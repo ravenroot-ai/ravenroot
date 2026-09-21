@@ -133,8 +133,9 @@ The operator chooses exactly one source when provisioning the registration:
   and observes lifecycle and execution state only while that binding remains current.
 - A **v2 deployment source** adds an authoritative run selector whose identity is
   `(tenant, deploymentId, graphVersion, incarnationId, processInstanceId)`. It may request that a
-  Start execution control be shown, but the control remains absent unless separate execute authority
-  is also granted. V1 behavior is unchanged.
+  Start execution control be shown. That presentation option grants no authority; use the explicitly
+  named execution-capability provisioning path separately when the action should be authorized. V1
+  behavior is unchanged.
 
 The two forms do not fall back to each other. A live registration never reads a GraphML snapshot if
 its deployment disappears or changes version, and a snapshot registration never starts observing a

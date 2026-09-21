@@ -19,8 +19,9 @@ Consume a pre-authorized read-only projection and navigate Ravenroot without dep
    announcements to understand selection, lifecycle, continuity, and execution changes.
 6. Treat `GAP`, `VERSION_MISMATCH`, and `DETACHED` as terminal read-only states. They clear runtime
    decoration so stale color or emphasis is not announced as current.
-7. **Start execution** is absent from focus and accessibility trees unless the registration requests
-   it and the server grants independent execute authority. It starts one traversal only; it does not
+7. **Start execution** is absent from focus and accessibility trees unless the registration's
+   presentation option requests it. Its server action still requires independent execute authority.
+   It starts one traversal only; it does not
    expose stop, restart, undeploy, or global engine controls.
 8. When reporting an accessibility defect, include the control, input method, announced state, and expected state without attaching sensitive graph data.
 

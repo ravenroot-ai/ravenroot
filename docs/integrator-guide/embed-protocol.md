@@ -42,6 +42,9 @@ attaches a new signed stream. Refresh keeps the exact selection only while it re
 requires the separate `DEPLOYMENT_EXECUTE` capability for every request and rechecks the exact tenant,
 deployment, graph version, and incarnation. The browser supplies only its minimized session proof
 and a bounded idempotency request id; executable graph content and operator credentials stay server-side.
+The standard `deploymentV2(...)` provisioning factory never grants execution. Operators grant it
+explicitly with `deploymentV2WithExecutionCapability(...)`; either factory can independently show or
+hide the control. A hidden control keeps the action endpoint unavailable even if authority was granted.
 
 Observation reconnect is bounded and resumes with an opaque cursor. For a v2 selected run, a
 process-local gap triggers `runtime-reset` followed by server-filtered durable replay for that exact

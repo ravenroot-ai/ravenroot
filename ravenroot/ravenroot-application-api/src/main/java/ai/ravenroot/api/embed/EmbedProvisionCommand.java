@@ -124,6 +124,35 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
                                                       Optional<EmbedTheme> themeOverride,
                                                       String deploymentId,
                                                       boolean showStartExecution) {
+        return deploymentV2(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, themeOverride, deploymentId, showStartExecution, false);
+    }
+
+    /**
+     * Creates a v2 deployment registration with separately granted execution authority.
+     *
+     * <p>The presentation option remains independent: callers may grant execution while keeping the
+     * affordance hidden, or show the affordance without using this authority-granting factory.</p>
+     */
+    public static EmbedProvisionCommand deploymentV2WithExecutionCapability(
+            String registrationId, long expectedRevision,
+            String workloadIssuer, String workloadSubject,
+            String tenantId, String parentOrigin,
+            Optional<EmbedTheme> themeOverride,
+            String deploymentId,
+            boolean showStartExecution) {
+        return deploymentV2(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, themeOverride, deploymentId, showStartExecution, true);
+    }
+
+    private static EmbedProvisionCommand deploymentV2(
+            String registrationId, long expectedRevision,
+            String workloadIssuer, String workloadSubject,
+            String tenantId, String parentOrigin,
+            Optional<EmbedTheme> themeOverride,
+            String deploymentId,
+            boolean showStartExecution,
+            boolean grantExecution) {
         var source = EmbedViewerSource.deploymentV2(deploymentId, showStartExecution);
         var grant = new VerifiedEmbedGraphGrant(tenantId, "deployment:" + deploymentId, deploymentId,
                 1, deploymentId, "deferred", "deferred", "deployment-live-v2");
@@ -135,7 +164,7 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
         capabilities.add(EmbedCapability.GRAPH_READ);
         capabilities.add(EmbedCapability.DEPLOYMENT_OBSERVE);
         capabilities.add(EmbedCapability.DEPLOYMENT_RUN_READ);
-        if (showStartExecution) capabilities.add(EmbedCapability.DEPLOYMENT_EXECUTE);
+        if (grantExecution) capabilities.add(EmbedCapability.DEPLOYMENT_EXECUTE);
         return new EmbedProvisionCommand(registrationId, expectedRevision, workloadIssuer, workloadSubject,
                 tenantId, parentOrigin, Set.copyOf(capabilities), themeOverride, grant,
                 EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);

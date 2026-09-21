@@ -105,10 +105,8 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
                 || !sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE))) {
             throw new IllegalArgumentException("deployment source requires its matching observe capability");
         }
-        if (source instanceof EmbedViewerSource.DeploymentV2 deployment
-                && (!sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)
-                || (deployment.showStartExecution()
-                && !sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)))) {
+        if (source instanceof EmbedViewerSource.DeploymentV2
+                && !sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
             throw new IllegalArgumentException("deployment v2 source requires explicit run capabilities");
         }
     }

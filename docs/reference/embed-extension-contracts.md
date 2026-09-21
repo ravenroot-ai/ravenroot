@@ -27,7 +27,7 @@ V1 registrations continue to record `viewerSourceVersion: "1"` and exactly one s
 
 The additive v2 deployment source opts into selectable live runs. It adds run-read authority and may
 request a visible Start execution affordance. Visibility is never authority: Start is absent by
-default, and a visible control still requires a separately granted embed-execute capability. Run
+default, and showing it does not grant the separately provisioned embed-execute capability. Run
 identity is the exact `(tenant, deployment, graph version, incarnation, process instance)` tuple.
 Only active and bounded recent terminal rows are projected; workload, lease, worker, correlation,
 credential, payload, and tenant-wide metadata are excluded.
@@ -52,7 +52,8 @@ source and all snapshot-only inputs are refused.
 
 The projection cannot mutate a graph, read credentials, install adapters, or expand its own scope.
 V1 cannot start execution. V2 can request one server-side traversal only when both the presentation
-option and independent capability are present; it cannot stop/restart/undeploy a deployment or
+option and independent capability are present; the presentation option alone still renders the
+control but its action is refused. V2 cannot stop/restart/undeploy a deployment or
 control the global engine. Exact origin and host checks apply at launch and exchange.
 
 The deployment observation cursor is opaque, bound to the registration revision, session, deployment,

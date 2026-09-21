@@ -155,9 +155,7 @@ public final class EmbedBrowserHttpHandler {
             var bootstrap = sessions.begin(available.registration());
             boolean viewerV2 = available.registration().source() instanceof EmbedViewerSource.DeploymentV2;
             boolean showStartExecution = viewerV2
-                    && ((EmbedViewerSource.DeploymentV2) available.registration().source()).showStartExecution()
-                    && available.registration().sessionGrant().capabilities()
-                    .contains(EmbedCapability.DEPLOYMENT_EXECUTE);
+                    && ((EmbedViewerSource.DeploymentV2) available.registration().source()).showStartExecution();
             audit(requestId.get(), available.registration(), EmbedSecurityAuditSink.Phase.TICKET_CONSUMED);
             exchange.getResponseHeaders().remove("X-Frame-Options");
             exchange.getResponseHeaders().set("Content-Security-Policy",
@@ -798,8 +796,7 @@ public final class EmbedBrowserHttpHandler {
                 "\"viewerSourceVersion\":\"2\"");
         return base.substring(0, base.length() - 1)
                 + ",\"showStartExecution\":"
-                + (((EmbedViewerSource.DeploymentV2) registration.source()).showStartExecution()
-                && registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE))
+                + ((EmbedViewerSource.DeploymentV2) registration.source()).showStartExecution()
                 + ",\"runs\":" + runsArray(context, view) + "}";
     }
 

@@ -4730,7 +4730,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "9950851904ad7fce7821b292a75eb3ba6105abce75b294681df0b1f2689e3bb1",
+          "digest": "3e2655c81b8822bc83d9c546148c704173444b74fedc4b2c9d46191333435b3a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5201,7 +5201,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "9950851904ad7fce7821b292a75eb3ba6105abce75b294681df0b1f2689e3bb1",
+          "digest": "3e2655c81b8822bc83d9c546148c704173444b74fedc4b2c9d46191333435b3a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5538,7 +5538,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "9950851904ad7fce7821b292a75eb3ba6105abce75b294681df0b1f2689e3bb1",
+          "digest": "3e2655c81b8822bc83d9c546148c704173444b74fedc4b2c9d46191333435b3a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -8982,7 +8982,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "bfc805e8d99ad484a85aadb7721e804f645e631e46f1ecc4b4a74b3a957b9adc",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -9052,7 +9052,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "bfc805e8d99ad484a85aadb7721e804f645e631e46f1ecc4b4a74b3a957b9adc",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -10901,7 +10901,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "bfc805e8d99ad484a85aadb7721e804f645e631e46f1ecc4b4a74b3a957b9adc",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {

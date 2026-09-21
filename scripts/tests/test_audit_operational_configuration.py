@@ -1943,10 +1943,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
             self.assertEqual(95, len(details))
             self.assertEqual(
-                {"methods": 105, "path": 95, "summary": 419, "successStatuses": 96},
+                {"methods": 105, "path": 95, "summary": 419, "successStatuses": 97},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(715, len(entries))
+            self.assertEqual(716, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,

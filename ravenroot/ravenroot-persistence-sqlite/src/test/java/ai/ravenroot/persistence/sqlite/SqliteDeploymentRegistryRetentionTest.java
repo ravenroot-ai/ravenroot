@@ -120,9 +120,14 @@ class SqliteDeploymentRegistryRetentionTest {
 
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
              var statement = connection.createStatement()) {
+            // Restore the exact version-32 shape. Identity bindings are migration 33 and the
+            // process incarnation origin is migration 34, so both later structures and history
+            // rows must be removed before exercising the identity backfill.
+            statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
+            statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("DROP TABLE deployment_identity_binding");
-            statement.execute("DELETE FROM store_schema_history WHERE version = " + SqliteSchema.currentVersion());
-            statement.execute("PRAGMA user_version = " + (SqliteSchema.currentVersion() - 1));
+            statement.execute("DELETE FROM store_schema_history WHERE version >= 33");
+            statement.execute("PRAGMA user_version = 32");
         }
 
         try (var registry = new SqliteDeploymentRegistry(database, clock,

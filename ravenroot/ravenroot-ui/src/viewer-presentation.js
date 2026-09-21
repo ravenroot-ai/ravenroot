@@ -1,5 +1,5 @@
 import { getRendererPalette } from './theme-palette.js';
-import { COMMON_NODE_GLYPHS } from './catalog-node-icon.js';
+import { COMMON_NODE_GLYPHS, nodeTypeCardShape } from './catalog-node-icon.js';
 import { CATALOG_NODE_SYMBOLS, catalogNodeSymbol } from './catalog-node-symbol.js';
 
 export const VIEWER_NODE_ICONS = Object.freeze({
@@ -56,6 +56,33 @@ export function viewerCardImage(nodeType, palette) {
 }
 
 /**
+ * Native Design card presentation shared by the authoring canvas and read-only deployment views.
+ * The image is a packaged inline SVG, including the deterministic initial used for unknown types.
+ */
+export function viewerDesignNodeStyle(nodeType, palette, {
+  label = 'data(cardLabel)', fontSize = 20, bypassed = false, labelSide = 'bottom',
+} = {}) {
+  const type = String(nodeType || 'node').toLowerCase();
+  const rightLabel = labelSide === 'right';
+  return {
+    shape: nodeTypeCardShape(type), width: 80, height: 80,
+    'background-color': palette.nodeSurfaceByType[type] || palette.nodeSurface,
+    'border-width': 2.5,
+    'border-color': bypassed
+      ? palette.nodeType.system : (palette.nodeType[type] || palette.nodeBorder),
+    'border-opacity': 1,
+    'background-image': viewerCardImage(type, palette),
+    'background-width': '100%', 'background-height': '100%',
+    'background-fit': 'none', 'background-clip': 'none',
+    label, color: palette.nodeText, 'font-size': `${fontSize}px`, 'font-weight': '500',
+    'text-valign': rightLabel ? 'center' : 'bottom',
+    'text-halign': rightLabel ? 'right' : 'center',
+    'text-margin-x': rightLabel ? 10 : 0, 'text-margin-y': rightLabel ? 0 : 10,
+    'text-background-opacity': 0, padding: '0px', 'text-wrap': 'none',
+  };
+}
+
+/**
  * The single Cytoscape presentation contract used by the editor canvas and every read-only viewer.
  * Shell-only affordances are classes added by the editor; node/edge identity and runtime state live
  * here so an embedded graph cannot drift into a second visual language.
@@ -96,16 +123,34 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
       shape: 'diamond', 'background-color': surface.error, 'border-color': node.error,
       'border-width': 2.5,
     } },
-    ...['handler', 'flow', 'agent', 'consumer', 'actor', 'system', 'workspace', 'trace', 'human-task']
+    ...['handler', 'flow', 'agent', 'consumer', 'actor', 'system', 'workspace', 'trace',
+      'human-task', 'behavior', 'passthrough']
       .map(type => ({
       selector: `node[nodeType="${type}"]`, style: {
         ...(type === 'system' ? { shape: 'rectangle' } : {}),
-        'background-color': surface[type], 'border-color': node[type],
+        'background-color': surface[type] || surface[type === 'behavior' ? 'flow' : 'handler'],
+        'border-color': node[type] || node[type === 'behavior' ? 'flow' : 'handler'],
         'border-width': type === 'system' ? 1.5
           : (type === 'workspace' ? 3
             : (type === 'human-task' || type === 'consumer' ? 2.5 : 2)),
       },
     })),
+    ...(['n8n', 'design'].includes(mode) ? [
+      { selector: 'node', style: {
+        shape: 'roundrectangle', width: 80, height: 80,
+        'border-width': 2.5,
+        label: 'data(cardLabel)',
+        'text-valign': 'bottom', 'text-halign': 'center',
+        'text-margin-x': 0, 'text-margin-y': 10,
+        'font-size': '20px', 'font-weight': '500', padding: '0px', 'text-wrap': 'none',
+      } },
+      ...Object.keys(VIEWER_CARD_GLYPH).map(type => ({
+        selector: `node[nodeType="${type}"]`,
+        style: { 'background-image': viewerCardImage(type, palette),
+          'background-width': '100%', 'background-height': '100%',
+          'background-fit': 'none', 'background-clip': 'none' },
+      })),
+    ] : []),
     { selector: 'node[humanTaskPending > 0]', style: {
       'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
       'border-style': 'double', 'border-width': 4,
@@ -116,12 +161,6 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     } },
     { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
       'underlay-opacity': 0.45, 'underlay-padding': 15,
-    } },
-    { selector: 'node[nodeType="behavior"]', style: {
-      'background-color': surface.flow, 'border-color': node.flow, 'border-width': 2,
-    } },
-    { selector: 'node[nodeType="passthrough"]', style: {
-      'background-color': surface.handler, 'border-color': node.handler, 'border-width': 2,
     } },
     { selector: 'node[?bypassed], node[runtimeState="bypassed"]', style: {
       'border-style': 'dashed', 'border-color': node.system, 'border-width': 2.5,
@@ -213,23 +252,10 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     } },
     { selector: 'edge:selected.dim', style: { opacity: 1 } },
     ...(mode === 'n8n' ? [
-      { selector: 'node', style: {
-        shape: 'roundrectangle', width: 80, height: 80,
-        'border-width': 2.5,
-        label: 'data(cardLabel)',
-        'text-valign': 'bottom', 'text-margin-y': 10,
-        'font-size': '20px', 'font-weight': '500', padding: '0px', 'text-wrap': 'none',
-      } },
-      ...Object.keys(VIEWER_CARD_GLYPH).map(type => ({
-        selector: `node[nodeType="${type}"]`,
-        style: { 'background-image': viewerCardImage(type, palette),
-          'background-width': '100%', 'background-height': '100%',
-          'background-fit': 'none', 'background-clip': 'none' },
-      })),
       { selector: 'edge', style: {
-        ...(mode === 'n8n' ? { 'curve-style': 'taxi', 'taxi-direction': 'auto',
-          'taxi-turn': '50%', 'taxi-turn-min-distance': 20, 'taxi-radius': 28,
-          'source-endpoint': 'outside-to-line', 'target-endpoint': 'outside-to-line', width: 2.5 } : {}),
+        'curve-style': 'taxi', 'taxi-direction': 'auto',
+        'taxi-turn': '50%', 'taxi-turn-min-distance': 20, 'taxi-radius': 28,
+        'source-endpoint': 'outside-to-line', 'target-endpoint': 'outside-to-line', width: 2.5,
       } },
     ] : []),
     ...(mode === 'elastic' ? [

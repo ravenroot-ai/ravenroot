@@ -10,21 +10,26 @@ import {
 } from './viewer-renderer-adapter.js';
 import { getRendererPalette } from './theme-palette.js';
 import { requireEmbedTheme } from './theme-resolution.js';
-import { createViewerStylesheet, viewerNodeType } from './viewer-presentation.js';
+import {
+  VIEWER_CARD_GLYPH,
+  createViewerStylesheet,
+  viewerCardImage,
+  viewerNodeType,
+} from './viewer-presentation.js';
 import {
   applyDeploymentViewFrame,
   applyDeploymentViewStateToRenderer,
   createDeploymentViewState,
   resetDeploymentViewRuntime,
 } from './deployment-view-state.js';
-import { applyViewerSimpleRoute, applyViewerUnbundledRoute } from './viewer-edge-style.js';
-import {
-  resolveViewerRoutesWithinBudget,
-  viewerSupportsElastic,
-} from './viewer-route-budget.js';
+import { viewerSupportsElastic } from './viewer-route-budget.js';
 import { mountD3ElasticRenderer } from './viewer-elastic-renderer.js';
 import { registerLayeredLayout } from './layered-layout.js';
-import { viewerDesignLayoutOptions } from './viewer-design-layout.js';
+import {
+  applyViewerDesignLabelSide,
+  applyViewerDesignRoutes,
+  viewerDesignLayoutOptions,
+} from './viewer-design-layout.js';
 import {
   clampViewportCenter,
   minimapToWorld,
@@ -39,27 +44,6 @@ export function viewerStylesheet(mode = 'cyto', theme = 'dark') {
 cytoscape.use(cytoscapeDagre);
 cytoscape.use(cytoscapeElk);
 registerLayeredLayout(cytoscape);
-
-export function applyResolvedRoutes(instance, mode) {
-  if (mode !== 'cyto') return;
-  const nodes = instance.nodes().map(node => ({
-    id: node.id(), x: node.position().x, y: node.position().y,
-    width: node.width(), height: node.height(),
-  }));
-  const edges = instance.edges().map(edge => ({
-    id: edge.id(), source: edge.source().id(), target: edge.target().id(), label: '',
-  }));
-  const plan = resolveViewerRoutesWithinBudget({ nodes, edges });
-  instance.edges().forEach(edge => {
-    if (plan.strategy === 'simple') {
-      applyViewerSimpleRoute(edge);
-      return;
-    }
-    const route = plan.routes.get(edge.id());
-    if (!route || edge.source().id() === edge.target().id()) return;
-    applyViewerUnbundledRoute(edge, route, { lineCap: 'round' });
-  });
-}
 
 function elasticElements(snapshot, palette, width, height) {
   const columns = Math.max(1, Math.ceil(Math.sqrt(snapshot.nodes.length)));
@@ -160,7 +144,20 @@ export function createEmbedViewer(container, {
   let runGeneration = 0;
   const modeStates = new Map();
   const isMonitoring = () => semanticModes ? mode.value === 'monitoring' : mode.value === 'elastic';
-  const designStyle = () => semanticModes ? 'cyto' : mode.value;
+  const designStyle = () => semanticModes ? 'design' : mode.value;
+
+  const applyDesignPresentation = () => {
+    if (!semanticModes) return;
+    instance.nodes().forEach(node => {
+      const type = node.data('nodeType');
+      if (Object.hasOwn(VIEWER_CARD_GLYPH, type)) return;
+      node.style({
+        'background-image': viewerCardImage(type, palette),
+        'background-width': '100%', 'background-height': '100%',
+        'background-fit': 'none', 'background-clip': 'none',
+      });
+    });
+  };
 
   const concealMinimap = () => {
     if (minimapFrame !== null) cancelAnimationFrame(minimapFrame);
@@ -251,9 +248,12 @@ export function createEmbedViewer(container, {
     if (command === 'render' && semanticModes) {
       if (isMonitoring()) elasticMount?.simulation.alpha(1).restart();
       else {
-        const layout = instance.layout(viewerDesignLayoutOptions(currentSnapshot?.designArrangement));
+        const arrangement = currentSnapshot?.designArrangement;
+        const layout = instance.layout(viewerDesignLayoutOptions(arrangement, {
+          prepareLabels: side => applyViewerDesignLabelSide(instance, side),
+        }));
         layout.one?.('layoutstop', () => {
-          applyResolvedRoutes(instance, 'cyto');
+          applyViewerDesignRoutes(instance, arrangement);
           scheduleMinimap();
         });
         layout.run();
@@ -333,12 +333,14 @@ export function createEmbedViewer(container, {
       // changing modes so N8N's shared taxi contract is not masked by stale Bezier properties.
       instance.elements().removeStyle();
       instance.style(viewerStylesheet(designStyle(), viewerTheme));
-      applyResolvedRoutes(instance, designStyle());
+      applyDesignPresentation();
       const saved = modeStates.get('design');
       if (saved) {
         instance.nodes().forEach(node => { if (saved.positions[node.id()]) node.position(saved.positions[node.id()]); });
         if (saved.zoom) instance.viewport({ zoom: saved.zoom, pan: saved.pan });
       }
+      if (semanticModes) applyViewerDesignRoutes(instance, currentSnapshot?.designArrangement);
+      else if (designStyle() === 'cyto') applyViewerDesignRoutes(instance, null);
     }
     container.dataset.viewerRenderer = mode.value;
     scheduleMinimap();
@@ -471,9 +473,9 @@ export function createEmbedViewer(container, {
         };
       }
       const nodeStyle = ['shape', 'width', 'height', 'background-color', 'background-image',
-        'background-width', 'background-height', 'background-fit', 'border-color',
+        'background-width', 'background-height', 'background-fit', 'background-clip', 'border-color',
         'border-width', 'border-style', 'font-size', 'font-weight', 'text-valign',
-        'text-halign', 'text-margin-y'];
+        'text-halign', 'text-margin-x', 'text-margin-y', 'padding'];
       const edgeStyle = ['width', 'line-color', 'line-style', 'target-arrow-shape',
         'target-arrow-color', 'curve-style'];
       return {

@@ -107,10 +107,14 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     const requestedUrls = [];
     const observationRequests = [];
     const responseStatuses = [];
+    let launchCsp = '';
     page.on('console', message => consoleMessages.push(message.text()));
     page.on('response', response => {
       const path = new URL(response.url()).pathname;
       if (path.startsWith('/v1/embed/')) responseStatuses.push(`${path}:${response.status()}`);
+      if (path === '/v1/embed/launch') {
+        void response.allHeaders().then(headers => { launchCsp = headers['content-security-policy'] || ''; });
+      }
     });
     page.on('request', async networkRequest => {
       requestedUrls.push(networkRequest.url());
@@ -149,6 +153,9 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     await expect(viewer.locator('[data-viewer-mode]')).toHaveValue('design');
     await expect(viewer.locator('[data-viewer-mode] option')).toHaveText(['Design', 'Monitoring']);
     await expect(viewer.locator('[data-viewer-command="render"]')).toHaveAccessibleName('Render');
+    await expect.poll(() => launchCsp).toContain('img-src data:');
+    expect(launchCsp).not.toContain("img-src 'self'");
+    expect(launchCsp).not.toContain('img-src https:');
     const runs = viewer.locator('[data-viewer-run]');
     await expect(runs).toBeDisabled();
     await expect(viewer.locator('[data-viewer-run-empty]')).toBeVisible();
@@ -213,6 +220,7 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
       && !url.includes(observed.headers.authorization.slice('Bearer '.length)))).toBe(true);
     expect(consoleMessages.every(message => !message.includes('browser-secret-topology')
       && !message.includes('browser-secret-runtime-payload'))).toBe(true);
+    expect(consoleMessages.every(message => !message.includes('Refused to load the image'))).toBe(true);
   });
 
 test('invalidates a selected production run after same-id deployment replacement',

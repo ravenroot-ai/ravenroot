@@ -101,6 +101,8 @@ class PackagedEmbedProcessTest {
             assertEquals(200, launched.statusCode(), launched.body());
             assertTrue(launched.headers().firstValue("Content-Security-Policy").orElseThrow()
                     .contains("frame-ancestors " + PARENT));
+            assertTrue(launched.headers().firstValue("Content-Security-Policy").orElseThrow()
+                    .contains("img-src data:"));
             assertTrue(launched.body().contains("\"grantRevision\":\"1\""), launched.body());
             String exchangeId = json(launched.body(), "exchangeId");
             String challenge = json(launched.body(), "challenge");

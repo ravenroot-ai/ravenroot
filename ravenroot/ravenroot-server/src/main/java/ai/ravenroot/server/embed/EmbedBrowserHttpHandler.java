@@ -161,7 +161,7 @@ public final class EmbedBrowserHttpHandler {
             exchange.getResponseHeaders().remove("X-Frame-Options");
             exchange.getResponseHeaders().set("Content-Security-Policy",
                     "default-src 'none'; base-uri 'none'; form-action 'none'; script-src 'self'; "
-                            + "style-src 'self'; connect-src 'self'; img-src 'none'; font-src 'none'; "
+                            + "style-src 'self'; connect-src 'self'; img-src data:; font-src 'none'; "
                             + "worker-src 'none'; frame-ancestors "
                             + parentOrigin.value() + "; sandbox allow-scripts allow-same-origin");
             String bootstrapJson = "{\"exchangeId\":\"" + JsonStrings.escape(bootstrap.exchangeId())

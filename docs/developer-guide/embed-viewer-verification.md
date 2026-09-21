@@ -11,7 +11,8 @@ binding, lifecycle transitions, bounded reconnect, cursor-gap handling, terminal
 shared style semantics. Browser coverage verifies:
 
 - the native **Open read-only view** attachment and the absence of edit or lifecycle commands;
-- dark and light rendering for Cyto, N8N, and Elastic in both native and embedded viewers;
+- dark and light rendering for the historical v1 renderer matrix and the public v2 Design and
+  Monitoring modes in both native and embedded viewers;
 - equivalent node identity, labels, bypass state, edge meaning, lifecycle, and runtime-state data;
 - cross-origin launch, acknowledgement, projection, and signed observation without cookies;
 - no bearer, proof key, cursor, topology, or runtime-event leak through URL, storage, globals, or
@@ -30,10 +31,16 @@ compacted process stream and compaction between bounded replay pages. Mode switc
 viewport without layout, fit, or simulation; **Render** affects only the selected mode. Design Render
 uses the projected persisted arrangement (`keep`, `flow`, `organic`, `hierarchical`,
 `hierarchical-new`, or `layered-down`) and recomputes edge routes after layout completion.
+Hierarchical Render retains native east-to-west ports and rounded segments. The two layered
+arrangements retain the drawing engine's published route and label placement instead of replacing it
+with a generic curve pass.
 
-The historical image rows below retain their filenames for release continuity. In the public v2 UI,
-Cyto is the Design renderer and Elastic is Monitoring; N8N is no longer a public choice. The v2
-browser matrix covers Design and Monitoring at desktop and narrow responsive widths in both themes,
+The historical image rows below retain their filenames for release continuity. The public v2 UI
+exposes only Design, Monitoring, and Render; renderer implementation names are not public choices.
+Design uses the native Workbench 80x80 card, packaged artwork, bottom label placement, and a stable
+visible initial for an unknown semantic node type. The production iframe permits only `data:` images
+for this packaged SVG artwork; it does not permit same-origin or remote image fetches. The v2 browser
+matrix covers Design and Monitoring at desktop and narrow responsive widths in both themes,
 including the run selector's zero/one/three states; the committed desktop parity captures follow.
 
 ## V2 semantic viewer evidence
@@ -66,7 +73,7 @@ including the run selector's zero/one/three states; the committed desktop parity
 From `ravenroot/ravenroot-ui`, install the locked dependencies, build the UI, and run:
 
 ```console
-$ RR_VISUAL_EVIDENCE_DIR=../../docs/qa/evidence/embedded-deployment-viewer \
+$ RR_VISUAL_EVIDENCE_DIR=../../docs/qa/evidence/embedded-deployment-viewer-v2 \
     npx playwright test e2e/viewer-visual-parity.spec.js
 ```
 

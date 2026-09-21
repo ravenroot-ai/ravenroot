@@ -6,6 +6,7 @@ import {
   createViewerStylesheet,
   viewerCardImage,
   viewerCardLabel,
+  viewerDesignNodeStyle,
   viewerNodeLabel,
   viewerNodeSize,
   viewerNodeType,
@@ -44,7 +45,7 @@ describe('shared viewer presentation', () => {
     });
   });
 
-  it('keeps Cyto dimensions and labels while N8N alone applies card presentation', () => {
+  it('keeps legacy Cyto dimensions and labels while card modes use shared artwork', () => {
     const cyto = createViewerStylesheet('dark', 'cyto');
     const cytoNode = cyto.find(entry => entry.selector === 'node');
     expect(cytoNode.style).toMatchObject({
@@ -61,6 +62,28 @@ describe('shared viewer presentation', () => {
     expect(n8n.some(entry => entry.selector === 'node'
       && entry.style.label === 'data(cardLabel)')).toBe(true);
     expect(n8n.some(entry => entry.style?.['background-image'])).toBe(true);
+  });
+
+  it('gives semantic Design the native 80px card, bottom label, and packaged fallback artwork', () => {
+    const design = createViewerStylesheet('dark', 'design');
+    const card = design.find(entry => entry.selector === 'node'
+      && entry.style.label === 'data(cardLabel)');
+    expect(card.style).toMatchObject({
+      width: 80, height: 80, 'font-size': '20px', 'font-weight': '500',
+      'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 10,
+    });
+    expect(design.some(entry => entry.selector === 'node[nodeType="agent"]'
+      && entry.style['background-image']?.startsWith('data:image/svg+xml,'))).toBe(true);
+
+    const unknown = viewerDesignNodeStyle('quartz-worker', {
+      nodeText: '#fff', nodeSurface: '#111', nodeSurfaceByType: {},
+      nodeBorder: '#555', nodeType: { system: '#888' },
+    }, { label: 'Quartz', labelSide: 'right' });
+    expect(decodeURIComponent(unknown['background-image'])).toContain('>Q</text>');
+    expect(unknown).toMatchObject({
+      width: 80, height: 80, label: 'Quartz',
+      'text-valign': 'center', 'text-halign': 'right', 'text-margin-x': 10,
+    });
   });
 
   it('preserves the public N8N glyph vocabulary and dedicated agent artwork', () => {

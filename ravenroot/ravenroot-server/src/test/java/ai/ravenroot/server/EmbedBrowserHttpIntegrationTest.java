@@ -320,6 +320,10 @@ class EmbedBrowserHttpIntegrationTest {
                     .contains("sandbox allow-scripts allow-same-origin"));
             assertTrue(launched.headers().firstValue("Content-Security-Policy").orElseThrow()
                     .contains("style-src 'self'"));
+            String launchedCsp = launched.headers().firstValue("Content-Security-Policy").orElseThrow();
+            assertTrue(launchedCsp.contains("img-src data:"));
+            assertFalse(launchedCsp.contains("img-src 'self'"));
+            assertFalse(launchedCsp.contains("img-src https:"));
             assertFalse(launched.body().contains("graphId"));
             assertFalse(launched.body().contains("bearer"));
             assertTrue(launched.body().contains("\"grantRevision\":\"1\""));

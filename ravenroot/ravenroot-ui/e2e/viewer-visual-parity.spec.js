@@ -14,11 +14,14 @@ const projection = {
       layout: { x: 445, y: 330, width: 72, height: 72 } },
     { id: 'error', kind: 'ERROR', label: 'Failure', visualType: 'error',
       layout: { x: 560, y: 180, width: 72, height: 72 } },
+    { id: 'custom', kind: 'BEHAVIOR', label: 'Quartz', visualType: 'quartz-worker',
+      layout: { x: 680, y: 330, width: 100, height: 52 } },
   ],
   edges: [
     { id: 'route-continue', source: 'start', target: 'worker', label: 'continue', visualType: 'continue' },
     { id: 'route-agent', source: 'worker', target: 'agent', label: 'delegates', visualType: 'default' },
     { id: 'route-failure', source: 'worker', target: 'error', label: 'failed', visualType: 'failed' },
+    { id: 'route-custom', source: 'agent', target: 'custom', label: 'continues', visualType: 'continue' },
   ],
 };
 
@@ -161,9 +164,9 @@ const nativeCardSnapshot = (page, renderer) => page.evaluate(selectedRenderer =>
   const instance = window.ravenroot.activeDocument().cy;
   instance.fit(60);
   const nodeStyle = ['shape', 'width', 'height', 'background-color', 'background-image',
-    'background-width', 'background-height', 'background-fit', 'border-color',
+    'background-width', 'background-height', 'background-fit', 'background-clip', 'border-color',
     'border-width', 'border-style', 'font-size', 'font-weight', 'text-valign',
-    'text-halign', 'text-margin-y'];
+    'text-halign', 'text-margin-x', 'text-margin-y', 'padding'];
   const edgeStyle = ['width', 'line-color', 'line-style', 'target-arrow-shape',
     'target-arrow-color', 'curve-style'];
   return {
@@ -275,7 +278,10 @@ function semanticPresentation(snapshot) {
   return {
     renderer: snapshot.renderer,
     nodes: snapshot.nodes.map(node => ({
-      id: node.id, label: node.label, type: node.type, position: node.position,
+      id: node.id,
+      // Legacy Standard and legacy Cyto intentionally predate the deterministic card initial.
+      label: node.type === 'quartz-worker' ? node.label.replace(/^\S+\s/u, '') : node.label,
+      type: node.type, position: node.position,
       style: Object.fromEntries(['background-color', 'border-color', 'border-style']
         .map(name => [name, node.style[name]])),
     })),
@@ -287,6 +293,22 @@ function semanticPresentation(snapshot) {
   };
 }
 
+function designPresentation(snapshot) {
+  const styleNames = [
+    'shape', 'width', 'height', 'background-color', 'background-image',
+    'background-width', 'background-height', 'background-fit', 'background-clip',
+    'border-color', 'border-width', 'border-style', 'font-size', 'font-weight',
+    'text-valign', 'text-halign', 'text-margin-x', 'text-margin-y', 'padding',
+  ];
+  return {
+    nodes: snapshot.nodes.map(node => ({
+      id: node.id, label: node.label, type: node.type,
+      style: Object.fromEntries(styleNames.map(name => [name, node.style[name]])),
+    })),
+    edges: semanticPresentation(snapshot).edges,
+  };
+}
+
 for (const theme of ['dark', 'light']) {
   test(`native and embedded Cyto, N8N, and Elastic stay within visual parity budget in ${theme}`,
     async ({ page }, testInfo) => {
@@ -294,6 +316,9 @@ for (const theme of ['dark', 'light']) {
     await openNativeViewer(page);
     await page.evaluate(selected => window.ravenroot.setApplicationTheme(selected), theme);
     for (const renderer of ['cyto', 'n8n', 'elastic']) {
+      // This historical matrix verifies the legacy public renderer contracts. v2 below deliberately
+      // uses the native default Design presentation instead of forcing this legacy standard style.
+      if (renderer === 'cyto') await page.evaluate(() => window.ravenroot.setVisualStyle('standard'));
       if (renderer === 'n8n') await page.evaluate(() => window.ravenroot.setVisualStyle('n8n'));
       if (renderer === 'elastic') await page.locator('#btn-monitoring').click();
       if (renderer === 'elastic') {
@@ -343,7 +368,16 @@ for (const theme of ['dark', 'light']) {
         embedded.renderer = mode;
         const embeddedPng = await rendererPng(page, 'embed', renderer);
         if (mode === 'monitoring') expect(embedded).toEqual(native);
-        else expect(semanticPresentation(embedded)).toEqual(semanticPresentation(native));
+        else expect(designPresentation(embedded)).toEqual(designPresentation(native));
+        if (mode === 'design') {
+          const unknown = embedded.nodes.find(node => node.id === 'custom');
+          expect(unknown.style).toMatchObject({
+            width: '80px', height: '80px', 'background-width': '100%',
+            'background-height': '100%', 'background-fit': 'none',
+            'font-size': '20px', 'text-valign': 'bottom', 'text-halign': 'center',
+          });
+          expect(decodeURIComponent(unknown.icon)).toContain('>Q</text>');
+        }
         const comparison = await comparePng(page, nativePng, embeddedPng);
         expect(comparison.ratio).toBeLessThanOrEqual(MAX_PIXEL_DIFFERENCE_RATIO);
         await persistEvidence(testInfo, `v2-${theme}`, mode, nativePng, embeddedPng, comparison);

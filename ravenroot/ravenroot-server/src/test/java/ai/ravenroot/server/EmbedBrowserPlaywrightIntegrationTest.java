@@ -209,11 +209,13 @@ class EmbedBrowserPlaywrightIntegrationTest {
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
               <key id="kind" for="node" attr.name="kind" attr.type="string"/>
               <key id="label" for="node" attr.name="label" attr.type="string"/>
+              <key id="classification" for="node" attr.name="classification" attr.type="string"/>
               <key id="arrangement" for="graph" attr.name="ravenroot.designArrangement" attr.type="string"/>
               <graph id="browser-secret-topology" edgedefault="directed">
                 <data key="arrangement">flow</data>
                 <node id="start"><data key="kind">START</data><data key="label">Live start</data></node>
-                <node id="end"><data key="kind">END</data><data key="label">Live end</data></node>
+                <node id="end"><data key="kind">END</data><data key="label">Live end</data>
+                  <data key="classification">quartz-worker</data></node>
                 <edge id="live-edge" source="start" target="end"/>
               </graph>
             </graphml>

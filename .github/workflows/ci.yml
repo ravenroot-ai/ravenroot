@@ -1,14 +1,24 @@
 name: Continuous integration
 
 on:
-  # A pull request into `dev` publishes no run here: that trigger used to hand the review commit a
-  # cheap `admission` tier, and a lighter tier able to publish `ci-required` on a commit headed for
-  # `dev` is exactly the defect this workflow exists to refuse. The review candidate is instead
-  # verified by one dispatched `full` run on its exact commit before the pull request is opened; the
-  # merge queue verifies the integration commit; and a routed Dependabot pull request into `dev` is
-  # dispatched the same way, in full, since a later merge relies on its result.
+  # A pull request into `dev` triggers here directly, and the classifier below gives it the full
+  # tier: `ci-required` on that event is now backed by the complete functional suite, not the
+  # retired `admission` diagnostic. This repository once removed this trigger for `dev`, on the
+  # theory that one dispatched full run on the exact commit before the pull request opens would
+  # satisfy `dev`'s required `ci-required` check just as well, since a check run belongs to the
+  # commit regardless of which event produced it. That theory was tested and proven false: a pull
+  # request's required-checks evaluation and status rollup only see check suites tied to the pull
+  # request's own events (`pull_request`, and pushes to its head branch); a `workflow_dispatch`
+  # suite lives on the commit and is readable through the REST check-runs API, but it never enters
+  # the pull request's rollup. Without this trigger, `ci-required` was not red for a pull request
+  # into `dev` — it was absent, and the pull request could never be queued or merged (observed on
+  # #310's own pull request: three dispatched suites on the head commit, one green, none in the
+  # rollup, `mergeStateStatus: BLOCKED`; a control pull request still carrying this trigger showed
+  # the `pull_request` suite in its rollup, `CLEAN`, and queued). The dispatched review-candidate run
+  # remains useful ahead of opening the pull request, but it cannot substitute for the event's own
+  # run, so the trigger is restored.
   pull_request:
-    branches: [main]
+    branches: [dev, main]
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [dev, main]

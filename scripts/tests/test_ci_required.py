@@ -515,16 +515,21 @@ class TriggerTest(unittest.TestCase):
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("push" in problem for problem in verify_workflow(broken)))
 
-    def test_the_committed_pull_request_trigger_names_main_alone(self) -> None:
-        """Point 4: a pull request into dev must publish no run here at all."""
+    def test_the_committed_pull_request_trigger_names_dev_and_main(self) -> None:
+        """Point 4's proof: a pull request's own event must publish ci-required for it."""
         self.assertEqual(verify_workflow(self.contents), [])
-        self.assertIn("  pull_request:\n    branches: [main]\n", self.contents)
+        self.assertIn("  pull_request:\n    branches: [dev, main]\n", self.contents)
 
-    def test_a_pull_request_trigger_naming_dev_is_refused(self) -> None:
-        """The exact regression point 4 exists to close: `dev` back on the pull_request trigger."""
+    def test_a_pull_request_trigger_missing_dev_is_refused(self) -> None:
+        """The exact regression point 4's proof exists to close: `dev` dropped from the trigger.
+
+        Removing this trigger for `dev` was tried and proven wrong: a dispatched run's check suite
+        never enters a pull request's rollup, so `ci-required` was not red but absent, and the pull
+        request could never be queued. Losing `dev` here again must be refused.
+        """
         broken = self.contents.replace(
-            "  pull_request:\n    branches: [main]\n",
-            "  pull_request:\n    branches: [dev, main]\n", 1,
+            "  pull_request:\n    branches: [dev, main]\n",
+            "  pull_request:\n    branches: [main]\n", 1,
         )
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("pull_request" in problem for problem in verify_workflow(broken)))

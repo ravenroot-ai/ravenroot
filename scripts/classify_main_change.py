@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Classify a CI event without trusting mutable pull-request prose.
 
-`ci.yml` no longer triggers on a pull request into `dev`: a review commit is instead verified by one
-dispatched `full` run on its exact commit, before the pull request is opened. The merge queue then
-verifies the actual integration commit with the same `full` tier. A routed Dependabot pull request
-into `dev` reaches this classifier the same way a genuine pull request would have — `event_name`
-"pull_request", `base_ref` "dev" — but only through `ci.yml`'s dispatch inputs, since the native
-trigger is gone; because that combination can now only be the routed replay, and a later merge into
-`dev` relies on its result being the complete suite rather than a cheap diagnostic one, it shares its
-outcome with `merge_group` in one return. Once the integration commit reaches `dev`, `postmerge`
-deliberately repeats no functional test. `promotion` likewise reuses the full-tier evidence already
-bound to the commit, while `docs` covers a content-only push to `main`.
+A pull request into `dev` triggers `ci.yml` directly and earns the full tier here, so `ci-required`
+on that event's own check suite is backed by the complete functional suite, not the retired
+`admission` diagnostic. `ci.yml` once removed this trigger for `dev`, betting that one dispatched
+full run on the exact commit before the pull request opens would satisfy `dev`'s required
+`ci-required` just as well; that bet was tested and lost, because a pull request's required-checks
+evaluation and status rollup only see check suites tied to its own events, never a `workflow_dispatch`
+suite living on the same commit — so the trigger is restored (see `ci.yml`'s `on:` block for the
+evidence). The merge queue verifies the actual integration commit with the same `full` tier. A routed
+Dependabot pull request into `dev` reaches this classifier the same way a genuine pull request would
+— `event_name` "pull_request", `base_ref` "dev" — but through `ci.yml`'s dispatch inputs rather than
+its own event, because the real Dependabot pull request targets `main`, not `dev`; since a later merge
+into `dev` relies on that dispatch's result, it shares `merge_group`'s full-tier outcome in one return.
+Once the integration commit reaches `dev`, `postmerge` deliberately repeats no functional test.
+`promotion` likewise reuses the full-tier evidence already bound to the commit, while `docs` covers a
+content-only push to `main`.
 """
 
 from __future__ import annotations
@@ -144,10 +149,12 @@ def classify(
     # A merge-group commit is `dev` plus the queued pull request: the integration, tested before the
     # queue advances `dev` to exactly this commit.
     #
-    # The same tier covers a routed Dependabot pull request into `dev`. `ci.yml` no longer triggers
-    # on a genuine pull request into `dev`, so that combination can only be the routed dispatch
-    # replaying itself through ci.yml's inputs, and a later merge into `dev` relies on its result
-    # being the complete suite rather than a cheap diagnostic one.
+    # The same tier covers `("pull_request", "dev")` either way it is reached: a genuine pull request
+    # into `dev`, whose own event must publish `ci-required` there (a dispatched run's check suite
+    # never enters that pull request's rollup, so its own event has to carry the result), or a routed
+    # Dependabot pull request replaying itself through ci.yml's dispatch inputs, because the real
+    # Dependabot pull request targets `main`, not `dev`. Either way a later merge into `dev` relies on
+    # the result being the complete suite rather than a cheap diagnostic one.
     if event_name == "merge_group" or (event_name == "pull_request" and base_ref == "dev"):
         return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 

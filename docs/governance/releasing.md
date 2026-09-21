@@ -9,7 +9,7 @@ the explicit decision to publish a selected set of product changes.
 | Branch | Purpose | Accepted changes |
 |---|---|---|
 | `main` | Default branch, released product history, and current public documentation | Release or content-promotion pull requests from the internal `dev` branch; exceptionally, protected internal `hotfix/*` pull requests |
-| `dev` | Integration branch for the next release | Reviewed topic branches and pull requests from repository branches or forks (a fork's pull request additionally needs a maintainer to mirror its head into a repository branch before `ci-required` can run — see [Where the checks run](#where-the-checks-run)) |
+| `dev` | Integration branch for the next release | Reviewed topic branches and pull requests from repository branches or forks, each verified by its own `pull_request` event (see [Where the checks run](#where-the-checks-run)) |
 | `feature/*`, `fix/*`, `docs/*`, `test/*` | Focused contribution branches based on `dev` | One bounded change returning to `dev` |
 | `hotfix/*` | Exceptional urgent correction based on `main` | Patch release returning to `main`, followed by synchronization to `dev` |
 
@@ -26,9 +26,8 @@ exactly this repository and its head branch is either:
 The check runs from the base branch through `pull_request_target`, has no repository permissions, does
 not check out either branch, calls no API, and executes no pull request code. A fork therefore cannot
 replace or spoof the required check. The check must be configured as required on `main`. Fork and
-ordinary topic pull requests target `dev`; a fork's pull request cannot obtain `ci-required` there by
-itself (see [Where the checks run](#where-the-checks-run)), which is a gap in verification reach, not
-in `main-source-policy` or in this section's own guarantee.
+ordinary topic pull requests target `dev`, where each is verified by its own `pull_request` event (see
+[Where the checks run](#where-the-checks-run)).
 
 Source acceptance is not hotfix authorization. A repository ruleset targeting `hotfix/*` must restrict
 branch creation and updates to release maintainers. Protection on `main` must require review and
@@ -72,32 +71,33 @@ The full tier is the complete functional suite: the policy and documentation gat
 unit and end-to-end suites, the backend build and test suites, the support modules, the plugin
 boundary, the API documentation gate, and the runtime smoke tests. It runs on:
 
-- a review candidate, dispatched once on the exact commit about to be reviewed:
-  `gh workflow run ci.yml --ref <branch> -f tier=full`. The dispatch offers `full` alone;
+- a pull request into `dev`, from its own `pull_request` event — a fork's pull request the same way
+  as a repository branch's, verified without any manual step;
+- a review candidate, dispatched ahead of opening the pull request, on the exact commit about to be
+  reviewed: `gh workflow run ci.yml --ref <branch> -f tier=full`. The dispatch offers `full` alone;
 - every merge-group commit, when a merge queue is enabled on `dev`;
 - a routed Dependabot pull request into `dev`, dispatched by `route-dependabot.yml` once its
-  Dependabot-into-`main` pull request has been authorized and retargeted. A later merge into `dev`
-  relies on that dispatch's result, so it earns the full suite rather than a lighter one.
+  Dependabot-into-`main` pull request has been authorized and retargeted, because the real Dependabot
+  pull request targets `main`, not `dev`. A later merge into `dev` relies on that dispatch's result,
+  so it earns the full suite rather than a lighter one.
 
-None of these three routes reaches a pull request opened from a fork. The dispatch's `--ref` must
-name a branch that already exists in this repository — not a fork head, and not `refs/pull/N/head`;
-the fast workflow fires only on `feature/**` pushes in this repository; and the Dependabot route
-handles only Dependabot's own pull requests. A fork's pull request into `dev` therefore cannot obtain
-`ci-required` by itself, and `dev`'s ruleset requires it before the pull request can be queued or
-merged. Before mirroring it, a maintainer must review the contribution, with particular attention to
-anything under `.github/`: a dispatched run executes the workflow definition committed on the branch
-it runs on, under `workflow_dispatch`, with this repository's full token, secrets, and environments,
-whereas the fork's own `pull_request` event ran that same file read-only and without secrets. The
-current procedure is otherwise manual, not automated: once reviewed, a maintainer pushes the
-contributor's exact head commit to a branch in this repository — the same SHA, unchanged, so the
-dispatched run's result lands on the pull request's own head — and then dispatches the full tier on
-that branch (`gh workflow run ci.yml --ref <branch> -f tier=full`). Until a maintainer does this, the
-pull request stays unverified.
+This repository tried removing the first of these — `pull_request` into `dev` — on the theory that
+the dispatched review-candidate run would satisfy `dev`'s required `ci-required` check on the pull
+request just as well, since a check run belongs to the commit rather than to the event that produced
+it. That theory was tested against real pull requests and disproven: GitHub's pull-request status
+rollup, and the required-checks evaluation that reads it, contain only check suites associated with
+the pull request itself — its `pull_request` event and pushes to its head branch. A
+`workflow_dispatch` suite lives on the same commit and is readable through the REST check-runs API,
+but it never enters the pull request's rollup. Without the trigger, `ci-required` was not red for a
+pull request into `dev` — it was absent, and the pull request could never be queued or merged
+(observed directly: `mergeStateStatus: BLOCKED` across two waits of forty and fifty minutes on a green,
+fully-dispatched pull request, against a control pull request that still carried the trigger and
+queued immediately). The dispatched review-candidate run remains useful for catching a problem before
+the pull request exists, but it cannot substitute for the pull request's own run, so the trigger is
+restored: `pull_request` into `dev` earns the full tier from the classifier, not the retired
+`admission` diagnostic, and this is what makes the restoration safe rather than a return to the
+original defect.
 
-`ci.yml` does not trigger on a pull request into `dev` at all. It used to run a small `admission`
-diagnostic tier there, but a lighter tier able to publish `ci-required` on a commit headed for `dev`
-is exactly the defect this section exists to prevent: the review candidate is verified instead by the
-dispatch above, on the exact commit the pull request will carry, before the pull request is opened.
 A push to `dev` itself runs the intentionally bare `postmerge` tier — the merge queue, or an
 explicitly dispatched full run, already verified that exact commit in full, so nothing functional is
 repeated.
@@ -167,11 +167,16 @@ dominates, so the even four-way split is kept as it is; this is reported as sati
 above rather than changed.
 
 No repository ruleset needs to change for the work in this section. `dev`'s protected-branch ruleset
-requires the single `ci-required` context, which continues to be published by the merge queue (and,
-for the routed Dependabot path, by the dispatch) exactly as it always was; removing the retired
-`admission` tier's jobs does not remove or rename any context a ruleset names, because they were never
-individually required. `main`'s ruleset likewise keeps requiring code scanning, `main-source-policy`,
-and `ci-required`, whose promotion-tier evidence check is unaffected by this section.
+requires the single `ci-required` context, published by the pull request's own event, by the merge
+queue, and, for the routed Dependabot path, by the dispatch; removing the retired `admission` tier's
+jobs does not remove or rename any context a ruleset names, because they were never individually
+required. `main`'s ruleset likewise keeps requiring code scanning, `main-source-policy`, and
+`ci-required`, whose promotion-tier evidence check is unaffected by this section.
+
+Restoring the `pull_request` trigger changes CI capacity, not correctness: a change now costs one
+full run on the pull request's own event, in addition to the full run the merge queue still runs on
+the integration commit once it is queued. Budget runner capacity for two full runs per change, not
+one.
 
 ## Integrating changes on `dev`
 

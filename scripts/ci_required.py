@@ -102,10 +102,14 @@ REQUIRED_BY_TIER = {
 # for `dev` a lighter tier is refused here instead of trusted. Push events are keyed by the branch
 # pushed; pull requests by their base. Anything not listed is refused.
 #
-# `ci.yml` no longer triggers on a pull request into `dev`, so `("pull_request", "dev")` is reached
-# only by the routed Dependabot dispatch replaying itself as that event. It may carry `full` alone:
-# the retired `admission` tier used to be allowed here, and a lighter tier able to publish
-# `ci-required` on a pull-request head into `dev` is exactly the defect this module exists to refuse.
+# `("pull_request", "dev")` is reached by a genuine pull request into `dev` and by the routed
+# Dependabot dispatch replaying itself as that event. It may carry `full` alone: the retired
+# `admission` tier used to be allowed here, and a lighter tier able to publish `ci-required` on a
+# pull-request head into `dev` is exactly the defect this module exists to refuse. `ci.yml` briefly
+# removed the native `pull_request` trigger for `dev` on the theory that a dispatched full run on the
+# same commit would satisfy the required check just as well; it does not, because a pull request's
+# required-checks evaluation never sees a `workflow_dispatch` check suite, only ones tied to its own
+# events, so the trigger is back and this key is reached both ways again.
 # `verify_full_coverage_on_dev_pull_requests` holds this key to that structurally, not just by
 # convention, so a future edit cannot reintroduce a partial tier here without failing closed.
 ALLOWED_TIERS_BY_EVENT = {
@@ -287,22 +291,26 @@ def trigger_lines_without_comments(block: str) -> str:
 
 
 def verify_triggers(contents: str) -> list[str]:
-    """Hold ci.yml's events to the model: no work-branch pushes, a merge-queue trigger, full dispatch.
+    """Hold ci.yml's events to the model: pull requests into dev and main, a merge-queue trigger,
+    no work-branch pushes, full dispatch.
 
     This is the complete intended trigger shape, asserted positively in both directions: each event
     ci.yml is supposed to fire on is named exactly, and `feature/**` — the one branch pattern that
     must never reach this workflow — is checked absent from the actual trigger syntax, comments
     stripped first. Two independent copies of one decision drift silently when only some of them are
-    asserted; this used to say nothing about `pull_request` at all, which is exactly how it stayed
-    silent while that trigger named `dev`.
+    asserted. `pull_request` naming `dev` was removed once, on the theory that a dispatched full run
+    on the same commit would satisfy dev's required check just as well; it does not, because a pull
+    request's required-checks evaluation never sees a check suite from any event but its own, so the
+    trigger is back and this assertion holds it there.
     """
     problems: list[str] = []
     triggers = trigger_block(contents)
-    if "  pull_request:\n    branches: [main]\n" not in triggers:
+    if "  pull_request:\n    branches: [dev, main]\n" not in triggers:
         problems.append(
-            "ci.yml: `pull_request` must name exactly `[main]`. A pull request into `dev` must publish "
-            "no run here; the review candidate is verified by a dispatched full run instead, and a "
-            "lighter tier able to publish ci-required on that commit is the defect point 4 refuses."
+            "ci.yml: `pull_request` must name exactly `[dev, main]`. A pull request's own event is "
+            "what publishes ci-required for it; a dispatched run's check suite never enters that pull "
+            "request's rollup, so removing this trigger leaves ci-required absent rather than green, "
+            "and the pull request can never be queued or merged."
         )
     if "  push:\n    branches: [dev, main]\n" not in triggers:
         problems.append(
@@ -402,11 +410,13 @@ def verify_full_coverage_on_dev_pull_requests() -> list[str]:
     check is tautological for the `full` tier itself and can never fire by that set shrinking: dropping
     a job from `ci.yml` without updating this constant is refused independently, by `verify_workflow`'s
     own two-way reconciliation between the workflow and the topology tables. What this actually catches
-    is point 4's failure mode returning under a new name: a tier newly named for `("pull_request",
-    "dev")` in `ALLOWED_TIERS_BY_EVENT` without requiring every job in `FULL_FUNCTIONAL_JOBS` — exactly
-    how the retired `admission` tier reported `ci-required` success there while only a handful of cheap
-    jobs had run. This check makes reintroducing such a tier here impossible to do silently, before the
-    workflow or the classifier are even consulted.
+    is a tier newly named for `("pull_request", "dev")` in `ALLOWED_TIERS_BY_EVENT` without requiring
+    every job in `FULL_FUNCTIONAL_JOBS` — exactly how the retired `admission` tier reported
+    `ci-required` success there while only a handful of cheap jobs had run. `("pull_request", "dev")`
+    is not a theoretical key: `ci.yml` triggers on it directly again, so this is a live event a future
+    edit could weaken, not only a placeholder for the routed Dependabot replay. This check makes
+    reintroducing a lighter tier here impossible to do silently, before the workflow or the classifier
+    are even consulted.
     """
     problems: list[str] = []
     for key, tiers in ALLOWED_TIERS_BY_EVENT.items():

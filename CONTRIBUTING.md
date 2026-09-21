@@ -14,17 +14,9 @@ documentation. Active development is integrated on `dev`.
 3. Make the change, its tests, its documentation, and any required change fragment together.
 4. Push the topic branch to your fork and open a pull request against `ravenroot-ai/ravenroot:dev`.
 
-Opening the pull request does not by itself produce `ci-required` on it: `ci.yml` no longer triggers
-on any pull request into `dev`, including one from a fork, and `dev`'s ruleset requires that check
-before the pull request can be queued or merged. Before mirroring it, a maintainer must review the
-contribution, with particular attention to anything under `.github/`: a dispatched run executes the
-workflow definition committed on the branch it runs on, under `workflow_dispatch`, with this
-repository's full token, secrets, and environments, whereas the fork's own `pull_request` event ran
-that same file read-only and without secrets. Once reviewed, a maintainer pushes the exact head commit
-of your pull request to a branch inside this repository — the same SHA, unchanged — and dispatches the
-full tier on it (`gh workflow run ci.yml --ref <branch> -f tier=full`); the dispatched run then lands
-on your pull request's own head, and `ci-required` reports there. There is no automated route yet, so
-your pull request stays unverified until a maintainer does this.
+Opening the pull request triggers `ci.yml` on it directly, from a fork or from a repository branch
+alike, and that run carries the complete functional suite — the same tier the merge queue runs on the
+integration commit — so `ci-required` reports from the pull request's own event.
 
 Ordinary pull requests from forks or repository branches must target `dev`, not `main`. Pull requests
 to `main` are reserved for the internal `dev` branch and protected internal `hotfix/*` branches. A

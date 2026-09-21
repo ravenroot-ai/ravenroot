@@ -165,7 +165,8 @@ class ClassifyTest(unittest.TestCase):
         )
 
     def test_a_dispatch_runs_the_full_tier_and_nothing_lighter(self):
-        """The result lands on the dispatched commit, where a pull request into `dev` reads it."""
+        """Verifies a review candidate on its exact commit before the pull request opens; it cannot
+        substitute for the pull request's own event, which now publishes ci-required independently."""
         for requested in ("", "full"):
             with self.subTest(requested=requested):
                 self.assertEqual(

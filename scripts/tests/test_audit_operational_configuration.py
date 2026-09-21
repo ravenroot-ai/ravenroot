@@ -1937,16 +1937,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_707_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_723_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
             self.assertEqual(95, len(details))
             self.assertEqual(
-                {"methods": 105, "path": 95, "summary": 419, "successStatuses": 97},
+                {"methods": 105, "path": 95, "summary": 426, "successStatuses": 97},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(716, len(entries))
+            self.assertEqual(723, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4295,7 +4295,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 419 |",
+                "| Retained published contract descriptions | 426 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4303,7 +4303,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 418 |",
+                "| Retained published contract descriptions | 425 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

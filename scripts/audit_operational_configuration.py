@@ -7365,7 +7365,7 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
          "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
-         "74950914d80d6c00ed13dc7e502d6464af7e99cf537d1900648eb2f48bdd32c1"),
+         "84243f4cef7a99d221dbb7453b3753297daf4feee9d0060d836b538b15860a5d"),
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "executeHttp",
          "f8baedda556637f780f48d6619ef5cfdd5aba613c710a38f0a5aa586055baf2f"),
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "openWebSocket",
@@ -8132,7 +8132,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '1110b0605bb9a6f18c044bdc65e0a43566a300a72f48d9a44d93ef164c3b9c71',
+  '74e2eb1701e081d4ab9452e58e3211a9c9bd50e14800e64e8805c4881f67e038',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -14014,22 +14014,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-c5669fbf3888f9cdf9ec": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-d043f9dc51f14cff8d76":
+    "oc-79726625c7df0967475f": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-f47ee00a26213d22fe93":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-57d68b5c6572861fc9af": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-c7578290b67ed9bf0ad3": (
+    "oc-44541f7489c5c37a5042": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8cc0b95fc4f993eccb90": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-4db05cbf5ccc487e7592": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-cfe709ae7d73baaeb370": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-c5669fbf3888f9cdf9ec": "/v1/events",
-    "oc-d043f9dc51f14cff8d76": "/v1/events",
-    "oc-57d68b5c6572861fc9af": "/v1/events",
-    "oc-c7578290b67ed9bf0ad3": "/v1/events/recent",
-    "oc-4db05cbf5ccc487e7592": "/v1/events/recent",
+    "oc-79726625c7df0967475f": "/v1/events",
+    "oc-f47ee00a26213d22fe93": "/v1/events",
+    "oc-44541f7489c5c37a5042": "/v1/events",
+    "oc-8cc0b95fc4f993eccb90": "/v1/events/recent",
+    "oc-cfe709ae7d73baaeb370": "/v1/events/recent",
 }
 
 
@@ -14835,9 +14835,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 105, "path": 95, "summary": 419, "successStatuses": 97}
+    expected_counts = {"methods": 105, "path": 95, "summary": 426, "successStatuses": 97}
     if len(details) != 95 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 95/716 positional shape")
+        errors.append("RouteTable authority no longer has the reviewed 95/723 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

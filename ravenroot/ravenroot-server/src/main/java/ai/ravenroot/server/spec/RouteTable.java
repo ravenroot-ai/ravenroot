@@ -355,7 +355,8 @@ public final class RouteTable {
                             + "Re-registering the same id with the same graph returns the current "
                             + "status unchanged; with a different graph it is a 409. An explicit ?scope= other than "
                             + "LOCAL_PROCESS is refused rather than degraded. The response scope is always "
-                            + "LOCAL_PROCESS: no durability, lease, fencing, failover or cluster claim.",
+                            + "LOCAL_PROCESS. A deploymentGeneration field identifies durable lifecycle intent; "
+                            + "the runtime remains process-local and makes no cluster ownership claim.",
                     true, true, 200,
                     concat(STANDARD_ERRORS, ErrorCode.GRAPHML_DOCUMENT_TOO_LARGE.code(),
                             ErrorCode.GRAPHML_RESOURCE_LIMIT.code(), ErrorCode.GRAPHML_UNSAFE_XML.code(),
@@ -367,8 +368,11 @@ public final class RouteTable {
                     "GET inspects and DELETE undeploys exactly one authenticated tenant's process-local "
                             + "deployment. Undeploy stops first and only then removes the registration, so "
                             + "it is strictly distinct from POST .../stop, which leaves the deployment "
-                            + "registered and re-startable. Unknown ids, sibling-tenant ids and an id "
-                            + "already undeployed are the identical nondisclosing 404.",
+                            + "registered and re-startable. GET gives unknown ids, sibling-tenant ids and removed "
+                            + "ids the identical nondisclosing 404. Legacy repeated DELETE does likewise; durable "
+                            + "DELETE retains a tenant-scoped tombstone for typed replay or refusal. Durable Undeploy requires "
+                            + "Idempotency-Key, X-Ravenroot-Expected-Generation, X-Ravenroot-Reason and an explicit "
+                            + "X-Ravenroot-Undeploy-Disposition.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
@@ -391,7 +395,8 @@ public final class RouteTable {
                             + "starting a READY deployment answers immediately with its current status. "
                             + "Subject to this pod's active-deployment cap, which counts deployments a "
                             + "graceful shutdown would owe time to and so is checked here rather than at "
-                            + "registration; exceeding it is a 429.",
+                            + "registration; exceeding it is a 429. Durable targets require Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code(),
@@ -400,13 +405,15 @@ public final class RouteTable {
                     "Stops one process-local deployment and leaves it registered and re-startable. Closes "
                             + "admission and inbound sources first, then releases only that deployment's own "
                             + "domain -- never a sibling deployment and never the shared ActorSystem. "
-                            + "Idempotent: stopping a stopped deployment answers STOPPED.",
+                            + "Idempotent: stopping a stopped deployment answers STOPPED. Durable targets also "
+                            + "require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/restart",
                     "A completed stop followed by a start, never the two overlapping, so no source "
-                            + "subscription is duplicated across the restart.",
+                            + "subscription is duplicated across the restart. Durable targets require "
+                            + "Idempotency-Key and X-Ravenroot-Expected-Generation; Restart has no reason header.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),

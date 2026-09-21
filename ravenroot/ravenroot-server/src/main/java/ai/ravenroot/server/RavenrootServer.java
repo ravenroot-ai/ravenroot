@@ -3755,11 +3755,10 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code "scope":"LOCAL_PROCESS"}.</p>
      *
      * <h2>Non-disclosure is one code path, not a rule to remember</h2>
-     * <p>Every lookup and every command resolves through {@code AuthorizedRavenrootApplication}, which
-     * takes the tenant from the authenticated {@code RequestContext} and never from the request. An
-     * unknown id, a sibling tenant's id and an id already undeployed all arrive here as the same empty
-     * {@code Optional} and leave as the same {@link ErrorCode#UNKNOWN_RESOURCE} body — there is no
-     * branch here that could tell them apart even if it wanted to.</p>
+     * <p>Every status lookup resolves through tenant-scoped application or durable control state. An
+     * unknown id, a sibling tenant's id and an id already undeployed leave GET as the same
+     * {@link ErrorCode#UNKNOWN_RESOURCE} body. A durable tombstone is command-only: it can replay the
+     * exact Undeploy intent or refuse a different intent without exposing another tenant's state.</p>
      *
      * <h2>Why this is not {@code /v1/executions/{id}/cancel} or {@code /v1/drain}</h2>
      * <p>Those two are unchanged and mean what they always meant: cancel ends one traversal, drain
@@ -3790,7 +3789,8 @@ public final class RavenrootServer implements AutoCloseable {
             if (suffix.isEmpty() || suffix.equals("/")) {
                 if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                     exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
-                    json(exchange, 200, deploymentListJson(authorizedApplication.localDeployments(context)));
+                    json(exchange, 200, deploymentListJson(context.tenantId(),
+                            authorizedApplication.localDeployments(context)));
                     return;
                 }
                 if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -3814,12 +3814,15 @@ public final class RavenrootServer implements AutoCloseable {
                 // have required this handler to read the registration first, and that read is a
                 // different authorization action -- so registering would have started demanding an
                 // observe scope it does not otherwise need, to decorate a status code.
-                var status = durableDeploymentControl == null
-                        ? authorizedApplication.registerLocalDeployment(context, deploymentId,
-                                new java.io.ByteArrayInputStream(graph))
-                        : durableDeploymentControl.register(
-                                ai.ravenroot.api.security.SecurityContext.of(context), deploymentId, graph).local();
-                deploymentJson(exchange, 200, status);
+                if (durableDeploymentControl == null) {
+                    var status = authorizedApplication.registerLocalDeployment(context, deploymentId,
+                            new java.io.ByteArrayInputStream(graph));
+                    deploymentJson(exchange, 200, status, null);
+                } else {
+                    var registration = durableDeploymentControl.register(
+                            ai.ravenroot.api.security.SecurityContext.of(context), deploymentId, graph);
+                    deploymentJson(exchange, 200, registration.local(), registration.durable().generation());
+                }
                 return;
             }
 
@@ -3863,12 +3866,21 @@ public final class RavenrootServer implements AutoCloseable {
                         fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                         return;
                     }
+                    var durable = durableDeploymentRecord(context.tenantId(), deploymentId);
+                    Long generation = durable
+                            .map(ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record::generation)
+                            .orElse(null);
+                    if (durable
+                            .map(record -> record.tombstone() != null).orElse(false)) {
+                        fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+                        return;
+                    }
                     exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
-                    deploymentJson(exchange, 200, status.orElseThrow());
+                    deploymentJson(exchange, 200, status.orElseThrow(), generation);
                     return;
                 }
                 if ("DELETE".equalsIgnoreCase(exchange.getRequestMethod())) {
-                    if (durableDeploymentControl != null) {
+                    if (durableDeploymentRecord(context.tenantId(), deploymentId).isPresent()) {
                         durableDeploymentCommand(exchange, httpContext, deploymentId, "undeploy");
                         return;
                     }
@@ -3882,7 +3894,7 @@ public final class RavenrootServer implements AutoCloseable {
             }
 
             if (!method(exchange, httpContext, "POST")) return;
-            if (durableDeploymentControl != null) {
+            if (durableDeploymentRecord(context.tenantId(), deploymentId).isPresent()) {
                 durableDeploymentCommand(exchange, httpContext, deploymentId, segments[2]);
                 return;
             }
@@ -4313,18 +4325,39 @@ public final class RavenrootServer implements AutoCloseable {
         deploymentJson(exchange, 200, settled.orElseThrow());
     }
 
-    private String deploymentListJson(List<ai.ravenroot.api.application.LocalDeploymentStatus> statuses) {
+    private java.util.Optional<ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record>
+    durableDeploymentRecord(String tenantId, String deploymentId) {
+        return durableDeploymentControl == null
+                ? java.util.Optional.empty()
+                : durableDeploymentControl.get(tenantId, deploymentId);
+    }
+
+    private String deploymentListJson(String tenantId,
+                                      List<ai.ravenroot.api.application.LocalDeploymentStatus> statuses) {
         return "{\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
-                + "\",\"deployments\":[" + statuses.stream().map(RavenrootServer::deploymentObject)
+                + "\",\"deployments\":[" + statuses.stream()
+                .filter(status -> durableDeploymentRecord(tenantId, status.deploymentId())
+                        .map(record -> record.tombstone() == null).orElse(true))
+                .map(status -> deploymentObject(status,
+                        durableDeploymentRecord(tenantId, status.deploymentId())
+                                .map(ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record::generation)
+                                .orElse(null)))
                 .collect(java.util.stream.Collectors.joining(",")) + "]}";
     }
 
     private void deploymentJson(HttpExchange exchange, int statusCode,
                                 ai.ravenroot.api.application.LocalDeploymentStatus status) throws IOException {
-        json(exchange, statusCode, deploymentObject(status));
+        deploymentJson(exchange, statusCode, status, null);
     }
 
-    private static String deploymentObject(ai.ravenroot.api.application.LocalDeploymentStatus status) {
+    private void deploymentJson(HttpExchange exchange, int statusCode,
+                                ai.ravenroot.api.application.LocalDeploymentStatus status,
+                                Long generation) throws IOException {
+        json(exchange, statusCode, deploymentObject(status, generation));
+    }
+
+    private static String deploymentObject(ai.ravenroot.api.application.LocalDeploymentStatus status,
+                                           Long generation) {
         String diagnostic = status.diagnostic().map(value -> "\"" + escape(value) + "\"").orElse("null");
         String graphVersion = status.graphVersion().map(value -> "\"" + escape(value) + "\"")
                 .orElse("null");
@@ -4333,7 +4366,8 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"sourceCount\":" + status.sourceCount()
                 + ",\"graphVersion\":" + graphVersion
                 + ",\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
-                + "\",\"diagnostic\":" + diagnostic + "}";
+                + "\",\"diagnostic\":" + diagnostic
+                + (generation == null ? "" : ",\"deploymentGeneration\":" + generation) + "}";
     }
 
     private void sourceSessionJson(HttpExchange exchange, int statusCode,

@@ -1148,7 +1148,10 @@ final class SqliteSchema {
                 new SchemaMigration(32, "durable human-task interaction revocations", List.of(
                         "CREATE TABLE human_task_interaction_revocation (tenant_id TEXT NOT NULL, capability_id TEXT NOT NULL, task_id TEXT NOT NULL, generation INTEGER NOT NULL, revoked_at_epoch_second INTEGER NOT NULL, revoked_at_nano INTEGER NOT NULL, expires_at_epoch_second INTEGER NOT NULL, expires_at_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, capability_id))",
                         "CREATE INDEX human_task_interaction_revocation_expiry ON human_task_interaction_revocation (tenant_id, expires_at_epoch_second, expires_at_nano)")),
-                new SchemaMigration(33, "durable deployment incarnation origin", List.of(
+                new SchemaMigration(33, "non-expiring deployment identity bindings", List.of(
+                        "CREATE TABLE deployment_identity_binding (tenant_id TEXT NOT NULL, binding_key TEXT NOT NULL, digest TEXT NOT NULL, deployment_id TEXT NOT NULL, PRIMARY KEY (tenant_id, binding_key), FOREIGN KEY (tenant_id, deployment_id) REFERENCES deployment (tenant_id, deployment_id))",
+                        "INSERT INTO deployment_identity_binding (tenant_id, binding_key, digest, deployment_id) SELECT tenant_id, command_key, digest, deployment_id FROM deployment_command WHERE action = 'CREATE'")),
+                new SchemaMigration(34, "durable deployment incarnation origin", List.of(
                         "ALTER TABLE process_instance ADD COLUMN deployment_incarnation_id TEXT",
                         "CREATE INDEX idx_process_instance_deployment_incarnation ON process_instance "
                                 + "(tenant_id, deployment_id, deployment_incarnation_id)")));

@@ -7765,7 +7765,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  '22e946d9a3a2dbdbca3058d4f1d13e2f64886979de3f13bc1bcbbd86e2eed461',
+  'd19966291b1a23b7dae325c2bcf137a24824876c31cf6b404726f84040bbc196',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',

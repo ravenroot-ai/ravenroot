@@ -61,6 +61,7 @@ public sealed interface EmbedViewerSource permits EmbedViewerSource.Snapshot, Em
      */
     record DeploymentV2(String viewerSourceVersion, String deploymentId,
                         boolean showStartExecution) implements EmbedViewerSource {
+        /** Validates the versioned deployment source. */
         public DeploymentV2 {
             if (!"2".equals(viewerSourceVersion)) {
                 throw new IllegalArgumentException("unsupported viewer source version");
@@ -69,6 +70,11 @@ public sealed interface EmbedViewerSource permits EmbedViewerSource.Snapshot, Em
             if (deploymentId.isBlank()) throw new IllegalArgumentException("deploymentId must not be blank");
         }
 
+        /**
+         * Creates a version-two deployment source.
+         * @param deploymentId tenant-scoped deployment identifier
+         * @param showStartExecution whether the viewer may present the start affordance
+         */
         public DeploymentV2(String deploymentId, boolean showStartExecution) {
             this("2", deploymentId, showStartExecution);
         }
@@ -85,7 +91,12 @@ public sealed interface EmbedViewerSource permits EmbedViewerSource.Snapshot, Em
      */
     static EmbedViewerSource deployment(String deploymentId) { return new Deployment(deploymentId); }
 
-    /** Creates an additive v2 deployment viewer source. */
+    /**
+     * Creates an additive v2 deployment viewer source.
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param showStartExecution whether the viewer may present the start affordance
+     * @return version-two deployment viewer source
+     */
     static EmbedViewerSource deploymentV2(String deploymentId, boolean showStartExecution) {
         return new DeploymentV2(deploymentId, showStartExecution);
     }

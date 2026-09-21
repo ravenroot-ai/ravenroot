@@ -81,7 +81,14 @@ public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> de
         return of(deploymentId, null, workloadId, correlationId);
     }
 
-    /** Builds an origin with an exact physical deployment incarnation. */
+    /**
+     * Builds an origin with an exact physical deployment incarnation.
+     * @param deploymentId hosting deployment, or {@code null}
+     * @param deploymentIncarnationId physical deployment incarnation, or {@code null}
+     * @param workloadId owning workload, or {@code null}
+     * @param correlationId caller correlation identity, or {@code null}
+     * @return corresponding normalized origin
+     */
     public static ExecutionOrigin of(String deploymentId, String deploymentIncarnationId,
                                      String workloadId, String correlationId) {
         return new ExecutionOrigin(Optional.ofNullable(deploymentId),

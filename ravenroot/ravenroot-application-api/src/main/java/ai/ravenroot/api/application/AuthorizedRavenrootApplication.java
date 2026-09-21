@@ -686,7 +686,15 @@ public final class AuthorizedRavenrootApplication {
                 Objects.requireNonNull(listener, "listener"));
     }
 
-    /** Returns only process rows hosted by the exact deployment and graph version. */
+    /**
+     * Returns only process rows hosted by the exact deployment binding.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param limit maximum selector rows to return
+     * @return authorized rows matching every binding component
+     */
     public java.util.List<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRuns(
             RequestContext context, String deploymentId, String incarnationId,
             String graphVersion, int limit) {
@@ -705,7 +713,15 @@ public final class AuthorizedRavenrootApplication {
                 .toList();
     }
 
-    /** Resolves one exact run without depending on its position in the bounded selector page. */
+    /**
+     * Resolves one exact run without depending on its position in the bounded selector page.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param processInstanceId exact process identity
+     * @return the authorized matching row, or empty when absent or mismatched
+     */
     public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRun(
             RequestContext context, String deploymentId, String incarnationId, String graphVersion,
             java.util.UUID processInstanceId) {
@@ -721,7 +737,17 @@ public final class AuthorizedRavenrootApplication {
                 .filter(item -> version.equals(item.graphVersionPin().reference()));
     }
 
-    /** Replays one already-authorized selected run from its durable per-process journal. */
+    /**
+     * Replays one already-authorized selected run from its durable per-process journal.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of events to return
+     * @return ordered durable events for the exact authorized run
+     */
     public java.util.List<DurableExecutionEvent> embedDeploymentRunReplay(
             RequestContext context, String deploymentId, String incarnationId, String graphVersion,
             java.util.UUID processInstanceId, long afterSequence, int limit) {
@@ -732,7 +758,15 @@ public final class AuthorizedRavenrootApplication {
                 afterSequence, bounded);
     }
 
-    /** Starts one idempotent traversal under an embed-only capability and exact binding. */
+    /**
+     * Starts one idempotent traversal under an embed-only capability and exact binding.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param requestId bounded idempotency identity
+     * @return sanitized authoritative admission outcome
+     */
     public EmbedDeploymentStart startEmbedDeploymentExecution(RequestContext context,
                                                                String deploymentId,
                                                                String incarnationId,

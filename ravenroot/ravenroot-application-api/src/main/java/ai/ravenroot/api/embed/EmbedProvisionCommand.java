@@ -117,7 +117,19 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
                 EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);
     }
 
-    /** Creates an additive v2 deployment registration with selectable runs. */
+    /**
+     * Creates an additive v2 deployment registration with selectable runs and no execute authority.
+     * @param registrationId stable registration identity
+     * @param expectedRevision optimistic registration revision
+     * @param workloadIssuer trusted workload issuer
+     * @param workloadSubject trusted workload subject
+     * @param tenantId owning tenant
+     * @param parentOrigin exact allowed embedding origin
+     * @param themeOverride optional presentation theme
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param showStartExecution whether to present the start affordance
+     * @return fail-closed version-two provisioning command
+     */
     public static EmbedProvisionCommand deploymentV2(String registrationId, long expectedRevision,
                                                       String workloadIssuer, String workloadSubject,
                                                       String tenantId, String parentOrigin,
@@ -133,6 +145,16 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
      *
      * <p>The presentation option remains independent: callers may grant execution while keeping the
      * affordance hidden, or show the affordance without using this authority-granting factory.</p>
+     * @param registrationId stable registration identity
+     * @param expectedRevision optimistic registration revision
+     * @param workloadIssuer trusted workload issuer
+     * @param workloadSubject trusted workload subject
+     * @param tenantId owning tenant
+     * @param parentOrigin exact allowed embedding origin
+     * @param themeOverride optional presentation theme
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param showStartExecution whether to present the start affordance
+     * @return fail-closed version-two provisioning command with explicit execute authority
      */
     public static EmbedProvisionCommand deploymentV2WithExecutionCapability(
             String registrationId, long expectedRevision,

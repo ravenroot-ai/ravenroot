@@ -915,7 +915,13 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<List<JournalRecord>> readJournal(String tenantId, long afterOffset, int limit);
 
-    /** Reads one exact process stream by its durable per-instance sequence. */
+    /**
+     * Reads one exact process stream by its durable per-instance sequence.
+     * @param key tenant-scoped process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of records to return
+     * @return ordered durable records after the requested sequence
+     */
     default CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
                                                                      long afterSequence, int limit) {
         var refused = new java.util.concurrent.CompletableFuture<List<JournalRecord>>();

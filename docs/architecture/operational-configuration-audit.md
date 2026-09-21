@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 77.
+Checked source reconciliations: 78.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 23636 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23580 |
-| Unchanged identities | 22769 |
-| Approved identity migrations | 800 |
-| Approved retirements | 11 |
-| Semantically classified additions | 67 |
+| Source inventory candidates | 23636 |
+| Unchanged identities | 23636 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 23636 |
 
 ## Final semantic review
@@ -10395,7 +10395,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-98b266052bd7720a7007` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java:67` `ManagedExecutionStore` | java | retained | security-ceiling-or-default | This exact method-name atom is an allowlisted delegate operation in the managed wrapper’s fail-closed surface. |
 | `oc-04abb774458279ad1b0f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java:68` `ManagedExecutionStore` | java | retained | security-ceiling-or-default | This exact method-name atom is an allowlisted delegate operation in the managed wrapper’s fail-closed surface. |
 | `oc-b9e5a08c5a159bf552c0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java:68` `ManagedExecutionStore` | java | retained | security-ceiling-or-default | This exact method-name atom is an allowlisted delegate operation in the managed wrapper’s fail-closed surface. |
-| `oc-87005ba5340dc6e24c0d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java:161` `if` | java | retained | derived | This initializes the local sweep-loop counter and is derived control-flow state, not a persistence policy value. |
+| `oc-87005ba5340dc6e24c0d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java:164` `if` | java | retained | derived | This initializes the local sweep-loop counter and is derived control-flow state, not a persistence policy value. |
 | `oc-2a32ca16959db1b3b7dd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java:28` `fromSystem` | java | already-centralized | operator-configurable | The typed PostgreSQL store policy owns this value; the closed property/environment resolver, constructor validation, bootstrap propagation, and adapter consumers are source-verified. |
 | `oc-50449d2558c0943e8f69` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java:29` `fromSystem` | java | already-centralized | operator-configurable | The typed PostgreSQL store policy owns this value; the closed property/environment resolver, constructor validation, bootstrap propagation, and adapter consumers are source-verified. |
 | `oc-5d6b395380526751e660` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java:31` `fromSystem` | java | already-centralized | operator-configurable | The typed PostgreSQL store policy owns this value; the closed property/environment resolver, constructor validation, bootstrap propagation, and adapter consumers are source-verified. |

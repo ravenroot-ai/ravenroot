@@ -7765,7 +7765,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  '22e946d9a3a2dbdbca3058d4f1d13e2f64886979de3f13bc1bcbbd86e2eed461',
+  'd19966291b1a23b7dae325c2bcf137a24824876c31cf6b404726f84040bbc196',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -14014,22 +14014,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-d9972e84afabadbad707": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-89a8b3d572a7381fcb6d":
+    "oc-79726625c7df0967475f": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-f47ee00a26213d22fe93":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-bc09becb6e9be735dd8d": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-59cb23818ec6a8fe7b13": (
+    "oc-44541f7489c5c37a5042": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8cc0b95fc4f993eccb90": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-fc35b1654ce247e21896": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-cfe709ae7d73baaeb370": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-d9972e84afabadbad707": "/v1/events",
-    "oc-89a8b3d572a7381fcb6d": "/v1/events",
-    "oc-bc09becb6e9be735dd8d": "/v1/events",
-    "oc-59cb23818ec6a8fe7b13": "/v1/events/recent",
-    "oc-fc35b1654ce247e21896": "/v1/events/recent",
+    "oc-79726625c7df0967475f": "/v1/events",
+    "oc-f47ee00a26213d22fe93": "/v1/events",
+    "oc-44541f7489c5c37a5042": "/v1/events",
+    "oc-8cc0b95fc4f993eccb90": "/v1/events/recent",
+    "oc-cfe709ae7d73baaeb370": "/v1/events/recent",
 }
 
 
@@ -14835,9 +14835,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 103, "path": 93, "summary": 424, "successStatuses": 94}
-    if len(details) != 93 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 93/714 positional shape")
+    expected_counts = {"methods": 105, "path": 95, "summary": 426, "successStatuses": 97}
+    if len(details) != 95 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 95/723 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

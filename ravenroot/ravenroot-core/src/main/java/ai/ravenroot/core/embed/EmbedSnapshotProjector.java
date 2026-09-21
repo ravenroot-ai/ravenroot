@@ -122,7 +122,8 @@ public final class EmbedSnapshotProjector {
                 })
                 .toList();
         var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
-                grant.graphId(), grant.graphVersionId(), grant.canonicalDigest(), nodes, edges);
+                grant.graphId(), grant.graphVersionId(), grant.canonicalDigest(), nodes, edges,
+                designArrangement(definition));
         if (projection.jsonBytes() > budget.maxJsonBytes()) throw new ProjectionTooLarge();
         return projection;
     }
@@ -162,9 +163,16 @@ public final class EmbedSnapshotProjector {
                 })
                 .toList();
         var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
-                graphId, graphVersionId, canonicalDigest, nodes, edges);
+                graphId, graphVersionId, canonicalDigest, nodes, edges, designArrangement(definition));
         if (projection.jsonBytes() > budget.maxJsonBytes()) throw new ProjectionTooLarge();
         return projection;
+    }
+
+    private static String designArrangement(GraphDefinition definition) {
+        Object value = definition.properties().get("ravenroot.designArrangement");
+        if (!(value instanceof String text)) return null;
+        return Set.of("hierarchical", "flow", "organic", "keep", "hierarchical-new", "layered-down")
+                .contains(text) ? text : null;
     }
 
     private static EmbedGraphProjection.Node projectSnapshotNode(GraphNode node, EmbedProjectionBudget budget) {

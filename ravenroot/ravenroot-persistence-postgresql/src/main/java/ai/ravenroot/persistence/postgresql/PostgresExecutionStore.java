@@ -67,6 +67,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -368,6 +369,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private static final String INVENTORY_COLUMNS =
             "SELECT p.process_instance_id, p.status, p.termination_reason, p.graph_version_pin, "
                     + "p.revision, p.fencing_token, p.lifecycle_generation, p.deployment_id, "
+                    + "p.deployment_incarnation_id, "
                     + "p.workload_id, p.correlation_id, p.created_at_epoch_second, p.created_at_nano, "
                     + "p.updated_at_epoch_second, p.updated_at_nano, p.retained_until_epoch_second, "
                     + "p.retained_until_nano, l.worker_id AS lease_worker_id, "
@@ -384,7 +386,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private static final String META_COLUMNS =
             "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, control_state, "
                     + "updated_at_epoch_second, updated_at_nano, created_at_epoch_second, "
-                    + "created_at_nano, lifecycle_generation, deployment_id, workload_id, "
+                    + "created_at_nano, lifecycle_generation, deployment_id, deployment_incarnation_id, workload_id, "
                     + "correlation_id, retained_until_epoch_second, retained_until_nano "
                     + "FROM process_instance WHERE tenant_id = ? AND process_instance_id = ?";
 
@@ -1648,6 +1650,61 @@ public final class PostgresExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                    long afterSequence, int limit) {
+        return readProcessJournalPage(key, afterSequence, limit).thenApply(ProcessJournalPage::records);
+    }
+
+    @Override
+    public CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                       long afterSequence, int limit) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            if (afterSequence < 0) throw failure(ExecutionStoreFailure.invalid("afterSequence cannot be negative"));
+            requireLimit(limit);
+            return readFolded(null, connection -> {
+                long next = 1L;
+                try (PreparedStatement boundary = connection.prepareStatement(
+                        "SELECT next_sequence FROM journal_stream_sequence WHERE tenant_id = ? "
+                                + "AND process_instance_id = ?")) {
+                    boundary.setString(1, key.tenantId());
+                    StoredUuid.bind(boundary, 2, key.processInstanceId());
+                    try (ResultSet rows = boundary.executeQuery()) {
+                        if (rows.next()) next = rows.getLong(1);
+                    }
+                }
+                long retainedFrom = next;
+                try (PreparedStatement boundary = connection.prepareStatement(
+                        "SELECT MIN(stream_sequence) FROM event_journal WHERE tenant_id = ? "
+                                + "AND process_instance_id = ?")) {
+                    boundary.setString(1, key.tenantId());
+                    StoredUuid.bind(boundary, 2, key.processInstanceId());
+                    try (ResultSet rows = boundary.executeQuery()) {
+                        if (rows.next() && rows.getObject(1) != null) retainedFrom = rows.getLong(1);
+                    }
+                }
+                if (afterSequence + 1 < retainedFrom) {
+                    throw failure(new ExecutionStoreFailure.JournalTruncated(
+                            key.tenantId(), afterSequence, retainedFrom));
+                }
+                var page = new ArrayList<JournalRecord>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "SELECT * FROM event_journal WHERE tenant_id = ? AND process_instance_id = ? "
+                                + "AND stream_sequence > ? ORDER BY stream_sequence LIMIT ?")) {
+                    statement.setString(1, key.tenantId());
+                    StoredUuid.bind(statement, 2, key.processInstanceId());
+                    statement.setLong(3, afterSequence);
+                    statement.setInt(4, limit);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) page.add(readJournalRecord(key.tenantId(), rows));
+                    }
+                }
+                return new ProcessJournalPage(page, retainedFrom, next);
+            });
+        });
+    }
+
+    @Override
     public CompletionStage<Long> journalRetainedFrom(String tenantId) {
         return async(() -> {
             requireTenantId(tenantId);
@@ -2041,8 +2098,9 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         StoredInstant.read(rows, "updated_at"),
                         StoredInstant.read(rows, "created_at"),
                         rows.getLong("lifecycle_generation"),
-                        ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
-                                rows.getString("correlation_id")),
+                        ExecutionOrigin.of(rows.getString("deployment_id"),
+                                rows.getString("deployment_incarnation_id"),
+                                rows.getString("workload_id"), rows.getString("correlation_id")),
                         nullableInstant(rows, "retained_until"), rows.getString("control_state"));
             }
         }
@@ -2140,10 +2198,11 @@ public final class PostgresExecutionStore implements ExecutionStore {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO process_instance (tenant_id, process_instance_id, status, "
                         + "termination_reason, graph_version_pin, revision, fencing_token, "
-                        + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
+                        + "lifecycle_generation, deployment_id, deployment_incarnation_id, "
+                        + "workload_id, correlation_id, "
                         + "created_at_epoch_second, created_at_nano, updated_at_epoch_second, "
                         + "updated_at_nano, retained_until_epoch_second, retained_until_nano, control_state) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT DO NOTHING")) {
             statement.setString(1, key.tenantId());
             StoredUuid.bind(statement, 2, key.processInstanceId());
@@ -2154,12 +2213,13 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setLong(6, revision);
             statement.setLong(7, generation);
             statement.setString(8, origin.deploymentId().orElse(null));
-            statement.setString(9, origin.workloadId().orElse(null));
-            statement.setString(10, origin.correlationId().orElse(null));
-            int index = StoredInstant.bindValue(statement, 11, createdAt);
+            statement.setString(9, origin.deploymentIncarnationId().orElse(null));
+            statement.setString(10, origin.workloadId().orElse(null));
+            statement.setString(11, origin.correlationId().orElse(null));
+            int index = StoredInstant.bindValue(statement, 12, createdAt);
             index = StoredInstant.bindValue(statement, index, now);
             bindNullableInstant(statement, index, retainedUntil);
-            statement.setString(17, folded.controlState().name());
+            statement.setString(18, folded.controlState().name());
             inserted = statement.executeUpdate();
         }
         if (inserted == 0) {
@@ -2189,7 +2249,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         try (PreparedStatement statement = connection.prepareStatement(
                 "UPDATE process_instance SET status = ?, termination_reason = ?, "
                         + "graph_version_pin = ?, revision = ?, lifecycle_generation = ?, "
-                        + "deployment_id = ?, workload_id = ?, correlation_id = ?, "
+                        + "deployment_id = ?, deployment_incarnation_id = ?, workload_id = ?, correlation_id = ?, "
                         + "updated_at_epoch_second = ?, updated_at_nano = ?, "
                         + "retained_until_epoch_second = ?, retained_until_nano = ?, control_state = ? "
                         + "WHERE tenant_id = ? AND process_instance_id = ? AND revision = ?")) {
@@ -2202,9 +2262,10 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setLong(4, revision);
             statement.setLong(5, generation);
             statement.setString(6, origin.deploymentId().orElse(null));
-            statement.setString(7, origin.workloadId().orElse(null));
-            statement.setString(8, origin.correlationId().orElse(null));
-            int index = StoredInstant.bindValue(statement, 9, now);
+            statement.setString(7, origin.deploymentIncarnationId().orElse(null));
+            statement.setString(8, origin.workloadId().orElse(null));
+            statement.setString(9, origin.correlationId().orElse(null));
+            int index = StoredInstant.bindValue(statement, 10, now);
             index = bindNullableInstant(statement, index, retainedUntil);
             statement.setString(index++, folded.controlState().name());
             statement.setString(index++, key.tenantId());
@@ -2828,6 +2889,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 rows.getLong("revision"), rows.getLong("lifecycle_generation"),
                 new GraphVersionPin(rows.getString("graph_version_pin")),
                 Optional.ofNullable(rows.getString("deployment_id")),
+                Optional.ofNullable(rows.getString("deployment_incarnation_id")),
                 Optional.ofNullable(rows.getString("workload_id")),
                 Optional.ofNullable(rows.getString("correlation_id")),
                 leaseLive ? Optional.of(worker) : Optional.empty(),

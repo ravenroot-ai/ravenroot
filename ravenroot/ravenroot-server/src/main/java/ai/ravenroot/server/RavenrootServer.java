@@ -853,6 +853,10 @@ public final class RavenrootServer implements AutoCloseable {
                     publicContext(embed::projection));
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.OBSERVATION_PATH,
                     publicContext(embed::observation));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.RUNS_PATH,
+                    publicContext(embed::runs));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.START_EXECUTION_PATH,
+                    publicContext(embed::startExecution));
         }
         var staticUi = new StaticUiHandler(uiDirectory);
         server.createContext("/", publicContext((exchange, ignored) -> staticUi.handle(exchange)));

@@ -2168,7 +2168,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                         .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessCreated(accepted,
                                 new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion)))
                         .recordOrigin(ai.ravenroot.api.persistence.ExecutionOrigin.of(
-                                executionContextDeploymentId, traversalId.toString(), security.requestId()))
+                                executionContextDeploymentId, incarnationId,
+                                traversalId.toString(), security.requestId()))
                         .build()));
         // RUNNING is committed here, before the engine send below, so a persisted RUNNING means
         // "sent, outcome unknown" rather than "about to be sent" -- the reading PERS-04's recovery

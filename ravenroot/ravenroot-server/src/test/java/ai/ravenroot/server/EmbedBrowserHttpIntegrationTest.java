@@ -256,7 +256,8 @@ class EmbedBrowserHttpIntegrationTest {
         var expected = Set.of(EmbedBrowserHttpHandler.CREATE_PATH,
                 EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH, EmbedBrowserHttpHandler.LAUNCH_PATH,
                 EmbedBrowserHttpHandler.EXCHANGE_PATH, EmbedBrowserHttpHandler.PROJECTION_PATH,
-                EmbedBrowserHttpHandler.OBSERVATION_PATH);
+                EmbedBrowserHttpHandler.OBSERVATION_PATH, EmbedBrowserHttpHandler.RUNS_PATH,
+                EmbedBrowserHttpHandler.START_EXECUTION_PATH);
         var declared = RouteTable.ALL.stream().filter(route -> route.path().startsWith("/v1/embed/"))
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
                         ai.ravenroot.server.spec.RouteDescriptor::path,
@@ -319,6 +320,10 @@ class EmbedBrowserHttpIntegrationTest {
                     .contains("sandbox allow-scripts allow-same-origin"));
             assertTrue(launched.headers().firstValue("Content-Security-Policy").orElseThrow()
                     .contains("style-src 'self'"));
+            String launchedCsp = launched.headers().firstValue("Content-Security-Policy").orElseThrow();
+            assertTrue(launchedCsp.contains("img-src data:"));
+            assertFalse(launchedCsp.contains("img-src 'self'"));
+            assertFalse(launchedCsp.contains("img-src https:"));
             assertFalse(launched.body().contains("graphId"));
             assertFalse(launched.body().contains("bearer"));
             assertTrue(launched.body().contains("\"grantRevision\":\"1\""));
@@ -472,6 +477,117 @@ class EmbedBrowserHttpIntegrationTest {
             assertTrue(launched.body().indexOf("data-theme=\"light\"")
                     < launched.body().indexOf("href=\"/embed-viewer.css\""));
         }
+    }
+
+    @Test
+    void v2LaunchUsesSemanticControlsAndKeepsStartExecutionAbsentByDefault() throws Exception {
+        var registrations = new InMemoryEmbedRegistrationAuthority();
+        provision(registrations, EmbedProvisionCommand.deploymentV2("v2-read", 0, "issuer", "workload",
+                "tenant", PARENT, Optional.empty(), "orders", false));
+        provision(registrations, EmbedProvisionCommand.deploymentV2("v2-start", 0, "issuer", "workload",
+                "tenant", PARENT, Optional.empty(), "orders", true));
+        provision(registrations, EmbedProvisionCommand.deploymentV2WithExecutionCapability(
+                "v2-start-granted", 0, "issuer", "workload",
+                "tenant", PARENT, Optional.empty(), "orders", true));
+        provision(registrations, EmbedProvisionCommand.deploymentV2WithExecutionCapability(
+                "v2-hidden-granted", 0, "issuer", "workload",
+                "tenant", PARENT, Optional.empty(), "orders", false));
+        provision(registrations, EmbedProvisionCommand.deploymentV2("v2-visible-denied", 0,
+                "issuer", "workload", "tenant", PARENT, Optional.empty(), "orders", true));
+        try (var engine = new PekkoExecutionEngine("embed-http-v2-launch");
+             var server = server(engine, false, registrations)) {
+            server.start();
+            var client = HttpClient.newHttpClient();
+            String base = "http://127.0.0.1:" + server.port();
+
+            String readOnlyHtml = launch(client, base, "v2-read").body();
+            assertTrue(readOnlyHtml.contains("\"viewerSourceVersion\":\"2\""), readOnlyHtml);
+            assertTrue(readOnlyHtml.contains("<option value=\"design\">Design</option>"));
+            assertTrue(readOnlyHtml.contains("<option value=\"monitoring\">Monitoring</option>"));
+            assertTrue(readOnlyHtml.contains("data-viewer-command=\"render\""));
+            assertTrue(readOnlyHtml.contains("data-viewer-run"));
+            assertFalse(readOnlyHtml.contains("data-viewer-start"));
+            assertFalse(readOnlyHtml.contains(">Cyto<"));
+
+            String startHtml = launch(client, base, "v2-start").body();
+            assertTrue(startHtml.contains("\"showStartExecution\":true"), startHtml);
+            assertTrue(startHtml.contains("data-viewer-start>Start execution</button>"));
+
+            String grantedHtml = launch(client, base, "v2-start-granted").body();
+            assertTrue(grantedHtml.contains("\"showStartExecution\":true"), grantedHtml);
+            assertTrue(grantedHtml.contains("data-viewer-start>Start execution</button>"));
+
+            String hiddenGrantedHtml = launch(client, base, "v2-hidden-granted").body();
+            assertTrue(hiddenGrantedHtml.contains("\"showStartExecution\":false"), hiddenGrantedHtml);
+            assertFalse(hiddenGrantedHtml.contains("data-viewer-start"));
+
+            var denied = viewerSession(client, base, "v2-visible-denied", "visible-denied");
+            var deniedStart = send(client, viewerPost(base + EmbedBrowserHttpHandler.START_EXECUTION_PATH,
+                    VIEWER, startProofBody(denied, "start-denied"))
+                    .header("Authorization", "Bearer " + denied.bearer()));
+            assertEquals(403, deniedStart.statusCode(), deniedStart.body());
+
+            var hidden = viewerSession(client, base, "v2-hidden-granted", "hidden-granted");
+            var hiddenStart = send(client, viewerPost(base + EmbedBrowserHttpHandler.START_EXECUTION_PATH,
+                    VIEWER, startProofBody(hidden, "start-hidden"))
+                    .header("Authorization", "Bearer " + hidden.bearer()));
+            assertEquals(403, hiddenStart.statusCode(), hiddenStart.body());
+        }
+    }
+
+    private record ViewerSession(KeyPair pair, String bearer, String nonce) { }
+
+    private static ViewerSession viewerSession(HttpClient client, String base, String registrationId,
+                                               String identity) throws Exception {
+        var launched = launch(client, base, registrationId);
+        String exchangeId = json(launched.body(), "exchangeId");
+        String exchangeNonce = json(launched.body(), "challenge");
+        String acknowledgementId = json(launched.body(), "acknowledgementId");
+        String channelId = json(launched.body(), "channelId");
+        String correlation = identity + "-correlation";
+        String ack = "{\"registrationId\":\"" + registrationId + "\",\"acknowledgementId\":\""
+                + acknowledgementId + "\",\"channelId\":\"" + channelId
+                + "\",\"correlationId\":\"" + correlation + "\"}";
+        assertEquals(200, send(client, s2sPost(base + EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH,
+                "workload", ack)).statusCode());
+        KeyPair pair = keyPair();
+        ECPublicKey publicKey = (ECPublicKey) pair.getPublic();
+        Instant time = Instant.now();
+        String jti = identity + "-exchange";
+        String body = "{\"exchangeId\":\"" + exchangeId + "\",\"channelId\":\""
+                + channelId + "\",\"ackCorrelationId\":\"" + correlation + "\",\"keyX\":\""
+                + coordinate(publicKey.getW().getAffineX()) + "\",\"keyY\":\""
+                + coordinate(publicKey.getW().getAffineY()) + "\",\"nonce\":\"" + exchangeNonce
+                + "\",\"jti\":\"" + jti + "\",\"issuedAt\":\"" + time
+                + "\",\"signature\":\"" + exchangeSignature(pair, exchangeId, 1, exchangeNonce,
+                channelId, correlation, jti, time) + "\"}";
+        var exchanged = send(client, viewerPost(base + EmbedBrowserHttpHandler.EXCHANGE_PATH, VIEWER, body));
+        assertEquals(200, exchanged.statusCode(), exchanged.body());
+        return new ViewerSession(pair, json(exchanged.body(), "bearer"),
+                json(exchanged.body(), "challenge"));
+    }
+
+    private static String startProofBody(ViewerSession session, String jti) throws Exception {
+        Instant time = Instant.now();
+        return "{\"nonce\":\"" + session.nonce() + "\",\"jti\":\"" + jti
+                + "\",\"issuedAt\":\"" + time + "\",\"signature\":\""
+                + signature(session.pair(), session.bearer(), 1, session.nonce(), jti,
+                EmbedBrowserHttpHandler.START_EXECUTION_PATH, time)
+                + "\",\"requestId\":\"" + jti + "\"}";
+    }
+
+    private static HttpResponse<String> launch(HttpClient client, String base, String registrationId)
+            throws Exception {
+        var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"registrationId\":\"" + registrationId + "\"}")));
+        assertEquals(201, created.statusCode(), created.body());
+        URI uri = URI.create(json(created.body(), "launchUrl"));
+        var launched = send(client, request(base + uri.getRawPath() + "?" + uri.getRawQuery())
+                .header("Sec-Fetch-Mode", "navigate").header("Sec-Fetch-Dest", "iframe").GET());
+        assertEquals(200, launched.statusCode(), launched.body());
+        return launched;
     }
 
     @Test

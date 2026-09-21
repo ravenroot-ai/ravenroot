@@ -916,6 +916,37 @@ public interface ExecutionStore extends AutoCloseable {
     CompletionStage<List<JournalRecord>> readJournal(String tenantId, long afterOffset, int limit);
 
     /**
+     * Reads one exact process stream by its durable per-instance sequence.
+     * @param key tenant-scoped process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of records to return
+     * @return ordered durable records after the requested sequence
+     */
+    default CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                     long afterSequence, int limit) {
+        var refused = new java.util.concurrent.CompletableFuture<List<JournalRecord>>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EVENT_JOURNAL)));
+        return refused;
+    }
+
+    /**
+     * Reads one process stream together with its atomic retained and allocation boundaries.
+     * Implementations must fail with {@link ExecutionStoreFailure.JournalTruncated} when the
+     * requested continuation precedes {@link ProcessJournalPage#retainedFromSequence()}.
+     * @param key tenant-scoped process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of records to return
+     * @return one bounded page and the boundaries observed in the same read transaction
+     */
+    default CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                        long afterSequence, int limit) {
+        return readProcessJournal(key, afterSequence, limit)
+                .thenApply(records -> new ProcessJournalPage(records, 1, records.isEmpty()
+                        ? afterSequence + 1 : records.getLast().streamSequence() + 1));
+    }
+
+    /**
      * The lowest {@link JournalRecord#journalOffset()} this tenant's journal still holds, or the next
      * offset it will issue when the journal is empty.
      *

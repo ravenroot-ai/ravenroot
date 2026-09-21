@@ -83,6 +83,12 @@ public enum AuthorizationAction {
     /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
     DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true),
 
+    /** Discover runs only within one embed registration's exact deployment binding. */
+    EMBED_DEPLOYMENT_RUN_READ("ravenroot.embed.deployment.runs.read", true),
+
+    /** Start one idempotent traversal through an exact embed deployment binding. */
+    EMBED_DEPLOYMENT_EXECUTE("ravenroot.embed.deployment.execute", true),
+
     /** Explicitly override one Human Task decision policy with attributable operator intent. */
     HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true);
 

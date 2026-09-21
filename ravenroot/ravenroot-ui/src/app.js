@@ -71,7 +71,6 @@ import { catalogEmptyState } from './catalog-empty-state.js';
 import {
   catalogNodeIcon,
   COMMON_NODE_GLYPHS,
-  nodeTypeCardShape,
   resolveDescriptorNodeType,
 } from './catalog-node-icon.js';
 import { createLayoutSessions } from './layout-session.js';
@@ -130,7 +129,7 @@ import { mountD3ElasticRenderer } from './viewer-elastic-renderer.js';
 import {
   VIEWER_NODE_ICONS,
   createViewerStylesheet,
-  viewerCardImage,
+  viewerDesignNodeStyle,
   viewerNodeSize,
 } from './viewer-presentation.js';
 import {
@@ -3432,10 +3431,10 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
       sourceGraphVersion: graph.viewerBinding.graphVersion,
       deploymentId,
     },
-    // The read-only viewer's Cyto mode is the established semantic node/edge presentation. Keep
-    // the editor's existing `cyto` authoring preset (an N8N-family card layout) untouched.
+    // Deployment Design uses the same default authoring cards and artwork as Workbench Design.
+    // Renderer implementation names remain internal to this native presentation state.
     presentation: {
-      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'standard', designArrangement: null,
+      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto', designArrangement: null,
     },
   });
   const owner = workspace.find(id);
@@ -4411,78 +4410,6 @@ function initCy(elements, gd, options = {}) {
 // N8N VISUAL MODE
 // ═══════════════════════════════════════════════════════════════
 
-const N8N_ICONS_CHAR = {
-  start:    '▶', end:      '■', error:    '⚠',
-  terminal: '⊙',
-  consumer: '⧒', handler:  '↩',
-  agent:    '🧠', flow:     '⚙',
-  actor:    '◎', system:   '▤',
-  trace:    COMMON_NODE_GLYPHS.trace, 'human-task': COMMON_NODE_GLYPHS['human-task'],
-};
-let N8N_BG = rendererPalette.nodeSurfaceByType;
-let N8N_BORDER = rendererPalette.nodeType;
-
-// Digital circuit-brain SVG — front view, two hemispheres, PCB traces
-function agentBrainSvg() { return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' width='80' height='80'>
- <g fill='none' stroke='${rendererPalette.nodeType.agent}' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'>
-
-    <!-- Left outer profile (restored to its original smooth curves) -->
-    <path d='M 200 45
-             C 170 45, 155 60, 140 75
-             C 115 65, 90 85, 95 115
-             C 70 120, 75 160, 90 170
-             C 70 185, 75 225, 95 230
-             C 80 250, 90 285, 115 290
-             C 110 320, 145 340, 170 330
-             C 185 345, 195 355, 200 355' />
-
-    <!-- Right outer profile (mirrored, with smooth curves) -->
-    <path d='M 200 45
-             C 230 45, 245 60, 260 75
-             C 285 65, 310 85, 305 115
-             C 330 120, 325 160, 310 170
-             C 330 185, 325 225, 305 230
-             C 320 250, 310 285, 285 290
-             C 290 320, 255 340, 230 330
-             C 215 345, 205 355, 200 355' />
-
-    <!-- Central separator line -->
-    <line x1='200' y1='65' x2='200' y2='335' />
-
-    <!-- LEFT-HEMISPHERE CIRCUITS (segmented geometric lines) -->
-    <!-- Upper circuit -->
-    <path d='M 185 290 L 185 175 L 145 135 L 145 110' />
-    <!-- Middle circuit -->
-    <path d='M 170 260 L 170 215 L 125 185 L 125 165' />
-    <!-- Lower circuit -->
-    <path d='M 155 295 L 125 295 L 125 255 L 140 255' />
-
-    <!-- RIGHT-HEMISPHERE CIRCUITS (segmented geometric lines) -->
-    <!-- Upper circuit -->
-    <path d='M 215 290 L 215 175 L 255 135 L 255 110' />
-    <!-- Middle circuit -->
-    <path d='M 230 260 L 230 215 L 275 185 L 275 165' />
-    <!-- Lower circuit -->
-    <path d='M 245 295 L 275 295 L 275 255 L 260 255' />
-
-    <!-- TERMINAL CIRCLES (all with uniform radius R=9) -->
-    <!-- Left -->
-    <circle cx='145' cy='110' r='9' />
-    <circle cx='125' cy='165' r='9' />
-    <circle cx='140' cy='255' r='9' />
-
-    <!-- Right -->
-    <circle cx='255' cy='110' r='9' />
-    <circle cx='275' cy='165' r='9' />
-    <circle cx='260' cy='255' r='9' />
-
-  </g>
-</svg>`; }
-
-function makeN8nSVG(char, nodeType) {
-  return viewerCardImage(nodeType, rendererPalette);
-}
-
 let n8nActive = false;
 function rendererFor(owner = workspace.active) {
   const renderer = owner?.renderer;
@@ -4615,8 +4542,6 @@ function applyApplicationTheme(theme) {
   rendererPalette = getRendererPalette(applicationTheme);
   EDGE_TYPE_COLORS = rendererPalette.edgeType;
   NODE_TYPE_COLORS = rendererPalette.nodeType;
-  N8N_BG = rendererPalette.nodeSurfaceByType;
-  N8N_BORDER = rendererPalette.nodeType;
 
   workspace.documents.forEach(owner => {
     const target = owner.cy;
@@ -4870,40 +4795,13 @@ function applyElasticVisualStyle() {
 
 function applyN8nNodeStyle(target = cy, owner = workspace.active) {
   if (!target) return;
-  const fontPx = `${owner?.fontSize || DEFAULT_FONT_SIZE}px`;
   target.nodes().forEach(n => {
-    const t  = n.data('nodeType');
-    const ic = N8N_ICONS_CHAR[t] || '◎';
-    const bg = N8N_BG[t]         || rendererPalette.nodeSurface;
-    const bd = N8N_BORDER[t]     || rendererPalette.nodeBorder;
-    n.style({
-      shape:                  nodeTypeCardShape(t),
-      width:                   80,
-      height:                  80,
-      'background-color':      bg,
-      'border-width':          2.5,
-      // This family includes the DEFAULT `cyto` style, so this is the border most authors
-      // actually see. The neutral ring is restated here because the per-type `bd` written inline
-      // would otherwise beat the stylesheet; the per-type icon tile is untouched, so the node stays
-      // identifiable. `border-style` is deliberately absent so the data selector remains authoritative.
-      'border-color':          n.data('bypassed') ? rendererPalette.nodeType.system : bd,
-      'border-opacity':        1,
-      'background-image':      makeN8nSVG(ic, t),
-      'background-width':     '100%',
-      'background-height':    '100%',
-      'background-fit':       'none',
-      'background-clip':      'none',
-      label:                   runtimeNodeLabel(n),
-      'font-size':             fontPx,
-      'font-weight':          '500',
-      color:                  rendererPalette.nodeText,
-      'text-valign':          'bottom',
-      'text-halign':          'center',
-      'text-margin-y':         10,
-      'text-background-opacity': 0,
-      padding:                '0px',
-      'text-wrap':            'none',
-    });
+    n.style(viewerDesignNodeStyle(n.data('nodeType'), rendererPalette, {
+      label: runtimeNodeLabel(n),
+      fontSize: owner?.fontSize || DEFAULT_FONT_SIZE,
+      bypassed: Boolean(n.data('bypassed')),
+      labelSide: layeredLabelSide(owner?.layoutMode),
+    }));
     applyRuntimeVisual(n);
   });
   // Restated after the per-node style above, which writes this family's placement inline: a

@@ -43,6 +43,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
@@ -4758,6 +4759,68 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void processJournalReadNeverWidensToASiblingInstance() {
+        assumeCapability(StoreCapability.EVENT_JOURNAL);
+        var selected = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        var sibling = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID selectedTraversal = UUID.randomUUID();
+        UUID siblingTraversal = UUID.randomUUID();
+        StoredProcessInstance selectedCreated = await(store().apply(
+                creationBatch(selected, selectedTraversal, "graph-v1")));
+        StoredProcessInstance siblingCreated = await(store().apply(
+                creationBatch(sibling, siblingTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(selected)
+                .expecting(RevisionExpectation.exactly(selectedCreated.revision()))
+                .publish(event(selected, selectedTraversal, "selected.one"))
+                .publish(event(selected, selectedTraversal, "selected.two")).build()));
+        await(store().apply(ExecutionBatch.to(sibling)
+                .expecting(RevisionExpectation.exactly(siblingCreated.revision()))
+                .publish(event(sibling, siblingTraversal, "sibling.one")).build()));
+
+        List<JournalRecord> selectedOnly = await(store().readProcessJournal(selected, 0, 10));
+        assertEquals(List.of("selected.one", "selected.two"), selectedOnly.stream()
+                .map(row -> row.envelope().eventType()).toList());
+        assertEquals(2L, selectedOnly.getLast().streamSequence());
+        assertEquals(List.of("selected.two"), await(store().readProcessJournal(selected, 1, 10)).stream()
+                .map(row -> row.envelope().eventType()).toList());
+    }
+
+    @Test
+    final void processJournalBoundaryRejectsFullyCompactedAndInterPageGaps() {
+        assumeCapability(StoreCapability.JOURNAL_COMPACTION);
+        var key = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .publish(event(key, traversal, "one"))
+                .publish(event(key, traversal, "two"))
+                .publish(event(key, traversal, "three")).build()));
+
+        ProcessJournalPage first = await(store().readProcessJournalPage(key, 0, 1));
+        assertEquals(1L, first.retainedFromSequence());
+        assertEquals(4L, first.nextSequence());
+        assertEquals(1L, first.records().getFirst().streamSequence());
+
+        List<JournalRecord> tenant = await(store().readJournal(DEFAULT_TENANT, 0, 10));
+        await(store().advanceOutboxCursor(await(store().outboxCursor(DEFAULT_TENANT, "process-replay")),
+                tenant.getLast().journalOffset()));
+        clock().advance(store().journalRetention().plusMinutes(1));
+        assertEquals(3L, await(store().compactJournal(DEFAULT_TENANT)));
+
+        var interPage = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 1, 1))));
+        assertEquals(4L, interPage.retainedFrom());
+        var fullyCompacted = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 0, 10))));
+        assertEquals(4L, fullyCompacted.retainedFrom());
+        ProcessJournalPage current = await(store().readProcessJournalPage(key, 3, 10));
+        assertTrue(current.records().isEmpty());
+        assertEquals(4L, current.retainedFromSequence());
+        assertEquals(4L, current.nextSequence());
+    }
+
+    @Test
     final void aRejectedBatchJournalsNothingSoTheTransitionAndTheEventFailTogether() {
         assumeCapability(StoreCapability.EVENT_JOURNAL);
         var key = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
@@ -5656,13 +5719,15 @@ public abstract class ExecutionStoreContract {
                 .expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(acceptedInstance(key.processInstanceId(), traversalId),
                         new GraphVersionPin("graph-v7")))
-                .recordOrigin(ExecutionOrigin.of("deployment-9", "workload-3", "corr-42"))
+                .recordOrigin(ExecutionOrigin.of("deployment-9", "incarnation-4",
+                        "workload-3", "corr-42"))
                 .build()));
 
         ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
         assertEquals(key, entry.key());
         assertEquals(new GraphVersionPin("graph-v7"), entry.graphVersionPin());
         assertEquals(Optional.of("deployment-9"), entry.deploymentId());
+        assertEquals(Optional.of("incarnation-4"), entry.deploymentIncarnationId());
         assertEquals(Optional.of("workload-3"), entry.workloadId());
         assertEquals(Optional.of("corr-42"), entry.correlationId());
         assertNotEquals(entry.deploymentId(), entry.workloadId());
@@ -5685,6 +5750,7 @@ public abstract class ExecutionStoreContract {
                 .build()));
         ProcessInventoryEntry updated = await(store().findProcessInstance(key)).orElseThrow();
         assertEquals(Optional.of("deployment-9"), updated.deploymentId(), "absent components leave values untouched");
+        assertEquals(Optional.of("incarnation-4"), updated.deploymentIncarnationId());
         assertEquals(Optional.of("workload-3"), updated.workloadId());
         assertEquals(Optional.of("corr-updated"), updated.correlationId(), "a present component is written");
     }

@@ -102,7 +102,8 @@ public final class DefaultAuthorizationService implements AuthorizationService {
                 AuthorizationAction.GRAPH_READ, AuthorizationAction.EXECUTION_START);
         put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.EMBED_GRAPH_READ, AuthorizationAction.EMBED_SESSION_CREATE,
-                AuthorizationAction.DEPLOYMENT_OBSERVE);
+                AuthorizationAction.DEPLOYMENT_OBSERVE, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
+                AuthorizationAction.EMBED_DEPLOYMENT_EXECUTE);
         // Deliberately narrower than the actions above, which VIEWER holds. Deciding which
         // snapshot an embed may ever expose is an operations decision, not a viewing one.
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),

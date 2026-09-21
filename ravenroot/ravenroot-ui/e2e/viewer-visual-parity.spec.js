@@ -14,11 +14,14 @@ const projection = {
       layout: { x: 445, y: 330, width: 72, height: 72 } },
     { id: 'error', kind: 'ERROR', label: 'Failure', visualType: 'error',
       layout: { x: 560, y: 180, width: 72, height: 72 } },
+    { id: 'custom', kind: 'BEHAVIOR', label: 'Quartz', visualType: 'quartz-worker',
+      layout: { x: 680, y: 330, width: 100, height: 52 } },
   ],
   edges: [
     { id: 'route-continue', source: 'start', target: 'worker', label: 'continue', visualType: 'continue' },
     { id: 'route-agent', source: 'worker', target: 'agent', label: 'delegates', visualType: 'default' },
     { id: 'route-failure', source: 'worker', target: 'error', label: 'failed', visualType: 'failed' },
+    { id: 'route-custom', source: 'agent', target: 'custom', label: 'continues', visualType: 'continue' },
   ],
 };
 
@@ -28,6 +31,7 @@ const envelope = {
     incarnationId: 'inc-visual' },
   lifecycle: 'READY', canonicalDigest: 'graph-v1', projection,
 };
+const envelopeV2 = { ...envelope, viewerSourceVersion: '2' };
 
 // Projection bounds and native authoring normalization legitimately differ, especially for curved
 // routes. Semantic style equality above is strict; this budget catches gross paint drift without
@@ -117,13 +121,52 @@ async function mountEmbedTwin(page, theme, renderer) {
   await expect(page.locator('#ravenroot-embed-viewer')).toHaveAttribute('data-viewer-renderer', renderer);
 }
 
+async function mountV2EmbedTwin(page, theme, mode) {
+  await page.evaluate(async ({ source, selectedTheme, selectedMode }) => {
+    const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/embed-viewer.css';
+    document.head.append(link);
+    await new Promise((resolve, reject) => { link.addEventListener('load', resolve, { once: true });
+      link.addEventListener('error', reject, { once: true }); });
+    const native = document.querySelector('.doc-pane--active .doc-elastic-host.active')
+      || document.querySelector('.doc-pane--active .doc-canvas');
+    const rect = native.getBoundingClientRect();
+    const host = document.createElement('section'); host.id = 'visual-parity-host';
+    host.innerHTML = `<span class="embed-focus-sentinel" tabindex="0"></span>
+      <main id="ravenroot-embed-viewer" class="embed-viewer"><header hidden>
+        <p data-viewer-metadata></p><select data-viewer-mode><option value="design">Design</option>
+        <option value="monitoring">Monitoring</option></select>
+        <button data-viewer-command="render">Render</button><select data-viewer-run></select>
+        <span data-viewer-run-empty></span></header>
+        <div data-viewer-canvas tabindex="0"></div><canvas data-viewer-minimap tabindex="0"></canvas>
+        <ol data-viewer-alternative></ol><p data-viewer-status></p></main>
+        <span class="embed-focus-sentinel" tabindex="0"></span>`;
+    Object.assign(host.style, { position: 'fixed', zIndex: '99999', left: `${rect.left}px`,
+      top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    const root = host.querySelector('main'); Object.assign(root.style, { width: '100%', height: '100%' });
+    Object.assign(root.querySelector('[data-viewer-canvas]').style,
+      { width: '100%', height: '100%', position: 'absolute', inset: '0' });
+    root.querySelector('[data-viewer-minimap]').style.display = 'none';
+    root.querySelector('[data-viewer-alternative]').style.display = 'none';
+    root.querySelector('[data-viewer-status]').style.display = 'none';
+    document.body.append(host);
+    const { createEmbedViewer } = await import('/embed-viewer.js');
+    window.__visualParityViewer = createEmbedViewer(root, { theme: selectedTheme });
+    await window.__visualParityViewer.mount(source);
+    if (selectedMode === 'monitoring') {
+      const select = root.querySelector('[data-viewer-mode]'); select.value = selectedMode;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, { source: envelopeV2, selectedTheme: theme, selectedMode: mode });
+  await expect(page.locator('#ravenroot-embed-viewer')).toHaveAttribute('data-viewer-renderer', mode);
+}
+
 const nativeCardSnapshot = (page, renderer) => page.evaluate(selectedRenderer => {
   const instance = window.ravenroot.activeDocument().cy;
   instance.fit(60);
   const nodeStyle = ['shape', 'width', 'height', 'background-color', 'background-image',
-    'background-width', 'background-height', 'background-fit', 'border-color',
+    'background-width', 'background-height', 'background-fit', 'background-clip', 'border-color',
     'border-width', 'border-style', 'font-size', 'font-weight', 'text-valign',
-    'text-halign', 'text-margin-y'];
+    'text-halign', 'text-margin-x', 'text-margin-y', 'padding'];
   const edgeStyle = ['width', 'line-color', 'line-style', 'target-arrow-shape',
     'target-arrow-color', 'curve-style'];
   return {
@@ -235,7 +278,10 @@ function semanticPresentation(snapshot) {
   return {
     renderer: snapshot.renderer,
     nodes: snapshot.nodes.map(node => ({
-      id: node.id, label: node.label, type: node.type, position: node.position,
+      id: node.id,
+      // Legacy Standard and legacy Cyto intentionally predate the deterministic card initial.
+      label: node.type === 'quartz-worker' ? node.label.replace(/^\S+\s/u, '') : node.label,
+      type: node.type, position: node.position,
       style: Object.fromEntries(['background-color', 'border-color', 'border-style']
         .map(name => [name, node.style[name]])),
     })),
@@ -247,6 +293,22 @@ function semanticPresentation(snapshot) {
   };
 }
 
+function designPresentation(snapshot) {
+  const styleNames = [
+    'shape', 'width', 'height', 'background-color', 'background-image',
+    'background-width', 'background-height', 'background-fit', 'background-clip',
+    'border-color', 'border-width', 'border-style', 'font-size', 'font-weight',
+    'text-valign', 'text-halign', 'text-margin-x', 'text-margin-y', 'padding',
+  ];
+  return {
+    nodes: snapshot.nodes.map(node => ({
+      id: node.id, label: node.label, type: node.type,
+      style: Object.fromEntries(styleNames.map(name => [name, node.style[name]])),
+    })),
+    edges: semanticPresentation(snapshot).edges,
+  };
+}
+
 for (const theme of ['dark', 'light']) {
   test(`native and embedded Cyto, N8N, and Elastic stay within visual parity budget in ${theme}`,
     async ({ page }, testInfo) => {
@@ -254,6 +316,9 @@ for (const theme of ['dark', 'light']) {
     await openNativeViewer(page);
     await page.evaluate(selected => window.ravenroot.setApplicationTheme(selected), theme);
     for (const renderer of ['cyto', 'n8n', 'elastic']) {
+      // This historical matrix verifies the legacy public renderer contracts. v2 below deliberately
+      // uses the native default Design presentation instead of forcing this legacy standard style.
+      if (renderer === 'cyto') await page.evaluate(() => window.ravenroot.setVisualStyle('standard'));
       if (renderer === 'n8n') await page.evaluate(() => window.ravenroot.setVisualStyle('n8n'));
       if (renderer === 'elastic') await page.locator('#btn-monitoring').click();
       if (renderer === 'elastic') {
@@ -282,4 +347,42 @@ for (const theme of ['dark', 'light']) {
       });
     }
   });
+}
+
+for (const theme of ['dark', 'light']) {
+  test(`v2 native and embedded Design and Monitoring parity evidence in ${theme}`,
+    async ({ page }, testInfo) => {
+      await stubViewerService(page); await openNativeViewer(page);
+      await page.evaluate(selected => window.ravenroot.setApplicationTheme(selected), theme);
+      for (const [mode, renderer] of [['design', 'cyto'], ['monitoring', 'elastic']]) {
+        if (renderer === 'elastic') {
+          await page.locator('#btn-monitoring').click();
+          await expect(page.locator('.doc-pane--active .doc-elastic-host.active')).toBeVisible();
+        }
+        const native = renderer === 'elastic'
+          ? await nativeElasticSnapshot(page) : await nativeCardSnapshot(page, renderer);
+        native.renderer = mode;
+        const nativePng = await rendererPng(page, 'native', renderer);
+        await mountV2EmbedTwin(page, theme, mode);
+        const embedded = await page.evaluate(() => window.__visualParityViewer.presentationSnapshot());
+        embedded.renderer = mode;
+        const embeddedPng = await rendererPng(page, 'embed', renderer);
+        if (mode === 'monitoring') expect(embedded).toEqual(native);
+        else expect(designPresentation(embedded)).toEqual(designPresentation(native));
+        if (mode === 'design') {
+          const unknown = embedded.nodes.find(node => node.id === 'custom');
+          expect(unknown.style).toMatchObject({
+            width: '80px', height: '80px', 'background-width': '100%',
+            'background-height': '100%', 'background-fit': 'none',
+            'font-size': '20px', 'text-valign': 'bottom', 'text-halign': 'center',
+          });
+          expect(decodeURIComponent(unknown.icon)).toContain('>Q</text>');
+        }
+        const comparison = await comparePng(page, nativePng, embeddedPng);
+        expect(comparison.ratio).toBeLessThanOrEqual(MAX_PIXEL_DIFFERENCE_RATIO);
+        await persistEvidence(testInfo, `v2-${theme}`, mode, nativePng, embeddedPng, comparison);
+        await page.evaluate(() => { window.__visualParityViewer.destroy();
+          document.getElementById('visual-parity-host').remove(); });
+      }
+    });
 }

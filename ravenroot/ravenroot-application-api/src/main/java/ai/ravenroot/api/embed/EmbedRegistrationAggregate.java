@@ -97,10 +97,17 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
                 && !eligibility.policyRevision().equals(graph.projectionPolicyRevision())) {
             throw new IllegalArgumentException("eligibility and graph grant policy revisions must match");
         }
-        if (source instanceof EmbedViewerSource.Deployment deployment
-                && (!deployment.deploymentId().equals(graph.deploymentId())
+        String sourceDeployment = source instanceof EmbedViewerSource.Deployment deployment
+                ? deployment.deploymentId()
+                : source instanceof EmbedViewerSource.DeploymentV2 deployment ? deployment.deploymentId() : null;
+        if (sourceDeployment != null
+                && (!sourceDeployment.equals(graph.deploymentId())
                 || !sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE))) {
             throw new IllegalArgumentException("deployment source requires its matching observe capability");
+        }
+        if (source instanceof EmbedViewerSource.DeploymentV2
+                && !sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
+            throw new IllegalArgumentException("deployment v2 source requires explicit run capabilities");
         }
     }
 

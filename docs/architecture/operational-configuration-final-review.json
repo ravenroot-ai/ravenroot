@@ -4730,7 +4730,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "0bf466469dcfffd3c991d0393957f879f30a42fdb9fa0bae9c05ae101126c071",
+          "digest": "3e2655c81b8822bc83d9c546148c704173444b74fedc4b2c9d46191333435b3a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5201,7 +5201,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "0bf466469dcfffd3c991d0393957f879f30a42fdb9fa0bae9c05ae101126c071",
+          "digest": "3e2655c81b8822bc83d9c546148c704173444b74fedc4b2c9d46191333435b3a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5538,7 +5538,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "0bf466469dcfffd3c991d0393957f879f30a42fdb9fa0bae9c05ae101126c071",
+          "digest": "3e2655c81b8822bc83d9c546148c704173444b74fedc4b2c9d46191333435b3a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5658,7 +5658,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "57ae33d4b2944edb8f5668a474b876be8d82c61dde2e2c722c29df4457e1e4ad",
+          "digest": "8aa4e79db78a711e223b57d480aa95817ba2d9cda936840570a6a02406b64a67",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "57ae33d4b2944edb8f5668a474b876be8d82c61dde2e2c722c29df4457e1e4ad",
+          "digest": "8aa4e79db78a711e223b57d480aa95817ba2d9cda936840570a6a02406b64a67",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -5761,7 +5761,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "57ae33d4b2944edb8f5668a474b876be8d82c61dde2e2c722c29df4457e1e4ad",
+          "digest": "8aa4e79db78a711e223b57d480aa95817ba2d9cda936840570a6a02406b64a67",
           "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "57ae33d4b2944edb8f5668a474b876be8d82c61dde2e2c722c29df4457e1e4ad",
+          "digest": "8aa4e79db78a711e223b57d480aa95817ba2d9cda936840570a6a02406b64a67",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "57ae33d4b2944edb8f5668a474b876be8d82c61dde2e2c722c29df4457e1e4ad",
+          "digest": "8aa4e79db78a711e223b57d480aa95817ba2d9cda936840570a6a02406b64a67",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
@@ -8533,8 +8533,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f36a05d82781fd0c8591e383bfaf1fa9b5d7a8fda6165085699693b3ced223b7",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels."
+          "digest": "8fcca24c10c92cddcaf8b3613d05ef7b63d67f99e6ae46bb0b9d1312e3060e91",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
@@ -8829,8 +8829,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f36a05d82781fd0c8591e383bfaf1fa9b5d7a8fda6165085699693b3ced223b7",
-          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels."
+          "digest": "8fcca24c10c92cddcaf8b3613d05ef7b63d67f99e6ae46bb0b9d1312e3060e91",
+          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed."
         }
       ],
       "candidateCount": 131,
@@ -8982,13 +8982,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "5b90bfc6d595c6bff0600a4f3c7faad1fdd8fe61bfe900522dd16dfdf2ba9279",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f36a05d82781fd0c8591e383bfaf1fa9b5d7a8fda6165085699693b3ced223b7",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels."
+          "digest": "8fcca24c10c92cddcaf8b3613d05ef7b63d67f99e6ae46bb0b9d1312e3060e91",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed."
         }
       ],
       "candidateCount": 43,
@@ -9052,7 +9052,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "5b90bfc6d595c6bff0600a4f3c7faad1fdd8fe61bfe900522dd16dfdf2ba9279",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -10766,8 +10766,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f36a05d82781fd0c8591e383bfaf1fa9b5d7a8fda6165085699693b3ced223b7",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels."
+          "digest": "8fcca24c10c92cddcaf8b3613d05ef7b63d67f99e6ae46bb0b9d1312e3060e91",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
@@ -10901,7 +10901,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "5b90bfc6d595c6bff0600a4f3c7faad1fdd8fe61bfe900522dd16dfdf2ba9279",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,8 +11429,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f36a05d82781fd0c8591e383bfaf1fa9b5d7a8fda6165085699693b3ced223b7",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels."
+          "digest": "8fcca24c10c92cddcaf8b3613d05ef7b63d67f99e6ae46bb0b9d1312e3060e91",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",

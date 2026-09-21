@@ -425,6 +425,54 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Starts one payload-free traversal from an exact immutable local deployment binding.
+     * Implementations must compare both graph version and incarnation before admitting the request,
+     * and must reconcile {@code requestId} through durable ingress rather than dispatch twice.
+     * @param security authenticated tenant and principal
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param requestId bounded idempotency identity
+     * @return sanitized authoritative admission outcome
+     */
+    default EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
+                                                                 String deploymentId,
+                                                                 String incarnationId,
+                                                                 String graphVersion,
+                                                                 String requestId) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
+    /**
+     * Reads one exact process's durable event stream for authoritative embed reconciliation.
+     * @param tenantId owning tenant
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of events to return
+     * @return ordered durable events after the requested sequence
+     */
+    default List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
+                                                                 long afterSequence, int limit) {
+        return List.of();
+    }
+
+    /**
+     * Returns one process replay page with its atomically observed retention boundary.
+     * @param tenantId exact owning tenant
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable process sequence
+     * @param limit maximum event count
+     * @return bounded events and authoritative retained/allocation boundaries
+     */
+    default DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
+                                                                long afterSequence, int limit) {
+        List<DurableExecutionEvent> events = durableEventsForProcess(
+                tenantId, processInstanceId, afterSequence, limit);
+        return new DurableProcessEventPage(events, 1,
+                events.isEmpty() ? afterSequence + 1 : events.getLast().streamSequence() + 1);
+    }
+
+    /**
  * Starts one of this tenant's registered deployments and completes at readiness.
  *
  * <p>Idempotent and single-flight, inheriting {@code GraphDeployment.start}'s own contract:

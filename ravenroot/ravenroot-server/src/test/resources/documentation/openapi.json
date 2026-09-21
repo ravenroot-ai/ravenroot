@@ -633,6 +633,22 @@
         }
       }
     },
+    "/v1/embed/executions": {
+      "post": {
+        "summary": "Requests one idempotent traversal under a separately authorized exact v2 embed binding.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "202": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
+          "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
+        }
+      }
+    },
     "/v1/embed/launch": {
       "get": {
         "summary": "Consumes a one-use launch ticket during an iframe navigation and returns only the distinct-origin viewer bootstrap; never returns graph data or a bearer.",
@@ -673,6 +689,21 @@
           "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
           "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
           "413": {"description": "EMBED_DATA_TOO_LARGE"}
+        }
+      }
+    },
+    "/v1/embed/runs": {
+      "post": {
+        "summary": "Reads a bounded, server-filtered run list for one exact v2 embed deployment binding.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
+          "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
         }
       }
     },

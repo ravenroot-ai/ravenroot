@@ -58,6 +58,16 @@ describe('shared read-only viewer core', () => {
     expect(JSON.stringify(snapshot)).not.toContain('secret');
   });
 
+  it('unwraps the additive v2 deployment envelope without copying run metadata', () => {
+    const snapshot = createViewerSnapshot({
+      viewerSourceVersion: '2', source: { kind: 'deployment' }, runs: [{ secret: 'no' }],
+      projection: projection(),
+    });
+    expect(snapshot.graphId).toBe('graph-1');
+    expect(JSON.stringify(snapshot)).not.toContain('runs');
+    expect(JSON.stringify(snapshot)).not.toContain('secret');
+  });
+
   it('settles READY only after rendering and delegates read-only viewport operations', async () => {
     let settle;
     const target = renderer();

@@ -150,6 +150,22 @@ class RouteTableSpecServerAgreementTest {
         assertTrue(confirmation.contains("#/components/schemas/HumanTaskConfirmationRequest"), confirmation);
         assertTrue(confirmation.contains("#/components/schemas/HumanTaskConfirmationResult"), confirmation);
         assertTrue(generatedNow.contains("\"enum\": [\"APPLIED\", \"ALREADY_APPLIED\"]"), generatedNow);
+        String deploymentStop = pathEntry(generatedNow, "/v1/deployments/{id}/stop");
+        assertTrue(deploymentStop.contains("\"name\": \"Idempotency-Key\""), deploymentStop);
+        assertTrue(deploymentStop.contains("\"name\": \"X-Ravenroot-Expected-Generation\""),
+                deploymentStop);
+        assertTrue(deploymentStop.contains("\"name\": \"X-Ravenroot-Reason\""), deploymentStop);
+        assertTrue(deploymentStop.contains("#/components/schemas/DeploymentCommandResponse"), deploymentStop);
+        String deploymentRestart = pathEntry(generatedNow, "/v1/deployments/{id}/restart");
+        assertFalse(deploymentRestart.contains("X-Ravenroot-Reason"),
+                "durable Restart deliberately has no reason header");
+        String deployment = pathEntry(generatedNow, "/v1/deployments/{id}");
+        assertTrue(deployment.contains("X-Ravenroot-Undeploy-Disposition"), deployment);
+        assertTrue(generatedNow.contains("\"deploymentGeneration\""), generatedNow);
+        for (String outcome : List.of("ACCEPTED", "CONVERGED", "REPLAYED", "IDEMPOTENCY_CONFLICT",
+                "STALE_GENERATION", "SUPERSEDED", "REFUSED", "FAILED", "TERMINAL")) {
+            assertTrue(generatedNow.contains("\"" + outcome + "\""), "missing outcome " + outcome);
+        }
         String onDisk = checkedInSpec();
         assertEquals(generatedNow, onDisk, () -> "the checked-in OpenAPI fixture is stale -- regenerate it with "
                 + "SpecGeneratorMain (see its own Javadoc) after changing RouteTable");

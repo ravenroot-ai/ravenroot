@@ -15,6 +15,26 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget and the authenticated principal's exact opaque `workspace.tenantId` |
 | `POST /v1/drain` | Stop admission and drain accepted work |
 
+## Deployment lifecycle
+
+| Method and path | Result |
+|---|---|
+| `GET /v1/deployments` | List only the authenticated tenant's registrations. `deploymentGeneration` is present when a row is governed by durable lifecycle authority and absent for legacy/source-session compatibility rows. `scope=LOCAL_PROCESS` describes runtime placement; a generation describes durable command intent, not cluster ownership. |
+| `POST /v1/deployments?id=ID` | Register immutable GraphML. With durable deployment control, the tenant and local ID acquire a non-expiring identity binding: reopening the same store returns the current aggregate and authoritative generation, while a tombstoned durable ID is refused before a local runtime is published. The binding survives command-ledger expiry and purge. |
+| `GET /v1/deployments/{id}` | Read status and its current authoritative generation when durable. Unknown, sibling-tenant, and removed IDs remain the same nondisclosing 404. |
+| `POST /v1/deployments/{id}/start` | Legacy rows return status. Durable rows require `Idempotency-Key` and `X-Ravenroot-Expected-Generation` and return a `DeploymentCommandOutcome`. |
+| `POST /v1/deployments/{id}/stop` | As Start, plus a required bounded `X-Ravenroot-Reason` for durable rows. Stop leaves the registration reusable. |
+| `POST /v1/deployments/{id}/restart` | As Start. Restart intentionally has no reason header. |
+| `DELETE /v1/deployments/{id}` | Durable Undeploy additionally requires a bounded reason and an explicit `X-Ravenroot-Undeploy-Disposition`: `DRAIN_FIRST`, `CANCEL_IN_FLIGHT`, or `REFUSE_IF_BUSY`. No disposition is inferred. Terminal removal retains a tombstone for exact replay while removing the local runtime. |
+
+Durable command outcomes are `ACCEPTED`, `CONVERGED`, `REPLAYED`, `IDEMPOTENCY_CONFLICT`,
+`STALE_GENERATION`, `SUPERSEDED`, `REFUSED`, `FAILED`, and `TERMINAL`. Clients reconcile the
+authoritative status after a response. Stale, superseded, and refused decisions are shown without
+automatic resubmission; an ambiguous transport delivery may be retried only with the identical intent
+key and metadata. If that retry also loses its response, clients issue an authoritative GET without a
+third command delivery. They expose the observed state (or Undeploy's authoritative 404) separately
+from the still-unknown command outcome.
+
 ## Execution and events
 
 | Method and path | Result |
@@ -94,6 +114,7 @@ plus the repository's service, bundle, development, build, and test scripts.
 | `ravenroot inventory` | List the tenant's whole durable process inventory (`GET /v1/executions/inventory`, paged to completion internally — never a partial page); unfiltered, terminal rows **included** by default; a trailing `retained-from=` line always prints, even for an idle tenant |
 | `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`), also followed by a trailing `retained-from=` line; the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |
 | `ravenroot process PROCESS-INSTANCE-ID COMMAND EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Apply a durable process Pause, Resume, Cancel, Drain, or recoverable Stop through the remote server; prints the typed outcome, new generation, state, and retained reason |
+| `ravenroot deployments ...` | List/register/inspect/Start/Stop/Restart/Undeploy local runtimes. Durable rows print generation and typed command outcomes; Stop requires `--reason`, and Undeploy requires both explicit `--disposition` and `--reason`. |
 | `ravenroot-server` | Start the standalone service |
 
 CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Authentication and ownership checks are identical to HTTP because the CLI is a client, not a privileged bypass.

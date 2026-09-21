@@ -2484,7 +2484,7 @@
         },
         {
           "path": "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/RemoteBackend.java",
-          "digest": "3e1a6bb0663521fff561fb7cc07ce334501e7ed3446bbe356013473235723d5f",
+          "digest": "d0e7063076c91493578ea2fbc04079490bcc0047c49a1a8adf3e8b3ec34eed2b",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -11434,7 +11434,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "f0bcaa4f21ed8aa600a7502c08dd0e132d4d4363bb3ebf0ecfdbe79f3e3d1837",
+          "digest": "e03741fce0eaa0593a2ef563a3c46848724f0801b4fe28d216666018ec5249eb",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],

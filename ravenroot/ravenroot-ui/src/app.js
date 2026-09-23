@@ -71,7 +71,6 @@ import { catalogEmptyState } from './catalog-empty-state.js';
 import {
   catalogNodeIcon,
   COMMON_NODE_GLYPHS,
-  nodeTypeCardShape,
   resolveDescriptorNodeType,
 } from './catalog-node-icon.js';
 import { createLayoutSessions } from './layout-session.js';
@@ -130,7 +129,7 @@ import { mountD3ElasticRenderer } from './viewer-elastic-renderer.js';
 import {
   VIEWER_NODE_ICONS,
   createViewerStylesheet,
-  viewerCardImage,
+  viewerDesignNodeStyle,
   viewerNodeSize,
 } from './viewer-presentation.js';
 import {
@@ -203,6 +202,10 @@ import {
 } from './execution-reconciliation.js';
 import { publicExecutionDescription } from './execution-event-description.js';
 import { runtimeActivityMessage, runtimeActivityOutput } from './runtime-activity-data.js';
+import {
+  DEFAULT_ACTIVITY_MODE, activityEventVisible, isLogEmission, logEmissionPresentation,
+  normalizeActivityMode, usesConciseLogRendering,
+} from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
 import {
@@ -3428,10 +3431,10 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
       sourceGraphVersion: graph.viewerBinding.graphVersion,
       deploymentId,
     },
-    // The read-only viewer's Cyto mode is the established semantic node/edge presentation. Keep
-    // the editor's existing `cyto` authoring preset (an N8N-family card layout) untouched.
+    // Deployment Design uses the same default authoring cards and artwork as Workbench Design.
+    // Renderer implementation names remain internal to this native presentation state.
     presentation: {
-      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'standard', designArrangement: null,
+      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto', designArrangement: null,
     },
   });
   const owner = workspace.find(id);
@@ -4407,78 +4410,6 @@ function initCy(elements, gd, options = {}) {
 // N8N VISUAL MODE
 // ═══════════════════════════════════════════════════════════════
 
-const N8N_ICONS_CHAR = {
-  start:    '▶', end:      '■', error:    '⚠',
-  terminal: '⊙',
-  consumer: '⧒', handler:  '↩',
-  agent:    '🧠', flow:     '⚙',
-  actor:    '◎', system:   '▤',
-  trace:    COMMON_NODE_GLYPHS.trace, 'human-task': COMMON_NODE_GLYPHS['human-task'],
-};
-let N8N_BG = rendererPalette.nodeSurfaceByType;
-let N8N_BORDER = rendererPalette.nodeType;
-
-// Digital circuit-brain SVG — front view, two hemispheres, PCB traces
-function agentBrainSvg() { return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' width='80' height='80'>
- <g fill='none' stroke='${rendererPalette.nodeType.agent}' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'>
-
-    <!-- Left outer profile (restored to its original smooth curves) -->
-    <path d='M 200 45
-             C 170 45, 155 60, 140 75
-             C 115 65, 90 85, 95 115
-             C 70 120, 75 160, 90 170
-             C 70 185, 75 225, 95 230
-             C 80 250, 90 285, 115 290
-             C 110 320, 145 340, 170 330
-             C 185 345, 195 355, 200 355' />
-
-    <!-- Right outer profile (mirrored, with smooth curves) -->
-    <path d='M 200 45
-             C 230 45, 245 60, 260 75
-             C 285 65, 310 85, 305 115
-             C 330 120, 325 160, 310 170
-             C 330 185, 325 225, 305 230
-             C 320 250, 310 285, 285 290
-             C 290 320, 255 340, 230 330
-             C 215 345, 205 355, 200 355' />
-
-    <!-- Central separator line -->
-    <line x1='200' y1='65' x2='200' y2='335' />
-
-    <!-- LEFT-HEMISPHERE CIRCUITS (segmented geometric lines) -->
-    <!-- Upper circuit -->
-    <path d='M 185 290 L 185 175 L 145 135 L 145 110' />
-    <!-- Middle circuit -->
-    <path d='M 170 260 L 170 215 L 125 185 L 125 165' />
-    <!-- Lower circuit -->
-    <path d='M 155 295 L 125 295 L 125 255 L 140 255' />
-
-    <!-- RIGHT-HEMISPHERE CIRCUITS (segmented geometric lines) -->
-    <!-- Upper circuit -->
-    <path d='M 215 290 L 215 175 L 255 135 L 255 110' />
-    <!-- Middle circuit -->
-    <path d='M 230 260 L 230 215 L 275 185 L 275 165' />
-    <!-- Lower circuit -->
-    <path d='M 245 295 L 275 295 L 275 255 L 260 255' />
-
-    <!-- TERMINAL CIRCLES (all with uniform radius R=9) -->
-    <!-- Left -->
-    <circle cx='145' cy='110' r='9' />
-    <circle cx='125' cy='165' r='9' />
-    <circle cx='140' cy='255' r='9' />
-
-    <!-- Right -->
-    <circle cx='255' cy='110' r='9' />
-    <circle cx='275' cy='165' r='9' />
-    <circle cx='260' cy='255' r='9' />
-
-  </g>
-</svg>`; }
-
-function makeN8nSVG(char, nodeType) {
-  return viewerCardImage(nodeType, rendererPalette);
-}
-
 let n8nActive = false;
 function rendererFor(owner = workspace.active) {
   const renderer = owner?.renderer;
@@ -4611,8 +4542,6 @@ function applyApplicationTheme(theme) {
   rendererPalette = getRendererPalette(applicationTheme);
   EDGE_TYPE_COLORS = rendererPalette.edgeType;
   NODE_TYPE_COLORS = rendererPalette.nodeType;
-  N8N_BG = rendererPalette.nodeSurfaceByType;
-  N8N_BORDER = rendererPalette.nodeType;
 
   workspace.documents.forEach(owner => {
     const target = owner.cy;
@@ -4866,40 +4795,13 @@ function applyElasticVisualStyle() {
 
 function applyN8nNodeStyle(target = cy, owner = workspace.active) {
   if (!target) return;
-  const fontPx = `${owner?.fontSize || DEFAULT_FONT_SIZE}px`;
   target.nodes().forEach(n => {
-    const t  = n.data('nodeType');
-    const ic = N8N_ICONS_CHAR[t] || '◎';
-    const bg = N8N_BG[t]         || rendererPalette.nodeSurface;
-    const bd = N8N_BORDER[t]     || rendererPalette.nodeBorder;
-    n.style({
-      shape:                  nodeTypeCardShape(t),
-      width:                   80,
-      height:                  80,
-      'background-color':      bg,
-      'border-width':          2.5,
-      // This family includes the DEFAULT `cyto` style, so this is the border most authors
-      // actually see. The neutral ring is restated here because the per-type `bd` written inline
-      // would otherwise beat the stylesheet; the per-type icon tile is untouched, so the node stays
-      // identifiable. `border-style` is deliberately absent so the data selector remains authoritative.
-      'border-color':          n.data('bypassed') ? rendererPalette.nodeType.system : bd,
-      'border-opacity':        1,
-      'background-image':      makeN8nSVG(ic, t),
-      'background-width':     '100%',
-      'background-height':    '100%',
-      'background-fit':       'none',
-      'background-clip':      'none',
-      label:                   runtimeNodeLabel(n),
-      'font-size':             fontPx,
-      'font-weight':          '500',
-      color:                  rendererPalette.nodeText,
-      'text-valign':          'bottom',
-      'text-halign':          'center',
-      'text-margin-y':         10,
-      'text-background-opacity': 0,
-      padding:                '0px',
-      'text-wrap':            'none',
-    });
+    n.style(viewerDesignNodeStyle(n.data('nodeType'), rendererPalette, {
+      label: runtimeNodeLabel(n),
+      fontSize: owner?.fontSize || DEFAULT_FONT_SIZE,
+      bypassed: Boolean(n.data('bypassed')),
+      labelSide: layeredLabelSide(owner?.layoutMode),
+    }));
     applyRuntimeVisual(n);
   });
   // Restated after the per-node style above, which writes this family's placement inline: a
@@ -12595,12 +12497,67 @@ function activityIdentifiersHtml(event) {
   ).join('');
 }
 
+// ── OBSERVATION LEVEL ───────────────────────────────────────────────────────────────────────────
+//
+// How much of the event stream the panel renders. Module state, never persisted and never
+// serialized: it is an observer preference, not an execution input, and a reload deliberately starts
+// quiet again. `setActivityMode` is the only writer, and the level is consulted on the ONE path that
+// appends a row to `#activity-log` — after the same event has already been offered to the monitoring
+// projection that paints nodes and edges (`observeNodeActivity`/`observeEdgeTraversal` in
+// `handleRuntimeEvent`). A quieter panel therefore cannot make the graph's runtime state untrue.
+// The classification itself, and why it is catalog semantics rather than a guess, lives in
+// `src/activity-visibility.js`.
+let activityMode = DEFAULT_ACTIVITY_MODE;
+
+function activityModeRadios() {
+  return [...document.querySelectorAll('.activity-modes[role="radiogroup"] > [role="radio"]')];
+}
+
+// One Tab stop for the whole group: the selected level, or the first level when nothing is selected.
+// Roving tabindex is what keeps a radiogroup from multiplying the panel's tab stops while leaving
+// every level arrow-reachable.
+function syncActivityModeChrome() {
+  const radios = activityModeRadios();
+  const tabStop = radios.find(control => control.dataset.mode === activityMode) || radios[0];
+  radios.forEach(control => {
+    const checked = control.dataset.mode === activityMode;
+    control.setAttribute('aria-checked', checked ? 'true' : 'false');
+    control.classList.toggle('active', checked);
+    control.tabIndex = control === tabStop ? 0 : -1;
+  });
+}
+
+function setActivityMode(mode) {
+  const next = normalizeActivityMode(mode);
+  if (next === activityMode) return;
+  activityMode = next;
+  syncActivityModeChrome();
+  // Deliberately no re-render and no replay. The panel shows the events that ARRIVE while a level is
+  // selected: buffering what a quieter level hid would put those rows back inside the 400-row budget
+  // the filter exists to protect, and rebuilding the list would re-announce the entire live region
+  // to assistive technology. The choice changes what arrives next, which is what an observer
+  // preference means. (Four rows are not removed either — nothing already shown is taken away.)
+}
+
 function appendActivityEvent(event) {
+  // FIRST, before any per-row work exists to do. A hidden event must not consume one of the panel's
+  // 400 rows, must not build a row, and must not move the scroll position; classification plus this
+  // return is the entire cost it pays.
+  if (!activityEventVisible(event, activityMode)) return;
+
   const type = String(event.type || 'EVENT');
   const css = type.includes('FAILED') ? 'failed'
     : type.includes('DEFAULTED') ? 'fallback'
     : type.includes('BYPASSED') ? 'bypassed'
     : type.includes('COMPLETED') ? 'completed' : '';
+  // `isLogEmission` is exactly the old `Object.hasOwn(event, 'output')` test, named for what the
+  // member means: the trusted typed author projection, present only for a `log`-catalog completion.
+  const output = isLogEmission(event) ? runtimeActivityOutput(event.output, {
+    redacted: event.outputRedacted,
+    truncated: event.outputTruncated,
+  }) : null;
+  if (appendLogEmissionRow(event, css, output)) return;
+
   const title = event.nodeId ? `${type} · ${event.nodeId}` : type;
   // Named for what each number is. `active=` was the old label and it named neither.
   const counts = event.nodeId
@@ -12612,16 +12569,33 @@ function appendActivityEvent(event) {
     redacted: event.messageRedacted,
     truncated: event.messageTruncated,
   });
-  const output = Object.hasOwn(event, 'output') ? runtimeActivityOutput(event.output, {
-    redacted: event.outputRedacted,
-    truncated: event.outputTruncated,
-  }) : null;
   const diagnosticFlags = projection => [projection.redacted ? 'redacted' : '', projection.truncated ? 'truncated' : '']
     .filter(Boolean).join(', ');
   const detail = `${publicExecutionDescription(event.description, type, event.publicReason)}${counts}`
     + (message.value ? ` · ${message.value}${diagnosticFlags(message) ? ` (${diagnosticFlags(message)})` : ''}` : '')
     + (output ? ` · output=${output.displayValue}${diagnosticFlags(output) ? ` (${diagnosticFlags(output)})` : ''}` : '');
   appendActivity(title, detail, css, event.occurredAt, activityIdentifiersHtml(event));
+  noteActivitySummary(event);
+}
+
+// A successful log emission reads as the workflow output the author asked for: the emitted value is
+// the row. The generic `NODE_COMPLETED · <node-id>` title, the instance counts and the
+// process/traversal/invocation/attempt identifiers are exactly what made the value hard to find, so
+// Output and Nodes drop all three; Trace keeps them, because preserving the full technical rendering
+// is what Trace is for. Returns whether it drew the row, so the caller keeps one path.
+function appendLogEmissionRow(event, css, output) {
+  if (!output || !usesConciseLogRendering(event, activityMode)) return false;
+  const presentation = logEmissionPresentation(output);
+  appendActivity(presentation.title, presentation.detail, `${css} output-value`.trim(), event.occurredAt);
+  noteActivitySummary(event);
+  return true;
+}
+
+// The header's one-line "which execution am I looking at", written only for a row that was actually
+// shown, so it always names an event the reader can find. It stays put under Output mode during a
+// stretch that shows nothing (a long arithmetic loop), which is the accepted cost of doing no DOM
+// work at all for a hidden event.
+function noteActivitySummary(event) {
   document.getElementById('activity-summary').textContent =
     `${event.engineId || 'engine'} · execution ${shortId(event.executionId)}`;
   if (activeExecutionReconciliation === 'unknown') syncExecutionReconciliationChrome(true);
@@ -15291,6 +15265,7 @@ document.addEventListener('click', event => {
   else if (action === 'zoom') zoomBy(Number(control.dataset.value));
   else if (action === 'close-info') closeInfo();
   else if (action === 'clear-activity') clearActivity();
+  else if (action === 'activity-mode') setActivityMode(control.dataset.mode);
   else if (action === 'clear-assistant') clearAssistantConversation();
   else if (action === 'confirm-assistant-proposal') confirmAssistantProposal(control.dataset.proposalId);
   else if (action === 'reject-assistant-proposal') rejectAssistantProposal(control.dataset.proposalId);
@@ -15375,6 +15350,30 @@ document.querySelector('.layout-mirrors[role="radiogroup"]')?.addEventListener('
 document.documentElement.style.setProperty('--stage-min-h', `${STAGE_MIN_HEIGHT}px`);
 document.documentElement.style.setProperty('--stage-min-w', `${PANE_MIN_WIDTH}px`);
 
+// The observation-level group uses the topbar view control's own keyboard model rather than a second
+// convention: arrows move between levels and select as they go, Home/End jump to the ends, and the
+// group stays a single Tab stop. `stopPropagation` keeps these keys away from the canvas/panel
+// shortcuts, which is why the handler is bound here rather than delegated globally.
+document.querySelector('.activity-modes[role="radiogroup"]')?.addEventListener('keydown', event => {
+  const current = event.target.closest('[role="radio"]');
+  if (!current) return;
+  const radios = activityModeRadios();
+  const currentIndex = radios.indexOf(current);
+  if (currentIndex < 0) return;
+  let nextIndex = currentIndex;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % radios.length;
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + radios.length) % radios.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = radios.length - 1;
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+  const next = radios[nextIndex];
+  next.focus();
+  next.click();
+});
+syncActivityModeChrome();
+
 document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter => {
   splitter.addEventListener('keydown', onLayoutSplitterKeydown);
   splitter.addEventListener('pointerdown', onLayoutSplitterPointerDown);
@@ -15394,7 +15393,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // that browser step instead of returning to a detached opener.
     requestAnimationFrame(focusHumanTaskInspector);
   },
-  onSubmit: async ({ task, action, comment, isCurrent }) => {
+  onSubmit: async ({ task, action, comment, response, isCurrent }) => {
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     const owner = workspace.active;
@@ -15407,8 +15406,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       throw new Error('Reconnect to this document workspace before deciding this task.');
     }
     try {
-      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
-        { capability });
+      const result = await client.settleHumanTask(task, action, comment, response, { capability });
       if (!current()) return result;
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
@@ -15422,6 +15420,52 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       if (current()) void humanTaskController.refresh();
       throw error;
     }
+  },
+  onLaunch: async task => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect to this document workspace before opening this presentation.');
+    }
+    return client.issueHumanTaskInteraction(task, { capability });
+  },
+  onInteractionSubmit: async (task, launch, action, comment, response) => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect before completing this presentation.');
+    }
+    let typedResponse = null;
+    if (action === 'RESOLVE') {
+      if (response?.contentType !== 'application/vnd.ravenroot.payload+json'
+          || typeof response?.payloadBase64 !== 'string') {
+        throw new Error('The custom presentation returned an invalid typed response.');
+      }
+      try {
+        const binary = atob(response.payloadBase64);
+        const bytes = Uint8Array.from(binary, unit => unit.charCodeAt(0));
+        typedResponse = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      } catch {
+        throw new Error('The custom presentation returned malformed response bytes.');
+      }
+    }
+    // Custom hosts never receive or consume the delegated external-provider capability. The
+    // parent settles through its current authenticated session, so authorization loss is checked
+    // at completion instead of replaying issuance-time identity claims.
+    const result = await client.settleHumanTask(task, action, comment, typedResponse, { capability });
+    clearHumanTaskSelection();
+    addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+      'completed');
+    await humanTaskController.refresh();
+    return result;
+  },
+  onExternalReconcile: async task => {
+    await humanTaskController.refresh();
+    addActivityMessage('human task', `reconciled external response · task ${shortId(task.taskId)}`, 'completed');
+  },
+  onRevoke: async (task, launch) => {
+    const client = runtimeClient;
+    if (client) await client.revokeHumanTaskInteraction(task, launch);
   },
 });
 

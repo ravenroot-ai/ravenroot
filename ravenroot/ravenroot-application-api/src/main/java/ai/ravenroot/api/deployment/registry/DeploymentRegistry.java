@@ -309,12 +309,25 @@ public interface DeploymentRegistry extends AutoCloseable {
  * @param tenantId stable tenant id for this declaration.
  * @param key stable key for this declaration.
  * @param digest content digest that identifies the graph artifact to create.
+ * @param retainIdentity whether {@code key} permanently binds this tenant to the created deployment
+ *                       identity, independently of bounded idempotency-ledger retention.
  */
-    record CreateCommand(String tenantId, String key, String digest) {
+    record CreateCommand(String tenantId, String key, String digest, boolean retainIdentity) {
 /**
  * Validates the tenant, caller-provided key, and graph digest required for an idempotent create.
  */
         public CreateCommand { validate(tenantId, key, digest); }
+
+        /**
+         * Compatibility shape for ordinary creates whose exact replay is bounded by the adapter's
+         * idempotency retention policy.
+         * @param tenantId stable tenant id for this declaration.
+         * @param key stable idempotency key for this declaration.
+         * @param digest content digest that identifies the graph artifact to create.
+         */
+        public CreateCommand(String tenantId, String key, String digest) {
+            this(tenantId, key, digest, false);
+        }
     }
 /**
  * Identity and concurrency expectations carried by every mutation of an existing deployment.
@@ -571,6 +584,13 @@ public interface DeploymentRegistry extends AutoCloseable {
  * @return stage completing with the created deployment record.
  */
     CompletionStage<Record> create(GraphVersion.Content firstVersion, CreateCommand command);
+/**
+ * Resolves the current aggregate held by a non-expiring create identity binding.
+ * @param tenantId tenant that owns the binding.
+ * @param bindingKey create key whose identity was retained.
+ * @return current aggregate, including a tombstone, or empty without cross-tenant disclosure.
+ */
+    CompletionStage<Optional<Record>> retainedIdentity(String tenantId, String bindingKey);
 /**
  * Appends a new immutable graph version using compare-and-set protection.
  * @param version the version constraint applied while processing the request.

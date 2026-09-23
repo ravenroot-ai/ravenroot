@@ -42,10 +42,20 @@ class SqliteProcessControlMigrationTest {
         }
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database); var statement = connection.createStatement()) {
+            statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
+            statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("ALTER TABLE process_instance DROP COLUMN control_state");
             statement.execute("DROP TABLE runner_fleet_guard");
             statement.execute("DROP TABLE runner_availability");
             statement.execute("DROP TABLE runner_retention_guard");
+            statement.execute("DROP TABLE human_task_interaction_revocation");
+            statement.execute("DROP TABLE deployment_identity_binding");
+            statement.execute("ALTER TABLE human_task DROP COLUMN presentation_schema_digest");
+            statement.execute("ALTER TABLE human_task DROP COLUMN presentation_form_schema");
+            statement.execute("ALTER TABLE human_task DROP COLUMN presentation_profile_version");
+            statement.execute("ALTER TABLE human_task DROP COLUMN presentation_profile_id");
+            statement.execute("ALTER TABLE human_task DROP COLUMN presentation_version");
+            statement.execute("ALTER TABLE human_task DROP COLUMN presentation_kind");
             statement.execute("DELETE FROM store_schema_history WHERE version >= 29");
             statement.execute("PRAGMA user_version = 28");
             statement.execute("DELETE FROM event_journal WHERE tenant_id = 'missing' OR (tenant_id = 'latest' AND journal_offset = 1)");

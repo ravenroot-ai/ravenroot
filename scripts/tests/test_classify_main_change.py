@@ -45,13 +45,14 @@ PROMOTION_HEAD = {"head_ref": "dev", "head_repository": REPOSITORY, "repository"
 
 
 class ClassifyTest(unittest.TestCase):
-    def test_pull_request_to_dev_is_admission(self):
-        """Review gets quick diagnostics; the queue verifies the integration commit in full."""
+    def test_pull_request_to_dev_is_full(self):
+        """`ci.yml` no longer triggers this way, so it can only be the routed Dependabot replay —
+        and it must earn the complete suite, not the retired `admission` diagnostic tier."""
         self.assertEqual(
             classify(event_name="pull_request", base_ref="dev", ref_name="feature/x", labels=set(), paths=[])[
                 "tier"
             ],
-            "admission",
+            "full",
         )
 
     def test_main_requires_exactly_one_release_label(self):
@@ -143,7 +144,8 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(result["release_intent"], "none")
 
     def test_a_routed_dependabot_run_is_classified_as_its_pull_request_into_dev(self):
-        """The routing workflow replays the event as `pull_request` into `dev`, so it earns the suite."""
+        """The routing workflow replays the event as `pull_request` into `dev`. A later merge relies on
+        this result, so it earns the complete suite, conservatively, rather than a lighter one."""
         self.assertEqual(
             classify(
                 event_name="pull_request",
@@ -152,7 +154,7 @@ class ClassifyTest(unittest.TestCase):
                 labels=set(),
                 paths=["ravenroot/ravenroot-ui/package-lock.json"],
             )["tier"],
-            "admission",
+            "full",
         )
 
     def test_a_merge_group_commit_is_full(self):
@@ -163,7 +165,8 @@ class ClassifyTest(unittest.TestCase):
         )
 
     def test_a_dispatch_runs_the_full_tier_and_nothing_lighter(self):
-        """The result lands on the dispatched commit, where a pull request into `dev` reads it."""
+        """Verifies a review candidate on its exact commit before the pull request opens; it cannot
+        substitute for the pull request's own event, which now publishes ci-required independently."""
         for requested in ("", "full"):
             with self.subTest(requested=requested):
                 self.assertEqual(

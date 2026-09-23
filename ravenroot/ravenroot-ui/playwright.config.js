@@ -4,8 +4,8 @@ import { UI_ORIGIN } from './e2e/ports.mjs';
 
 export default defineConfig({
   testDir: './e2e',
-  // QA-11: the plugin and Human Task process-restart folders are SEPARATE Playwright projects
-  // that drive real Ravenroot JVMs, not this config's stub
+  // QA-11: the plugin and real-JVM process-restart/persistence folders are SEPARATE Playwright
+  // projects that drive real Ravenroot JVMs, not this config's stub
   // `ui-fixture-server.mjs`. Left unignored here, this config's own recursive `testDir` scan would
   // pick that spec up and run it against the wrong server — it has no `/v1/node-types` endpoint at
   // all — failing every `npm run test:e2e` run for a reason that has nothing to do with the suite
@@ -13,7 +13,8 @@ export default defineConfig({
   // `source-session-activity-real` joins them for the same reason: its server is a real JVM this
   // config never starts, and the stub fixture server has no source session to observe.
   testIgnore: ['**/plugin-ui/**', '**/human-task-confirmation-real/**',
-    '**/source-session-activity-real/**', '**/launch-profile-real/**'],
+    '**/source-session-activity-real/**', '**/launch-profile-real/**',
+    '**/deployment-persistence-real/**'],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

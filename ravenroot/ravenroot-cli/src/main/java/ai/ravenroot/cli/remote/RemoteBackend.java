@@ -69,16 +69,25 @@ import java.util.Objects;
  * this client could not establish, which would provide false reassurance.</p>
  */
 public final class RemoteBackend implements CliBackend {
-    private final HttpClient client;
+    private final RequestSender sender;
     private final URI baseUri;
     private final String token;
     private final Duration timeout;
 
     public RemoteBackend(URI baseUri, String token, Duration timeout) {
+        this(baseUri, token, timeout, defaultSender(timeout));
+    }
+
+    RemoteBackend(URI baseUri, String token, Duration timeout, RequestSender sender) {
         this.baseUri = Objects.requireNonNull(baseUri, "baseUri");
         this.token = Objects.requireNonNull(token, "token");
         this.timeout = Objects.requireNonNull(timeout, "timeout");
-        this.client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        this.sender = Objects.requireNonNull(sender, "sender");
+    }
+
+    private static RequestSender defaultSender(Duration timeout) {
+        HttpClient client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        return request -> client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     @Override
@@ -369,6 +378,49 @@ public final class RemoteBackend implements CliBackend {
                 MinimalJson.asString(body.get("state")), MinimalJson.asString(body.get("reason")));
     }
 
+    @Override
+    public List<HumanTaskView> humanTasks() throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(
+                get("/v1/human-tasks?includeTerminal=false&limit=100")));
+        return MinimalJson.asArray(body.get("items")).stream().map(entry -> {
+            var item = MinimalJson.asObject(entry);
+            return new HumanTaskView(MinimalJson.asString(item.get("taskId")),
+                    MinimalJson.asLong(item.get("generation")), MinimalJson.asString(item.get("status")),
+                    MinimalJson.asString(item.get("title")), MinimalJson.asString(item.get("nodeId")),
+                    MinimalJson.asString(item.get("presentationKind")),
+                    MinimalJson.asString(item.get("responseContentType")),
+                    MinimalJson.asString(item.get("responseSchema")),
+                    MinimalJson.asString(item.get("responseSchemaVersion")));
+        }).toList();
+    }
+
+    @Override
+    public HumanTaskDecisionView settleHumanTask(String taskId, long generation, String action,
+                                                 byte[] response, String contentType, String comment,
+                                                 String overrideReason) throws IOException {
+        var document = new LinkedHashMap<String, Object>();
+        document.put("schemaVersion", 1L);
+        document.put("action", action.toUpperCase(java.util.Locale.ROOT));
+        document.put("comment", comment == null ? "" : comment);
+        if (response != null) {
+            var encoded = new LinkedHashMap<String, Object>();
+            encoded.put("contentType", contentType == null || contentType.isBlank()
+                    ? "application/octet-stream" : contentType);
+            encoded.put("payloadBase64", java.util.Base64.getEncoder().encodeToString(response));
+            document.put("response", encoded);
+        }
+        if (overrideReason != null && !overrideReason.isBlank()) {
+            document.put("override", Map.of("version", 1L, "reason", overrideReason));
+        }
+        String path = "/v1/human-tasks/" + java.net.URLEncoder.encode(taskId, StandardCharsets.UTF_8)
+                + "/settle?generation=" + generation;
+        var body = MinimalJson.asObject(MinimalJson.parse(post(path,
+                MinimalJson.write(document).getBytes(StandardCharsets.UTF_8), "application/json")));
+        return new HumanTaskDecisionView(MinimalJson.asString(body.get("outcome")),
+                MinimalJson.asString(body.get("taskId")), MinimalJson.asLong(body.get("generation")),
+                MinimalJson.asStringOrNull(body.get("resumeTraversalId")));
+    }
+
     /** Reads {@code GET /v1/deployments}: the caller's own tenant's registrations, in the order
      * the server lists them. */
     @Override
@@ -401,29 +453,127 @@ public final class RemoteBackend implements CliBackend {
 
     @Override
     public DeploymentView stopDeployment(String deploymentId) throws IOException {
-        return deploymentCommand(deploymentId, "stop");
+        return stopDeployment(deploymentId, null);
+    }
+
+    @Override
+    public DeploymentView stopDeployment(String deploymentId, String reason) throws IOException {
+        return deploymentCommand(deploymentId, "stop", reason, null);
     }
 
     @Override
     public DeploymentView restartDeployment(String deploymentId) throws IOException {
-        return deploymentCommand(deploymentId, "restart");
+        return deploymentCommand(deploymentId, "restart", null, null);
     }
 
     /** The three lifecycle commands share one path shape and one empty {@code POST} body -- exactly
      * {@link #cancel}'s own request shape, reused rather than restated. */
     private DeploymentView deploymentCommand(String deploymentId, String command) throws IOException {
+        return deploymentCommand(deploymentId, command, null, null);
+    }
+
+    private DeploymentView deploymentCommand(String deploymentId, String command, String reason,
+                                              String disposition) throws IOException {
+        DeploymentView before = deployment(deploymentId);
         String path = "/v1/deployments/" + java.net.URLEncoder.encode(deploymentId, StandardCharsets.UTF_8)
                 + "/" + command;
-        return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(
-                post(path, new byte[0], "application/json"))));
+        if (before.deploymentGeneration() == null) {
+            String response = "undeploy".equals(command)
+                    ? delete(path.substring(0, path.length() - "/undeploy".length()))
+                    : post(path, new byte[0], "application/json");
+            return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(response)));
+        }
+        if (("stop".equals(command) || "undeploy".equals(command))
+                && (reason == null || reason.isBlank())) {
+            throw new IOException("durable " + command + " requires --reason");
+        }
+        if ("undeploy".equals(command) && !java.util.Set.of(
+                "DRAIN_FIRST", "CANCEL_IN_FLIGHT", "REFUSE_IF_BUSY").contains(disposition)) {
+            throw new IOException("durable undeploy requires an explicit --disposition");
+        }
+        String key = java.util.UUID.randomUUID().toString();
+        HttpRequest.Builder request = baseRequest("undeploy".equals(command)
+                ? path.substring(0, path.length() - "/undeploy".length()) : path)
+                .header("Accept", "application/json")
+                .header("Idempotency-Key", key)
+                .header("X-Ravenroot-Expected-Generation", before.deploymentGeneration().toString());
+        if (reason != null) request.header("X-Ravenroot-Reason", reason);
+        if (disposition != null) request.header("X-Ravenroot-Undeploy-Disposition", disposition);
+        HttpRequest built = "undeploy".equals(command)
+                ? request.DELETE().build() : request.POST(HttpRequest.BodyPublishers.noBody()).build();
+        Map<String, Object> outcome;
+        try {
+            outcome = MinimalJson.asObject(MinimalJson.parse(sendWithTransportRetry(built)));
+        } catch (AmbiguousDeliveryException ambiguous) {
+            return reconcileAmbiguousDeploymentCommand(deploymentId, command, before);
+        }
+        String outcomeName = deploymentOutcome(outcome);
+        String detail = deploymentOutcomeDetail(outcome);
+        boolean terminal = "TERMINAL".equals(outcomeName)
+                || ("REPLAYED".equals(outcomeName)
+                    && "TERMINAL".equals(MinimalJson.asString(
+                        MinimalJson.asObject(outcome.get("original")).get("outcome"))));
+        if (terminal) {
+            try {
+                deployment(deploymentId);
+                throw new IOException("terminal deployment remains observable after authoritative removal");
+            } catch (IOException missing) {
+                if (missing.getMessage() == null || !missing.getMessage().startsWith("404 ")) {
+                    throw missing;
+                }
+            }
+            return new DeploymentView(deploymentId, "REMOVED", 0, "LOCAL_PROCESS", null,
+                    outcomeGeneration(outcome), outcomeName, detail);
+        }
+        boolean refreshOnly = java.util.Set.of("IDEMPOTENCY_CONFLICT", "STALE_GENERATION",
+                "SUPERSEDED", "REFUSED", "FAILED").contains(outcomeName);
+        DeploymentView observed = null;
+        for (int attempt = 0; attempt < (refreshOnly ? 1 : 40); attempt++) {
+            observed = deployment(deploymentId);
+            boolean settled = "stop".equals(command)
+                    ? java.util.Set.of("STOPPED", "FAILED").contains(observed.state())
+                    : java.util.Set.of("READY", "DEGRADED", "FAILED").contains(observed.state());
+            if (settled || refreshOnly) break;
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted while reconciling durable deployment state", interrupted);
+            }
+        }
+        return new DeploymentView(observed.deploymentId(), observed.state(), observed.sourceCount(),
+                observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), outcomeName, detail);
+    }
+
+    private DeploymentView reconcileAmbiguousDeploymentCommand(String deploymentId, String command,
+                                                                DeploymentView before) throws IOException {
+        try {
+            DeploymentView observed = deployment(deploymentId);
+            return new DeploymentView(observed.deploymentId(), observed.state(), observed.sourceCount(),
+                    observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), null,
+                    "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_STATE");
+        } catch (IOException missing) {
+            if ("undeploy".equals(command) && missing.getMessage() != null
+                    && missing.getMessage().startsWith("404 ")) {
+                return new DeploymentView(deploymentId, "REMOVED", 0, before.scope(), null,
+                        before.deploymentGeneration(), null,
+                        "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_NOT_FOUND");
+            }
+            throw missing;
+        }
     }
 
     /** {@code DELETE /v1/deployments/{id}}: stops the deployment and then removes its
      * registration -- distinct from {@link #stopDeployment}, which leaves it registered. */
     @Override
     public DeploymentView undeployDeployment(String deploymentId) throws IOException {
-        return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(
-                delete("/v1/deployments/" + java.net.URLEncoder.encode(deploymentId, StandardCharsets.UTF_8)))));
+        return undeployDeployment(deploymentId, null, null);
+    }
+
+    @Override
+    public DeploymentView undeployDeployment(String deploymentId, String disposition, String reason)
+            throws IOException {
+        return deploymentCommand(deploymentId, "undeploy", reason, disposition);
     }
 
     /** {@code diagnostic} is the one field on this response that can be {@code null}
@@ -432,10 +582,130 @@ public final class RemoteBackend implements CliBackend {
      * rejects {@code null}. */
     private static DeploymentView deploymentFrom(Map<String, Object> body) {
         Object diagnostic = body.get("diagnostic");
+        Object generation = body.get("deploymentGeneration");
+        Long parsedGeneration = generation == null ? null : MinimalJson.asLong(generation);
+        if (parsedGeneration != null && parsedGeneration < 0) {
+            throw new IllegalArgumentException("deploymentGeneration cannot be negative");
+        }
         return new DeploymentView(MinimalJson.asString(body.get("deploymentId")),
                 MinimalJson.asString(body.get("state")), (int) MinimalJson.asLong(body.get("sourceCount")),
                 MinimalJson.asString(body.get("scope")),
-                diagnostic == null ? null : MinimalJson.asString(diagnostic));
+                diagnostic == null ? null : MinimalJson.asString(diagnostic),
+                parsedGeneration, null, null);
+    }
+
+    private static final java.util.Set<String> DEPLOYMENT_OUTCOMES = java.util.Set.of(
+            "ACCEPTED", "CONVERGED", "REPLAYED", "IDEMPOTENCY_CONFLICT", "STALE_GENERATION",
+            "SUPERSEDED", "REFUSED", "FAILED", "TERMINAL");
+
+    private static String deploymentOutcome(Map<String, Object> body) {
+        String outcome = MinimalJson.asString(body.get("outcome"));
+        if (!DEPLOYMENT_OUTCOMES.contains(outcome)) {
+            throw new IllegalArgumentException("unknown deployment command outcome " + outcome);
+        }
+        switch (outcome) {
+            case "ACCEPTED" -> {
+                MinimalJson.asString(body.get("commandId"));
+                long from = nonnegative(body, "fromGeneration");
+                long generation = nonnegative(body, "generation");
+                if (generation != from + 1) {
+                    throw new IllegalArgumentException("accepted deployment command must advance one generation");
+                }
+            }
+            case "CONVERGED" -> {
+                MinimalJson.asString(body.get("commandId"));
+                nonnegative(body, "generation");
+                MinimalJson.asString(body.get("observed"));
+            }
+            case "REPLAYED" -> {
+                Map<String, Object> original = MinimalJson.asObject(body.get("original"));
+                if ("REPLAYED".equals(deploymentOutcome(original))) {
+                    throw new IllegalArgumentException("nested deployment replay");
+                }
+            }
+            case "IDEMPOTENCY_CONFLICT" -> MinimalJson.asString(body.get("key"));
+            case "STALE_GENERATION" -> {
+                long expected = nonnegative(body, "expected");
+                long generation = nonnegative(body, "generation");
+                if (expected == generation) {
+                    throw new IllegalArgumentException("matching deployment generation is not stale");
+                }
+            }
+            case "SUPERSEDED" -> {
+                MinimalJson.asString(body.get("by"));
+                nonnegative(body, "generation");
+            }
+            case "REFUSED" -> MinimalJson.asString(body.get("reason"));
+            case "FAILED" -> MinimalJson.asString(body.get("cause"));
+            case "TERMINAL" -> {
+                MinimalJson.asString(body.get("commandId"));
+                nonnegative(body, "generation");
+            }
+            default -> throw new IllegalArgumentException("unknown deployment outcome");
+        }
+        return outcome;
+    }
+
+    private static long nonnegative(Map<String, Object> body, String field) {
+        long value = MinimalJson.asLong(body.get(field));
+        if (value < 0) throw new IllegalArgumentException(field + " cannot be negative");
+        return value;
+    }
+
+    private static Long outcomeGeneration(Map<String, Object> outcome) {
+        if ("REPLAYED".equals(outcome.get("outcome"))) {
+            return outcomeGeneration(MinimalJson.asObject(outcome.get("original")));
+        }
+        return outcome.containsKey("generation") ? nonnegative(outcome, "generation") : null;
+    }
+
+    private static String deploymentOutcomeDetail(Map<String, Object> outcome) {
+        return switch (MinimalJson.asString(outcome.get("outcome"))) {
+            case "REPLAYED" -> "original=" + deploymentOutcomeDetail(
+                    MinimalJson.asObject(outcome.get("original")));
+            case "REFUSED" -> "reason=" + MinimalJson.asString(outcome.get("reason"));
+            case "FAILED" -> "cause=" + MinimalJson.asString(outcome.get("cause"));
+            case "SUPERSEDED" -> "by=" + MinimalJson.asString(outcome.get("by"));
+            case "STALE_GENERATION" -> "expected=" + nonnegative(outcome, "expected")
+                    + ",current=" + nonnegative(outcome, "generation");
+            case "IDEMPOTENCY_CONFLICT" -> "key=" + MinimalJson.asString(outcome.get("key"));
+            default -> outcome.containsKey("generation")
+                    ? "generation=" + nonnegative(outcome, "generation") : "";
+        };
+    }
+
+    private String sendWithTransportRetry(HttpRequest request) throws IOException {
+        HttpResponse<String> response;
+        try {
+            response = sender.send(request);
+        } catch (IOException ambiguous) {
+            // Reuse the exact immutable request (key, generation and body) once. HTTP responses
+            // never enter this catch and are not retried automatically.
+            try {
+                response = sender.send(request);
+            } catch (IOException secondAmbiguous) {
+                throw new AmbiguousDeliveryException(secondAmbiguous);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted waiting for " + baseUri, interrupted);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted waiting for " + baseUri, interrupted);
+        }
+        if (response.statusCode() >= 400) throw renderError(response);
+        return response.body();
+    }
+
+    private static final class AmbiguousDeliveryException extends IOException {
+        private AmbiguousDeliveryException(IOException cause) {
+            super("both delivery attempts lost their responses", cause);
+        }
+    }
+
+    @FunctionalInterface
+    interface RequestSender {
+        HttpResponse<String> send(HttpRequest request) throws IOException, InterruptedException;
     }
 
     /**
@@ -517,7 +787,7 @@ public final class RemoteBackend implements CliBackend {
     private String send(HttpRequest request) throws IOException {
         HttpResponse<String> response;
         try {
-            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            response = sender.send(request);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted waiting for " + baseUri, interrupted);

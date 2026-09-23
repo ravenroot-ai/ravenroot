@@ -4,6 +4,9 @@ import {
   GRAPH_LAYOUT_MODE_PROPERTY,
   GRAPH_RENDER_MODE_PROPERTY,
 } from './graph-document.js';
+import { DESIGN_ARRANGEMENTS } from './design-arrangements.js';
+
+export { DESIGN_ARRANGEMENTS } from './design-arrangements.js';
 
 export function normalizedCanvasState(value, graph) {
   if (!value || typeof value !== 'object') return null;
@@ -96,15 +99,6 @@ export const DESIGN_LAYOUT_MODES = Object.freeze(new Set([
   'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto',
   'hierarchical-new', 'layered-down',
 ]));
-export const DESIGN_ARRANGEMENTS = Object.freeze({
-  hierarchical: Object.freeze({ layout: 'hierarchical' }),
-  flow: Object.freeze({ layout: 'dagre' }),
-  organic: Object.freeze({ layout: 'cose' }),
-  keep: Object.freeze({ preservePositions: true }),
-  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
-  'layered-down': Object.freeze({ layout: 'layered-down' }),
-});
-
 export function normalizeDesignArrangement(value, layoutMode) {
   if (Object.hasOwn(DESIGN_ARRANGEMENTS, value)) return value;
   if (typeof layoutMode !== 'string' || !layoutMode) return null;

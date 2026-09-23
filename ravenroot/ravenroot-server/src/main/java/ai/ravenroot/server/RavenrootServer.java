@@ -312,6 +312,10 @@ public final class RavenrootServer implements AutoCloseable {
     private ai.ravenroot.core.process.ProcessLifecycleService processLifecycle;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
     private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
+    private ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker humanTaskInteractions;
+    private ai.ravenroot.server.security.BrowserOriginPolicy humanTaskInteractionOrigins;
+    /** Immutable before start; never derived from a request, task, or authored graph. */
+    private java.util.Set<java.net.URI> humanTaskFrameOrigins = java.util.Set.of();
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
     /** Installed only by the packaged composition when durable agent authority is enabled. */
     /**
@@ -849,6 +853,10 @@ public final class RavenrootServer implements AutoCloseable {
                     publicContext(embed::projection));
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.OBSERVATION_PATH,
                     publicContext(embed::observation));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.RUNS_PATH,
+                    publicContext(embed::runs));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.START_EXECUTION_PATH,
+                    publicContext(embed::startExecution));
         }
         var staticUi = new StaticUiHandler(uiDirectory);
         server.createContext("/", publicContext((exchange, ignored) -> staticUi.handle(exchange)));
@@ -955,7 +963,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     private com.sun.net.httpserver.HttpHandler secured(HttpRequestContext.Handler handler) {
         return exchange -> {
-            httpSecurity.responseHeaders().apply(exchange.getResponseHeaders());
+            httpSecurity.responseHeaders().apply(exchange.getResponseHeaders(), humanTaskFrameOrigins);
             handler.handle(exchange, HttpRequestContext.create());
         };
     }
@@ -1080,6 +1088,29 @@ public final class RavenrootServer implements AutoCloseable {
         humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
         humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
         humanTaskPolicy = java.util.Objects.requireNonNull(policy, "policy");
+    }
+
+    /** Installs the operator-owned presentation registry and capability-only completion surface. */
+    synchronized void installHumanTaskInteractions(
+            ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionConfiguration configuration) {
+        if (started.get()) throw new IllegalStateException("human-task interactions must be installed before start");
+        if (humanTaskInteractions != null) {
+            throw new IllegalStateException("human-task interactions are already installed");
+        }
+        if (humanTasks == null) throw new IllegalStateException("human-task interactions require durable tasks");
+        humanTaskInteractions = new ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker(
+                java.util.Objects.requireNonNull(configuration, "configuration"), humanTasks, clock);
+        humanTaskFrameOrigins = configuration.presentationOrigins();
+        var capabilityOrigins = new java.util.LinkedHashSet<>(httpSecurity.browserOrigins().allowedOrigins());
+        configuration.profiles().values().stream().map(profile -> profile.origin().toString())
+                .forEach(capabilityOrigins::add);
+        humanTaskInteractionOrigins = new ai.ravenroot.server.security.BrowserOriginPolicy(capabilityOrigins);
+        server.createContext("/v1/human-task-interactions/complete",
+                publicContext((exchange, context) -> {
+                    if (humanTaskInteractionOrigins.handlePreflight(exchange, java.util.Set.of("POST"))) return;
+                    if (!humanTaskInteractionOrigins.acceptActual(exchange)) return;
+                    humanTaskInteractionCompletion(exchange, context);
+                }));
     }
 
     /** Installs the independently bound durable interaction listener before either listener starts. */
@@ -1450,7 +1481,8 @@ public final class RavenrootServer implements AutoCloseable {
         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
         String tenantId = httpContext.requirePrincipal().tenantId();
         json(exchange, 200, humanTasks != null && humanTasks.supportsConfirmations()
-                ? servedConfiguration.json(humanTaskPolicy, tenantId) : servedConfiguration.json(tenantId));
+                ? servedConfiguration.json(humanTaskPolicy, tenantId, humanTaskInteractions != null)
+                : servedConfiguration.json(tenantId));
     }
 
     /**
@@ -2701,8 +2733,24 @@ public final class RavenrootServer implements AutoCloseable {
             return;
         }
         String[] segments = suffix.substring(1).split("/", -1);
+        if (segments.length == 2 && "interaction".equals(segments[1]) && !segments[0].isBlank()) {
+            humanTaskInteraction(exchange, httpContext, context, segments[0]);
+            return;
+        }
         boolean confirmation = segments.length == 3 && "confirmation".equals(segments[1]);
         String decision = confirmation ? segments[2] : segments.length == 2 ? segments[1] : "";
+        if (segments.length == 2 && "settle".equals(decision) && !segments[0].isBlank()) {
+            if (!method(exchange, httpContext, "POST")) return;
+            try {
+                java.util.UUID taskId = java.util.UUID.fromString(segments[0]);
+                long generation = Long.parseLong(query(exchange).get("generation"));
+                if (generation < 1) throw new IllegalArgumentException("generation");
+                humanTaskSettlement(exchange, httpContext, context, service, taskId, generation, null);
+            } catch (IllegalArgumentException invalid) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            }
+            return;
+        }
         if ((segments.length != 2 && !confirmation) || segments[0].isBlank()
                 || !("resolve".equals(decision) || "deny".equals(decision)
                 || "cancel".equals(decision))) {
@@ -2712,27 +2760,49 @@ public final class RavenrootServer implements AutoCloseable {
         if (!method(exchange, httpContext, "POST")) return;
         java.util.UUID taskId;
         long generation;
+        ai.ravenroot.api.persistence.HumanTaskOverride override = null;
         try {
             taskId = java.util.UUID.fromString(segments[0]);
-            generation = Long.parseLong(query(exchange).get("generation"));
+            Map<String, String> parameters = query(exchange);
+            if (!java.util.Set.of("generation", "override", "reason").containsAll(parameters.keySet())) {
+                throw new IllegalArgumentException("unknown human-task decision parameter");
+            }
+            generation = Long.parseLong(parameters.get("generation"));
             if (generation < 1) throw new IllegalArgumentException("generation");
+            if (parameters.containsKey("override")) {
+                if (!"true".equalsIgnoreCase(parameters.get("override"))) {
+                    throw new IllegalArgumentException("override must be true when present");
+                }
+                override = new ai.ravenroot.api.persistence.HumanTaskOverride(parameters.get("reason"));
+                authorization.requireAllowed(context,
+                        ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_OVERRIDE,
+                        ai.ravenroot.api.security.ProtectedResource.owned(
+                                "human-task", taskId.toString(), context.tenantId()));
+            } else if (parameters.containsKey("reason")) {
+                throw new IllegalArgumentException("reason requires an explicit override");
+            }
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
         } catch (RuntimeException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
         if (confirmation) {
-            humanTaskConfirmation(exchange, httpContext, context, service, taskId, generation, decision);
+            humanTaskConfirmation(exchange, httpContext, context, service, taskId, generation,
+                    decision, override);
             return;
         }
         ai.ravenroot.core.humantask.HumanTaskResult result;
         try {
-            result = switch (decision) {
-                case "resolve" -> service.resolve(context, taskId, generation,
-                        humanTaskResponse(exchange, context, taskId, service));
-                case "deny" -> service.deny(context, taskId, generation);
-                case "cancel" -> service.cancel(context, taskId, generation);
+            ai.ravenroot.api.persistence.HumanTaskSettlement settlement = switch (decision) {
+                case "resolve" -> ai.ravenroot.api.persistence.HumanTaskSettlement.resolve(
+                        humanTaskResponse(exchange, context, taskId, service, override != null), "");
+                case "deny" -> ai.ravenroot.api.persistence.HumanTaskSettlement.deny("");
+                case "cancel" -> ai.ravenroot.api.persistence.HumanTaskSettlement.cancel("");
                 default -> throw new IllegalStateException("unreachable human-task operation");
             };
+            result = override == null ? service.settle(context, taskId, generation, settlement)
+                    : service.settleOverride(context, taskId, generation, settlement, override);
             if (result.resumeTraversalId() != null) humanTaskSweep.accept(context.tenantId());
         } catch (HumanTaskBodyTooLarge tooLarge) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
@@ -2756,6 +2826,335 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
+    private void humanTaskInteraction(HttpExchange exchange, HttpRequestContext httpContext,
+                                      ai.ravenroot.api.security.RequestContext context,
+                                      String taskText) throws IOException {
+        var broker = humanTaskInteractions;
+        if (broker == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        try {
+            java.util.UUID taskId = java.util.UUID.fromString(taskText);
+            Map<String, String> parameters = query(exchange);
+            if (!parameters.keySet().equals(java.util.Set.of("generation"))) {
+                throw new IllegalArgumentException("exact generation is required");
+            }
+            long generation = Long.parseLong(parameters.get("generation"));
+            if (generation < 1) throw new IllegalArgumentException("invalid generation");
+            if ("POST".equals(exchange.getRequestMethod())) {
+                java.util.List<String> origins = exchange.getRequestHeaders().get("Origin");
+                if (origins == null || origins.size() != 1) {
+                    throw new ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker
+                            .CapabilityFailure(ai.ravenroot.server.humantaskinteraction
+                            .HumanTaskInteractionBroker.Code.ORIGIN_REFUSED);
+                }
+                var launch = broker.issue(context, taskId, generation, origins.getFirst());
+                json(exchange, 200, humanTaskInteractionLaunchJson(launch));
+                return;
+            }
+            if ("DELETE".equals(exchange.getRequestMethod())) {
+                byte[] body = boundedBody(exchange, 32_768);
+                var root = strictJsonMap(body, java.util.Set.of("schemaVersion", "capability"));
+                if (integer(root, "schemaVersion") != 1) throw new IllegalArgumentException("schema version");
+                broker.revoke(context, text(root, "capability"), taskId, generation);
+                json(exchange, 200, "{\"schemaVersion\":1,\"outcome\":\"REVOKED\"}");
+                return;
+            }
+            fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
+        } catch (ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker.CapabilityFailure failure) {
+            humanTaskInteractionFailure(exchange, httpContext, failure);
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    private void humanTaskInteractionCompletion(HttpExchange exchange,
+                                                HttpRequestContext httpContext) throws IOException {
+        var broker = humanTaskInteractions;
+        if (broker == null || !"/v1/human-task-interactions/complete".equals(
+                exchange.getRequestURI().getPath())) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
+            return;
+        }
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || !(contentType.equalsIgnoreCase("application/json")
+                || contentType.equalsIgnoreCase("application/json; charset=utf-8"))) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        // This endpoint is capability-authenticated. Ambient browser/server credentials are refused,
+        // not ignored, so a registered host never needs or receives a Ravenroot bearer.
+        if (exchange.getRequestHeaders().containsKey("Authorization")
+                || exchange.getRequestHeaders().containsKey("Cookie")) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            java.util.List<String> origins = exchange.getRequestHeaders().get("Origin");
+            if (origins == null || origins.size() != 1) {
+                throw new ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker
+                        .CapabilityFailure(ai.ravenroot.server.humantaskinteraction
+                        .HumanTaskInteractionBroker.Code.ORIGIN_REFUSED);
+            }
+            byte[] body = boundedBody(exchange, broker.maxCompletionBytes());
+            var root = strictJsonMap(body, java.util.Set.of(
+                    "schemaVersion", "capability", "action", "comment", "response"),
+                    java.util.Set.of("schemaVersion", "capability", "action"));
+            if (integer(root, "schemaVersion") != 1) throw new IllegalArgumentException("schema version");
+            String comment = root.entries().containsKey("comment") ? textAllowEmpty(root, "comment") : "";
+            var action = ai.ravenroot.api.persistence.HumanTaskConfirmationAction.valueOf(
+                    text(root, "action").toUpperCase(java.util.Locale.ROOT));
+            ai.ravenroot.api.persistence.OpaquePayload response = null;
+            if (root.entries().containsKey("response")) {
+                if (!(root.entries().get("response")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.MapValue responseMap)
+                        || !responseMap.entries().keySet().equals(
+                        java.util.Set.of("contentType", "payloadBase64"))) {
+                    throw new IllegalArgumentException("invalid interaction response");
+                }
+                response = ai.ravenroot.api.persistence.OpaquePayload.of(
+                        java.util.Base64.getDecoder().decode(textAllowEmpty(responseMap, "payloadBase64")),
+                        text(responseMap, "contentType"));
+            }
+            var settlement = switch (action) {
+                case RESOLVE -> ai.ravenroot.api.persistence.HumanTaskSettlement.resolve(
+                        java.util.Objects.requireNonNull(response, "response"), comment);
+                case DENY -> {
+                    if (response != null) throw new IllegalArgumentException("deny response");
+                    yield ai.ravenroot.api.persistence.HumanTaskSettlement.deny(comment);
+                }
+                case CANCEL -> {
+                    if (response != null) throw new IllegalArgumentException("cancel response");
+                    yield ai.ravenroot.api.persistence.HumanTaskSettlement.cancel(comment);
+                }
+            };
+            var result = broker.complete(text(root, "capability"), origins.getFirst(), body,
+                    exchange.getRequestHeaders().getFirst("X-Ravenroot-Provider-Signature"), settlement);
+            switch (result.code()) {
+                case RESOLVED, DENIED, CANCELLED, ALREADY_APPLIED -> json(exchange, 200,
+                        "{\"schemaVersion\":1,\"outcome\":\"" + result.code()
+                                + "\",\"taskId\":\"" + result.task().request().taskId()
+                                + "\",\"generation\":" + result.task().generation() + "}");
+                case ALREADY_SETTLED, STALE_GENERATION -> fail(exchange, httpContext, ErrorCode.CONFLICT);
+                case PAYLOAD_REFUSED -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                case NOT_FOUND, UNAVAILABLE -> fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+                case UNAUTHORIZED -> fail(exchange, httpContext, ErrorCode.ACCESS_DENIED);
+                default -> fail(exchange, httpContext, ErrorCode.CONFLICT);
+            }
+        } catch (ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker.CapabilityFailure failure) {
+            humanTaskInteractionFailure(exchange, httpContext, failure);
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    private static String humanTaskInteractionLaunchJson(
+            ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker.Launch launch) {
+        var task = launch.task();
+        var schema = launch.responseSchema();
+        String actions = task.availableActions().stream().map(action -> "\"" + action + "\"")
+                .collect(java.util.stream.Collectors.joining(","));
+        String review = task.reviewPresentation().map(value -> "{\"version\":" + value.version()
+                + ",\"contentType\":\"" + escape(value.contentType()) + "\",\"text\":\""
+                + escape(value.text()) + "\",\"contentDigest\":\"" + escape(value.contentDigest())
+                + "\"}").orElse("null");
+        return "{\"schemaVersion\":1,\"capability\":\"" + escape(launch.capability())
+                + "\",\"capabilityId\":\"" + launch.capabilityId() + "\",\"expiresAt\":\""
+                + launch.expiresAt() + "\",\"launchUri\":\"" + escape(launch.profile().launchUri().toString())
+                + "\",\"origin\":\"" + escape(launch.profile().origin().toString())
+                + "\",\"kind\":\"" + launch.profile().kind() + "\",\"profileId\":\""
+                + escape(launch.profile().key().id()) + "\",\"profileVersion\":"
+                + launch.profile().key().version() + ",\"taskId\":\"" + task.taskId()
+                + "\",\"generation\":" + task.generation() + ",\"actions\":[" + actions
+                + "],\"review\":" + review + ",\"responseSchema\":{\"contentType\":\""
+                + escape(schema.contentType()) + "\",\"schema\":\"" + escape(schema.schema())
+                + "\",\"schemaVersion\":\"" + escape(schema.schemaVersion()) + "\",\"kind\":\""
+                + schema.kind() + "\",\"maxBytes\":" + schema.maxBytes() + "}}";
+    }
+
+    private static byte[] boundedBody(HttpExchange exchange, int maximum) throws IOException {
+        try (var input = exchange.getRequestBody()) {
+            byte[] body = input.readNBytes(maximum + 1);
+            if (body.length > maximum) throw new IllegalArgumentException("body too large");
+            return body;
+        }
+    }
+
+    private static ai.ravenroot.api.payload.PayloadValue.MapValue strictJsonMap(
+            byte[] body, java.util.Set<String> permitted) {
+        return strictJsonMap(body, permitted, permitted);
+    }
+
+    private static ai.ravenroot.api.payload.PayloadValue.MapValue strictJsonMap(
+            byte[] body, java.util.Set<String> permitted, java.util.Set<String> required) {
+        var parsed = ai.ravenroot.api.payload.PayloadJson.read(body,
+                new ai.ravenroot.api.payload.PayloadLimits(Math.max(1024, body.length),
+                        5, 32, 64, Math.max(1024, body.length), 128));
+        if (!(parsed instanceof ai.ravenroot.api.payload.PayloadValue.MapValue root)
+                || !permitted.containsAll(root.entries().keySet())
+                || !root.entries().keySet().containsAll(required)) {
+            throw new IllegalArgumentException("invalid interaction document");
+        }
+        return root;
+    }
+
+    private static String text(ai.ravenroot.api.payload.PayloadValue.MapValue root, String name) {
+        String value = textAllowEmpty(root, name);
+        if (value.isBlank()) throw new IllegalArgumentException(name + " cannot be blank");
+        return value;
+    }
+
+    private static String textAllowEmpty(ai.ravenroot.api.payload.PayloadValue.MapValue root, String name) {
+        if (!(root.entries().get(name) instanceof ai.ravenroot.api.payload.PayloadValue.TextValue text)) {
+            throw new IllegalArgumentException(name + " must be text");
+        }
+        return text.value();
+    }
+
+    private static long integer(ai.ravenroot.api.payload.PayloadValue.MapValue root, String name) {
+        if (!(root.entries().get(name) instanceof ai.ravenroot.api.payload.PayloadValue.IntegerValue value)) {
+            throw new IllegalArgumentException(name + " must be integer");
+        }
+        return value.value();
+    }
+
+    private static void humanTaskInteractionFailure(HttpExchange exchange, HttpRequestContext context,
+            ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker.CapabilityFailure failure)
+            throws IOException {
+        switch (failure.code()) {
+            case EXPIRED, REVOKED -> fail(exchange, context, ErrorCode.CONFLICT);
+            case ORIGIN_REFUSED, SIGNATURE_REFUSED, ACTION_REFUSED ->
+                    fail(exchange, context, ErrorCode.ACCESS_DENIED);
+            case UNAVAILABLE -> fail(exchange, context, ErrorCode.UNKNOWN_RESOURCE);
+            case MALFORMED -> fail(exchange, context, ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    /** Strict transport-neutral settlement document used by HTTP, CLI, and Workbench. */
+    private void humanTaskSettlement(HttpExchange exchange, HttpRequestContext httpContext,
+                                     ai.ravenroot.api.security.RequestContext context,
+                                     ai.ravenroot.core.humantask.HumanTaskService service,
+                                     java.util.UUID taskId, long generation,
+                                     ai.ravenroot.api.persistence.HumanTaskOverride requiredOverride)
+            throws IOException {
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || !(contentType.equalsIgnoreCase("application/json")
+                || contentType.equalsIgnoreCase("application/json; charset=utf-8"))) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        ai.ravenroot.api.persistence.HumanTaskSettlement settlement;
+        ai.ravenroot.api.persistence.HumanTaskOverride override = null;
+        try {
+            byte[] body;
+            try (var input = exchange.getRequestBody()) {
+                body = input.readNBytes(humanTaskPolicy.decisionBodyMaxBytes() + 1);
+            }
+            if (body.length > humanTaskPolicy.decisionBodyMaxBytes()) {
+                throw new IllegalArgumentException("settlement document is too large");
+            }
+            var parsed = ai.ravenroot.api.payload.PayloadJson.read(body,
+                    new ai.ravenroot.api.payload.PayloadLimits(humanTaskPolicy.decisionBodyMaxBytes(),
+                            5, 16, 48, humanTaskPolicy.decisionBodyMaxBytes(), 64));
+            if (!(parsed instanceof ai.ravenroot.api.payload.PayloadValue.MapValue root)
+                    || !root.entries().keySet().stream().allMatch(java.util.Set.of(
+                    "schemaVersion", "action", "comment", "response", "override")::contains)
+                    || !(root.entries().get("schemaVersion")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.IntegerValue version)
+                    || version.value() != 1
+                    || !(root.entries().get("action")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.TextValue actionText)) {
+                throw new IllegalArgumentException("invalid settlement document");
+            }
+            String comment = "";
+            if (root.entries().containsKey("comment")) {
+                if (!(root.entries().get("comment")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.TextValue text)) {
+                    throw new IllegalArgumentException("invalid settlement comment");
+                }
+                comment = text.value();
+            }
+            var action = ai.ravenroot.api.persistence.HumanTaskConfirmationAction.valueOf(
+                    actionText.value().toUpperCase(java.util.Locale.ROOT));
+            ai.ravenroot.api.persistence.OpaquePayload response = null;
+            if (root.entries().containsKey("response")) {
+                if (!(root.entries().get("response")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.MapValue responseMap)
+                        || !responseMap.entries().keySet().equals(
+                        java.util.Set.of("contentType", "payloadBase64"))
+                        || !(responseMap.entries().get("contentType")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.TextValue responseType)
+                        || !(responseMap.entries().get("payloadBase64")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.TextValue responseBody)) {
+                    throw new IllegalArgumentException("invalid settlement response");
+                }
+                response = ai.ravenroot.api.persistence.OpaquePayload.of(
+                        java.util.Base64.getDecoder().decode(responseBody.value()), responseType.value());
+            }
+            settlement = switch (action) {
+                case RESOLVE -> ai.ravenroot.api.persistence.HumanTaskSettlement.resolve(
+                        java.util.Objects.requireNonNull(response, "response"), comment);
+                case DENY -> {
+                    if (response != null) throw new IllegalArgumentException("deny cannot carry a response");
+                    yield ai.ravenroot.api.persistence.HumanTaskSettlement.deny(comment);
+                }
+                case CANCEL -> {
+                    if (response != null) throw new IllegalArgumentException("cancel cannot carry a response");
+                    yield ai.ravenroot.api.persistence.HumanTaskSettlement.cancel(comment);
+                }
+            };
+            if (root.entries().containsKey("override")) {
+                if (!(root.entries().get("override")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.MapValue overrideMap)
+                        || !overrideMap.entries().keySet().equals(java.util.Set.of("version", "reason"))
+                        || !(overrideMap.entries().get("version")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.IntegerValue overrideVersion)
+                        || !(overrideMap.entries().get("reason")
+                        instanceof ai.ravenroot.api.payload.PayloadValue.TextValue reason)) {
+                    throw new IllegalArgumentException("invalid override document");
+                }
+                override = new ai.ravenroot.api.persistence.HumanTaskOverride(
+                        Math.toIntExact(overrideVersion.value()), reason.value());
+                authorization.requireAllowed(context,
+                        ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_OVERRIDE,
+                        ai.ravenroot.api.security.ProtectedResource.owned(
+                                "human-task", taskId.toString(), context.tenantId()));
+            }
+            if (requiredOverride != null && !requiredOverride.equals(override)) {
+                throw new IllegalArgumentException(
+                        "administrative settlement body must repeat the authorized override");
+            }
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        ai.ravenroot.core.humantask.HumanTaskResult result = override == null
+                ? service.settle(context, taskId, generation, settlement)
+                : service.settleOverride(context, taskId, generation, settlement, override);
+        switch (result.code()) {
+            case NOT_FOUND, UNAVAILABLE -> fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            case UNAUTHORIZED -> fail(exchange, httpContext, ErrorCode.ACCESS_DENIED);
+            case PAYLOAD_REFUSED -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            case STALE_GENERATION, ALREADY_SETTLED -> fail(exchange, httpContext, ErrorCode.CONFLICT);
+            default -> {
+                if (result.resumeTraversalId() != null) humanTaskSweep.accept(context.tenantId());
+                String resume = result.resumeTraversalId() == null ? "null"
+                        : "\"" + result.resumeTraversalId() + "\"";
+                json(exchange, 200, "{\"schemaVersion\":1,\"outcome\":\""
+                        + result.code().name() + "\",\"taskId\":\"" + taskId
+                        + "\",\"generation\":" + result.task().generation()
+                        + ",\"resumeTraversalId\":" + resume + "}");
+            }
+        }
+    }
+
     /** Payload-free administrative inventory and guarded Human Task reconciliation. */
     private void adminHumanTasks(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         ai.ravenroot.core.humantask.HumanTaskService service = humanTasks;
@@ -2764,6 +3163,13 @@ public final class RavenrootServer implements AutoCloseable {
             return;
         }
         String suffix = exchange.getRequestURI().getPath().substring("/v1/admin/human-tasks".length());
+        String[] actionSegments = suffix.startsWith("/")
+                ? suffix.substring(1).split("/", -1) : new String[0];
+        if (actionSegments.length == 2 && !actionSegments[0].isBlank()
+                && ("attention".equals(actionSegments[1]) || "settle".equals(actionSegments[1]))) {
+            adminHumanTaskOverride(exchange, httpContext, service, actionSegments[0], actionSegments[1]);
+            return;
+        }
         boolean purge = "/purge".equals(suffix);
         if ((!suffix.isEmpty() && !"/".equals(suffix) && !purge)
                 || !method(exchange, httpContext, purge ? "POST" : "GET")) return;
@@ -2799,6 +3205,52 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {
             fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    private void adminHumanTaskOverride(
+            HttpExchange exchange, HttpRequestContext httpContext,
+            ai.ravenroot.core.humantask.HumanTaskService service,
+            String taskText, String operation) throws IOException {
+        if (!method(exchange, httpContext, "attention".equals(operation) ? "GET" : "POST")) return;
+        try {
+            Map<String, String> parameters = query(exchange);
+            if (!java.util.Set.of("tenant", "generation", "reason").equals(parameters.keySet())) {
+                throw new IllegalArgumentException("tenant, generation, and reason are required");
+            }
+            String tenant = parameters.get("tenant");
+            java.util.UUID taskId = java.util.UUID.fromString(taskText);
+            long generation = Long.parseLong(parameters.get("generation"));
+            if (tenant == null || tenant.isBlank() || generation < 1) {
+                throw new IllegalArgumentException("invalid override locator");
+            }
+            var override = new ai.ravenroot.api.persistence.HumanTaskOverride(parameters.get("reason"));
+            var caller = httpContext.applicationContext();
+            authorization.requireAllowed(caller,
+                    ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_OVERRIDE,
+                    ai.ravenroot.api.security.ProtectedResource.owned(
+                            "human-task", taskId.toString(), tenant));
+            var scoped = tenant.equals(caller.tenantId()) ? caller
+                    : new ai.ravenroot.api.security.RequestContext(caller.requestId(), caller.subject(),
+                    caller.principalType(), caller.issuer(), tenant, caller.roles(), caller.scopes());
+            if ("settle".equals(operation)) {
+                humanTaskSettlement(exchange, httpContext, scoped, service, taskId, generation, override);
+                return;
+            }
+            var item = service.attentionOverride(scoped,
+                    new ai.ravenroot.api.persistence.HumanTaskAttentionLocator(taskId, generation), override);
+            var counts = item.isEmpty()
+                    ? new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(0, 0)
+                    : new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(1,
+                    item.orElseThrow().status() == ai.ravenroot.api.persistence.HumanTaskStatus.ESCALATED
+                            ? 1 : 0);
+            json(exchange, 200, humanTaskAttentionPageJson(
+                    new ai.ravenroot.api.persistence.HumanTaskAttentionPage(item.stream().toList(),
+                            java.util.Optional.empty(), counts, java.util.List.of())));
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
     }
 
@@ -2916,9 +3368,10 @@ public final class RavenrootServer implements AutoCloseable {
 
     private ai.ravenroot.api.persistence.OpaquePayload humanTaskResponse(
             HttpExchange exchange, ai.ravenroot.api.security.RequestContext context,
-            java.util.UUID taskId, ai.ravenroot.core.humantask.HumanTaskService service)
+            java.util.UUID taskId, ai.ravenroot.core.humantask.HumanTaskService service,
+            boolean override)
             throws IOException {
-        int limit = service.authorizedResponseBodyLimit(context, taskId)
+        int limit = service.authorizedResponseBodyLimit(context, taskId, override)
                 .orElse(humanTaskPolicy.decisionBodyMaxBytes());
         byte[] body;
         try (var input = exchange.getRequestBody()) {
@@ -2936,7 +3389,8 @@ public final class RavenrootServer implements AutoCloseable {
         if (!method(exchange, httpContext, "GET")) return;
         Map<String, String> parameters = query(exchange);
         if (!java.util.Set.of("graphVersion", "deploymentId", "processInstanceId", "traversalId",
-                "nodeId", "taskId", "generation", "limit", "cursor").containsAll(parameters.keySet())) {
+                "nodeId", "taskId", "generation", "limit", "cursor", "override", "reason")
+                .containsAll(parameters.keySet())) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
@@ -2957,7 +3411,22 @@ public final class RavenrootServer implements AutoCloseable {
                 }
                 var locator = new ai.ravenroot.api.persistence.HumanTaskAttentionLocator(
                         java.util.UUID.fromString(taskText), Long.parseLong(generationText));
-                var item = service.attention(context, locator);
+                boolean overrideRequested = parameters.containsKey("override");
+                if (overrideRequested != parameters.containsKey("reason")
+                        || overrideRequested && !"true".equalsIgnoreCase(parameters.get("override"))) {
+                    throw new IllegalArgumentException("override and reason must be supplied together");
+                }
+                java.util.Optional<ai.ravenroot.api.persistence.HumanTaskAttentionItem> item;
+                if (overrideRequested) {
+                    authorization.requireAllowed(context,
+                            ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_OVERRIDE,
+                            ai.ravenroot.api.security.ProtectedResource.owned(
+                                    "human-task", taskText, context.tenantId()));
+                    item = service.attentionOverride(context, locator,
+                            new ai.ravenroot.api.persistence.HumanTaskOverride(parameters.get("reason")));
+                } else {
+                    item = service.attention(context, locator);
+                }
                 var counts = item.isEmpty()
                         ? new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(0, 0)
                         : new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(1,
@@ -2969,6 +3438,9 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             String graphVersion = parameters.get("graphVersion");
+            if (parameters.containsKey("override") || parameters.containsKey("reason")) {
+                throw new IllegalArgumentException("override review requires an exact locator");
+            }
             String deploymentId = parameters.get("deploymentId");
             String processId = parameters.get("processInstanceId");
             if (graphVersion == null || graphVersion.isBlank()
@@ -2987,6 +3459,8 @@ public final class RavenrootServer implements AutoCloseable {
                             ? java.util.Optional.of(new ai.ravenroot.api.persistence.HumanTaskAttentionCursor(
                             parameters.get("cursor"))) : java.util.Optional.empty(), limit);
             json(exchange, 200, humanTaskAttentionPageJson(service.attention(context, attentionQuery)));
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {
@@ -2997,11 +3471,12 @@ public final class RavenrootServer implements AutoCloseable {
     private void humanTaskConfirmation(
             HttpExchange exchange, HttpRequestContext httpContext, ai.ravenroot.api.security.RequestContext context,
             ai.ravenroot.core.humantask.HumanTaskService service, java.util.UUID taskId,
-            long generation, String decision) throws IOException {
+            long generation, String decision,
+            ai.ravenroot.api.persistence.HumanTaskOverride override) throws IOException {
         ai.ravenroot.api.persistence.HumanTaskConfirmationAction action =
                 ai.ravenroot.api.persistence.HumanTaskConfirmationAction.valueOf(
                         decision.toUpperCase(java.util.Locale.ROOT));
-        var authority = service.confirmationAuthority(context, taskId, action);
+        var authority = service.confirmationAuthority(context, taskId, action, override != null);
         if (authority.isEmpty()) {
             fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
@@ -3043,12 +3518,14 @@ public final class RavenrootServer implements AutoCloseable {
         }
         ai.ravenroot.core.humantask.HumanTaskResult result;
         try {
-            result = switch (action) {
-                case RESOLVE -> service.resolve(context, taskId, generation,
+            ai.ravenroot.api.persistence.HumanTaskSettlement settlement = switch (action) {
+                case RESOLVE -> ai.ravenroot.api.persistence.HumanTaskSettlement.resolve(
                         ai.ravenroot.core.humantask.HumanTaskService.confirmationResponse(), comment);
-                case DENY -> service.deny(context, taskId, generation, comment);
-                case CANCEL -> service.cancel(context, taskId, generation, comment);
+                case DENY -> ai.ravenroot.api.persistence.HumanTaskSettlement.deny(comment);
+                case CANCEL -> ai.ravenroot.api.persistence.HumanTaskSettlement.cancel(comment);
             };
+            result = override == null ? service.settle(context, taskId, generation, settlement)
+                    : service.settleOverride(context, taskId, generation, settlement, override);
         } catch (RuntimeException failure) {
             fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
             return;
@@ -3058,7 +3535,7 @@ public final class RavenrootServer implements AutoCloseable {
             case PAYLOAD_REFUSED -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             case STALE_GENERATION, ALREADY_SETTLED -> fail(exchange, httpContext, ErrorCode.CONFLICT);
             case RESOLVED, DENIED, CANCELLED, ALREADY_APPLIED -> {
-                var task = service.confirmationProjection(context, result, action);
+                var task = service.confirmationProjection(context, result, action, override != null);
                 if (task.isEmpty()) {
                     fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
                     return;
@@ -3105,6 +3582,14 @@ public final class RavenrootServer implements AutoCloseable {
                         + "\",\"text\":\"" + escape(value.text())
                         + "\",\"contentDigest\":\"" + escape(value.contentDigest())
                         + "\",\"maxUtf8Bytes\":" + value.maxUtf8Bytes() + "}").orElse("");
+        var interaction = item.interactionPresentation();
+        String interactionJson = ",\"interactionPresentation\":{\"kind\":\""
+                + interaction.kind().name() + "\",\"version\":" + interaction.version()
+                + ",\"profileId\":\"" + escape(interaction.profileId())
+                + "\",\"profileVersion\":" + interaction.profileVersion()
+                + ",\"formSchema\":" + (interaction.formSchema().isEmpty() ? "null"
+                : interaction.formSchema()) + ",\"schemaDigest\":\""
+                + escape(interaction.schemaDigest()) + "\"}";
         return "{\"taskId\":\"" + item.taskId() + "\",\"generation\":" + item.generation()
                 + ",\"status\":\"" + item.status().name() + "\",\"graphVersion\":\""
                 + escape(item.graphVersion()) + "\",\"deploymentId\":"
@@ -3123,7 +3608,7 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"actions\":[" + actions + "],\"resolveLabel\":\""
                 + escape(presentation.resolveLabel()) + "\",\"denyLabel\":\""
                 + escape(presentation.denyLabel()) + "\",\"cancelLabel\":\""
-                + escape(presentation.cancelLabel()) + "\"}" + review
+                + escape(presentation.cancelLabel()) + "\"}" + interactionJson + review
                 + ",\"availableActions\":[" + available + "]}";
     }
 
@@ -3148,6 +3633,14 @@ public final class RavenrootServer implements AutoCloseable {
                     .append(escape(request.responseSchema().schemaVersion()))
                     .append("\",\"responseKind\":\"").append(request.responseSchema().kind())
                     .append("\",\"maxResponseBytes\":").append(request.responseSchema().maxBytes())
+                    .append(",\"presentationKind\":\"").append(request.presentation().kind())
+                    .append("\",\"presentationVersion\":").append(request.presentation().version())
+                    .append(",\"presentationProfileId\":\"")
+                    .append(escape(request.presentation().profileId())).append("\"")
+                    .append(",\"presentationProfileVersion\":")
+                    .append(request.presentation().profileVersion())
+                    .append(",\"presentationSchemaDigest\":\"")
+                    .append(escape(request.presentation().schemaDigest())).append("\"")
                     .append(",\"expiresAt\":\"").append(request.expiresAt()).append("\"");
             request.escalateAt().ifPresent(value -> out.append(",\"escalateAt\":\"")
                     .append(value).append("\""));
@@ -3262,11 +3755,10 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code "scope":"LOCAL_PROCESS"}.</p>
      *
      * <h2>Non-disclosure is one code path, not a rule to remember</h2>
-     * <p>Every lookup and every command resolves through {@code AuthorizedRavenrootApplication}, which
-     * takes the tenant from the authenticated {@code RequestContext} and never from the request. An
-     * unknown id, a sibling tenant's id and an id already undeployed all arrive here as the same empty
-     * {@code Optional} and leave as the same {@link ErrorCode#UNKNOWN_RESOURCE} body — there is no
-     * branch here that could tell them apart even if it wanted to.</p>
+     * <p>Every status lookup resolves through tenant-scoped application or durable control state. An
+     * unknown id, a sibling tenant's id and an id already undeployed leave GET as the same
+     * {@link ErrorCode#UNKNOWN_RESOURCE} body. A durable tombstone is command-only: it can replay the
+     * exact Undeploy intent or refuse a different intent without exposing another tenant's state.</p>
      *
      * <h2>Why this is not {@code /v1/executions/{id}/cancel} or {@code /v1/drain}</h2>
      * <p>Those two are unchanged and mean what they always meant: cancel ends one traversal, drain
@@ -3297,7 +3789,8 @@ public final class RavenrootServer implements AutoCloseable {
             if (suffix.isEmpty() || suffix.equals("/")) {
                 if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                     exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
-                    json(exchange, 200, deploymentListJson(authorizedApplication.localDeployments(context)));
+                    json(exchange, 200, deploymentListJson(context.tenantId(),
+                            authorizedApplication.localDeployments(context)));
                     return;
                 }
                 if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -3321,12 +3814,15 @@ public final class RavenrootServer implements AutoCloseable {
                 // have required this handler to read the registration first, and that read is a
                 // different authorization action -- so registering would have started demanding an
                 // observe scope it does not otherwise need, to decorate a status code.
-                var status = durableDeploymentControl == null
-                        ? authorizedApplication.registerLocalDeployment(context, deploymentId,
-                                new java.io.ByteArrayInputStream(graph))
-                        : durableDeploymentControl.register(
-                                ai.ravenroot.api.security.SecurityContext.of(context), deploymentId, graph).local();
-                deploymentJson(exchange, 200, status);
+                if (durableDeploymentControl == null) {
+                    var status = authorizedApplication.registerLocalDeployment(context, deploymentId,
+                            new java.io.ByteArrayInputStream(graph));
+                    deploymentJson(exchange, 200, status, null);
+                } else {
+                    var registration = durableDeploymentControl.register(
+                            ai.ravenroot.api.security.SecurityContext.of(context), deploymentId, graph);
+                    deploymentJson(exchange, 200, registration.local(), registration.durable().generation());
+                }
                 return;
             }
 
@@ -3370,12 +3866,21 @@ public final class RavenrootServer implements AutoCloseable {
                         fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                         return;
                     }
+                    var durable = durableDeploymentRecord(context.tenantId(), deploymentId);
+                    Long generation = durable
+                            .map(ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record::generation)
+                            .orElse(null);
+                    if (durable
+                            .map(record -> record.tombstone() != null).orElse(false)) {
+                        fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+                        return;
+                    }
                     exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
-                    deploymentJson(exchange, 200, status.orElseThrow());
+                    deploymentJson(exchange, 200, status.orElseThrow(), generation);
                     return;
                 }
                 if ("DELETE".equalsIgnoreCase(exchange.getRequestMethod())) {
-                    if (durableDeploymentControl != null) {
+                    if (durableDeploymentRecord(context.tenantId(), deploymentId).isPresent()) {
                         durableDeploymentCommand(exchange, httpContext, deploymentId, "undeploy");
                         return;
                     }
@@ -3389,7 +3894,7 @@ public final class RavenrootServer implements AutoCloseable {
             }
 
             if (!method(exchange, httpContext, "POST")) return;
-            if (durableDeploymentControl != null) {
+            if (durableDeploymentRecord(context.tenantId(), deploymentId).isPresent()) {
                 durableDeploymentCommand(exchange, httpContext, deploymentId, segments[2]);
                 return;
             }
@@ -3820,18 +4325,39 @@ public final class RavenrootServer implements AutoCloseable {
         deploymentJson(exchange, 200, settled.orElseThrow());
     }
 
-    private String deploymentListJson(List<ai.ravenroot.api.application.LocalDeploymentStatus> statuses) {
+    private java.util.Optional<ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record>
+    durableDeploymentRecord(String tenantId, String deploymentId) {
+        return durableDeploymentControl == null
+                ? java.util.Optional.empty()
+                : durableDeploymentControl.get(tenantId, deploymentId);
+    }
+
+    private String deploymentListJson(String tenantId,
+                                      List<ai.ravenroot.api.application.LocalDeploymentStatus> statuses) {
         return "{\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
-                + "\",\"deployments\":[" + statuses.stream().map(RavenrootServer::deploymentObject)
+                + "\",\"deployments\":[" + statuses.stream()
+                .filter(status -> durableDeploymentRecord(tenantId, status.deploymentId())
+                        .map(record -> record.tombstone() == null).orElse(true))
+                .map(status -> deploymentObject(status,
+                        durableDeploymentRecord(tenantId, status.deploymentId())
+                                .map(ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record::generation)
+                                .orElse(null)))
                 .collect(java.util.stream.Collectors.joining(",")) + "]}";
     }
 
     private void deploymentJson(HttpExchange exchange, int statusCode,
                                 ai.ravenroot.api.application.LocalDeploymentStatus status) throws IOException {
-        json(exchange, statusCode, deploymentObject(status));
+        deploymentJson(exchange, statusCode, status, null);
     }
 
-    private static String deploymentObject(ai.ravenroot.api.application.LocalDeploymentStatus status) {
+    private void deploymentJson(HttpExchange exchange, int statusCode,
+                                ai.ravenroot.api.application.LocalDeploymentStatus status,
+                                Long generation) throws IOException {
+        json(exchange, statusCode, deploymentObject(status, generation));
+    }
+
+    private static String deploymentObject(ai.ravenroot.api.application.LocalDeploymentStatus status,
+                                           Long generation) {
         String diagnostic = status.diagnostic().map(value -> "\"" + escape(value) + "\"").orElse("null");
         String graphVersion = status.graphVersion().map(value -> "\"" + escape(value) + "\"")
                 .orElse("null");
@@ -3840,7 +4366,8 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"sourceCount\":" + status.sourceCount()
                 + ",\"graphVersion\":" + graphVersion
                 + ",\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
-                + "\",\"diagnostic\":" + diagnostic + "}";
+                + "\",\"diagnostic\":" + diagnostic
+                + (generation == null ? "" : ",\"deploymentGeneration\":" + generation) + "}";
     }
 
     private void sourceSessionJson(HttpExchange exchange, int statusCode,

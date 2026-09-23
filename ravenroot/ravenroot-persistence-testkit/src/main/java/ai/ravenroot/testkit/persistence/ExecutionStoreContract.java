@@ -43,6 +43,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
@@ -65,6 +66,7 @@ import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
+import ai.ravenroot.api.persistence.HumanTaskInteractionRevocation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -224,6 +226,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tenant that lost no record.</p>
  */
 public abstract class ExecutionStoreContract {
+
+    @Test
+    final void humanTaskInteractionRevocationIsTenantScopedIdempotentAndExpires() {
+        UUID capabilityId = UUID.randomUUID();
+        Instant revokedAt = clock().instant();
+        Instant expiresAt = revokedAt.plus(Duration.ofMinutes(5));
+        var revocation = new HumanTaskInteractionRevocation(
+                capabilityId, UUID.randomUUID(), 3, revokedAt, expiresAt);
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, revokedAt)));
+        await(store().revokeHumanTaskInteraction("tenant-a", revocation));
+        await(store().revokeHumanTaskInteraction("tenant-a", revocation));
+        assertTrue(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, revokedAt)));
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-b", capabilityId, revokedAt)),
+                "a capability identifier must not become a cross-tenant revocation oracle");
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, expiresAt)),
+                "expiry is exclusive so an old revocation cannot grow without bound");
+    }
 
     @Test
     final void runnerWorkspaceSurvivesLaterTraversalWhileIndependentProcessesStayIsolated() {
@@ -3957,8 +3976,10 @@ public abstract class ExecutionStoreContract {
                 .mapToLong(count -> count.pending()).sum(),
                 "aggregate per-node counts must be complete rather than truncated");
         assertEquals(first.registration().taskId(), page.items().getFirst().taskId());
-        assertEquals(orderedActions, page.items().getFirst().availableActions(),
-                "the safe projection must preserve pinned authored action order");
+        assertEquals(List.of(HumanTaskConfirmationAction.DENY,
+                        HumanTaskConfirmationAction.RESOLVE),
+                page.items().getFirst().availableActions(),
+                "the safe projection must preserve authored order while keeping cancel requester-only");
         assertTrue(page.items().getFirst().reviewPresentation().isEmpty(),
                 "collection projections must never disclose review content");
         assertEquals(4096, page.items().getFirst().promptMaxUtf8Bytes());
@@ -4025,9 +4046,26 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.of("deployment-c"), recovered.deploymentId());
         assertEquals(fixture.key().processInstanceId(), recovered.processInstanceId());
         assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), recovered.availableActions());
-        assertEquals("Mail body\nsecond line", recovered.reviewPresentation().orElseThrow().text());
+        assertTrue(recovered.reviewPresentation().isEmpty(),
+                "requester-only cancellation must not disclose review content in enforced mode");
+
+        var permissive = new HumanTaskAttentionAuthorization("issuer|USER|other",
+                Set.of(), Set.of(), false);
+        var permissiveDetail = await(store().findHumanTaskAttention(tenant, locator, permissive))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), permissiveDetail.availableActions());
+        assertEquals("Mail body\nsecond line",
+                permissiveDetail.reviewPresentation().orElseThrow().text());
+
+        var override = new HumanTaskAttentionAuthorization("issuer|USER|administrator",
+                Set.of(), Set.of(), true, true);
+        var overrideDetail = await(store().findHumanTaskAttention(tenant, locator, override))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), overrideDetail.availableActions());
         assertEquals(HumanTaskReviewPresentation.TEXT_PLAIN,
-                recovered.reviewPresentation().orElseThrow().contentType());
+                overrideDetail.reviewPresentation().orElseThrow().contentType());
         assertTrue(await(store().findHumanTaskAttention(tenant,
                 new HumanTaskAttentionLocator(fixture.registration().taskId(), 2L), requester)).isEmpty(),
                 "a stale generation must be indistinguishable from an absent task");
@@ -4718,6 +4756,68 @@ public abstract class ExecutionStoreContract {
                 "committedAtRevision is what makes the shared boundary observable rather than merely "
                         + "asserted: it names the exact transition the event was written beside");
         assertEquals(ProcessInstanceStatus.RUNNING, applied.state().status());
+    }
+
+    @Test
+    final void processJournalReadNeverWidensToASiblingInstance() {
+        assumeCapability(StoreCapability.EVENT_JOURNAL);
+        var selected = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        var sibling = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID selectedTraversal = UUID.randomUUID();
+        UUID siblingTraversal = UUID.randomUUID();
+        StoredProcessInstance selectedCreated = await(store().apply(
+                creationBatch(selected, selectedTraversal, "graph-v1")));
+        StoredProcessInstance siblingCreated = await(store().apply(
+                creationBatch(sibling, siblingTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(selected)
+                .expecting(RevisionExpectation.exactly(selectedCreated.revision()))
+                .publish(event(selected, selectedTraversal, "selected.one"))
+                .publish(event(selected, selectedTraversal, "selected.two")).build()));
+        await(store().apply(ExecutionBatch.to(sibling)
+                .expecting(RevisionExpectation.exactly(siblingCreated.revision()))
+                .publish(event(sibling, siblingTraversal, "sibling.one")).build()));
+
+        List<JournalRecord> selectedOnly = await(store().readProcessJournal(selected, 0, 10));
+        assertEquals(List.of("selected.one", "selected.two"), selectedOnly.stream()
+                .map(row -> row.envelope().eventType()).toList());
+        assertEquals(2L, selectedOnly.getLast().streamSequence());
+        assertEquals(List.of("selected.two"), await(store().readProcessJournal(selected, 1, 10)).stream()
+                .map(row -> row.envelope().eventType()).toList());
+    }
+
+    @Test
+    final void processJournalBoundaryRejectsFullyCompactedAndInterPageGaps() {
+        assumeCapability(StoreCapability.JOURNAL_COMPACTION);
+        var key = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .publish(event(key, traversal, "one"))
+                .publish(event(key, traversal, "two"))
+                .publish(event(key, traversal, "three")).build()));
+
+        ProcessJournalPage first = await(store().readProcessJournalPage(key, 0, 1));
+        assertEquals(1L, first.retainedFromSequence());
+        assertEquals(4L, first.nextSequence());
+        assertEquals(1L, first.records().getFirst().streamSequence());
+
+        List<JournalRecord> tenant = await(store().readJournal(DEFAULT_TENANT, 0, 10));
+        await(store().advanceOutboxCursor(await(store().outboxCursor(DEFAULT_TENANT, "process-replay")),
+                tenant.getLast().journalOffset()));
+        clock().advance(store().journalRetention().plusMinutes(1));
+        assertEquals(3L, await(store().compactJournal(DEFAULT_TENANT)));
+
+        var interPage = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 1, 1))));
+        assertEquals(4L, interPage.retainedFrom());
+        var fullyCompacted = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 0, 10))));
+        assertEquals(4L, fullyCompacted.retainedFrom());
+        ProcessJournalPage current = await(store().readProcessJournalPage(key, 3, 10));
+        assertTrue(current.records().isEmpty());
+        assertEquals(4L, current.retainedFromSequence());
+        assertEquals(4L, current.nextSequence());
     }
 
     @Test
@@ -5619,13 +5719,15 @@ public abstract class ExecutionStoreContract {
                 .expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(acceptedInstance(key.processInstanceId(), traversalId),
                         new GraphVersionPin("graph-v7")))
-                .recordOrigin(ExecutionOrigin.of("deployment-9", "workload-3", "corr-42"))
+                .recordOrigin(ExecutionOrigin.of("deployment-9", "incarnation-4",
+                        "workload-3", "corr-42"))
                 .build()));
 
         ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
         assertEquals(key, entry.key());
         assertEquals(new GraphVersionPin("graph-v7"), entry.graphVersionPin());
         assertEquals(Optional.of("deployment-9"), entry.deploymentId());
+        assertEquals(Optional.of("incarnation-4"), entry.deploymentIncarnationId());
         assertEquals(Optional.of("workload-3"), entry.workloadId());
         assertEquals(Optional.of("corr-42"), entry.correlationId());
         assertNotEquals(entry.deploymentId(), entry.workloadId());
@@ -5648,6 +5750,7 @@ public abstract class ExecutionStoreContract {
                 .build()));
         ProcessInventoryEntry updated = await(store().findProcessInstance(key)).orElseThrow();
         assertEquals(Optional.of("deployment-9"), updated.deploymentId(), "absent components leave values untouched");
+        assertEquals(Optional.of("incarnation-4"), updated.deploymentIncarnationId());
         assertEquals(Optional.of("workload-3"), updated.workloadId());
         assertEquals(Optional.of("corr-updated"), updated.correlationId(), "a present component is written");
     }

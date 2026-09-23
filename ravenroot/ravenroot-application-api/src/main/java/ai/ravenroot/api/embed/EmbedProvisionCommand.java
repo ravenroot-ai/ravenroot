@@ -117,6 +117,81 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
                 EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);
     }
 
+    /**
+     * Creates an additive v2 deployment registration with selectable runs and no execute authority.
+     * @param registrationId stable registration identity
+     * @param expectedRevision optimistic registration revision
+     * @param workloadIssuer trusted workload issuer
+     * @param workloadSubject trusted workload subject
+     * @param tenantId owning tenant
+     * @param parentOrigin exact allowed embedding origin
+     * @param themeOverride optional presentation theme
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param showStartExecution whether to present the start affordance
+     * @return fail-closed version-two provisioning command
+     */
+    public static EmbedProvisionCommand deploymentV2(String registrationId, long expectedRevision,
+                                                      String workloadIssuer, String workloadSubject,
+                                                      String tenantId, String parentOrigin,
+                                                      Optional<EmbedTheme> themeOverride,
+                                                      String deploymentId,
+                                                      boolean showStartExecution) {
+        return deploymentV2(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, themeOverride, deploymentId, showStartExecution, false);
+    }
+
+    /**
+     * Creates a v2 deployment registration with separately granted execution authority.
+     *
+     * <p>The presentation option remains independent: callers may grant execution while keeping the
+     * affordance hidden, or show the affordance without using this authority-granting factory.</p>
+     * @param registrationId stable registration identity
+     * @param expectedRevision optimistic registration revision
+     * @param workloadIssuer trusted workload issuer
+     * @param workloadSubject trusted workload subject
+     * @param tenantId owning tenant
+     * @param parentOrigin exact allowed embedding origin
+     * @param themeOverride optional presentation theme
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param showStartExecution whether to present the start affordance
+     * @return fail-closed version-two provisioning command with explicit execute authority
+     */
+    public static EmbedProvisionCommand deploymentV2WithExecutionCapability(
+            String registrationId, long expectedRevision,
+            String workloadIssuer, String workloadSubject,
+            String tenantId, String parentOrigin,
+            Optional<EmbedTheme> themeOverride,
+            String deploymentId,
+            boolean showStartExecution) {
+        return deploymentV2(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, themeOverride, deploymentId, showStartExecution, true);
+    }
+
+    private static EmbedProvisionCommand deploymentV2(
+            String registrationId, long expectedRevision,
+            String workloadIssuer, String workloadSubject,
+            String tenantId, String parentOrigin,
+            Optional<EmbedTheme> themeOverride,
+            String deploymentId,
+            boolean showStartExecution,
+            boolean grantExecution) {
+        var source = EmbedViewerSource.deploymentV2(deploymentId, showStartExecution);
+        var grant = new VerifiedEmbedGraphGrant(tenantId, "deployment:" + deploymentId, deploymentId,
+                1, deploymentId, "deferred", "deferred", "deployment-live-v2");
+        var eligibility = new EmbedProjectionEligibility("deployment-live-v2",
+                false, false, false, false, false, false, false);
+        var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
+                deploymentId, "deferred", "deferred", java.util.List.of(), java.util.List.of());
+        var capabilities = new java.util.HashSet<EmbedCapability>();
+        capabilities.add(EmbedCapability.GRAPH_READ);
+        capabilities.add(EmbedCapability.DEPLOYMENT_OBSERVE);
+        capabilities.add(EmbedCapability.DEPLOYMENT_RUN_READ);
+        if (grantExecution) capabilities.add(EmbedCapability.DEPLOYMENT_EXECUTE);
+        return new EmbedProvisionCommand(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, Set.copyOf(capabilities), themeOverride, grant,
+                EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);
+    }
+
     /** The revision this command writes when it is accepted; monotone by construction.
      * @return {@code expectedRevision + 1}
      */

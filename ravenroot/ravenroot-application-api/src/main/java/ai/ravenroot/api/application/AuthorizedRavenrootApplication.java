@@ -687,6 +687,118 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
+     * Returns only process rows hosted by the exact deployment binding.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param limit maximum selector rows to return
+     * @return authorized rows matching every binding component
+     */
+    public java.util.List<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRuns(
+            RequestContext context, String deploymentId, String incarnationId,
+            String graphVersion, int limit) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        String version = requireText(graphVersion, "graph version");
+        String incarnation = requireText(incarnationId, "incarnation id");
+        if (!delegate.processInventoryAvailable()) return java.util.List.of();
+        int bounded = Math.max(1, Math.min(limit, delegate.processInventoryMaxPageSize()));
+        var query = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder()
+                .hostedBy(deploymentId).includeTerminal(true).limit(bounded).build();
+        return delegate.processInventory(context.tenantId(), query).items().stream()
+                .filter(item -> version.equals(item.graphVersionPin().reference()))
+                .filter(item -> item.deploymentIncarnationId().filter(incarnation::equals).isPresent())
+                .toList();
+    }
+
+    /**
+     * Resolves one exact run without depending on its position in the bounded selector page.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param processInstanceId exact process identity
+     * @return the authorized matching row, or empty when absent or mismatched
+     */
+    public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRun(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion,
+            java.util.UUID processInstanceId) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        if (!delegate.processInventoryAvailable()) return java.util.Optional.empty();
+        String version = requireText(graphVersion, "graph version");
+        String incarnation = requireText(incarnationId, "incarnation id");
+        return delegate.processInstance(context.tenantId(), java.util.Objects.requireNonNull(processInstanceId))
+                .filter(item -> item.deploymentId().filter(deploymentId::equals).isPresent())
+                .filter(item -> item.deploymentIncarnationId().filter(incarnation::equals).isPresent())
+                .filter(item -> version.equals(item.graphVersionPin().reference()));
+    }
+
+    /**
+     * Replays one already-authorized selected run from its durable per-process journal.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of events to return
+     * @return ordered durable events for the exact authorized run
+     */
+    public java.util.List<DurableExecutionEvent> embedDeploymentRunReplay(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion,
+            java.util.UUID processInstanceId, long afterSequence, int limit) {
+        return embedDeploymentRunReplayPage(context, deploymentId, incarnationId, graphVersion,
+                processInstanceId, afterSequence, limit).events();
+    }
+
+    /**
+     * Replays one selected run with an authoritative per-process retention boundary.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of events to return
+     * @return bounded events and their atomic durable stream boundary
+     */
+    public DurableProcessEventPage embedDeploymentRunReplayPage(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion,
+            java.util.UUID processInstanceId, long afterSequence, int limit) {
+        var run = embedDeploymentRun(context, deploymentId, incarnationId, graphVersion, processInstanceId);
+        if (run.isEmpty()) return new DurableProcessEventPage(java.util.List.of(), 1, 1);
+        int bounded = Math.max(1, Math.min(limit, 512));
+        return delegate.durableEventPageForProcess(context.tenantId(), processInstanceId,
+                afterSequence, bounded);
+    }
+
+    /**
+     * Starts one idempotent traversal under an embed-only capability and exact binding.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param requestId bounded idempotency identity
+     * @return sanitized authoritative admission outcome
+     */
+    public EmbedDeploymentStart startEmbedDeploymentExecution(RequestContext context,
+                                                               String deploymentId,
+                                                               String incarnationId,
+                                                               String graphVersion,
+                                                               String requestId) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_EXECUTE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        return delegate.startEmbedDeploymentExecution(SecurityContext.of(context), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"),
+                requireText(requestId, "request id"));
+    }
+
+    /**
  * Starts one of the caller tenant's deployments under the caller's own identity.
  * @param context authenticated request context supplying the owning tenant and serving identity
  * @param deploymentId the deployment to start

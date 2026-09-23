@@ -57,12 +57,20 @@ public final class DeploymentObservationCursorStore {
         cursors.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().expiresAt()));
     }
 
-    public record Binding(String authority, String deploymentId, String incarnationId, String graphVersion) {
+    public record Binding(String authority, String deploymentId, String incarnationId, String graphVersion,
+                          String processInstanceId) {
+        public Binding(String authority, String deploymentId, String incarnationId, String graphVersion) {
+            this(authority, deploymentId, incarnationId, graphVersion, null);
+        }
+
         public Binding {
             Objects.requireNonNull(authority, "authority");
             Objects.requireNonNull(deploymentId, "deploymentId");
             Objects.requireNonNull(incarnationId, "incarnationId");
             Objects.requireNonNull(graphVersion, "graphVersion");
+            if (processInstanceId != null && processInstanceId.isBlank()) {
+                throw new IllegalArgumentException("processInstanceId must not be blank");
+            }
         }
     }
 

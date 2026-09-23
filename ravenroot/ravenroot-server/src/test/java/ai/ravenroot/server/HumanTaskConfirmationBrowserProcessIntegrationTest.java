@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -60,7 +61,7 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
                 "human-task-confirmation-browser", UUID.randomUUID().toString()));
         Ready verify;
         try (Control control = new Control(backendPort, output)) {
-            runBrowser(control, output);
+            runBrowser(control, output, "rehydrates pinned tasks");
 
             verify = control.start(Phase.VERIFY);
             assertEquals(Phase.VERIFY, verify.phase());
@@ -68,6 +69,19 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
         }
         awaitNoReplayVisibilityWindow();
         assertDurableSettlement(output, verify);
+    }
+
+    @Test
+    void servedWorkbenchLoadsAndCompletesRegisteredCustomPresentationUnderEffectiveCsp()
+            throws Exception {
+        Assumptions.assumeTrue(Boolean.getBoolean("ravenroot.humanTaskConfirmation.browserTest"),
+                "run after the companion real-browser scenario is enabled");
+        int backendPort = freePort();
+        Path output = Files.createDirectories(Path.of(System.getProperty("user.dir"), "target",
+                "human-task-confirmation-browser", UUID.randomUUID().toString()));
+        try (Control control = new Control(backendPort, output, true)) {
+            runBrowser(control, output, "registered custom presentation loads");
+        }
     }
 
     private static void awaitNoReplayVisibilityWindow() throws InterruptedException {
@@ -108,14 +122,14 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
         }
     }
 
-    private static void runBrowser(Control control, Path output) throws Exception {
+    private static void runBrowser(Control control, Path output, String title) throws Exception {
         Path ui = Path.of(System.getProperty("user.dir")).resolve("../ravenroot-ui").toAbsolutePath().normalize();
         Path executable = ui.resolve("node_modules/.bin/playwright");
         if (!Files.isExecutable(executable)) {
             throw new IllegalStateException("the installed Playwright binary is required for the real harness");
         }
         var process = new ProcessBuilder(executable.toString(), "test",
-                "--config=playwright.human-task-confirmation.config.js")
+                "--config=playwright.human-task-confirmation.config.js", "--grep=" + title)
                 .directory(ui.toFile()).redirectErrorStream(true)
                 .redirectOutput(output.resolve("playwright-driver.log").toFile());
         process.environment().put("RAVENROOT_HUMAN_TASK_CONFIRMATION_CONTROL_ORIGIN", control.origin());
@@ -185,17 +199,24 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
         private final HttpServer server;
         private final int backendPort;
         private final Path output;
+        private final boolean customPresentation;
         private volatile Child child;
         private volatile Ready ready;
 
         private Control(int backendPort, Path output) throws IOException {
+            this(backendPort, output, false);
+        }
+
+        private Control(int backendPort, Path output, boolean customPresentation) throws IOException {
             this.backendPort = backendPort;
             this.output = output;
+            this.customPresentation = customPresentation;
             server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
             server.createContext("/start", this::start);
             server.createContext("/stop", this::stop);
             server.createContext("/ready", this::ready);
             server.createContext("/graph", this::graph);
+            server.createContext("/custom-presentation", this::customPresentation);
             server.start();
         }
 
@@ -240,8 +261,27 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
                     Integer.toString(phase.confirmationLimit));
             builder.environment().put("RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES",
                     Integer.toString(phase.confirmationLimit));
+            if (customPresentation) {
+                Path configuration = interactionConfiguration();
+                builder.environment().put("RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG",
+                        configuration.toString());
+                builder.environment().put("RAVENROOT_HUMAN_TASK_FIXTURE_PRESENTATION_KIND", "CUSTOM");
+            }
             var process = builder.start();
             return new Child(process, transcript, phase);
+        }
+
+        private Path interactionConfiguration() throws IOException {
+            Path configuration = output.resolve("custom-interactions.json");
+            String origin = origin();
+            String secret = Base64.getEncoder().encodeToString(
+                    "custom-browser-capability-secret-32-bytes".getBytes(StandardCharsets.UTF_8));
+            Files.writeString(configuration, "{\"schemaVersion\":1,\"capabilityTtlSeconds\":30,"
+                    + "\"maxCompletionBytes\":65536,\"capabilitySecretBase64\":\"" + secret
+                    + "\",\"profiles\":[{\"id\":\"fixture-provider\",\"version\":1,"
+                    + "\"kind\":\"CUSTOM\",\"launchUri\":\"" + origin
+                    + "/custom-presentation\",\"origin\":\"" + origin + "\"}]}");
+            return configuration;
         }
 
         private void start(HttpExchange exchange) throws IOException {
@@ -285,6 +325,52 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
                 return;
             }
             replyGraphMl(exchange, HumanTaskConfirmationWorkbenchProcess.graph());
+        }
+
+        private void customPresentation(HttpExchange exchange) throws IOException {
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                reply(exchange, 405, "");
+                return;
+            }
+            if (exchange.getRequestHeaders().containsKey("Authorization")
+                    || exchange.getRequestHeaders().containsKey("Cookie")) {
+                reply(exchange, 400, "");
+                return;
+            }
+            String document = """
+                    <!doctype html><html><body><p id="custom-ready">Waiting for initialization</p>
+                    <script>
+                    addEventListener('message', event => {
+                      const message = event.data;
+                      if (!message || message.protocol !== 'ravenroot.human-task.presentation'
+                          || message.version !== 1 || message.type !== 'initialize') return;
+                      if ('capability' in message || 'tenantId' in message || 'subject' in message) {
+                        document.querySelector('#custom-ready').textContent = 'Unsafe initialization';
+                        return;
+                      }
+                      document.querySelector('#custom-ready').textContent = 'Initialized registered presentation';
+                      const response = { contract: 'ravenroot.payload/1',
+                        schema: message.responseSchema.schema,
+                        schemaVersion: message.responseSchema.schemaVersion,
+                        kind: message.responseSchema.kind,
+                        value: message.responseSchema.kind === 'MAP' ? { approved: true } : true };
+                      const payloadBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(response))));
+                      setTimeout(() => parent.postMessage({
+                        protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
+                        capabilityId: message.capabilityId, taskId: message.taskId,
+                        generation: message.generation, action: 'RESOLVE',
+                        comment: 'Completed through the isolated custom presentation.',
+                        response: { contentType: message.responseSchema.contentType, payloadBase64 }
+                      }, '*'), 500);
+                    });
+                    </script></body></html>
+                    """;
+            byte[] bytes = document.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
         }
 
         private synchronized void stop() throws Exception {

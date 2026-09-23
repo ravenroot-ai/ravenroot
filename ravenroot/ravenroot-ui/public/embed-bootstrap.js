@@ -5,6 +5,8 @@
   const EXCHANGE_PATH = '/v1/embed/exchange';
   const PROJECTION_PATH = '/v1/embed/projection';
   const OBSERVATION_PATH = '/v1/embed/observation';
+  const RUNS_PATH = '/v1/embed/runs';
+  const START_EXECUTION_PATH = '/v1/embed/executions';
   const MAX_STREAM_FRAME_BYTES = 64 * 1024;
   const MAX_OBSERVATION_RETRIES = 5;
   const encoder = new TextEncoder();
@@ -171,7 +173,7 @@
     return { type, id, data: data.join('\n') };
   };
 
-  const readObservation = async (reader, viewerInstance, source, signal) => {
+  const readObservation = async (reader, viewerInstance, source, signal, generation) => {
     const decoder = new TextDecoder();
     let buffer = '';
     let cursor = '';
@@ -191,12 +193,14 @@
         if (!parsed.data) continue;
         const payload = JSON.parse(parsed.data);
         const type = parsed.type === 'source-gap' ? 'gap'
-          : parsed.type === 'source-invalidated' ? 'invalidated' : parsed.type;
+          : parsed.type === 'source-invalidated' ? 'invalidated'
+            : parsed.type === 'runtime-reset' ? 'reset' : parsed.type;
         viewerInstance.observe({
           type,
           deploymentId: payload.deploymentId ?? source.deploymentId,
           graphVersion: payload.graphVersion ?? source.graphVersion,
           incarnationId: payload.incarnationId ?? source.incarnationId,
+          processInstanceId: payload.processInstanceId ?? source.processInstanceId ?? null,
           cursor: parsed.id || payload.cursor,
           ...(type === 'execution' ? { event: {
             type: payload.event?.type ?? payload.type,
@@ -210,10 +214,11 @@
             occurredAt: payload.event?.occurredAt ?? payload.occurredAt ?? null,
             publicReason: payload.event?.publicReason ?? payload.publicReason ?? null,
             description: payload.event?.description ?? payload.description ?? '',
+            sequence: Number(payload.event?.sequence ?? payload.sequence) || undefined,
           } } : {}),
           ...(type === 'lifecycle' ? { lifecycle: payload.lifecycle } : {}),
           ...(['gap', 'invalidated'].includes(type) ? { reason: payload.reason } : {}),
-        });
+        }, generation);
         cursor = parsed.id || cursor;
         if (parsed.type === 'source-gap' || parsed.type === 'source-invalidated') {
           await reader.cancel();
@@ -229,9 +234,13 @@
     const node = document.getElementById('ravenroot-embed-bootstrap');
     if (node === null) throw new Error('bootstrap unavailable');
     const value = JSON.parse(node.textContent);
-    const keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt',
+    const v1Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt',
       'grantRevision', 'parentOrigin', 'theme', 'viewerOrigin'];
-    if (!exactKeys(value, keys)
+    const v2Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt',
+      'grantRevision', 'parentOrigin', 'showStartExecution', 'theme', 'viewerOrigin',
+      'viewerSourceVersion'];
+    const v2 = value?.viewerSourceVersion === '2';
+    if (!exactKeys(value, v2 ? v2Keys : v1Keys)
         || !boundedString(value.exchangeId)
         || !boundedString(value.challenge)
         || !boundedString(value.channelId)
@@ -241,6 +250,7 @@
         || !boundedString(value.viewerOrigin, 2048)
         || !boundedString(value.parentOrigin, 2048)
         || (value.theme !== null && !THEMES.includes(value.theme))
+        || (v2 && typeof value.showStartExecution !== 'boolean')
         || location.origin !== value.viewerOrigin
         || window.parent === window) {
       throw new Error('bootstrap invalid');
@@ -386,9 +396,97 @@
     // This direct module call is the only projection handoff. The value remains in the viewer realm
     // and this closure: it is never published on window, storage, the URL, or postMessage.
     const { createEmbedViewer } = await import('/embed-viewer.js');
-    viewer = createEmbedViewer(document.getElementById('ravenroot-embed-viewer'), { theme });
+    let selectedProcess = null;
+    let selectedGeneration = 0;
+    let refreshTimer = null;
+    const signedBody = async (path, extra = {}) => {
+      const issuedAt = new Date().toISOString();
+      const jti = correlationId();
+      return { nonce: exchanged.challenge, jti, issuedAt,
+        signature: await sign(keyPair.privateKey, exchanged.bearer, bootstrap.revision,
+          exchanged.challenge, jti, path, issuedAt), ...extra };
+    };
+    const observeSelected = (processInstanceId, generation) => {
+      observation?.abort();
+      observation = null;
+      if (!processInstanceId) return;
+      const controller = new AbortController();
+      observation = controller;
+      void (async () => {
+        let cursor = '';
+        for (let attempt = 0; attempt <= MAX_OBSERVATION_RETRIES && !controller.signal.aborted; attempt += 1) {
+          try {
+            const request = await signedBody(OBSERVATION_PATH, { cursor, processInstanceId });
+            const reader = await postStream(OBSERVATION_PATH, request, exchanged.bearer, controller.signal);
+            const result = await readObservation(reader, viewer,
+              { ...projection.source, processInstanceId }, controller.signal, generation);
+            cursor = result.cursor;
+            if (result.terminal || controller.signal.aborted || generation !== selectedGeneration) return;
+          } catch (failure) {
+            if (controller.signal.aborted) return;
+            if (failure?.kind === 'expired' || attempt === MAX_OBSERVATION_RETRIES) throw failure;
+          }
+          await new Promise(resolve => setTimeout(resolve, Math.min(5_000, 500 * (attempt + 1))));
+        }
+      })().catch(failure => {
+        if (!controller.signal.aborted) showFailure(failure?.kind ?? 'error');
+      });
+    };
+    const selectRun = (processInstanceId, generation) => {
+      selectedProcess = processInstanceId;
+      selectedGeneration = generation;
+      observeSelected(processInstanceId, generation);
+    };
+    const refreshRuns = async () => {
+      const envelope = await postJson(RUNS_PATH, await signedBody(RUNS_PATH), exchanged.bearer);
+      if (!exactKeys(envelope, ['deploymentId', 'graphVersion', 'incarnationId', 'runs'])
+          || !Array.isArray(envelope.runs)
+          || envelope.deploymentId !== projection.source?.deploymentId
+          || envelope.graphVersion !== projection.source?.graphVersion
+          || envelope.incarnationId !== projection.source?.incarnationId) {
+        throw new EmbedRequestFailure('error');
+      }
+      const next = viewer.updateRuns(envelope, selectedProcess);
+      if (selectedProcess && !next) {
+        viewer.clearRuntime('The selected run is no longer authorized.');
+        observation?.abort();
+      }
+      selectedProcess = next;
+    };
+    const startExecution = async () => {
+      const requestId = correlationId();
+      try {
+        await postJson(START_EXECUTION_PATH,
+          await signedBody(START_EXECUTION_PATH, { requestId }), exchanged.bearer);
+      } catch (firstFailure) {
+        // The server may have committed before the response was lost. Reconcile by retrying the
+        // exact bounded idempotency identity with a fresh request proof.
+        await postJson(START_EXECUTION_PATH,
+          await signedBody(START_EXECUTION_PATH, { requestId }), exchanged.bearer);
+      }
+      await refreshRuns();
+    };
+    viewer = createEmbedViewer(document.getElementById('ravenroot-embed-viewer'), {
+      theme, onRunSelected: selectRun, onStartExecution: () => {
+        void startExecution().catch(failure => showFailure(failure?.kind ?? 'error'));
+      },
+    });
     await viewer.mount(projection);
-    if (projection.viewerSourceVersion === '1' && projection.source?.kind === 'deployment') {
+    if (projection.viewerSourceVersion === '2' && projection.source?.kind === 'deployment') {
+      await refreshRuns();
+      refreshTimer = setInterval(() => {
+        void refreshRuns().catch(failure => {
+          clearInterval(refreshTimer);
+          observation?.abort();
+          viewer.clearRuntime(failure?.kind === 'expired'
+            ? 'Live observation authorization ended.' : 'Run list is temporarily unavailable.');
+        });
+      }, 2_000);
+      addEventListener('pagehide', () => {
+        clearInterval(refreshTimer);
+        observation?.abort();
+      }, { once: true });
+    } else if (projection.viewerSourceVersion === '1' && projection.source?.kind === 'deployment') {
       observation = new AbortController();
       addEventListener('pagehide', () => observation?.abort(), { once: true });
       void (async () => {

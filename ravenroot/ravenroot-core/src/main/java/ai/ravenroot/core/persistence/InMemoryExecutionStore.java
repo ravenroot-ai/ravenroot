@@ -49,6 +49,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -127,6 +128,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * cannot silently answer for another one.
      */
     private final Map<String, TenantJournal> journals = new LinkedHashMap<>();
+    private final Map<String, Map<UUID, ai.ravenroot.api.persistence.HumanTaskInteractionRevocation>>
+            humanTaskInteractionRevocations = new LinkedHashMap<>();
     /**
      * Per-instance event counters, held outside {@link #journals} so that compaction cannot reset
      * them. A stream sequence that restarted after its records were discarded would make two
@@ -1311,7 +1314,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         return new ProcessInventoryEntry(key, entry.state.status(),
                 InventoryDisposition.ofProcess(entry.state.status(), leaseLive, anyAttemptParked(entry)),
                 entry.revision, entry.lifecycleGeneration, entry.graphVersionPin,
-                entry.origin.deploymentId(), entry.origin.workloadId(), entry.origin.correlationId(),
+                entry.origin.deploymentId(), entry.origin.deploymentIncarnationId(),
+                entry.origin.workloadId(), entry.origin.correlationId(),
                 leaseLive ? Optional.of(entry.lease.workerId()) : Optional.empty(),
                 entry.fencingToken,
                 leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
@@ -1889,6 +1893,39 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public CompletionStage<Void> revokeHumanTaskInteraction(String tenantId,
+            ai.ravenroot.api.persistence.HumanTaskInteractionRevocation revocation) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(revocation, "revocation");
+            synchronized (monitor) {
+                Map<UUID, ai.ravenroot.api.persistence.HumanTaskInteractionRevocation> tenant =
+                        humanTaskInteractionRevocations.computeIfAbsent(tenantId, ignored -> new LinkedHashMap<>());
+                tenant.values().removeIf(value -> !clock.instant().isBefore(value.expiresAt()));
+                var existing = tenant.putIfAbsent(revocation.capabilityId(), revocation);
+                if (existing != null && !existing.equals(revocation)) {
+                    throw failure(ExecutionStoreFailure.invalid("conflicting human-task capability revocation"));
+                }
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Boolean> isHumanTaskInteractionRevoked(
+            String tenantId, UUID capabilityId, Instant now) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(capabilityId, "capabilityId");
+            Objects.requireNonNull(now, "now");
+            synchronized (monitor) {
+                var value = humanTaskInteractionRevocations.getOrDefault(tenantId, Map.of()).get(capabilityId);
+                return value != null && now.isBefore(value.expiresAt());
+            }
+        });
+    }
+
+    @Override
     public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
         return complete(() -> {
             requireTenantId(tenantId);
@@ -2043,7 +2080,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             .permittedActions(task.request());
                     if (actions.isEmpty()) return Optional.empty();
                     return Optional.of(attentionItem(new AuthorizedHumanTask(
-                            task, entry.origin.deploymentId(), actions), true));
+                            task, entry.origin.deploymentId(), actions),
+                            authorization.mayReview(task.request().responderRequirements(),
+                                    task.request().requester().qualifiedIdentity())));
                 }
                 return Optional.empty();
             }
@@ -2076,7 +2115,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 request.confirmationLimits().maxActionLabelUtf8Bytes(),
                 request.confirmationLimits().maxCommentUtf8Bytes(),
                 row.actions(), includeReview && request.reviewPresentation().present()
-                        ? Optional.of(request.reviewPresentation()) : Optional.empty());
+                        ? Optional.of(request.reviewPresentation()) : Optional.empty(),
+                request.presentation());
     }
 
 
@@ -2637,6 +2677,46 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     }
                 }
                 return List.copyOf(page);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                    long afterSequence, int limit) {
+        return readProcessJournalPage(key, afterSequence, limit).thenApply(ProcessJournalPage::records);
+    }
+
+    @Override
+    public CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                       long afterSequence, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EVENT_JOURNAL);
+            java.util.Objects.requireNonNull(key, "key");
+            if (afterSequence < 0 || limit < 1) {
+                throw failure(ExecutionStoreFailure.invalid("process journal cursor and limit are invalid"));
+            }
+            synchronized (monitor) {
+                long next = streamSequences.getOrDefault(key, 0L) + 1;
+                long retainedFrom = journalOf(key.tenantId()).records.stream()
+                        .filter(record -> record.key().equals(key))
+                        .mapToLong(JournalRecord::streamSequence).min().orElse(next);
+                if (afterSequence + 1 < retainedFrom) {
+                    throw failure(new ExecutionStoreFailure.JournalTruncated(
+                            key.tenantId(), afterSequence, retainedFrom));
+                }
+                var page = new ArrayList<JournalRecord>();
+                for (JournalRecord record : journalOf(key.tenantId()).records) {
+                    if (!record.key().equals(key) || record.streamSequence() <= afterSequence) continue;
+                    if (!record.envelope().digestMatchesContent()) {
+                        throw failure(new ExecutionStoreFailure.Corrupted(key,
+                                "process journal event digest does not match its content"));
+                    }
+                    page.add(record);
+                    if (page.size() == limit) break;
+                }
+                page.sort(java.util.Comparator.comparingLong(JournalRecord::streamSequence));
+                return new ProcessJournalPage(page, retainedFrom, next);
             }
         });
     }

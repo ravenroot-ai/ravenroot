@@ -50,6 +50,13 @@ public final class P256EmbedProofVerifier {
     public boolean verifyObservationAndConsume(String bearer, long revision, String nonce, String jti,
                                                String method, String uri, Instant issuedAt,
                                                ECPublicKey key, byte[] signature) {
+        return verifyRequestAndConsume(bearer, revision, nonce, jti, method, uri, issuedAt, key, signature);
+    }
+
+    /** Verifies one independently replay-protected request in an active browser session. */
+    public boolean verifyRequestAndConsume(String bearer, long revision, String nonce, String jti,
+                                           String method, String uri, Instant issuedAt,
+                                           ECPublicKey key, byte[] signature) {
         return verifyAndConsume(bearer, revision, nonce, jti, method, uri, issuedAt,
                 key, signature, payload(bearer, revision, nonce, jti, method, uri, issuedAt), true);
     }

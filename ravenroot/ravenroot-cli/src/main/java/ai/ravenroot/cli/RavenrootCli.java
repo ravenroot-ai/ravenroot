@@ -66,6 +66,7 @@ public final class RavenrootCli {
                 case "cancel" -> cancelExecution(args);
                 case "drain" -> drainServer();
                 case "process" -> processControl(args);
+                case "human-tasks" -> humanTasks(args);
                 // One verb, seven subcommands, mirroring 'credentials' below: a listing, a
                 // register, and five id-scoped lifecycle actions. Every printed line carries scope=
                 // LOCAL_PROCESS -- the same word and the same guarantee the HTTP wire states -- so an
@@ -82,6 +83,58 @@ public final class RavenrootCli {
             reportFailure(error, errors);
             return 1;
         }
+    }
+
+    private int humanTasks(String[] args) throws IOException {
+        if (args.length == 2 && "list".equals(args[1])) {
+            for (var task : backend.humanTasks()) {
+                output.println("task-id=" + task.taskId() + "\tgeneration=" + task.generation()
+                        + "\tstatus=" + task.status() + "\tnode-id=" + sanitizeForConsole(task.nodeId())
+                        + "\ttitle=" + sanitizeForConsole(task.title())
+                        + "\tpresentation=" + task.presentationKind()
+                        + "\tresponse=" + task.responseContentType() + ";schema="
+                        + task.responseSchema() + ";version=" + task.responseSchemaVersion());
+            }
+            return 0;
+        }
+        if (args.length < 5 || !"settle".equals(args[1])) {
+            return invalid("Usage: ravenroot human-tasks <list|settle <task-id> <generation> "
+                    + "<resolve|deny|cancel> [--response-file <path>] [--content-type <type>] "
+                    + "[--comment <text>] [--override-reason <text>]>");
+        }
+        long generation = Long.parseLong(args[3]);
+        if (generation < 1) throw new IllegalArgumentException("generation must be positive");
+        String action = args[4].toUpperCase(java.util.Locale.ROOT);
+        if (!java.util.Set.of("RESOLVE", "DENY", "CANCEL").contains(action)) {
+            throw new IllegalArgumentException("human-task action must be resolve, deny, or cancel");
+        }
+        Path responseFile = null;
+        String contentType = "application/octet-stream";
+        String comment = "";
+        String overrideReason = null;
+        for (int index = 5; index < args.length; index += 2) {
+            if (index + 1 >= args.length) throw new IllegalArgumentException("missing human-task option value");
+            switch (args[index]) {
+                case "--response-file" -> responseFile = Path.of(args[index + 1]);
+                case "--content-type" -> contentType = args[index + 1];
+                case "--comment" -> comment = args[index + 1];
+                case "--override-reason" -> overrideReason = args[index + 1];
+                default -> throw new IllegalArgumentException("unknown human-task option: " + args[index]);
+            }
+        }
+        if ("RESOLVE".equals(action) != (responseFile != null)) {
+            throw new IllegalArgumentException("resolve requires --response-file and other actions forbid it");
+        }
+        var result = backend.settleHumanTask(args[2], generation, action,
+                responseFile == null ? null : Files.readAllBytes(responseFile), contentType,
+                comment, overrideReason);
+        output.println("outcome=" + result.outcome());
+        output.println("task-id=" + result.taskId());
+        output.println("generation=" + result.generation());
+        if (result.resumeTraversalId() != null) {
+            output.println("resume-traversal-id=" + result.resumeTraversalId());
+        }
+        return 0;
     }
 
     /**
@@ -444,19 +497,31 @@ public final class RavenrootCli {
         if (args.length == 3 && "start".equals(args[1])) {
             return printDeployment(backend.startDeployment(args[2]));
         }
-        if (args.length == 3 && "stop".equals(args[1])) {
-            return printDeployment(backend.stopDeployment(args[2]));
+        if ((args.length == 3 || args.length == 5) && "stop".equals(args[1])) {
+            if (args.length == 5 && !"--reason".equals(args[3])) return invalidDeploymentUsage();
+            return printDeployment(backend.stopDeployment(args[2], args.length == 5 ? args[4] : null));
         }
         if (args.length == 3 && "restart".equals(args[1])) {
             return printDeployment(backend.restartDeployment(args[2]));
         }
-        if (args.length == 3 && "undeploy".equals(args[1])) {
-            return printDeployment(backend.undeployDeployment(args[2]));
+        if ((args.length == 3 || args.length == 7) && "undeploy".equals(args[1])) {
+            if (args.length == 7 && !("--disposition".equals(args[3]) && "--reason".equals(args[5]))) {
+                return invalidDeploymentUsage();
+            }
+            return printDeployment(backend.undeployDeployment(args[2],
+                    args.length == 7 ? args[4] : null, args.length == 7 ? args[6] : null));
         }
+        return invalidDeploymentUsage();
+    }
+
+    private int invalidDeploymentUsage() {
         return invalid("Usage: ravenroot deployments <list"
                 + "|register <deployment-id> <graph.graphml>"
-                + "|inspect <deployment-id>|start <deployment-id>|stop <deployment-id>"
-                + "|restart <deployment-id>|undeploy <deployment-id>>");
+                + "|inspect <deployment-id>|start <deployment-id>"
+                + "|stop <deployment-id> [--reason <text>]"
+                + "|restart <deployment-id>"
+                + "|undeploy <deployment-id> [--disposition <DRAIN_FIRST|CANCEL_IN_FLIGHT|REFUSE_IF_BUSY>"
+                + " --reason <text>]>");
     }
 
     private int listDeployments() throws IOException {
@@ -468,7 +533,11 @@ public final class RavenrootCli {
 
     private int printDeployment(CliBackend.DeploymentView deployment) {
         printDeploymentLine(deployment);
-        return 0;
+        return deployment.commandDetail() != null
+                && deployment.commandDetail().startsWith("delivery=AMBIGUOUS") ? 1
+                : deployment.commandOutcome() != null && java.util.Set.of(
+                "IDEMPOTENCY_CONFLICT", "STALE_GENERATION", "SUPERSEDED", "REFUSED", "FAILED")
+                .contains(deployment.commandOutcome()) ? 1 : 0;
     }
 
     /**
@@ -483,6 +552,12 @@ public final class RavenrootCli {
                 + "\tstate=" + deployment.state()
                 + "\tsource-count=" + deployment.sourceCount()
                 + "\tscope=" + deployment.scope()
+                + (deployment.deploymentGeneration() == null ? ""
+                        : "\tgeneration=" + deployment.deploymentGeneration())
+                + (deployment.commandOutcome() == null ? ""
+                        : "\tcommand-outcome=" + deployment.commandOutcome())
+                + (deployment.commandDetail() == null || deployment.commandDetail().isBlank() ? ""
+                        : "\tcommand-detail=" + sanitizeForConsole(deployment.commandDetail()))
                 + (deployment.diagnostic() == null ? ""
                         : "\tdiagnostic=" + sanitizeForConsole(deployment.diagnostic())));
     }
@@ -551,6 +626,9 @@ public final class RavenrootCli {
                 + "<status|runtime|node-types|inspect <graph.graphml>|run <graph.graphml> [payload]"
                 + "|result <execution-id>|live|inventory|traversals <process-instance-id>"
                 + "|cancel <traversal-id>|drain|process|credentials|deployments>");
+        output.println("       ravenroot human-tasks <list|settle <task-id> <generation> "
+                + "<resolve|deny|cancel> [--response-file <path>] [--content-type <type>] "
+                + "[--comment <text>] [--override-reason <text>]>");
         output.println("       ravenroot process <process-instance-id> <pause|resume|cancel|drain|stop> "
                 + "<expected-generation> <idempotency-key> [reason]   (requires --server)");
         // Issue 154: 'inventory' is the durable, tenant-scoped process inventory -- what this
@@ -566,20 +644,25 @@ public final class RavenrootCli {
         // completes or is cancelled; a deployment is the opposite shape -- a long-lived, addressable,
         // startable/stoppable unit, and one with no effective SOURCE is still registrable and
         // controllable as one (sourceCount can legitimately read 0). Every line 'deployments' prints
-        // carries scope=LOCAL_PROCESS: no durability, lease, fencing, failover or cross-host claim --
-        // see docs/architecture/local-deployment-lifecycle.md for the full model. The durable,
-        // cluster-wide lifecycle is a separate decision.
+        // carries scope=LOCAL_PROCESS. A printed generation identifies durable command intent; it
+        // does not turn that runtime placement into a cluster-ownership claim.
         output.println("       ravenroot deployments <list"
                 + "|register <deployment-id> <graph.graphml>"
-                + "|inspect <deployment-id>|start <deployment-id>|stop <deployment-id>"
-                + "|restart <deployment-id>|undeploy <deployment-id>>");
+                + "|inspect <deployment-id>|start <deployment-id>"
+                + "|stop <deployment-id> [--reason <text>]"
+                + "|restart <deployment-id>"
+                + "|undeploy <deployment-id> [--disposition <DRAIN_FIRST|CANCEL_IN_FLIGHT|REFUSE_IF_BUSY>"
+                + " --reason <text>]>");
         output.println("       'deployments register' reserves the id and validates the graph but "
                 + "starts nothing (state=REGISTERED); 'start' is the separate call that serves it and "
                 + "answers only once the deployment has reached READY, or the truthful FAILED state if "
                 + "startup rolled back. 'stop' leaves the id registered and re-startable; 'undeploy' "
                 + "stops it and then removes the registration -- the two are deliberately distinct. "
-                + "An unknown id, a sibling tenant's id, and an id already undeployed all report the "
-                + "identical not-found failure, on both transports.");
+                + "Durable rows print generation and typed command outcome; Stop requires a reason, "
+                + "and Undeploy requires an explicit disposition and reason. "
+                + "GET never distinguishes an unknown id, a sibling tenant's id, or a removed id. "
+                + "Legacy repeated Undeploy is likewise not-found; durable Undeploy retains a tombstone "
+                + "so its exact intent can be replayed without making the id reusable.");
         // Listed separately because it is answered locally whether or not --server is
         // given -- the document is on this machine and so is the profile that reads it.
         output.println("       ravenroot validate <graph.graphml>");

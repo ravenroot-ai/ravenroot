@@ -60,6 +60,51 @@
         }
       }
     },
+    "/v1/admin/human-tasks/{taskId}/attention": {
+      "get": {
+        "summary": "Returns exact tenant-explicit Human Task review through an authorized override. Tenant administrators remain tenant-local; platform administrators may select another tenant. Audit evidence excludes review and response content.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/admin/human-tasks/{taskId}/settle": {
+      "post": {
+        "summary": "Applies the tenant-explicit canonical Human Task override settlement with a bounded reason and payload-free audit outcome.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/agent-authority": {
       "post": {
         "summary": "Dispatch context for the authenticated durable agent-authority trip/reset controls. Bare and unknown operations are nondisclosing 404 responses.",
@@ -251,11 +296,11 @@
     },
     "/v1/deployments": {
       "get": {
-        "summary": "GET lists the authenticated tenant's process-local deployments; POST registers an immutable graph version under ?id=... from GraphML. Registration starts nothing -- the response is REGISTERED and POST .../start is what serves. Unlike /v1/source-sessions a graph with no effective SOURCE is accepted. Re-registering the same id with the same graph returns the current status unchanged; with a different graph it is a 409. An explicit ?scope= other than LOCAL_PROCESS is refused rather than degraded. The response scope is always LOCAL_PROCESS: no durability, lease, fencing, failover or cluster claim.",
+        "summary": "GET lists the authenticated tenant's process-local deployments; POST registers an immutable graph version under ?id=... from GraphML. Registration starts nothing -- the response is REGISTERED and POST .../start is what serves. Unlike /v1/source-sessions a graph with no effective SOURCE is accepted. Re-registering the same id with the same graph returns the current status unchanged; with a different graph it is a 409. An explicit ?scope= other than LOCAL_PROCESS is refused rather than degraded. The response scope is always LOCAL_PROCESS. A deploymentGeneration field identifies durable lifecycle intent; the runtime remains process-local and makes no cluster ownership claim.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LocalDeploymentStatusList"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -269,11 +314,11 @@
         }
       },
       "post": {
-        "summary": "GET lists the authenticated tenant's process-local deployments; POST registers an immutable graph version under ?id=... from GraphML. Registration starts nothing -- the response is REGISTERED and POST .../start is what serves. Unlike /v1/source-sessions a graph with no effective SOURCE is accepted. Re-registering the same id with the same graph returns the current status unchanged; with a different graph it is a 409. An explicit ?scope= other than LOCAL_PROCESS is refused rather than degraded. The response scope is always LOCAL_PROCESS: no durability, lease, fencing, failover or cluster claim.",
+        "summary": "GET lists the authenticated tenant's process-local deployments; POST registers an immutable graph version under ?id=... from GraphML. Registration starts nothing -- the response is REGISTERED and POST .../start is what serves. Unlike /v1/source-sessions a graph with no effective SOURCE is accepted. Re-registering the same id with the same graph returns the current status unchanged; with a different graph it is a 409. An explicit ?scope= other than LOCAL_PROCESS is refused rather than degraded. The response scope is always LOCAL_PROCESS. A deploymentGeneration field identifies durable lifecycle intent; the runtime remains process-local and makes no cluster ownership claim.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LocalDeploymentStatus"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -289,14 +334,18 @@
     },
     "/v1/deployments/{id}": {
       "delete": {
-        "summary": "GET inspects and DELETE undeploys exactly one authenticated tenant's process-local deployment. Undeploy stops first and only then removes the registration, so it is strictly distinct from POST .../stop, which leaves the deployment registered and re-startable. Unknown ids, sibling-tenant ids and an id already undeployed are the identical nondisclosing 404.",
+        "summary": "GET inspects and DELETE undeploys exactly one authenticated tenant's process-local deployment. Undeploy stops first and only then removes the registration, so it is strictly distinct from POST .../stop, which leaves the deployment registered and re-startable. GET gives unknown ids, sibling-tenant ids and removed ids the identical nondisclosing 404. Legacy repeated DELETE does likewise; durable DELETE retains a tenant-scoped tombstone for typed replay or refusal. Durable Undeploy requires Idempotency-Key, X-Ravenroot-Expected-Generation, X-Ravenroot-Reason and an explicit X-Ravenroot-Undeploy-Disposition.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}},
+          {"name": "X-Ravenroot-Reason", "in": "header", "required": false, "description": "Required for durable Pause, Cancel, Stop and Undeploy; bounded operator reason.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Undeploy-Disposition", "in": "header", "required": false, "description": "Required for durable Undeploy: DRAIN_FIRST, CANCEL_IN_FLIGHT, or REFUSE_IF_BUSY.", "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -309,14 +358,14 @@
         }
       },
       "get": {
-        "summary": "GET inspects and DELETE undeploys exactly one authenticated tenant's process-local deployment. Undeploy stops first and only then removes the registration, so it is strictly distinct from POST .../stop, which leaves the deployment registered and re-startable. Unknown ids, sibling-tenant ids and an id already undeployed are the identical nondisclosing 404.",
+        "summary": "GET inspects and DELETE undeploys exactly one authenticated tenant's process-local deployment. Undeploy stops first and only then removes the registration, so it is strictly distinct from POST .../stop, which leaves the deployment registered and re-startable. GET gives unknown ids, sibling-tenant ids and removed ids the identical nondisclosing 404. Legacy repeated DELETE does likewise; durable DELETE retains a tenant-scoped tombstone for typed replay or refusal. Durable Undeploy requires Idempotency-Key, X-Ravenroot-Expected-Generation, X-Ravenroot-Reason and an explicit X-Ravenroot-Undeploy-Disposition.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LocalDeploymentStatus"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -335,10 +384,13 @@
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}},
+          {"name": "X-Ravenroot-Reason", "in": "header", "required": false, "description": "Required for durable Pause, Cancel, Stop and Undeploy; bounded operator reason.", "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -356,10 +408,12 @@
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -398,10 +452,13 @@
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}},
+          {"name": "X-Ravenroot-Reason", "in": "header", "required": false, "description": "Required for durable Pause, Cancel, Stop and Undeploy; bounded operator reason.", "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -415,14 +472,16 @@
     },
     "/v1/deployments/{id}/restart": {
       "post": {
-        "summary": "A completed stop followed by a start, never the two overlapping, so no source subscription is duplicated across the restart.",
+        "summary": "A completed stop followed by a start, never the two overlapping, so no source subscription is duplicated across the restart. Durable targets require Idempotency-Key and X-Ravenroot-Expected-Generation; Restart has no reason header.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -441,10 +500,12 @@
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -458,14 +519,16 @@
     },
     "/v1/deployments/{id}/start": {
       "post": {
-        "summary": "Starts one process-local deployment and answers when it has reached READY, or with the truthful FAILED status if startup failed and rolled back. Idempotent: starting a READY deployment answers immediately with its current status. Subject to this pod's active-deployment cap, which counts deployments a graceful shutdown would owe time to and so is checked here rather than at registration; exceeding it is a 429.",
+        "summary": "Starts one process-local deployment and answers when it has reached READY, or with the truthful FAILED status if startup failed and rolled back. Idempotent: starting a READY deployment answers immediately with its current status. Subject to this pod's active-deployment cap, which counts deployments a graceful shutdown would owe time to and so is checked here rather than at registration; exceeding it is a 429. Durable targets require Idempotency-Key and X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -480,14 +543,17 @@
     },
     "/v1/deployments/{id}/stop": {
       "post": {
-        "summary": "Stops one process-local deployment and leaves it registered and re-startable. Closes admission and inbound sources first, then releases only that deployment's own domain -- never a sibling deployment and never the shared ActorSystem. Idempotent: stopping a stopped deployment answers STOPPED.",
+        "summary": "Stops one process-local deployment and leaves it registered and re-startable. Closes admission and inbound sources first, then releases only that deployment's own domain -- never a sibling deployment and never the shared ActorSystem. Idempotent: stopping a stopped deployment answers STOPPED. Durable targets also require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "Idempotency-Key", "in": "header", "required": false, "description": "Required for a durable deployment; one unique key per operator intent.", "schema": {"type": "string"}},
+          {"name": "X-Ravenroot-Expected-Generation", "in": "header", "required": false, "description": "Required for a durable deployment; exact authoritative generation.", "schema": {"type": "integer", "format": "int64", "minimum": 0}},
+          {"name": "X-Ravenroot-Reason", "in": "header", "required": false, "description": "Required for durable Pause, Cancel, Stop and Undeploy; bounded operator reason.", "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentCommandResponse"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -567,6 +633,22 @@
         }
       }
     },
+    "/v1/embed/executions": {
+      "post": {
+        "summary": "Requests one idempotent traversal under a separately authorized exact v2 embed binding.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "202": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
+          "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
+        }
+      }
+    },
     "/v1/embed/launch": {
       "get": {
         "summary": "Consumes a one-use launch ticket during an iframe navigation and returns only the distinct-origin viewer bootstrap; never returns graph data or a bearer.",
@@ -607,6 +689,21 @@
           "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
           "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
           "413": {"description": "EMBED_DATA_TOO_LARGE"}
+        }
+      }
+    },
+    "/v1/embed/runs": {
+      "post": {
+        "summary": "Reads a bounded, server-filtered run list for one exact v2 embed deployment binding.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
+          "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
         }
       }
     },
@@ -884,6 +981,25 @@
         }
       }
     },
+    "/v1/human-task-interactions/complete": {
+      "post": {
+        "summary": "Completes one configured external-provider interaction using only its bounded signed capability. Ambient Authorization and Cookie credentials are refused; origin, provider signature, task generation, schema, action, expiry, and durable revocation are fenced.",
+        "x-assistant-posture": "NEVER",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskCapabilityCompletion"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskDecisionResult"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"}
+        }
+      }
+    },
     "/v1/human-tasks": {
       "get": {
         "summary": "Lists a bounded page of the authenticated tenant's outstanding durable human tasks. Terminal tasks are omitted unless includeTerminal=true; responses contain bounded display and schema metadata, never execution or response payloads.",
@@ -950,6 +1066,78 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskConfirmationRequest"}}}},
         "responses": {
           "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskConfirmationResult"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/human-tasks/{taskId}/interaction": {
+      "delete": {
+        "summary": "Issues or durably revokes one expiring, task- and generation-bound capability for an operator-registered custom presentation or external provider. The response contains only the authorized review projection and pinned response contract.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskCapabilityRevocation"}}}},
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      },
+      "post": {
+        "summary": "Issues or durably revokes one expiring, task- and generation-bound capability for an operator-registered custom presentation or external provider. The response contains only the authorized review projection and pinned response contract.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskInteractionLaunch"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/human-tasks/{taskId}/settle": {
+      "post": {
+        "summary": "Applies the canonical generation-fenced Human Task settlement document used by HTTP, the interaction WebSocket, Workbench, and CLI. Typed response bytes remain separate from action and comment; an explicit override carries a bounded reason and requires Human Task override authority.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskSettlement"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskDecisionResult"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1431,7 +1619,17 @@
       "HumanTaskNodeCount": {"allOf": [{"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, {"type": "object", "required": ["nodeId"], "properties": {"nodeId": {"type": "string"}}}]},
       "HumanTaskAttentionPage": {"type": "object", "required": ["schemaVersion", "items", "nextCursor", "counts", "nodeCounts"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}, "nextCursor": {"type": "string", "nullable": true}, "counts": {"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, "nodeCounts": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskNodeCount"}}}},
       "HumanTaskConfirmationResult": {"type": "object", "required": ["schemaVersion", "outcome", "task"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "outcome": {"type": "string", "enum": ["APPLIED", "ALREADY_APPLIED"]}, "task": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}},
+      "HumanTaskOpaqueResponse": {"type": "object", "additionalProperties": false, "required": ["contentType", "payloadBase64"], "properties": {"contentType": {"type": "string"}, "payloadBase64": {"type": "string", "format": "byte"}}},
+      "HumanTaskOverride": {"type": "object", "additionalProperties": false, "required": ["version", "reason"], "properties": {"version": {"type": "integer", "enum": [1]}, "reason": {"type": "string", "minLength": 1, "maxLength": 1024}}},
+      "HumanTaskSettlement": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "action"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "action": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}, "comment": {"type": "string"}, "response": {"$ref": "#/components/schemas/HumanTaskOpaqueResponse"}, "override": {"$ref": "#/components/schemas/HumanTaskOverride"}}},
+      "HumanTaskCapabilityCompletion": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "capability", "action"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "capability": {"type": "string"}, "action": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}, "comment": {"type": "string"}, "response": {"$ref": "#/components/schemas/HumanTaskOpaqueResponse"}}},
+      "HumanTaskCapabilityRevocation": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "capability"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "capability": {"type": "string"}}},
+      "HumanTaskInteractionLaunch": {"type": "object", "description": "Bounded registered-host launch data: capability metadata, exact task/generation/actions, authorized review presentation, and pinned response schema. It never contains a Ravenroot bearer token or provider signing credential."},
       "HumanTaskDecisionResult": {"type": "object", "required": ["outcome", "taskId", "generation"], "properties": {"outcome": {"type": "string"}, "taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "resumeTraversalId": {"type": "string", "format": "uuid"}}},
+      "LocalDeploymentStatus": {"type":"object","required":["deploymentId","state","sourceCount","graphVersion","scope","diagnostic"],"properties":{"deploymentId":{"type":"string"},"state":{"type":"string","enum":["REGISTERED","STARTING","READY","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":0},"graphVersion":{"type":"string","nullable":true},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"deploymentGeneration":{"type":"integer","format":"int64","minimum":0,"description":"Present only when this deployment is governed by durable lifecycle authority."}}},
+      "LocalDeploymentStatusList": {"type":"object","required":["scope","deployments"],"properties":{"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"deployments":{"type":"array","items":{"$ref":"#/components/schemas/LocalDeploymentStatus"}}}},
+      "DeploymentCommandOutcome": {"type":"object","required":["outcome"],"properties":{"outcome":{"type":"string","enum":["ACCEPTED","CONVERGED","REPLAYED","IDEMPOTENCY_CONFLICT","STALE_GENERATION","SUPERSEDED","REFUSED","FAILED","TERMINAL"]},"commandId":{"type":"string"},"fromGeneration":{"type":"integer","format":"int64","minimum":0},"generation":{"type":"integer","format":"int64","minimum":0},"expected":{"type":"integer","format":"int64","minimum":0},"observed":{"type":"string"},"key":{"type":"string"},"by":{"type":"string"},"reason":{"type":"string"},"cause":{"type":"string"},"original":{"$ref":"#/components/schemas/DeploymentCommandOutcome"}}},
+      "DeploymentCommandResponse": {"oneOf":[{"$ref":"#/components/schemas/LocalDeploymentStatus"},{"$ref":"#/components/schemas/DeploymentCommandOutcome"}],"description":"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome."},
       "ExecutionStreamEventBase": {"type":"object","description":"Version 1 JSON data of an execution SSE frame, not the whole SSE response. Compare id only within the authenticated tenant and source; RING also requires the same process-local continuity domain. Unknown fields and event classifiers are allowed. A conflicting type alias is invalid. IDs and aliases require semantic equality checks outside OpenAPI 3.0.3.","required":["schemaVersion","source","id","eventType","occurredAt","processInstanceId","traversalId"],"additionalProperties":true,"properties":{"schemaVersion":{"type":"integer","enum":[1]},"source":{"type":"string","enum":["RING","DURABLE"]},"id":{"type":"string","pattern":"^(0|-?[1-9][0-9]*)$","maxLength":20,"description":"Canonical signed decimal long string equal to the SSE id and native cursor. Not a globally unique event UUID. Use exact integer arithmetic; never compare against a rounded floating-point cursor."},"eventType":{"type":"string","minLength":1,"description":"Canonical classifier. Unknown values remain readable."},"occurredAt":{"type":"string","description":"Producer occurrence time in Java Instant text form, including supported extended years. Diagnostic time, not an ordering axis."},"processInstanceId":{"type":"string","format":"uuid"},"traversalId":{"type":"string","format":"uuid"},"deploymentId":{"type":"string","description":"Owning long-lived deployment; null for a one-shot submission that opened no deployment domain. The only identity a client can hold before a source-produced traversal exists. Emitted on RING frames; the durable journal does not retain it, so a DURABLE frame omits it rather than reporting null.","nullable":true},"graphVersion":{"type":"string"},"description":{"type":"string"},"invocationId":{"type":"string","format":"uuid","nullable":true},"attemptId":{"type":"string","format":"uuid","nullable":true},"nodeId":{"type":"string","nullable":true},"edgeId":{"type":"string","description":"Stable edge identity; unchanged 8192 UTF-8 byte limit and shared traversal wire budget.","nullable":true},"type":{"type":"string","deprecated":true,"description":"Readers accept this compatibility alias on either source when equal to eventType. RING writers retain it; DURABLE writers need not emit it. No removal date is scheduled."}}},
       "ExecutionStreamEvent": {"oneOf":[{"$ref":"#/components/schemas/RingExecutionStreamEvent"},{"$ref":"#/components/schemas/DurableExecutionStreamEvent"}],"discriminator":{"propertyName":"source","mapping":{"RING":"#/components/schemas/RingExecutionStreamEvent","DURABLE":"#/components/schemas/DurableExecutionStreamEvent"}}},
       "RingExecutionStreamEvent": {"allOf":[{"$ref":"#/components/schemas/ExecutionStreamEventBase"},{"type":"object","required":["sequence","engineId","executionId","type","activeInstances","inFlightArrivals","fallback","publicReason","message","messageRedacted","messageTruncated","processingDuration"],"additionalProperties":true,"properties":{"source":{"type":"string","enum":["RING"]},"sequence":{"type":"integer","format":"int64"},"engineId":{"type":"string"},"executionId":{"type":"string","format":"uuid","description":"Legacy traversalId alias; values must agree."},"activeInstances":{"type":"integer","minimum":0},"inFlightArrivals":{"type":"integer","minimum":0},"fallback":{"type":"boolean"},"publicReason":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9._:-]+$","nullable":true},"message":{"type":"string","description":"Already-safe bounded author message, not raw exception detail.","nullable":true},"messageRedacted":{"type":"boolean"},"messageTruncated":{"type":"boolean"},"output":{"description":"Optional bounded, targeted-redacted built-in log output. Absent is not an empty output."},"outputRedacted":{"type":"boolean"},"outputTruncated":{"type":"boolean"},"processingDuration":{"type":"number","minimum":0,"description":"Measured seconds; null means not measured, never zero by substitution.","nullable":true}},"not":{"anyOf":[{"required":["journalOffset"]},{"required":["streamSequence"]},{"required":["eventId"]},{"required":["causationId"]},{"required":["handlerId"]}]}}],"example":{"schemaVersion":1,"occurredAt":"2026-01-01T00:00:00Z","graphVersion":"graph-v1","processInstanceId":"10000000-0000-0000-0000-000000000001","traversalId":"20000000-0000-0000-0000-000000000002","invocationId":null,"attemptId":null,"nodeId":null,"edgeId":null,"source":"RING","id":"7","eventType":"EXECUTION_STARTED","sequence":7,"engineId":"pekko","executionId":"20000000-0000-0000-0000-000000000002","deploymentId":null,"type":"EXECUTION_STARTED","activeInstances":0,"inFlightArrivals":0,"fallback":false,"description":"Execution started.","publicReason":null,"message":null,"messageRedacted":false,"messageTruncated":false,"processingDuration":null}},

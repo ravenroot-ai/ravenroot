@@ -134,6 +134,8 @@ public record HumanTaskAttentionCursor(String value) {
             authorization.roles().stream().sorted().forEach(role -> update(digest, role));
             updateCount(digest, authorization.scopes().size());
             authorization.scopes().stream().sorted().forEach(scope -> update(digest, scope));
+            digest.update((byte) (authorization.responderEnforcementEnabled() ? 1 : 0));
+            digest.update((byte) (authorization.overrideAuthorized() ? 1 : 0));
             return digest.digest();
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);

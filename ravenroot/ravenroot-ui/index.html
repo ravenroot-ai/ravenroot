@@ -504,6 +504,28 @@
           <span class="panel-grip" aria-hidden="true"></span>
           <h2 class="panel-title" id="panel-activity-t">Runtime activity</h2>
           <span id="activity-summary">Waiting for events</span>
+          <!-- How much of the event stream this panel RENDERS. A presentation-only observer
+               preference: it cannot reach GraphML, the graph, the execution or the node/edge
+               monitoring projection, and it is never reset by, or an input to, a submission.
+               Output ships selected and the choice is deliberately NOT persisted, so a reload
+               starts quiet again.
+
+               It sits in the header rather than inside `#activity-log` on purpose: that element is
+               the panel's `aria-live` region, and switching modes must not re-announce its entries.
+               Radio semantics with a roving tabindex, the same keyboard model as the topbar's
+               Design/Monitoring control: arrow keys move between levels and select, Home/End jump
+               to the ends, and exactly one button is a tab stop. -->
+          <div class="btn-group activity-modes" role="radiogroup" aria-label="Activity detail level">
+            <button class="btn" role="radio" type="button" aria-checked="true" tabindex="0"
+                    data-action="activity-mode" data-mode="output"
+                    data-tooltip="Intentional log output, failures and the final execution state">Output</button>
+            <button class="btn" role="radio" type="button" aria-checked="false" tabindex="-1"
+                    data-action="activity-mode" data-mode="nodes"
+                    data-tooltip="Node start, completion and failure, plus everything Output shows">Nodes</button>
+            <button class="btn" role="radio" type="button" aria-checked="false" tabindex="-1"
+                    data-action="activity-mode" data-mode="trace"
+                    data-tooltip="The complete technical event stream, including identifiers">Trace</button>
+          </div>
           <button class="activity-clear" data-action="clear-activity" data-tooltip-exempt="persistent-text">Clear</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="activity"
                 aria-haspopup="menu" aria-expanded="false"
@@ -888,8 +910,8 @@
      listener session there, and every other graph still submits a real one-shot execution.
 
      STATES SHOWN ARE THE SERVER'S OWN WORDS -- REGISTERED, STARTING, READY, DEGRADED, STOPPING,
-     STOPPED, FAILED -- never a UI-invented approximation. Every row also names scope=LOCAL_PROCESS: no durability,
-     failover or cluster claim is made anywhere in this window. -->
+     STOPPED, FAILED -- never a UI-invented approximation. Every row also names scope=LOCAL_PROCESS;
+     durable generations describe reconciled command intent, not cluster-owned runtime execution. -->
 <dialog id="deployments-dialog" class="credentials-dialog deployments-dialog" aria-labelledby="deployments-title">
   <header class="credentials-hd">
     <h2 id="deployments-title">Deployments</h2>

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletionException;
@@ -62,6 +63,81 @@ class SqliteDeploymentRegistryRetentionTest {
                     DeploymentRegistry.RegistryException.class, thrown.getCause());
             assertInstanceOf(DeploymentRegistry.FailureReason.Conflict.class, failure.reason(),
                     "a purged key is evaluated as a new request, not replayed from a forgotten ledger row");
+        }
+    }
+
+    @Test
+    void retainedIdentitySurvivesLedgerPurgeAndReturnsTheCurrentAggregateAfterReopen(@TempDir Path directory) {
+        MutableClock clock = new MutableClock(START);
+        Duration retention = Duration.ofMinutes(5);
+        Path database = directory.resolve("retained-identity.db");
+        var content = new GraphVersion.Content(1, "graph".getBytes(StandardCharsets.UTF_8), "alice",
+                clock.instant());
+        var create = new DeploymentRegistry.CreateCommand(
+                "acme", "local-deployment:orders", "a".repeat(64), true);
+        DeploymentId original;
+
+        try (var registry = new SqliteDeploymentRegistry(database, clock,
+                tenant -> DeploymentId.of("dep-original"), retention)) {
+            DeploymentRegistry.Record made = registry.create(content, create).toCompletableFuture().join();
+            original = made.deploymentId();
+            var running = new DeploymentRegistry.Desired(DeploymentRegistry.DesiredKind.RUNNING, 1L,
+                    DeploymentRegistry.UpdateStrategy.STOP_FIRST, made.generation());
+            registry.command(running, new DeploymentRegistry.Command("acme", original, "start", "b".repeat(64),
+                    RevisionExpectation.exactly(made.revision()))).toCompletableFuture().join();
+        }
+
+        clock.advance(retention.plusSeconds(1));
+        try (var registry = new SqliteDeploymentRegistry(database, clock,
+                tenant -> DeploymentId.of("dep-must-not-be-minted"), retention)) {
+            assertEquals(2, registry.purgeExpiredCommandRecords("acme").toCompletableFuture().join());
+            DeploymentRegistry.Record recovered = registry.create(content, create).toCompletableFuture().join();
+            assertEquals(original, recovered.deploymentId());
+            assertEquals(1, recovered.generation());
+            assertEquals(DeploymentRegistry.DesiredKind.RUNNING, recovered.desired().kind());
+        }
+    }
+
+    @Test
+    void identityMigrationBackfillsAnExistingCreateLedgerWithTheCurrentAggregate(@TempDir Path directory)
+            throws Exception {
+        MutableClock clock = new MutableClock(START);
+        Path database = directory.resolve("identity-upgrade.db");
+        var content = new GraphVersion.Content(1, "graph".getBytes(StandardCharsets.UTF_8), "alice",
+                clock.instant());
+        var legacyCreate = new DeploymentRegistry.CreateCommand(
+                "acme", "local-deployment:orders", "a".repeat(64));
+        DeploymentId original;
+        try (var registry = new SqliteDeploymentRegistry(database, clock,
+                tenant -> DeploymentId.of("dep-before-upgrade"))) {
+            DeploymentRegistry.Record made = registry.create(content, legacyCreate).toCompletableFuture().join();
+            original = made.deploymentId();
+            registry.command(new DeploymentRegistry.Desired(DeploymentRegistry.DesiredKind.RUNNING, 1L,
+                            DeploymentRegistry.UpdateStrategy.STOP_FIRST, made.generation()),
+                    new DeploymentRegistry.Command("acme", original, "start", "b".repeat(64),
+                            RevisionExpectation.exactly(made.revision()))).toCompletableFuture().join();
+        }
+
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            // Restore the exact version-32 shape. Identity bindings are migration 33 and the
+            // process incarnation origin is migration 34, so both later structures and history
+            // rows must be removed before exercising the identity backfill.
+            statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
+            statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
+            statement.execute("DROP TABLE deployment_identity_binding");
+            statement.execute("DELETE FROM store_schema_history WHERE version >= 33");
+            statement.execute("PRAGMA user_version = 32");
+        }
+
+        try (var registry = new SqliteDeploymentRegistry(database, clock,
+                tenant -> DeploymentId.of("dep-after-upgrade"))) {
+            DeploymentRegistry.Record recovered = registry.create(content,
+                    new DeploymentRegistry.CreateCommand("acme", "local-deployment:orders",
+                            "a".repeat(64), true)).toCompletableFuture().join();
+            assertEquals(original, recovered.deploymentId());
+            assertEquals(1, recovered.generation());
+            assertEquals(DeploymentRegistry.DesiredKind.RUNNING, recovered.desired().kind());
         }
     }
 

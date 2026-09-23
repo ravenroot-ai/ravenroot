@@ -1,7 +1,11 @@
 name: Fast feedback
 
-# Ultralight feedback to whoever is working on a branch. This is advice, not a gate: the PR runs a
-# small admission suite and the merge group verifies the integration commit in full.
+# Ultralight feedback to whoever is working on a branch. This is advice, not a gate: the review
+# candidate gets one dispatched full run before its pull request is opened, and the merge group
+# verifies the integration commit in full again. This workflow now also carries the cheap checks the
+# retired `admission` tier used to run on a pull request into `dev` — the review and CI contract
+# suites, the UI unit tests, and a backend compile — so a branch author still gets that signal, on
+# every push rather than only once a full run is dispatched.
 #
 # This workflow must never publish a check context named `ci-required`, as a success or as a skipped
 # job. Check runs belong to the commit, and GitHub counts a skipped job as passed for a required
@@ -22,9 +26,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Work-branch feedback intentionally checks only cheap invariants. Contract suites belong to the
-  # review candidate and regression suites to the merge group, so the same test is not paid for at
-  # every push.
+  # Work-branch feedback intentionally checks only cheap invariants, plus the CI classifier's own
+  # contract suites and the UI unit suite carried over from the retired `admission` tier: cheap enough
+  # to repeat on every push. The expensive regression suites still belong to the review candidate's
+  # dispatched full run and to the merge group, so those are not paid for at every push.
   fast-policy:
     name: fast-policy
     runs-on: ubuntu-24.04
@@ -49,6 +54,14 @@ jobs:
       # The defence that does not depend on any tool's settings, read from the commits themselves.
       - name: Refuse assistant attribution in the new commits
         run: python3 scripts/check_commit_attribution.py
+      # Carried over from the retired `admission-policy` job: the CI classifier and its gate are
+      # exactly the code this push is most likely to have touched when it is CI-related, so their own
+      # contract suites belong to the fastest feedback available, not only to a dispatched full run.
+      - name: Verify the CI classification and gate contracts
+        run: |
+          python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_ci_required
+          python3 -m unittest scripts.tests.test_ci_topology
 
   fast-ui:
     name: fast-ui
@@ -69,6 +82,10 @@ jobs:
       - name: Build the UI
         working-directory: ravenroot/ravenroot-ui
         run: npm run build
+      # Carried over from the retired `admission-ui` job.
+      - name: Run the UI unit suite
+        working-directory: ravenroot/ravenroot-ui
+        run: npm test
 
   fast-backend:
     name: fast-backend
@@ -86,9 +103,11 @@ jobs:
           cache-dependency-path: |
             ravenroot/pom.xml
             ravenroot/**/pom.xml
-      - name: Validate the backend reactor without compiling or testing it
+      # Carried over from the retired `admission-backend` job: a compile catches what a plain
+      # `validate` cannot, without paying for the test suites the full tier already owns.
+      - name: Compile backend production sources without testing them
         working-directory: ravenroot
-        run: mvn -B --no-transfer-progress validate
+        run: mvn -B --no-transfer-progress -DskipTests compile
 
   ci-fast:
     name: ci-fast

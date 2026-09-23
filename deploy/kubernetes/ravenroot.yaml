@@ -123,6 +123,12 @@ spec:
               value: ""
             # Empty Human Task policy values select the Java typed defaults. Kustomize overlays may
             # replace individual values with quoted integers within the documented bounds.
+            - name: RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED
+              value: "false"
+            # A Kustomize overlay may set this to a read-only Secret/ConfigMap mount containing the
+            # complete operator-owned registry. Blank keeps registered presentations disabled.
+            - name: RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG
+              value: ""
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
               value: ""
             - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES

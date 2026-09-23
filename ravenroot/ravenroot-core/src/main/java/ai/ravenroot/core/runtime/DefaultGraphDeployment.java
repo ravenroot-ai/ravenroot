@@ -216,6 +216,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private GraphManager manager;
     private GraphRunner runner;
     private List<SourceHandle> sources = List.of();
+    /** Sources stopped for restart but still owed their terminal release if this registration ends. */
+    private List<SourceHandle> restartableSources = List.of();
     private volatile ManagedIngress managedIngress;
     /**
      * The generation admission is currently open at, and the value every arrival admitted through
@@ -878,13 +880,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         lock.lock();
         try {
             DeploymentState current = status.state();
-            if (current == DeploymentState.STOPPED) {
+            if (current == DeploymentState.STOPPED
+                    && (release == SourceRelease.STOP || restartableSources.isEmpty())) {
                 return CompletableFuture.completedFuture(status);
             }
             if (inFlightStop != null) {
                 return inFlightStop;
             }
-            if (current == DeploymentState.COLD || current == DeploymentState.FAILED) {
+            if ((current == DeploymentState.COLD || current == DeploymentState.FAILED)
+                    && (release == SourceRelease.STOP || restartableSources.isEmpty())) {
                 // COLD never started; a FAILED start already rolled back whatever it opened before
                 // reporting FAILED. Either way there is nothing left to release.
                 status = DeploymentStatus.of(id, DeploymentState.STOPPED);
@@ -1541,6 +1545,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         GraphRunner runnerToClose;
         GraphManager managerToClose;
         List<SourceHandle> sourcesToStop;
+        List<SourceHandle> stoppedSourcesToRelease;
         RequestReplyCoordinator requestRepliesToClose;
         lock.lock();
         try {
@@ -1548,6 +1553,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             runnerToClose = this.runner;
             managerToClose = this.manager;
             sourcesToStop = this.sources;
+            stoppedSourcesToRelease = release == SourceRelease.SHUTDOWN && this.sources.isEmpty()
+                    ? this.restartableSources : List.of();
             requestRepliesToClose = this.requestReplyCoordinator;
         } finally {
             lock.unlock();
@@ -1584,6 +1591,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     ? handle.source()::shutdown
                     : handle.source()::stop);
         }
+        for (SourceHandle handle : stoppedSourcesToRelease) {
+            stopSourceBounded(handle.source()::shutdown);
+        }
         try {
             if (runnerToClose != null) {
                 // Refuses a further hop to every traversal still in flight, then stops every
@@ -1609,6 +1619,14 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             this.runner = null;
             this.manager = null;
             this.sources = List.of();
+            if (release == SourceRelease.SHUTDOWN) {
+                this.restartableSources = List.of();
+            } else if (!sourcesToStop.isEmpty()) {
+                // The newest source instance owns the same cross-restart resource the previous
+                // instance retained. Keeping every historical instance would release that shared
+                // resource repeatedly on terminal removal.
+                this.restartableSources = List.copyOf(sourcesToStop);
+            }
             this.degradedSources.clear();
             this.ingressPermits = null;
             this.requestReplyCoordinator = null;
@@ -2150,7 +2168,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                         .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessCreated(accepted,
                                 new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion)))
                         .recordOrigin(ai.ravenroot.api.persistence.ExecutionOrigin.of(
-                                executionContextDeploymentId, traversalId.toString(), security.requestId()))
+                                executionContextDeploymentId, incarnationId,
+                                traversalId.toString(), security.requestId()))
                         .build()));
         // RUNNING is committed here, before the engine send below, so a persisted RUNNING means
         // "sent, outcome unknown" rather than "about to be sent" -- the reading PERS-04's recovery

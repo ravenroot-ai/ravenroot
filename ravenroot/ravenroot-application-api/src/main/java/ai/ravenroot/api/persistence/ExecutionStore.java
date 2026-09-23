@@ -772,6 +772,31 @@ public interface ExecutionStore extends AutoCloseable {
         return humanTaskConfirmationsUnsupported();
     }
 
+    /**
+     * Persists one payload-free task capability revocation across restart and replicas.
+     *
+     * @param tenantId authenticated tenant boundary
+     * @param revocation immutable task-bound revocation
+     * @return stage completing after the revocation is durable
+     */
+    default CompletionStage<Void> revokeHumanTaskInteraction(
+            String tenantId, HumanTaskInteractionRevocation revocation) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
+    /**
+     * Checks an unexpired task capability revocation inside the tenant boundary.
+     *
+     * @param tenantId authenticated tenant boundary
+     * @param capabilityId signed capability identity
+     * @param now authoritative instant used to fence expiry
+     * @return stage yielding whether the capability remains revoked
+     */
+    default CompletionStage<Boolean> isHumanTaskInteractionRevoked(
+            String tenantId, UUID capabilityId, java.time.Instant now) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
     // ---------------------------------------------------------------- durable execution pauses
 
     /**
@@ -889,6 +914,37 @@ public interface ExecutionStore extends AutoCloseable {
  * @return journal records after the cursor, bounded by the requested limit.
      */
     CompletionStage<List<JournalRecord>> readJournal(String tenantId, long afterOffset, int limit);
+
+    /**
+     * Reads one exact process stream by its durable per-instance sequence.
+     * @param key tenant-scoped process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of records to return
+     * @return ordered durable records after the requested sequence
+     */
+    default CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                     long afterSequence, int limit) {
+        var refused = new java.util.concurrent.CompletableFuture<List<JournalRecord>>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EVENT_JOURNAL)));
+        return refused;
+    }
+
+    /**
+     * Reads one process stream together with its atomic retained and allocation boundaries.
+     * Implementations must fail with {@link ExecutionStoreFailure.JournalTruncated} when the
+     * requested continuation precedes {@link ProcessJournalPage#retainedFromSequence()}.
+     * @param key tenant-scoped process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of records to return
+     * @return one bounded page and the boundaries observed in the same read transaction
+     */
+    default CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                        long afterSequence, int limit) {
+        return readProcessJournal(key, afterSequence, limit)
+                .thenApply(records -> new ProcessJournalPage(records, 1, records.isEmpty()
+                        ? afterSequence + 1 : records.getLast().streamSequence() + 1));
+    }
 
     /**
      * The lowest {@link JournalRecord#journalOffset()} this tenant's journal still holds, or the next

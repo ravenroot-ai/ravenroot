@@ -52,6 +52,12 @@ class HumanTaskAttentionModelTest {
         assertThrows(IllegalArgumentException.class, () -> cursor.boundary("tenant-a", query,
                 new HumanTaskAttentionAuthorization("issuer|USER|operator",
                         Set.of("REVIEWER", "OPERATIONS"), Set.of("human:decide"))));
+        assertThrows(IllegalArgumentException.class, () -> cursor.boundary("tenant-a", query,
+                new HumanTaskAttentionAuthorization("issuer|USER|operator",
+                        Set.of("REVIEWER"), Set.of("human:decide"), false)));
+        assertThrows(IllegalArgumentException.class, () -> cursor.boundary("tenant-a", query,
+                new HumanTaskAttentionAuthorization("issuer|USER|operator",
+                        Set.of("REVIEWER"), Set.of("human:decide"), true, true)));
         String changed = (cursor.value().startsWith("A") ? "B" : "A") + cursor.value().substring(1);
         assertThrows(IllegalArgumentException.class, () -> new HumanTaskAttentionCursor(changed)
                 .boundary("tenant-a", query, authorization));

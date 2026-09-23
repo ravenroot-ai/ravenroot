@@ -112,6 +112,23 @@ class DefaultAuthorizationServiceTest {
     }
 
     @Test
+    void humanTaskOverrideRequiresExplicitAdminScopeAndPreservesTenantAuthority() {
+        var service = new DefaultAuthorizationService(event -> { });
+        var resource = ProtectedResource.owned("human-task", "task-1", "tenant-a");
+        assertTrue(service.decide(context("tenant-a", Set.of(Role.TENANT_ADMIN),
+                        Set.of("ravenroot.human-task.override")),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+        assertFalse(service.decide(context("tenant-b", Set.of(Role.TENANT_ADMIN),
+                        Set.of("ravenroot.human-task.override")),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+        assertTrue(service.decide(context("platform", Set.of(Role.PLATFORM_ADMIN),
+                        Set.of("ravenroot.human-task.override")),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+        assertFalse(service.decide(context("tenant-a", Set.of(Role.TENANT_ADMIN), Set.of()),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+    }
+
+    @Test
     void runnerPrincipalAndTenantRefusalsAreRecordedAsDeniedEvenForPlatformAdmins() {
         var events = new ArrayList<AuthorizationAuditEvent>();
         var service = new DefaultAuthorizationService(events::add);
@@ -146,7 +163,8 @@ class DefaultAuthorizationServiceTest {
     private static Role permittedRole(AuthorizationAction action) {
         return switch (action) {
             case RUNNER_READ, STATUS_READ, CATALOG_READ, ARTIFACT_LIST, EMBED_GRAPH_READ,
-                    EMBED_SESSION_CREATE, DEPLOYMENT_OBSERVE -> Role.VIEWER;
+                    EMBED_SESSION_CREATE, DEPLOYMENT_OBSERVE, EMBED_DEPLOYMENT_RUN_READ,
+                    EMBED_DEPLOYMENT_EXECUTE -> Role.VIEWER;
             // EMBED_REGISTRATION_ADMIN is deliberately not in the VIEWER arm above, unlike the
             // two embed actions beside it. Deciding which snapshot an embed may expose is operations.
             case RUNNER_CONTROL, RUNNER_DISPATCH, GRAPH_READ, EXECUTION_START, EXECUTION_READ, EXECUTION_CONTROL,
@@ -154,7 +172,8 @@ class DefaultAuthorizationServiceTest {
             case ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
             case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE -> Role.APPROVER;
             case RUNTIME_OBSERVE, AGENT_AUTHORITY_CONTROL, AUDIT_ADMIN -> Role.PLATFORM_ADMIN;
-            case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN -> Role.TENANT_ADMIN;
+            case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN,
+                    HUMAN_TASK_OVERRIDE -> Role.TENANT_ADMIN;
             // EXECUTION_CONTROL moved out of this reserved arm the same commit it became
             // available -- see enforcesTheCompleteRoleAndScopeMatrix, which now exercises it through
             // the positive branch above (allowed with role+scope, denied with wrong role, denied with
@@ -170,6 +189,8 @@ class DefaultAuthorizationServiceTest {
                 || action == AuthorizationAction.ARTIFACT_LIST
                 || action == AuthorizationAction.EMBED_GRAPH_READ
                 || action == AuthorizationAction.EMBED_SESSION_CREATE
-                || action == AuthorizationAction.DEPLOYMENT_OBSERVE;
+                || action == AuthorizationAction.DEPLOYMENT_OBSERVE
+                || action == AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ
+                || action == AuthorizationAction.EMBED_DEPLOYMENT_EXECUTE;
     }
 }

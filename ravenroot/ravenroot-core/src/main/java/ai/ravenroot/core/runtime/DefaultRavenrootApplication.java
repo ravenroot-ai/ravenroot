@@ -4,10 +4,12 @@ import ai.ravenroot.api.application.ApplicationStatus;
 import ai.ravenroot.api.application.DurableExecutionEvent;
 import ai.ravenroot.api.application.DeploymentEventBatch;
 import ai.ravenroot.api.application.DeploymentViewerView;
+import ai.ravenroot.api.application.EmbedDeploymentStart;
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.DurableProcessEventPage;
 import ai.ravenroot.api.application.ExecutionSubmission;
 import ai.ravenroot.api.application.GraphSummary;
 import ai.ravenroot.api.application.LiveExecution;
@@ -2361,6 +2363,35 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return List.copyOf(events);
     }
 
+    @Override
+    public List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
+                                                               long afterSequence, int limit) {
+        return durableEventPageForProcess(tenantId, processInstanceId, afterSequence, limit).events();
+    }
+
+    @Override
+    public DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
+                                                               long afterSequence, int limit) {
+        if (!durableEventJournalAvailable()) return new DurableProcessEventPage(List.of(), 1, 1);
+        var key = new ExecutionKey(requireTenant(tenantId), java.util.Objects.requireNonNull(processInstanceId));
+        var page = await(executionStore.readProcessJournalPage(key, afterSequence, limit));
+        var nodeNames = loadInvocationNodeNames(key);
+        var events = new ArrayList<DurableExecutionEvent>(page.records().size());
+        for (JournalRecord record : page.records()) {
+            EventEnvelope envelope = record.envelope();
+            String nodeId = envelope.invocation().map(nodeNames::get).orElse(null);
+            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
+                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
+                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
+                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
+                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
+                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
+                            .orElse(null) : null));
+        }
+        return new DurableProcessEventPage(events, page.retainedFromSequence(), page.nextSequence());
+    }
+
     /**
      * The invocation-to-node binding {@code InvocationAdded} recorded as structure, in the same
      * transaction as the events themselves. The envelope deliberately carries no node id; see
@@ -2621,6 +2652,42 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (RuntimeException unprojectable) {
             return java.util.Optional.empty();
         }
+    }
+
+    @Override
+    public EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
+                                                               String deploymentId,
+                                                               String incarnationId,
+                                                               String graphVersion,
+                                                               String requestId) {
+        java.util.Objects.requireNonNull(security, "security");
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) {
+            throw new IllegalArgumentException("invalid embed execution request id");
+        }
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()),
+                requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        }
+        var receipt = record.deployment().ingress().offerDurably(security,
+                ai.ravenroot.api.deployment.IngressTarget.start(), java.util.Map.of(),
+                "embed-viewer", requestId);
+        var outcome = switch (receipt) {
+            case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored ->
+                    EmbedDeploymentStart.Outcome.ACCEPTED;
+            case ai.ravenroot.api.deployment.IngressReceipt.Duplicate ignored ->
+                    EmbedDeploymentStart.Outcome.DUPLICATE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Ambiguous ignored ->
+                    EmbedDeploymentStart.Outcome.RECONCILE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Refused ignored ->
+                    EmbedDeploymentStart.Outcome.REFUSED;
+            case ai.ravenroot.api.deployment.IngressReceipt.VolatileCustody ignored ->
+                    EmbedDeploymentStart.Outcome.REFUSED;
+        };
+        return new EmbedDeploymentStart(outcome, requestId);
     }
 
     @Override

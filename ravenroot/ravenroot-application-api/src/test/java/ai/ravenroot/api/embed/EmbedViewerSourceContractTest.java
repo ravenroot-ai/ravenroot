@@ -8,6 +8,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,5 +44,36 @@ class EmbedViewerSourceContractTest {
                 EmbedRegistrationState.ACTIVE, session, EmbedSnapshotLifecycle.ACTIVE,
                 EmbedProjectionEligibility.allowed("policy"), projection, Instant.EPOCH,
                 EmbedViewerSource.deployment("deployment")));
+    }
+
+    @Test
+    void v2RunSelectionAndStartPresentationAreAdditiveAndFailClosed() {
+        var hidden = EmbedProvisionCommand.deploymentV2("runs-hidden", 0, "issuer", "subject", "tenant",
+                "https://parent.example", Optional.empty(), "orders", false);
+        assertEquals(new EmbedViewerSource.DeploymentV2("orders", false), hidden.source());
+        assertTrue(hidden.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ));
+        assertNull(EmbedRegistrationRules.rejectionOf(hidden, EmbedProjectionBudget.DEFAULTS));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                hidden.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE));
+
+        var shown = EmbedProvisionCommand.deploymentV2("runs-start", 0, "issuer", "subject", "tenant",
+                "https://parent.example", Optional.empty(), "orders", true);
+        org.junit.jupiter.api.Assertions.assertFalse(
+                shown.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE));
+        assertNull(EmbedRegistrationRules.rejectionOf(shown, EmbedProjectionBudget.DEFAULTS));
+        assertEquals(new EmbedViewerSource.DeploymentV2("orders", true), shown.source());
+
+        var shownAndGranted = EmbedProvisionCommand.deploymentV2WithExecutionCapability(
+                "runs-start-granted", 0, "issuer", "subject", "tenant",
+                "https://parent.example", Optional.empty(), "orders", true);
+        assertTrue(shownAndGranted.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE));
+        assertNull(EmbedRegistrationRules.rejectionOf(shownAndGranted, EmbedProjectionBudget.DEFAULTS));
+
+        var hiddenAndGranted = EmbedProvisionCommand.deploymentV2WithExecutionCapability(
+                "runs-hidden-granted", 0, "issuer", "subject", "tenant",
+                "https://parent.example", Optional.empty(), "orders", false);
+        assertTrue(hiddenAndGranted.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE));
+        assertEquals(new EmbedViewerSource.DeploymentV2("orders", false), hiddenAndGranted.source());
+        assertEquals("2", shown.source().viewerSourceVersion());
     }
 }

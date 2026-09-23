@@ -12,12 +12,30 @@ import java.util.Objects;
  * @param canonicalDigest digest that binds the projection to the captured graph content
  * @param nodes allowlisted render-only nodes in the projection
  * @param edges render-only edges between the listed nodes
+ * @param designArrangement optional persisted semantic Design arrangement
  */
 public record EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
-                                   String canonicalDigest, List<Node> nodes, List<Edge> edges) {
+                                   String canonicalDigest, List<Node> nodes, List<Edge> edges,
+                                   String designArrangement) {
     public static final String CURRENT_CONTRACT_VERSION = "1.0";
     private static final java.util.Set<String> NODE_KINDS =
             java.util.Set.of("START", "PASSTHROUGH", "BEHAVIOR", "END", "ERROR");
+    private static final java.util.Set<String> DESIGN_ARRANGEMENTS = java.util.Set.of(
+            "hierarchical", "flow", "organic", "keep", "hierarchical-new", "layered-down");
+
+    /**
+     * Compatibility shape for projections captured before Design arrangement was projected.
+     * @param viewerContractVersion browser-viewer contract version used to interpret this DTO
+     * @param graphId stable identifier of the captured graph
+     * @param graphVersionId stable identifier of the captured graph version
+     * @param canonicalDigest digest binding this projection to captured graph content
+     * @param nodes allowlisted render-only nodes
+     * @param edges render-only edges between the listed nodes
+     */
+    public EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
+                                String canonicalDigest, List<Node> nodes, List<Edge> edges) {
+        this(viewerContractVersion, graphId, graphVersionId, canonicalDigest, nodes, edges, null);
+    }
 
 /**
  * Validates required capture coordinates and makes the rendered collections immutable.
@@ -29,6 +47,10 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
         canonicalDigest = requireText(canonicalDigest, "canonicalDigest");
         nodes = List.copyOf(Objects.requireNonNull(nodes, "nodes"));
         edges = List.copyOf(Objects.requireNonNull(edges, "edges"));
+        designArrangement = optionalText(designArrangement, "designArrangement");
+        if (designArrangement != null && !DESIGN_ARRANGEMENTS.contains(designArrangement)) {
+            throw new IllegalArgumentException("designArrangement is not supported");
+        }
     }
 
 /**
@@ -135,7 +157,8 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
         return "{\"viewerContractVersion\":\"" + escape(viewerContractVersion)
                 + "\",\"graphId\":\"" + escape(graphId) + "\",\"graphVersionId\":\""
                 + escape(graphVersionId) + "\",\"canonicalDigest\":\"" + escape(canonicalDigest)
-                + "\",\"nodes\":[" + nodeJson + "],\"edges\":[" + edgeJson + "]}";
+                + "\",\"nodes\":[" + nodeJson + "],\"edges\":[" + edgeJson + "]"
+                + optionalJson("designArrangement", designArrangement) + "}";
     }
 
 /**

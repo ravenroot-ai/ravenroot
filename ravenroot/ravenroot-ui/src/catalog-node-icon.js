@@ -1,3 +1,5 @@
+import { catalogNodeSymbol } from './catalog-node-symbol.js';
+
 // A catalog descriptor and the canvas node it becomes must agree on ONE thing: which visual node
 // type it is. `resolveDescriptorNodeType` is that single formula, extracted so every place that
 // turns a descriptor into a node — the catalog palette, the "Add catalog node" form (`app.js`), and
@@ -49,5 +51,5 @@ export const COMMON_NODE_GLYPHS = Object.freeze({
 // otherwise map to. Every other resolved type keeps the plain per-type glyph.
 export function catalogNodeIcon(descriptor, nodeIcons) {
   const nodeType = resolveDescriptorNodeType(descriptor);
-  return nodeType === 'agent' ? '🧠' : (nodeIcons[nodeType] || '•');
+  return nodeType === 'agent' ? '🧠' : (nodeIcons[nodeType] || catalogNodeSymbol(nodeType));
 }

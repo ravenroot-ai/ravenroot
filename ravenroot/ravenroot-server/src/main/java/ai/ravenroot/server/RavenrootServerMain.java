@@ -97,6 +97,8 @@ public final class RavenrootServerMain {
                 .fromEnvironment(System.getenv());
         var humanTaskPolicy = HumanTaskConfiguration.fromSystem(System.getProperties(), System.getenv());
         HumanTaskConfiguration.requireCompatible(humanTaskPolicy, graphExecutionLimits);
+        var humanTaskInteractions = ai.ravenroot.server.humantaskinteraction
+                .HumanTaskInteractionConfiguration.fromEnvironment(System.getenv());
         // Which execution store this deployment runs, read before anything durable opens. On the
         // single-host branch this also decides the offline-maintenance authority shared with
         // backup/restore, acquired before the audit trail opens and retained until both stores are
@@ -532,6 +534,9 @@ public final class RavenrootServerMain {
                 }
                 if (humanTasks != null) {
                     server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant, humanTaskPolicy);
+                    if (humanTaskInteractions != null) {
+                        server.installHumanTaskInteractions(humanTaskInteractions);
+                    }
                 }
                 if (runnerControl != null) server.installRunnerPlane(runnerControl, runnerContinuations);
                 if (interactionWebSockets.enabled()) {

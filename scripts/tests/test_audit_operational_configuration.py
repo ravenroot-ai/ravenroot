@@ -1111,7 +1111,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
         self.assertEqual(1230, len(program["candidateIds"]))
-        self.assertEqual(164, len(interaction["candidateIds"]))
+        self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
             "program/GitHub settings require the exact mandatory source-derived authority",
@@ -1937,16 +1937,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_676_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_723_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(88, len(details))
+            self.assertEqual(95, len(details))
             self.assertEqual(
-                {"methods": 97, "path": 88, "summary": 402, "successStatuses": 89},
+                {"methods": 105, "path": 95, "summary": 426, "successStatuses": 97},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(676, len(entries))
+            self.assertEqual(723, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4295,7 +4295,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 402 |",
+                "| Retained published contract descriptions | 426 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4303,7 +4303,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 401 |",
+                "| Retained published contract descriptions | 425 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -7362,10 +7362,10 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
         self.assertEqual(21, len(self.authority["contracts"]))
         self.assertEqual(84, sum(len(contract["candidateIds"]) for contract in self.authority["contracts"]))
         self.assertEqual(1, len(self.authority["bindingCarriers"]))
-        self.assertEqual(79, sum(len(group["candidateIds"]) for group in self.authority["semanticPartitions"]))
+        self.assertEqual(81, sum(len(group["candidateIds"]) for group in self.authority["semanticPartitions"]))
         ids = [identifier for group in self.authority["contracts"] + self.authority["bindingCarriers"]
                + self.authority["semanticPartitions"] for identifier in group["candidateIds"]]
-        self.assertEqual(164, len(ids))
+        self.assertEqual(166, len(ids))
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(set(ids), audit.interaction_websocket_cohort_candidate_ids(self.root, self.discovered))
         source = (self.root / audit.INTERACTION_WEBSOCKET_CONFIGURATION_PATH).read_text()

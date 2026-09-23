@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 
 // The Deployments window owns registration and control of local deployments. Routing that behavior
 // through the Run button would change Run's meaning; Run keeps its existing meaning end to end,
@@ -15,6 +16,31 @@ import { expect, test } from '@playwright/test';
 // `credentials-window.spec.js`'s own reasoning for not teaching this to the shared fixture server.
 
 const DEPLOYMENTS = '**/v1/deployments**';
+
+const legacyCapabilities = () => ({
+  contractVersion: 1,
+  scope: 'DEPLOYMENT',
+  commands: ['START', 'PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP', 'RESTART', 'UNDEPLOY']
+    .map(command => ({
+      command,
+      available: ['START', 'STOP', 'RESTART', 'UNDEPLOY'].includes(command),
+      reasonRequired: false,
+      unavailableReason: ['START', 'STOP', 'RESTART', 'UNDEPLOY'].includes(command)
+        ? null : 'DURABLE_AUTHORITY_UNAVAILABLE',
+    })),
+});
+
+const durableCapabilities = scope => ({
+  contractVersion: 1,
+  scope,
+  drainBound: scope === 'DEPLOYMENT' ? 'PT30S' : 'UNTIL_ACCEPTED_WORK_SETTLES',
+  commands: (scope === 'DEPLOYMENT'
+    ? ['START', 'PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP', 'RESTART', 'UNDEPLOY']
+    : ['PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP'])
+    .map(command => ({ command, available: true,
+      reasonRequired: ['PAUSE', 'CANCEL', 'STOP', 'UNDEPLOY'].includes(command),
+      unavailableReason: null })),
+});
 
 /** A stateful stub: register creates a REGISTERED entry, start/stop/restart transition it, undeploy
  * removes it and answers with the STOPPED status captured at removal -- the real route's own
@@ -60,7 +86,8 @@ function withDeploymentService(page) {
 
     if (request.method() === 'POST' && !command) {
       const entry = { deploymentId: id, state: 'REGISTERED', sourceCount: 0,
-        graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null };
+        graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null,
+        lifecycleCapabilities: legacyCapabilities() };
       held.set(id, entry);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(entry) });
       return;
@@ -179,12 +206,78 @@ test.describe('the deployments window', () => {
     await expect(page.locator('#deployment-list .deployment-item')).toHaveCount(1);
   });
 
+  test('uses advertised deployment and process capabilities at narrow width, with authoritative reconciliation',
+    async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const service = withDeploymentService(page);
+      service.held.set('orders-v3', {
+        deploymentId: 'orders-v3', state: 'READY', sourceCount: 1, graphVersion: 'graph-v3',
+        scope: 'LOCAL_PROCESS', diagnostic: null, deploymentGeneration: 3,
+        lifecycleCapabilities: durableCapabilities('DEPLOYMENT'),
+      });
+      const processId = 'aaaaaaaa-0000-0000-0000-000000000001';
+      let process = {
+        tenantId: 'tenant-a', processInstanceId: processId, status: 'RUNNING',
+        disposition: 'ACTIVE', revision: 7, lifecycleGeneration: 4, graphVersion: 'graph-v3',
+        deploymentId: 'orders-v3', workloadId: null, correlationId: null,
+        ownerWorkerId: 'worker-1', fencingToken: 9, leaseExpiresAt: '2026-09-24T10:00:30Z',
+        traversalCount: 2, createdAt: '2026-09-24T09:59:00Z', updatedAt: '2026-09-24T10:00:00Z',
+        retainedUntil: null, controlState: 'RUNNING', lifecycleCapabilities: durableCapabilities('PROCESS'),
+      };
+      const processCalls = [];
+      await page.route('**/v1/executions/inventory**', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({
+          items: [process], nextCursor: null, retainedFrom: '2026-09-01T00:00:00Z', maxPageSize: 100,
+        }),
+      }));
+      await page.route('**/v1/processes/**', async route => {
+        const request = route.request();
+        processCalls.push({ url: request.url(), headers: await request.allHeaders() });
+        process = { ...process, revision: 8, lifecycleGeneration: 5, controlState: 'PAUSED' };
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          outcome: 'APPLIED', processInstanceId: processId, generation: 8, state: 'PAUSED',
+          reason: 'planned maintenance', traversals: [],
+        }) });
+      });
+
+      await page.goto('/');
+      await openDeployments(page);
+      await page.locator('[data-deployment-operational="orders-v3"]').click();
+      await expect(page.locator('#lifecycle-process-status')).toContainText('1 authoritative process instance');
+      await expect(page.locator('.lifecycle-process-item')).toContainText('revision 7');
+      await expect(page.locator('.lifecycle-process-item')).toContainText('fence 9');
+      await page.locator('[data-process-select]').click();
+      await expect(page.locator('[data-process-action="pause"]')).toBeEnabled();
+      await expect(page.locator('.process-item-actions')).toContainText('UNTIL_ACCEPTED_WORK_SETTLES');
+
+      page.once('dialog', async dialog => {
+        expect(dialog.message()).toContain('Why should process');
+        await dialog.accept('planned maintenance');
+      });
+      await page.locator('[data-process-action="pause"]').click();
+      await expect(page.locator('.lifecycle-process-item .deployment-state')).toHaveText('PAUSED');
+      await expect(page.locator('.lifecycle-process-item')).toContainText('revision 8');
+      expect(processCalls).toHaveLength(1);
+      expect(new URL(processCalls[0].url).searchParams.get('reason')).toBe('planned maintenance');
+      expect(processCalls[0].headers['x-ravenroot-expected-generation']).toBe('7');
+      expect(processCalls[0].headers['idempotency-key']).toBeTruthy();
+
+      const dialogBounds = await page.locator('#deployments-dialog').boundingBox();
+      expect(dialogBounds.x).toBeGreaterThanOrEqual(0);
+      expect(dialogBounds.x + dialogBounds.width).toBeLessThanOrEqual(390);
+      expect(await page.locator('#deployments-dialog').evaluate(element => element.scrollWidth <= element.clientWidth))
+        .toBe(true);
+      const accessibility = await new AxeBuilder({ page }).include('#deployments-dialog').analyze();
+      expect(accessibility.violations).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath('operational-console-mobile.png'), fullPage: true });
+    });
+
   test('opens a registered deployment without a local file and applies its bounded live stream read-only',
     async ({ page }) => {
       const service = withDeploymentService(page);
       service.held.set('orders-v3', {
         deploymentId: 'orders-v3', state: 'READY', sourceCount: 0, graphVersion: 'graph-v1',
-        scope: 'LOCAL_PROCESS', diagnostic: null,
+        scope: 'LOCAL_PROCESS', diagnostic: null, lifecycleCapabilities: legacyCapabilities(),
       });
       await page.route('**/v1/node-types', route => route.fulfill({
         status: 200, contentType: 'application/json', body: '[]',

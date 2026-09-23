@@ -78,8 +78,32 @@ class DeploymentLifecycleHttpTest {
                     "POST", "/v1/deployments?id=durable", NO_SOURCE_GRAPH, "tenant-a");
             assertEquals(200, registered.statusCode(), registered.body());
             assertTrue(registered.body().contains("\"deploymentGeneration\":0"), registered.body());
+            assertTrue(registered.body().contains("\"contractVersion\":1"), registered.body());
+            assertTrue(registered.body().contains("\"scope\":\"DEPLOYMENT\""), registered.body());
+            assertTrue(registered.body().contains("\"command\":\"PAUSE\",\"available\":true"),
+                    registered.body());
+            assertTrue(registered.body().contains("\"command\":\"DRAIN\",\"available\":true"),
+                    registered.body());
+            assertTrue(registered.body().contains("\"command\":\"RESUME\",\"available\":false,"
+                    + "\"reasonRequired\":false,\"unavailableReason\":\"INCOMPATIBLE_STATE\""),
+                    registered.body());
+            assertTrue(registered.body().contains("\"drainBound\":\"PT"), registered.body());
             assertTrue(fixture.request("GET", "/v1/deployments", "", "tenant-a").body()
                     .contains("\"deploymentGeneration\":0"));
+
+            var deniedListing = fixture.request("GET", "/v1/deployments", "", "tenant-a-viewer");
+            assertEquals(200, deniedListing.statusCode(), deniedListing.body());
+            assertTrue(deniedListing.body().contains("\"command\":\"START\",\"available\":false"),
+                    deniedListing.body());
+            assertTrue(deniedListing.body().contains("\"unavailableReason\":\"NOT_AUTHORIZED\""),
+                    deniedListing.body());
+            var deniedStart = fixture.command("/v1/deployments/durable/start", "tenant-a-viewer",
+                    "denied-start", 0, null);
+            assertEquals(403, deniedStart.statusCode(), deniedStart.body());
+            assertTrue(fixture.request("GET", "/v1/deployments/durable", "", "tenant-a").body()
+                    .contains("\"deploymentGeneration\":0"), "a denied command must not mutate intent");
+            assertEquals(403, fixture.request("POST", "/v1/deployments?id=denied",
+                    NO_SOURCE_GRAPH, "tenant-a-viewer").statusCode());
 
             var legacyStop = fixture.request(
                     "POST", "/v1/deployments/durable/stop", "", "tenant-a");
@@ -703,10 +727,14 @@ class DeploymentLifecycleHttpTest {
         public AuthenticatedPrincipal authenticate(Headers headers) throws AuthenticationException {
             String tenant = headers.getFirst("X-Test-Tenant");
             if (tenant == null || tenant.isBlank()) throw new AuthenticationException("missing tenant");
+            boolean viewer = "tenant-a-viewer".equals(tenant);
             return new AuthenticatedPrincipal(tenant, AuthenticatedPrincipal.Type.USER,
-                    "urn:ravenroot:test", tenant, Set.of(Role.OPERATOR, Role.PLATFORM_ADMIN),
+                    "urn:ravenroot:test", viewer ? "tenant-a" : tenant,
+                    viewer ? Set.of(Role.OPERATOR) : Set.of(Role.OPERATOR, Role.PLATFORM_ADMIN),
                     java.util.Arrays.stream(AuthorizationAction.values())
                             .filter(AuthorizationAction::available)
+                            .filter(action -> !viewer || action != AuthorizationAction.EXECUTION_START
+                                    && action != AuthorizationAction.EXECUTION_CONTROL)
                             .map(AuthorizationAction::requiredScope)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));
         }

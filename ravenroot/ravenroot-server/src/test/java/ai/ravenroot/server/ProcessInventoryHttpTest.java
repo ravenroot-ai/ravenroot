@@ -92,6 +92,11 @@ class ProcessInventoryHttpTest {
                 assertTrue(inventory.contains("\"deploymentId\":null"),
                         () -> "a transient submission opens no deployment domain: " + inventory);
                 assertTrue(inventory.contains("\"retainedFrom\""), inventory);
+                assertTrue(inventory.contains("\"controlState\":null"), inventory);
+                assertTrue(inventory.contains("\"contractVersion\":1,\"scope\":\"PROCESS\""), inventory);
+                assertTrue(inventory.contains("\"command\":\"PAUSE\",\"available\":false"), inventory);
+                assertTrue(inventory.contains("\"unavailableReason\":\"TERMINAL_TARGET\""),
+                        inventory);
 
                 String traversals = body(getAs(server,
                         "/v1/executions/" + processInstanceId + "/traversals", "tenant-a"));

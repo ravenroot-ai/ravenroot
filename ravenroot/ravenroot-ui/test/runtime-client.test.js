@@ -13,7 +13,9 @@ import {
   validateDeploymentViewEnvelope,
   validateDeploymentViewFrame,
   validateDeploymentCommandOutcome,
+  validateLifecycleCapabilities,
   validateLocalDeploymentStatus,
+  validateProcessInventoryPage,
   validateRuntimeConfiguration,
   validateSourceSessionStatus,
 } from '../src/runtime-client.js';
@@ -509,6 +511,24 @@ describe('process lifecycle client', () => {
       }) }),
     );
   });
+
+  it('validates the versioned capability contract without inferring unavailable commands', () => {
+    const capabilities = { contractVersion: 1, scope: 'PROCESS',
+      drainBound: 'UNTIL_ACCEPTED_WORK_SETTLES', commands: [
+        { command: 'PAUSE', available: true, reasonRequired: true, unavailableReason: null },
+        { command: 'RESUME', available: false, reasonRequired: false,
+          unavailableReason: 'INCOMPATIBLE_STATE' },
+      ] };
+    expect(validateLifecycleCapabilities(capabilities, 'PROCESS')).toMatchObject(capabilities);
+    expect(() => validateLifecycleCapabilities({ ...capabilities, scope: 'DEPLOYMENT' }, 'PROCESS'))
+      .toThrow(/versioned contract/);
+    expect(() => validateLifecycleCapabilities({ ...capabilities, commands: [
+      capabilities.commands[0], capabilities.commands[0],
+    ] }, 'PROCESS')).toThrow(/invalid command/);
+    expect(() => validateLifecycleCapabilities({ ...capabilities, commands: [{
+      ...capabilities.commands[1], available: true,
+    }] }, 'PROCESS')).toThrow(/invalid command/);
+  });
 });
 
 describe('process-local deployment client', () => {
@@ -767,6 +787,18 @@ describe('durable process inventory client (issue 154)', () => {
     expect(fetchImpl.mock.calls[0][0]).toBe('/v1/executions/inventory');
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
     expect(result).toEqual(page);
+  });
+
+  it('accepts an authoritative control state and process capabilities and rejects a scope mismatch', () => {
+    const capabilities = { contractVersion: 1, scope: 'PROCESS', commands: [
+      { command: 'PAUSE', available: true, reasonRequired: true, unavailableReason: null },
+    ] };
+    const authoritative = { ...page, items: [{ ...page.items[0], controlState: 'RUNNING',
+      lifecycleCapabilities: capabilities }] };
+    expect(validateProcessInventoryPage(authoritative)).toBe(authoritative);
+    expect(() => validateProcessInventoryPage({ ...authoritative, items: [{ ...authoritative.items[0],
+      lifecycleCapabilities: { ...capabilities, scope: 'DEPLOYMENT' } }] }))
+      .toThrow(/versioned contract/);
   });
 
   it('sends only the filters the caller actually supplies, as GET /v1/executions/inventory query parameters', async () => {

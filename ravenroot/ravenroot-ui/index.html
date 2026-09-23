@@ -914,7 +914,7 @@
      durable generations describe reconciled command intent, not cluster-owned runtime execution. -->
 <dialog id="deployments-dialog" class="credentials-dialog deployments-dialog" aria-labelledby="deployments-title">
   <header class="credentials-hd">
-    <h2 id="deployments-title">Deployments</h2>
+    <h2 id="deployments-title">Operational console</h2>
     <button id="deployment-close" class="btn" type="button">Close</button>
   </header>
   <p id="deployment-scope" class="credential-note"></p>
@@ -937,6 +937,13 @@
     <h3 id="deployments-list-title">Deployments you hold</h3>
     <p id="deployment-empty" class="credential-note"></p>
     <ul id="deployment-list" class="credential-list deployment-list" aria-labelledby="deployments-list-title" hidden></ul>
+  </section>
+  <section class="credentials-listing lifecycle-processes" aria-labelledby="lifecycle-processes-title">
+    <h3 id="lifecycle-processes-title">Process instances</h3>
+    <p id="lifecycle-process-scope" class="credential-note">Select a deployment above to read its authoritative process inventory. Process controls never act on a task or a single traversal.</p>
+    <p id="lifecycle-process-status" class="credential-status" role="status" aria-live="polite"></p>
+    <ul id="lifecycle-process-list" class="credential-list lifecycle-process-list"
+        aria-labelledby="lifecycle-processes-title" hidden></ul>
   </section>
 </dialog>
 

@@ -14,8 +14,26 @@ import {
 // `index.html`, the same discipline `credential-panel.test.js` uses, so this file cannot keep passing
 // after the shipped window drifts from what it exercises.
 
+const LEGACY_CAPABILITIES = { contractVersion: 1, scope: 'DEPLOYMENT', commands: [
+  { command: 'START', available: true, reasonRequired: false, unavailableReason: null },
+  { command: 'PAUSE', available: false, reasonRequired: false,
+    unavailableReason: 'DURABLE_AUTHORITY_UNAVAILABLE' },
+  { command: 'RESUME', available: false, reasonRequired: false,
+    unavailableReason: 'DURABLE_AUTHORITY_UNAVAILABLE' },
+  { command: 'CANCEL', available: false, reasonRequired: false,
+    unavailableReason: 'DURABLE_AUTHORITY_UNAVAILABLE' },
+  { command: 'DRAIN', available: false, reasonRequired: false,
+    unavailableReason: 'DURABLE_AUTHORITY_UNAVAILABLE' },
+  { command: 'STOP', available: true, reasonRequired: false, unavailableReason: null },
+  { command: 'RESTART', available: true, reasonRequired: false, unavailableReason: null },
+  { command: 'UNDEPLOY', available: true, reasonRequired: false, unavailableReason: null },
+] };
+const DURABLE_CAPABILITIES = { contractVersion: 1, scope: 'DEPLOYMENT', drainBound: 'PT30S',
+  commands: LEGACY_CAPABILITIES.commands.map(command => ({ ...command, available: true,
+    reasonRequired: ['PAUSE', 'CANCEL', 'STOP', 'UNDEPLOY'].includes(command.command),
+    unavailableReason: null })) };
 const READY = { deploymentId: 'orders-v3', state: 'READY', sourceCount: 0, graphVersion: 'graph-v3',
-  scope: 'LOCAL_PROCESS', diagnostic: null };
+  scope: 'LOCAL_PROCESS', diagnostic: null, lifecycleCapabilities: LEGACY_CAPABILITIES };
 
 let dialog;
 
@@ -41,6 +59,8 @@ function stubClient(overrides = {}) {
     stopDeployment: vi.fn(async id => ({ ...READY, deploymentId: id, state: 'STOPPED' })),
     restartDeployment: vi.fn(async id => ({ ...READY, deploymentId: id })),
     undeployDeployment: vi.fn(async id => ({ ...READY, deploymentId: id, state: 'STOPPED' })),
+    processInventory: vi.fn(async () => ({ items: [], nextCursor: null,
+      retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
     ...overrides,
   };
 }
@@ -88,7 +108,7 @@ describe('what the window renders', () => {
   it('shows the authoritative durable generation when the server supplies one', async () => {
     const window_ = createDeploymentsWindow({
       dialog, client: stubClient({ deployments: vi.fn(async () => [
-        { ...READY, deploymentGeneration: 9 },
+        { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 9 },
       ]) }), pollMs: 0,
     });
     await window_.refresh();
@@ -266,7 +286,7 @@ describe('row actions', () => {
   });
 
   it('sends durable Stop with the displayed generation and an explicit reason', async () => {
-    const durable = { ...READY, deploymentGeneration: 6 };
+    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 6 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -281,7 +301,7 @@ describe('row actions', () => {
 
   it('surfaces reconciled state without inventing an outcome after both command responses are lost',
     async () => {
-      const durable = { ...READY, deploymentGeneration: 6 };
+      const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 6 };
       const client = stubClient({
         deployments: vi.fn(async () => [durable]),
         stopDeployment: vi.fn(async () => ({
@@ -302,7 +322,7 @@ describe('row actions', () => {
     });
 
   it('requires an explicit durable Undeploy disposition and reason', async () => {
-    const durable = { ...READY, deploymentGeneration: 11 };
+    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -322,7 +342,7 @@ describe('row actions', () => {
   });
 
   it('does not collect disposition or reason when durable Undeploy confirmation is cancelled', async () => {
-    const durable = { ...READY, deploymentGeneration: 11 };
+    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -341,7 +361,7 @@ describe('row actions', () => {
     ['disposition', [null]],
     ['reason', ['DRAIN_FIRST', null]],
   ])('does not send durable Undeploy when %s collection is cancelled', async (_field, answers) => {
-    const durable = { ...READY, deploymentGeneration: 11 };
+    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -353,6 +373,45 @@ describe('row actions', () => {
     await Promise.resolve();
 
     expect(client.undeployDeployment).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('selects a deployment and a process, then sends only its advertised process command', async () => {
+    const process = {
+      tenantId: 'tenant-a', deploymentId: 'orders-v3', graphVersion: 'graph-v3',
+      processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000001', status: 'RUNNING',
+      controlState: 'RUNNING', disposition: 'ACTIVE', revision: 7, lifecycleGeneration: 4,
+      fencingToken: 9,
+      lifecycleCapabilities: { contractVersion: 1, scope: 'PROCESS',
+        drainBound: 'UNTIL_ACCEPTED_WORK_SETTLES', commands: [
+          { command: 'PAUSE', available: true, reasonRequired: true, unavailableReason: null },
+          { command: 'RESUME', available: false, reasonRequired: false,
+            unavailableReason: 'INCOMPATIBLE_STATE' },
+        ] },
+    };
+    const client = stubClient({
+      deployments: vi.fn(async () => [{ ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES,
+        deploymentGeneration: 3 }]),
+      processInventory: vi.fn(async () => ({ items: [process], nextCursor: null,
+        retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
+      controlProcess: vi.fn(async () => ({ outcome: 'APPLIED', processInstanceId: process.processInstanceId,
+        generation: 8, state: 'PAUSED', reason: 'maintenance', traversals: [] })),
+    });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    field('deployment-list').querySelector('[data-deployment-operational="orders-v3"]').click();
+    await vi.waitFor(() => expect(client.processInventory).toHaveBeenCalled());
+    field('lifecycle-process-list').querySelector('[data-process-select]').click();
+
+    const resume = field('lifecycle-process-list').querySelector('[data-process-action="resume"]');
+    expect(resume.disabled).toBe(true);
+    vi.spyOn(window, 'prompt').mockReturnValue('maintenance');
+    field('lifecycle-process-list').querySelector('[data-process-action="pause"]').click();
+    await vi.waitFor(() => expect(client.controlProcess).toHaveBeenCalled());
+
+    expect(client.controlProcess).toHaveBeenCalledWith(process.processInstanceId, 'pause', 7,
+      expect.objectContaining({ reason: 'maintenance', idempotencyKey: expect.any(String) }));
+    expect(document.querySelector('#human-task-dialog [data-process-action]')).toBeNull();
     vi.restoreAllMocks();
   });
 });

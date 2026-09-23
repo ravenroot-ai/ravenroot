@@ -177,6 +177,37 @@ const DEPLOYMENT_COMMAND_OUTCOMES = new Set([
   'ACCEPTED', 'CONVERGED', 'REPLAYED', 'IDEMPOTENCY_CONFLICT', 'STALE_GENERATION',
   'SUPERSEDED', 'REFUSED', 'FAILED', 'TERMINAL',
 ]);
+const LIFECYCLE_COMMANDS = new Set([
+  'START', 'PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP', 'RESTART', 'UNDEPLOY',
+]);
+const LIFECYCLE_COMMANDS_BY_SCOPE = Object.freeze({
+  DEPLOYMENT: LIFECYCLE_COMMANDS,
+  PROCESS: new Set(['PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP']),
+});
+
+export function validateLifecycleCapabilities(value, expectedScope) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contractVersion !== 1 || value.scope !== expectedScope
+      || !Array.isArray(value.commands) || value.commands.length === 0
+      || (value.drainBound !== undefined && (typeof value.drainBound !== 'string' || !value.drainBound))) {
+    throw new Error('Lifecycle capabilities are not a supported versioned contract');
+  }
+  const seen = new Set();
+  const allowed = LIFECYCLE_COMMANDS_BY_SCOPE[expectedScope];
+  const commands = value.commands.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+        || !allowed?.has(item.command) || seen.has(item.command)
+        || typeof item.available !== 'boolean' || typeof item.reasonRequired !== 'boolean'
+        || (item.unavailableReason !== null && typeof item.unavailableReason !== 'string')
+        || (item.available && item.unavailableReason !== null)
+        || (!item.available && !item.unavailableReason)) {
+      throw new Error('Lifecycle capabilities contain an invalid command');
+    }
+    seen.add(item.command);
+    return Object.freeze({ ...item });
+  });
+  return Object.freeze({ ...value, commands: Object.freeze(commands) });
+}
 
 function safeGeneration(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -258,6 +289,37 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
   }
   if (expectedDeploymentId && value.deploymentId !== expectedDeploymentId) {
     throw new Error(`Deployment response id ${value.deploymentId} does not match ${expectedDeploymentId}`);
+  }
+  if (value.lifecycleCapabilities !== undefined) {
+    validateLifecycleCapabilities(value.lifecycleCapabilities, 'DEPLOYMENT');
+  }
+  return value;
+}
+
+export function validateProcessInventoryPage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.items)
+      || !Number.isSafeInteger(value.maxPageSize) || value.maxPageSize < 1
+      || typeof value.retainedFrom !== 'string'
+      || (value.nextCursor !== null && (typeof value.nextCursor !== 'string' || !value.nextCursor))) {
+    throw new Error('Process inventory response is not a valid authoritative page');
+  }
+  for (const item of value.items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+        || typeof item.tenantId !== 'string' || !item.tenantId
+        || typeof item.processInstanceId !== 'string' || !item.processInstanceId
+        || typeof item.status !== 'string' || !item.status
+        || typeof item.disposition !== 'string' || !item.disposition
+        || typeof item.graphVersion !== 'string' || !item.graphVersion
+        || !Number.isSafeInteger(item.revision) || item.revision < 1
+        || !Number.isSafeInteger(item.lifecycleGeneration) || item.lifecycleGeneration < 0
+        || !Number.isSafeInteger(item.fencingToken) || item.fencingToken < 0
+        || (item.controlState !== null && item.controlState !== undefined
+          && (typeof item.controlState !== 'string' || !item.controlState))) {
+      throw new Error('Process inventory contains an invalid authoritative target');
+    }
+    if (item.lifecycleCapabilities !== undefined) {
+      validateLifecycleCapabilities(item.lifecycleCapabilities, 'PROCESS');
+    }
   }
   return value;
 }
@@ -633,6 +695,22 @@ export class RavenrootRuntimeClient {
     return this.#deploymentCommand(deploymentId, 'restart', options);
   }
 
+  async pauseDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'pause', options);
+  }
+
+  async resumeDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'resume', options);
+  }
+
+  async cancelDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'cancel', options);
+  }
+
+  async drainDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'drain', options);
+  }
+
   /** Stops the deployment and then removes its registration. Legacy servers return the STOPPED
    * status captured at removal; durable servers return a typed terminal outcome and retain a tombstone
    * for exact replay even though the id no longer resolves through GET. */
@@ -657,7 +735,7 @@ export class RavenrootRuntimeClient {
     if (!safeGeneration(expectedGeneration)) {
       throw new Error('Deployment generation is outside JavaScript’s safe integer range');
     }
-    if ((action === 'stop' || action === 'undeploy')
+    if ((['pause', 'cancel', 'stop', 'undeploy'].includes(action))
         && (typeof reason !== 'string' || !reason.trim() || reason.length > 256)) {
       throw new Error(`Deployment ${action} requires a reason of at most 256 characters`);
     }
@@ -673,7 +751,8 @@ export class RavenrootRuntimeClient {
       Accept: 'application/json',
       'Idempotency-Key': key,
       'X-Ravenroot-Expected-Generation': String(expectedGeneration),
-      ...((action === 'stop' || action === 'undeploy') ? { 'X-Ravenroot-Reason': reason.trim() } : {}),
+      ...((['pause', 'cancel', 'stop', 'undeploy'].includes(action))
+        ? { 'X-Ravenroot-Reason': reason.trim() } : {}),
       ...(action === 'undeploy' ? { 'X-Ravenroot-Undeploy-Disposition': disposition } : {}),
     };
     let result;
@@ -721,6 +800,7 @@ export class RavenrootRuntimeClient {
       }
       const settled = action === 'stop' ? ['STOPPED', 'FAILED'].includes(status.state)
         : action === 'undeploy' ? false
+          : ['pause', 'resume', 'cancel', 'drain'].includes(action) ? true
           : ['READY', 'DEGRADED', 'FAILED'].includes(status.state);
       if (settled || refreshOnly) break;
       await this.sleep(250);
@@ -806,11 +886,12 @@ export class RavenrootRuntimeClient {
       params.set(key, String(value));
     }
     const query = params.toString();
-    return this.#json(`/v1/executions/inventory${query ? `?${query}` : ''}`, {
+    const result = await this.#json(`/v1/executions/inventory${query ? `?${query}` : ''}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal,
     });
+    return validateProcessInventoryPage(result);
   }
 
   /**

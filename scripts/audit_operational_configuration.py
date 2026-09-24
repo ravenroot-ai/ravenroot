@@ -8132,7 +8132,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '74e2eb1701e081d4ab9452e58e3211a9c9bd50e14800e64e8805c4881f67e038',
+  'aa87245f255f5e1f612c6ff67fd76cc02bb04f16d08c93ea0bdbe2182cf4a7e2',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',

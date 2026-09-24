@@ -17,7 +17,6 @@ import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.Instant;
@@ -524,7 +523,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             var releaseCredential = new CompletableFuture<Void>();
             var clock = new CleanupClock();
             var submittedOperations = new ArrayList<CompletableFuture<?>>();
-            NodeAction action = limitedAction(server.host(), server.port(), profile, ref -> {
+            NodeAction action = limitedAction(server.port(), profile, ref -> {
                 if (secrets.incrementAndGet() == 1) {
                     credentialEntered.complete(null);
                     awaitSignal(releaseCredential, "credential release");
@@ -692,13 +691,13 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, fixture.port(), "localhost", "STARTTLS", Set.of("INBOX"), 10)), credentials,
                 properties -> { properties.put("mail.imap.ssl.socketFactory", socketFactory); return properties; }).create(configuration());
     }
-    private static NodeAction limitedAction(String host, int port, String profile,
-                                            CredentialResolver credentials, LongSupplier clock) {
+    private static NodeAction limitedAction(int port, String profile, CredentialResolver credentials,
+                                            LongSupplier clock) {
         return new MailImapQueryNodeBehavior(
-                (tenant, name) -> Optional.of(profile(tenant, name, port, host, "IMAPS", Set.of("INBOX"), 10)),
+                (tenant, name) -> Optional.of(profile(tenant, name, port, "localhost", "IMAPS", Set.of("INBOX"), 10)),
                 credentials, java.util.function.UnaryOperator.identity(),
                 task -> Thread.ofVirtual().name("ravenroot-imap-admission-", 0).start(task),
-                clock, clock, loopbackPolicy(host))
+                clock, clock, loopbackPolicy("localhost"))
                 .create(new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR,
                         Map.of("profile", profile, "folder", "INBOX", "limit", "10", "maxConcurrency", "1")));
     }
@@ -803,16 +802,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
     private static MimeMessage charsetMessage(String subject, String body, String charset) throws Exception { MimeMessage message = message(subject, "body", Instant.parse("2025-01-01T12:00:00Z"), false); message.setText(body, charset); message.saveChanges(); return message; }
     private static MimeMessage addressFloodMessage() throws Exception { MimeMessage message = message("addresses", "body", Instant.parse("2025-01-01T12:00:00Z"), false); List<InternetAddress> recipients = new ArrayList<>(); for (int i = 0; i < 51; i++) recipients.add(new InternetAddress("reader" + i + "@example.test")); message.setRecipients(Message.RecipientType.TO, recipients.toArray(InternetAddress[]::new)); message.saveChanges(); return message; }
     private static final class HoldingServer implements AutoCloseable {
-        /**
-         * Bound to one explicit loopback address rather than the wildcard, and named by that literal
-         * rather than by "localhost". "localhost" resolves to both 127.0.0.1 and ::1 here, a wildcard
-         * listener answers on both, and the mail client tries the host's addresses in turn until one
-         * connects -- so a single logical connect could be accepted twice, and the "exactly one
-         * connection" assertions below became a race against which attempt failed first. One address
-         * makes those assertions mean what they say.
-         */
-        private static final String HOST = InetAddress.getLoopbackAddress().getHostAddress();
-        private final ServerSocket listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        private final ServerSocket listener = new ServerSocket(0);
         private final AtomicInteger acceptedSockets = new AtomicInteger();
         private final CompletableFuture<Void> firstConnection = new CompletableFuture<>();
         private final List<Socket> connections = new ArrayList<>();
@@ -842,7 +832,6 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             worker.start();
         }
         int port() { return listener.getLocalPort(); }
-        String host() { return HOST; }
         int acceptedSockets() { return acceptedSockets.get(); }
         void awaitFirstConnection(CompletableFuture<?> stage) throws Exception {
             awaitEventOrStage("the first transport connection", firstConnection, stage);

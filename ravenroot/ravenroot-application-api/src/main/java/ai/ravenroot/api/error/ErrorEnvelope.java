@@ -62,6 +62,7 @@ public final class ErrorEnvelope {
     private final String message;
     private final String correlationId;
     private final String incidentId;
+    private final ai.ravenroot.api.application.GraphAdmissionFinding finding;
     /**
      * The authoring assistant's own reason token, when this envelope describes an assistant
      * turn. Null everywhere else.
@@ -95,11 +96,17 @@ public final class ErrorEnvelope {
      */
     private ErrorEnvelope(String contract, String code, String message, String correlationId,
                           String incidentId) {
-        this(contract, code, message, correlationId, incidentId, null);
+        this(contract, code, message, correlationId, incidentId, null, null);
     }
 
     private ErrorEnvelope(String contract, String code, String message, String correlationId,
                           String incidentId, String assistantReason) {
+        this(contract, code, message, correlationId, incidentId, assistantReason, null);
+    }
+
+    private ErrorEnvelope(String contract, String code, String message, String correlationId,
+                          String incidentId, String assistantReason,
+                          ai.ravenroot.api.application.GraphAdmissionFinding finding) {
         this.contract = Objects.requireNonNull(contract, "contract");
         this.message = Objects.requireNonNull(message, "message");
         String token = safeToken(Objects.requireNonNull(code, "code"));
@@ -110,6 +117,7 @@ public final class ErrorEnvelope {
         // no assistant reason is honest, and one carrying a mangled or detail-bearing token invites a
         // client to map it.
         this.assistantReason = assistantReason == null ? null : safeReasonToken(assistantReason);
+        this.finding = finding;
     }
 
     /**
@@ -144,7 +152,7 @@ public final class ErrorEnvelope {
      * @return new immutable envelope carrying the incident handle
      */
     public ErrorEnvelope withIncident(String incident) {
-        return new ErrorEnvelope(contract, code, message, correlationId, incident, assistantReason);
+        return new ErrorEnvelope(contract, code, message, correlationId, incident, assistantReason, finding);
     }
 
     /**
@@ -157,7 +165,14 @@ public final class ErrorEnvelope {
      * @return new immutable envelope with the constrained assistant reason when valid
      */
     public ErrorEnvelope withAssistantReason(String reason) {
-        return new ErrorEnvelope(contract, code, message, correlationId, incidentId, reason);
+        return new ErrorEnvelope(contract, code, message, correlationId, incidentId, reason, finding);
+    }
+
+    /** Adds one already bounded graph-admission finding. */
+    public ErrorEnvelope withFinding(ai.ravenroot.api.application.GraphAdmissionFinding value) {
+        java.util.Objects.requireNonNull(value, "finding");
+        return new ErrorEnvelope(contract, code, message, correlationId,
+                value.incidentId(), assistantReason, value);
     }
 
     /**
@@ -246,7 +261,21 @@ public final class ErrorEnvelope {
         if (assistantReason != null) {
             out.append(",\"assistantReason\":\"").append(escape(assistantReason)).append('"');
         }
+        if (finding != null) {
+            out.append(",\"finding\":").append(findingJson(finding));
+        }
         return out.append('}').toString();
+    }
+
+    private static String findingJson(ai.ravenroot.api.application.GraphAdmissionFinding value) {
+        var out = new StringBuilder("{\"contract\":\"").append(escape(value.contract()))
+                .append("\",\"phase\":\"").append(value.phase()).append("\",\"reason\":\"")
+                .append(value.reason()).append('"');
+        if (value.nodeId() != null) out.append(",\"nodeId\":\"").append(escape(value.nodeId())).append('"');
+        if (value.nodeRef() != null) out.append(",\"nodeRef\":\"").append(escape(value.nodeRef())).append('"');
+        if (value.propertyName() != null) out.append(",\"propertyName\":\"")
+                .append(escape(value.propertyName())).append('"');
+        return out.append(",\"incidentId\":\"").append(escape(value.incidentId())).append("\"}").toString();
     }
 
     @Override
@@ -257,12 +286,13 @@ public final class ErrorEnvelope {
                 && message.equals(envelope.message)
                 && correlationId.equals(envelope.correlationId)
                 && Objects.equals(incidentId, envelope.incidentId)
-                && Objects.equals(assistantReason, envelope.assistantReason);
+                && Objects.equals(assistantReason, envelope.assistantReason)
+                && Objects.equals(finding, envelope.finding);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(contract, code, message, correlationId, incidentId, assistantReason);
+        return Objects.hash(contract, code, message, correlationId, incidentId, assistantReason, finding);
     }
 
     @Override
@@ -280,6 +310,8 @@ public final class ErrorEnvelope {
     public String assistantReason() {
         return assistantReason;
     }
+
+    public ai.ravenroot.api.application.GraphAdmissionFinding finding() { return finding; }
 
     /**
      * Accepts a correlation handle only if it is a bounded, boring token, and mints one otherwise.

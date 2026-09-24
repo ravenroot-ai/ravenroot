@@ -64,7 +64,8 @@ public final class OpenApiSpecGenerator {
         json.append("    },\n");
         String existingSchemas = humanTaskSchemas();
         json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\n    }"));
-        json.append(",\n").append(deploymentSchemas()).append(",\n")
+        json.append(",\n").append(diagnosticSchemas()).append(",\n")
+                .append(deploymentSchemas()).append(",\n")
                 .append(processInventorySchemas()).append(",\n")
                 .append(executionEventSchemas()).append("    }\n");
         json.append("  }\n");
@@ -190,6 +191,11 @@ public final class OpenApiSpecGenerator {
             parameters.add(queryParameter("cursor", "string", "Opaque cursor from nextCursor."));
             parameters.add(queryParameter("limit", "integer", "Page size, bounded by maxPageSize."));
         }
+        if ("/v1/graphs/inspect".equals(route.path()) && "POST".equals(method)) {
+            parameters.add("          {\"name\": \"purpose\", \"in\": \"query\", \"required\": false, "
+                    + "\"schema\": {\"type\": \"string\", \"default\": \"EXECUTION\", \"enum\": "
+                    + enumValues(ai.ravenroot.api.application.GraphAdmissionPurpose.values()) + "}}");
+        }
         if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)
                 || isHumanTaskSettlement(route, method) || isHumanTaskInteraction(route, method)) {
             parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
@@ -313,6 +319,11 @@ public final class OpenApiSpecGenerator {
             schema = "HumanTaskDecisionResult";
         } else if (isHumanTaskInteraction(route, method) && "POST".equals(method)) {
             schema = "HumanTaskInteractionLaunch";
+        } else if ("/v1/graphs/inspect".equals(route.path()) && "POST".equals(method)) {
+            schema = "GraphInspection";
+        } else if (("/v1/source-sessions".equals(route.path()) && "POST".equals(method))
+                || "/v1/source-sessions/{id}".equals(route.path())) {
+            schema = "SourceSessionStatus";
         } else if ("/v1/deployments".equals(route.path()) && "GET".equals(method)) {
             schema = "LocalDeploymentStatusList";
         } else if ("/v1/executions/inventory".equals(route.path()) && "GET".equals(method)) {
@@ -328,13 +339,30 @@ public final class OpenApiSpecGenerator {
                         + "{\"schema\": {\"$ref\": \"#/components/schemas/" + schema + "\"}}}}");
     }
 
+    private static String diagnosticSchemas() {
+        String phases = enumValues(ai.ravenroot.api.application.GraphAdmissionPhase.values());
+        String reasons = enumValues(ai.ravenroot.api.application.GraphAdmissionReason.values());
+        return "      \"GraphAdmissionFinding\": {\"type\":\"object\",\"required\":[\"contract\",\"phase\",\"reason\",\"incidentId\"],\"additionalProperties\":false,\"properties\":{"
+                + "\"contract\":{\"type\":\"string\",\"enum\":[\"ravenroot.graph-admission/1\"]},\"phase\":{\"type\":\"string\",\"enum\":" + phases + "},\"reason\":{\"type\":\"string\",\"enum\":" + reasons + "},"
+                + "\"nodeId\":{\"type\":\"string\",\"maxLength\":128},\"nodeRef\":{\"type\":\"string\",\"pattern\":\"^sha256:[0-9a-f]{32}$\"},\"propertyName\":{\"type\":\"string\",\"maxLength\":64},\"incidentId\":{\"type\":\"string\",\"maxLength\":128,\"pattern\":\"^[A-Za-z0-9._:-]+$\"}}},\n"
+                + "      \"StartupFailure\": {\"type\":\"object\",\"required\":[\"contract\",\"phase\",\"reason\",\"incidentId\"],\"additionalProperties\":false,\"properties\":{"
+                + "\"contract\":{\"type\":\"string\",\"enum\":[\"ravenroot.startup-failure/1\"]},\"phase\":{\"type\":\"string\",\"enum\":" + phases + "},\"reason\":{\"oneOf\":[{\"type\":\"string\",\"enum\":[\"STARTUP_FAILED\"]},{\"type\":\"string\",\"pattern\":\"^[a-z][a-z0-9-]{0,63}$\"}]},\"nodeId\":{\"type\":\"string\",\"maxLength\":128},\"nodeRef\":{\"type\":\"string\",\"pattern\":\"^sha256:[0-9a-f]{32}$\"},\"incidentId\":{\"type\":\"string\",\"maxLength\":128,\"pattern\":\"^[A-Za-z0-9._:-]+$\"}}},\n"
+                + "      \"GraphInspection\": {\"type\":\"object\",\"required\":[\"nodes\",\"edges\",\"startNodes\",\"endNodes\",\"valid\",\"violations\",\"findings\"],\"properties\":{\"nodes\":{\"type\":\"integer\",\"minimum\":0},\"edges\":{\"type\":\"integer\",\"minimum\":0},\"startNodes\":{\"type\":\"integer\",\"minimum\":0},\"endNodes\":{\"type\":\"integer\",\"minimum\":0},\"valid\":{\"type\":\"boolean\"},\"violations\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"findings\":{\"type\":\"array\",\"maxItems\":1,\"items\":{\"$ref\":\"#/components/schemas/GraphAdmissionFinding\"}}}},\n"
+                + "      \"SourceSessionStatus\": {\"type\":\"object\",\"required\":[\"sessionId\",\"deploymentId\",\"state\",\"sourceCount\",\"scope\",\"diagnostic\",\"failure\"],\"properties\":{\"sessionId\":{\"type\":\"string\"},\"deploymentId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"STARTING\",\"LISTENING\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},\"sourceCount\":{\"type\":\"integer\",\"minimum\":1},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"failure\":{\"allOf\":[{\"$ref\":\"#/components/schemas/StartupFailure\"}],\"nullable\":true}}}";
+    }
+
+    private static String enumValues(Enum<?>[] values) {
+        return java.util.Arrays.stream(values).map(value -> "\"" + value.name() + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    }
+
     private static String deploymentSchemas() {
         return "      \"LifecycleCommandCapability\": {\"type\":\"object\",\"required\":[\"command\",\"available\",\"reasonRequired\",\"unavailableReason\"],\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"START\",\"PAUSE\",\"RESUME\",\"CANCEL\",\"DRAIN\",\"STOP\",\"RESTART\",\"UNDEPLOY\"]},\"available\":{\"type\":\"boolean\"},\"reasonRequired\":{\"type\":\"boolean\"},\"unavailableReason\":{\"type\":\"string\",\"nullable\":true}}},\n"
                 + "      \"LifecycleCapabilities\": {\"type\":\"object\",\"required\":[\"contractVersion\",\"scope\",\"commands\"],\"properties\":{\"contractVersion\":{\"type\":\"integer\",\"enum\":[1]},\"scope\":{\"type\":\"string\",\"enum\":[\"DEPLOYMENT\",\"PROCESS\"]},\"commands\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LifecycleCommandCapability\"}},\"drainBound\":{\"type\":\"string\"}}},\n"
-                + "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"tenantId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\",\"continuity\",\"deploymentRevision\",\"desiredState\",\"observedState\",\"recoveryFailure\",\"lifecycleCapabilities\"],\"properties\":{"
+                + "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"tenantId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\",\"failure\",\"continuity\",\"deploymentRevision\",\"desiredState\",\"observedState\",\"recoveryFailure\",\"lifecycleCapabilities\"],\"properties\":{"
                 + "\"deploymentId\":{\"type\":\"string\"},\"tenantId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"REGISTERED\",\"STARTING\",\"READY\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},"
                 + "\"sourceCount\":{\"type\":\"integer\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\",\"nullable\":true},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},"
-                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"continuity\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]},\"deploymentRevision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1,\"nullable\":true},\"desiredState\":{\"type\":\"string\",\"nullable\":true},\"observedState\":{\"type\":\"string\",\"nullable\":true},\"recoveryFailure\":{\"type\":\"string\",\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
+                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"failure\":{\"allOf\":[{\"$ref\":\"#/components/schemas/StartupFailure\"}],\"nullable\":true},\"continuity\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]},\"deploymentRevision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1,\"nullable\":true},\"desiredState\":{\"type\":\"string\",\"nullable\":true},\"observedState\":{\"type\":\"string\",\"nullable\":true},\"recoveryFailure\":{\"type\":\"string\",\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
                 + "      \"LocalDeploymentStatusList\": {\"type\":\"object\",\"required\":[\"scope\",\"deployments\"],\"properties\":{\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"deployments\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"}}}},\n"
                 + "      \"DeploymentCommandOutcome\": {\"type\":\"object\",\"required\":[\"outcome\"],\"properties\":{\"outcome\":{\"type\":\"string\",\"enum\":[\"ACCEPTED\",\"CONVERGED\",\"REPLAYED\",\"IDEMPOTENCY_CONFLICT\",\"STALE_GENERATION\",\"SUPERSEDED\",\"REFUSED\",\"FAILED\",\"TERMINAL\"]},\"commandId\":{\"type\":\"string\"},\"fromGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"generation\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"expected\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"observed\":{\"type\":\"string\"},\"key\":{\"type\":\"string\"},\"by\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"cause\":{\"type\":\"string\"},\"original\":{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}}},\n"
                 + "      \"DeploymentCommandResponse\": {\"oneOf\":[{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"},{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}],\"description\":\"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome.\"}";

@@ -729,8 +729,11 @@ class RavenrootServerTest {
             // Still inspectable: the counts are unchanged from the valid case.
             assertTrue(response.body().contains("\"nodes\":4"), response.body());
             assertTrue(response.body().contains("\"valid\":false"), response.body());
-            assertTrue(response.body().contains(
-                    "Node 'error' declares an unknown kind 'SUBGRAPH'"), response.body());
+            assertTrue(response.body().contains("\"phase\":\"SEMANTIC_STRUCTURE\""), response.body());
+            assertTrue(response.body().contains("\"reason\":\"INVALID_STRUCTURE\""), response.body());
+            assertTrue(response.body().contains("\"nodeId\":\"error\""), response.body());
+            assertTrue(response.body().contains("\"nodeRef\":\"sha256:"), response.body());
+            assertFalse(response.body().contains("SUBGRAPH"), response.body());
         }
     }
 

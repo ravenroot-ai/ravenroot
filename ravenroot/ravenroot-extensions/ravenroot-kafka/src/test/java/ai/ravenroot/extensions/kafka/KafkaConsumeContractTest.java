@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,6 +17,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaConsumeContractTest {
+    @Test void declaresEveryPublicStartupCodeAsOneClosedSet() {
+        assertEquals(Set.of("assignment-lost-before-ready", "assignment-timeout", "broker-authorization-failed",
+                "checkpoint-policy-forbidden", "cluster-profile-required", "cluster-profile-unavailable",
+                "consumer-failed", "consumer-wakeup", "credential-unavailable",
+                "dead-letter-topic-forbidden", "durable-ingress-lost", "durable-ingress-required",
+                "group-forbidden", "invalid-tightening", "membership-invalid", "partition-order-violation",
+                "poison-policy-forbidden", "poison-record-halted", "startup-cancelled",
+                "subscription-mode-invalid", "topic-pattern-forbidden", "topics-forbidden", "topics-invalid",
+                "unknown-graph-property"), behavior((profile, secret) -> new KafkaConsumerTestSupport.FakeOwner(),
+                        KafkaConsumerTestSupport.profile()).sourceStartFailureCodes());
+    }
     @Test void descriptorIsConditionalCompleteAndCatalogValid() {
         var descriptor = new KafkaConsumeNodeBehavior().descriptor();
         NodeTypeDescriptorValidator.validate(descriptor);

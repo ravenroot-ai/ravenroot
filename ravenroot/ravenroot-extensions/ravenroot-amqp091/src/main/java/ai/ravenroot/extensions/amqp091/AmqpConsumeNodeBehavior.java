@@ -103,5 +103,16 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
         return new AmqpConsumerSource(configuration, credentials, profiles, policies, protocol, executor, clock);
     }
 
+    @Override public Set<String> sourceStartFailureCodes() {
+        return Set.of("amqp-consumer-already-active", "amqp-consumer-failed",
+                "amqp-consumer-policy-unavailable", "amqp-consumer-unavailable", "amqp-profile-unavailable",
+                "credential-unavailable", "durable-ingress-lost", "durable-ingress-required",
+                "invalid-checkpoint-policy", "invalid-dead-letter-mode", "invalid-drain-timeout",
+                "invalid-max-in-flight", "invalid-max-retry-backoff", "invalid-poison-attempts",
+                "invalid-poison-policy", "invalid-prefetch", "invalid-retry-backoff",
+                "poison-policy-forbidden", "queue-not-authorized", "startup-cancelled",
+                "unknown-graph-property");
+    }
+
     static Set<String> knownConfiguration() { return CONFIGURATION; }
 }

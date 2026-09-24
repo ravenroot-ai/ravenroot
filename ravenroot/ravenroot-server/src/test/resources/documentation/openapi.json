@@ -976,8 +976,11 @@
         "summary": "Parses and summarizes a GraphML document without executing it.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "purpose", "in": "query", "required": false, "schema": {"type": "string", "default": "EXECUTION", "enum": ["EXECUTION","LOCAL_DEPLOYMENT","SOURCE_SESSION"]}}
+        ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GraphInspection"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1538,7 +1541,7 @@
         "x-assistant-posture": "CONFIRM",
         "security": [{"bearerAuth": []}],
         "responses": {
-          "202": {"description": "success"},
+          "202": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SourceSessionStatus"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1561,7 +1564,7 @@
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SourceSessionStatus"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1581,7 +1584,7 @@
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SourceSessionStatus"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1634,9 +1637,13 @@
       "HumanTaskCapabilityRevocation": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "capability"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "capability": {"type": "string"}}},
       "HumanTaskInteractionLaunch": {"type": "object", "description": "Bounded registered-host launch data: capability metadata, exact task/generation/actions, authorized review presentation, and pinned response schema. It never contains a Ravenroot bearer token or provider signing credential."},
       "HumanTaskDecisionResult": {"type": "object", "required": ["outcome", "taskId", "generation"], "properties": {"outcome": {"type": "string"}, "taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "resumeTraversalId": {"type": "string", "format": "uuid"}}},
+      "GraphAdmissionFinding": {"type":"object","required":["contract","phase","reason","incidentId"],"additionalProperties":false,"properties":{"contract":{"type":"string","enum":["ravenroot.graph-admission/1"]},"phase":{"type":"string","enum":["GRAPHML_PARSE","SEMANTIC_STRUCTURE","PROPERTY_SCHEMA","CAPABILITY","RUNTIME_NATURE","BYPASS","RUNTIME_CONCURRENCY","RESOURCE_LIMIT","SOURCE_REQUIREMENT","SOURCE_CONSTRUCTION","SOURCE_START","MANAGED_INGRESS","STARTUP"]},"reason":{"type":"string","enum":["GRAPHML_REJECTED","INVALID_STRUCTURE","DUPLICATE_ELEMENT","MISSING_START","MISSING_END","INVALID_TERMINAL_COUNT","DANGLING_EDGE","INVALID_PROPERTY","REQUIRED_PROPERTY_MISSING","PROPERTY_TYPE_INVALID","PROPERTY_VALUE_NOT_ALLOWED","PROPERTY_OUT_OF_RANGE","PROPERTY_TOO_LARGE","PROPERTY_COLLECTION_INVALID","PROPERTY_NAME_NEAR_MISS","RESERVED_PROPERTY","WORKSPACE_REFERENCE_INVALID","REMOVED_BEHAVIOR","CAPABILITY_UNAVAILABLE","RUNTIME_NATURE_INVALID","RUNTIME_NATURE_NOT_ALLOWED","RUNTIME_NATURE_UNSUPPORTED","BYPASS_INVALID","RUNTIME_CONCURRENCY_INVALID","GRAPH_LIMIT_EXCEEDED","SOURCE_CAPABILITY_MISMATCH","SOURCE_REQUIRED","SOURCE_START_REFUSED","STARTUP_FAILED"]},"nodeId":{"type":"string","maxLength":128},"nodeRef":{"type":"string","pattern":"^sha256:[0-9a-f]{32}$"},"propertyName":{"type":"string","maxLength":64},"incidentId":{"type":"string","maxLength":128,"pattern":"^[A-Za-z0-9._:-]+$"}}},
+      "StartupFailure": {"type":"object","required":["contract","phase","reason","incidentId"],"additionalProperties":false,"properties":{"contract":{"type":"string","enum":["ravenroot.startup-failure/1"]},"phase":{"type":"string","enum":["GRAPHML_PARSE","SEMANTIC_STRUCTURE","PROPERTY_SCHEMA","CAPABILITY","RUNTIME_NATURE","BYPASS","RUNTIME_CONCURRENCY","RESOURCE_LIMIT","SOURCE_REQUIREMENT","SOURCE_CONSTRUCTION","SOURCE_START","MANAGED_INGRESS","STARTUP"]},"reason":{"oneOf":[{"type":"string","enum":["STARTUP_FAILED"]},{"type":"string","pattern":"^[a-z][a-z0-9-]{0,63}$"}]},"nodeId":{"type":"string","maxLength":128},"nodeRef":{"type":"string","pattern":"^sha256:[0-9a-f]{32}$"},"incidentId":{"type":"string","maxLength":128,"pattern":"^[A-Za-z0-9._:-]+$"}}},
+      "GraphInspection": {"type":"object","required":["nodes","edges","startNodes","endNodes","valid","violations","findings"],"properties":{"nodes":{"type":"integer","minimum":0},"edges":{"type":"integer","minimum":0},"startNodes":{"type":"integer","minimum":0},"endNodes":{"type":"integer","minimum":0},"valid":{"type":"boolean"},"violations":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","maxItems":1,"items":{"$ref":"#/components/schemas/GraphAdmissionFinding"}}}},
+      "SourceSessionStatus": {"type":"object","required":["sessionId","deploymentId","state","sourceCount","scope","diagnostic","failure"],"properties":{"sessionId":{"type":"string"},"deploymentId":{"type":"string"},"state":{"type":"string","enum":["STARTING","LISTENING","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":1},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"failure":{"allOf":[{"$ref":"#/components/schemas/StartupFailure"}],"nullable":true}}},
       "LifecycleCommandCapability": {"type":"object","required":["command","available","reasonRequired","unavailableReason"],"properties":{"command":{"type":"string","enum":["START","PAUSE","RESUME","CANCEL","DRAIN","STOP","RESTART","UNDEPLOY"]},"available":{"type":"boolean"},"reasonRequired":{"type":"boolean"},"unavailableReason":{"type":"string","nullable":true}}},
       "LifecycleCapabilities": {"type":"object","required":["contractVersion","scope","commands"],"properties":{"contractVersion":{"type":"integer","enum":[1]},"scope":{"type":"string","enum":["DEPLOYMENT","PROCESS"]},"commands":{"type":"array","items":{"$ref":"#/components/schemas/LifecycleCommandCapability"}},"drainBound":{"type":"string"}}},
-      "LocalDeploymentStatus": {"type":"object","required":["deploymentId","tenantId","state","sourceCount","graphVersion","scope","diagnostic","continuity","deploymentRevision","desiredState","observedState","recoveryFailure","lifecycleCapabilities"],"properties":{"deploymentId":{"type":"string"},"tenantId":{"type":"string"},"state":{"type":"string","enum":["REGISTERED","STARTING","READY","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":0},"graphVersion":{"type":"string","nullable":true},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"continuity":{"type":"string","enum":["PROCESS_LOCAL","DURABLE"]},"deploymentRevision":{"type":"integer","format":"int64","minimum":1,"nullable":true},"desiredState":{"type":"string","nullable":true},"observedState":{"type":"string","nullable":true},"recoveryFailure":{"type":"string","nullable":true},"deploymentGeneration":{"type":"integer","format":"int64","minimum":0,"description":"Present only when this deployment is governed by durable lifecycle authority."},"lifecycleCapabilities":{"$ref":"#/components/schemas/LifecycleCapabilities"}}},
+      "LocalDeploymentStatus": {"type":"object","required":["deploymentId","tenantId","state","sourceCount","graphVersion","scope","diagnostic","failure","continuity","deploymentRevision","desiredState","observedState","recoveryFailure","lifecycleCapabilities"],"properties":{"deploymentId":{"type":"string"},"tenantId":{"type":"string"},"state":{"type":"string","enum":["REGISTERED","STARTING","READY","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":0},"graphVersion":{"type":"string","nullable":true},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"failure":{"allOf":[{"$ref":"#/components/schemas/StartupFailure"}],"nullable":true},"continuity":{"type":"string","enum":["PROCESS_LOCAL","DURABLE"]},"deploymentRevision":{"type":"integer","format":"int64","minimum":1,"nullable":true},"desiredState":{"type":"string","nullable":true},"observedState":{"type":"string","nullable":true},"recoveryFailure":{"type":"string","nullable":true},"deploymentGeneration":{"type":"integer","format":"int64","minimum":0,"description":"Present only when this deployment is governed by durable lifecycle authority."},"lifecycleCapabilities":{"$ref":"#/components/schemas/LifecycleCapabilities"}}},
       "LocalDeploymentStatusList": {"type":"object","required":["scope","deployments"],"properties":{"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"deployments":{"type":"array","items":{"$ref":"#/components/schemas/LocalDeploymentStatus"}}}},
       "DeploymentCommandOutcome": {"type":"object","required":["outcome"],"properties":{"outcome":{"type":"string","enum":["ACCEPTED","CONVERGED","REPLAYED","IDEMPOTENCY_CONFLICT","STALE_GENERATION","SUPERSEDED","REFUSED","FAILED","TERMINAL"]},"commandId":{"type":"string"},"fromGeneration":{"type":"integer","format":"int64","minimum":0},"generation":{"type":"integer","format":"int64","minimum":0},"expected":{"type":"integer","format":"int64","minimum":0},"observed":{"type":"string"},"key":{"type":"string"},"by":{"type":"string"},"reason":{"type":"string"},"cause":{"type":"string"},"original":{"$ref":"#/components/schemas/DeploymentCommandOutcome"}}},
       "DeploymentCommandResponse": {"oneOf":[{"$ref":"#/components/schemas/LocalDeploymentStatus"},{"$ref":"#/components/schemas/DeploymentCommandOutcome"}],"description":"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome."},

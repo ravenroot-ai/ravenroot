@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,6 +24,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpConsumeContractTest {
+    @Test void declaresEveryPublicStartupCodeAsOneClosedSet() {
+        assertEquals(Set.of("amqp-consumer-already-active", "amqp-consumer-failed",
+                "amqp-consumer-policy-unavailable", "amqp-consumer-unavailable", "amqp-profile-unavailable",
+                "credential-unavailable", "durable-ingress-lost", "durable-ingress-required",
+                "invalid-checkpoint-policy", "invalid-dead-letter-mode", "invalid-drain-timeout",
+                "invalid-max-in-flight", "invalid-max-retry-backoff", "invalid-poison-attempts",
+                "invalid-poison-policy", "invalid-prefetch", "invalid-retry-backoff",
+                "poison-policy-forbidden", "queue-not-authorized", "startup-cancelled",
+                "unknown-graph-property"), behavior(new AmqpConsumerTestSupport.FakeProtocol())
+                .sourceStartFailureCodes());
+    }
     private AmqpConsumerSource source;
 
     @AfterEach

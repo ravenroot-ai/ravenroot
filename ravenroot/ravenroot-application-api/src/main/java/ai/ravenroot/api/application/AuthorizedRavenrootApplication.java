@@ -413,6 +413,12 @@ public final class AuthorizedRavenrootApplication {
         return delegate.inspectGraphMl(graphMl);
     }
 
+    /** Purpose-aware inspection after the same graph-read authorization. */
+    public GraphSummary inspectGraphMl(RequestContext context, InputStream graphMl, GraphAdmissionPurpose purpose) {
+        require(context, AuthorizationAction.GRAPH_READ, collection("graphs", context));
+        return delegate.inspectGraphMl(graphMl, purpose);
+    }
+
     /**
  * Starts a traversal with a structured payload.
  *

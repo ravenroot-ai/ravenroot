@@ -19,6 +19,14 @@ import ai.ravenroot.api.node.service.NodePackageServices;
  */
 public interface InboundSourceCapable {
     /**
+     * Closed codes this trusted source implementation may expose when startup is refused.
+     * Undeclared codes are deliberately projected as a generic incident by the core.
+     */
+    default java.util.Set<String> sourceStartFailureCodes() {
+        return java.util.Set.of();
+    }
+
+    /**
      * Builds this node's inbound source. Called once per node, at the same point in a deployment's
      * startup where {@link NodeBehavior#create} builds that node's action — configuration parsing and
      * any client construction belong here, not deferred into {@link InboundSource#start}, for the same

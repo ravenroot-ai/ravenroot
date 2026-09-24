@@ -1,6 +1,8 @@
 package ai.ravenroot.server;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.deployment.InboundSource;
@@ -92,13 +94,14 @@ class SourceSessionEditorActivityBrowserTest {
               <key id="kind" for="node" attr.name="kind" attr.type="string"/>
               <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
               <key id="message" for="node" attr.name="message" attr.type="string"/>
+              <key id="intervalMs" for="node" attr.name="intervalMs" attr.type="string"/>
               <key id="layoutX" for="node" attr.name="layoutX" attr.type="double"/>
               <key id="layoutY" for="node" attr.name="layoutY" attr.type="double"/>
               <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
               <graph id="listening-source" edgedefault="directed">
                 <node id="error"><data key="kind">ERROR</data><data key="layoutX">80</data><data key="layoutY">260</data></node>
                 <node id="start"><data key="kind">START</data><data key="layoutX">80</data><data key="layoutY">80</data></node>
-                <node id="consume"><data key="kind">BEHAVIOR</data><data key="behavior">test.stream.consume</data><data key="layoutX">300</data><data key="layoutY">80</data></node>
+                <node id="consume"><data key="kind">BEHAVIOR</data><data key="behavior">test.stream.consume</data><data key="intervalMs">700</data><data key="layoutX">300</data><data key="layoutY">80</data></node>
                 <node id="log-admission"><data key="kind">BEHAVIOR</data><data key="behavior">log</data><data key="message">admitted {{payload}}</data><data key="layoutX">540</data><data key="layoutY">80</data></node>
                 <node id="end"><data key="kind">END</data><data key="layoutX">780</data><data key="layoutY">80</data></node>
                 <edge source="start" target="consume"><data key="outcome">continue</data></edge>
@@ -234,7 +237,9 @@ class SourceSessionEditorActivityBrowserTest {
         public NodeTypeDescriptor descriptor() {
             return new NodeTypeDescriptor(SOURCE_BEHAVIOR, "Stream source", "Test",
                     "Admits one deterministic message per interval into its deployment.", "actor",
-                    false, List.of(), Set.of("inbound-source"),
+                    false, List.of(NodePropertyDescriptor.required("intervalMs", "Interval (ms)",
+                            NodePropertyType.INTEGER, "Deterministic test-source interval.")),
+                    Set.of("inbound-source"),
                     NodeRuntimeNature.SOURCE, Set.of(NodeRuntimeNature.SOURCE));
         }
 

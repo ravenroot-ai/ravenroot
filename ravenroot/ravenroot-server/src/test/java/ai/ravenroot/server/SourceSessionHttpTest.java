@@ -2,6 +2,8 @@ package ai.ravenroot.server;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
+import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
@@ -51,6 +53,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** HTTP/OpenAPI-facing lifecycle contract for process-local source sessions. */
 @Timeout(value = 60, unit = TimeUnit.SECONDS)
 class SourceSessionHttpTest {
+    @Test
+    void inspectionAndStartShareAValueFreePropertyRefusal() throws Exception {
+        var source = new SourceBehavior();
+        NodePackage nodePackage = new NodePackage() {
+            @Override public String id() { return "test.http.source.package"; }
+            @Override public String version() { return "1.0.0"; }
+            @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+            @Override public List<NodeBehavior> behaviors() { return List.of(source); }
+        };
+        BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(), nodePackage);
+        try (var engine = new PekkoExecutionEngine("source-session-http-admission")) {
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), null, 8, UnknownBehaviorPolicy.passThrough());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, true,
+                    new HeaderTenantAuthenticator(), new HttpSecurityConfiguration(
+                    new BrowserOriginPolicy(Set.of("https://editor.example")),
+                    new SecurityHeadersPolicy(false), java.time.Duration.ofSeconds(30)))) {
+                server.start();
+                String marker = "password=hunter2-host=private.example";
+                String graph = SOURCE_GRAPH
+                        .replace("<key id=\"outcome\"", "<key id=\"batch\" for=\"node\" attr.name=\"batchSize\" attr.type=\"string\"/>\n  <key id=\"outcome\"")
+                        .replace("<data key=\"behavior\">test.http.source</data></node>",
+                                "<data key=\"behavior\">test.http.source</data><data key=\"batch\">"
+                                        + marker + "</data></node>");
+
+                HttpResponse<String> inspected = request(server, "POST",
+                        "/v1/graphs/inspect?purpose=SOURCE_SESSION", graph, "tenant-a");
+                HttpResponse<String> started = request(server, "POST",
+                        "/v1/source-sessions?id=invalid-property", graph, "tenant-a");
+
+                assertEquals(200, inspected.statusCode(), inspected.body());
+                assertEquals(400, started.statusCode(), started.body());
+                for (String body : List.of(inspected.body(), started.body())) {
+                    assertTrue(body.contains("\"phase\":\"PROPERTY_SCHEMA\""), body);
+                    assertTrue(body.contains("\"reason\":\"PROPERTY_TYPE_INVALID\""), body);
+                    assertTrue(body.contains("\"nodeId\":\"listener\""), body);
+                    assertTrue(body.contains("\"propertyName\":\"batchSize\""), body);
+                    assertFalse(body.contains(marker), body);
+                    assertFalse(body.contains("private.example"), body);
+                }
+            }
+        }
+    }
+
     @Test
     void authenticatedTenantsStartObserveAndStopOnlyTheirOwnProcessLocalSession() throws Exception {
         var source = new SourceBehavior();
@@ -176,7 +224,9 @@ class SourceSessionHttpTest {
         @Override
         public NodeTypeDescriptor descriptor() {
             return new NodeTypeDescriptor("test.http.source", "HTTP source", "Test", "HTTP source", "actor",
-                    false, List.of(), Set.of(), NodeRuntimeNature.SOURCE, Set.of(NodeRuntimeNature.SOURCE));
+                    false, List.of(NodePropertyDescriptor.optional("batchSize", "Batch size",
+                            NodePropertyType.INTEGER, "Bounded test batch size", "1")),
+                    Set.of(), NodeRuntimeNature.SOURCE, Set.of(NodeRuntimeNature.SOURCE));
         }
 
         @Override

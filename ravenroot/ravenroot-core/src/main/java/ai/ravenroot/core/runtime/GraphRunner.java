@@ -4357,12 +4357,7 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(executionLimits, "executionLimits");
         java.util.function.Predicate<GraphNode> requiresCurrentAdmission =
                 node -> !node.id().equals(completedHumanTaskNode);
-        new BehaviorPropertySchema(behaviors).validate(graph, requiresCurrentAdmission);
-        new BehaviorCapabilityPreflight(behaviors).validate(graph, requiresCurrentAdmission);
-        new NodeRuntimeNatureValidator(behaviors).validate(graph);
-        new NodeBypassValidator().validate(graph);
-        new NodeRuntimeConcurrencyValidator(behaviors).validate(graph);
-        new GraphComplexityAdmission(behaviors, executionLimits).validate(graph);
+        new GraphAdmissionValidator(behaviors, executionLimits).validateLegacy(graph, requiresCurrentAdmission);
     }
 
     private static String validateCompletedHumanTaskNode(GraphDefinition graph, String nodeId) {

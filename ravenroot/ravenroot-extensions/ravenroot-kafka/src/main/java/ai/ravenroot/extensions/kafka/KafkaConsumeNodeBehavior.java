@@ -102,5 +102,16 @@ public final class KafkaConsumeNodeBehavior implements NodeBehavior, InboundSour
         return new KafkaConsumerSource(configuration, credentials, profiles, protocol, executor, clock);
     }
 
+    @Override public Set<String> sourceStartFailureCodes() {
+        return Set.of("assignment-lost-before-ready", "assignment-timeout", "broker-authorization-failed",
+                "checkpoint-policy-forbidden", "cluster-profile-required", "cluster-profile-unavailable",
+                "consumer-failed", "consumer-wakeup", "credential-unavailable",
+                "dead-letter-topic-forbidden", "durable-ingress-lost", "durable-ingress-required",
+                "group-forbidden", "invalid-tightening", "membership-invalid", "partition-order-violation",
+                "poison-policy-forbidden", "poison-record-halted", "startup-cancelled",
+                "subscription-mode-invalid", "topic-pattern-forbidden", "topics-forbidden", "topics-invalid",
+                "unknown-graph-property");
+    }
+
     static Set<String> knownConfiguration() { return CONFIG; }
 }

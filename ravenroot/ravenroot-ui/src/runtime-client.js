@@ -90,7 +90,8 @@ export class RuntimeAuthorizationError extends Error {
 // apart from here, so the message must not assert which one happened -- it names the possibilities
 // instead of picking one.
 export class RuntimeRequestError extends Error {
-  constructor(reason, { status = null, method, path } = {}) {
+  constructor(reason, { status = null, method, path, code = null, correlationId = null,
+    incidentId = null, finding = null } = {}) {
     const route = String(path || '').split('?')[0];
     const where = status == null ? `${method} ${route}` : `HTTP ${status} ${method} ${route}`;
     const hint = status == null
@@ -103,7 +104,83 @@ export class RuntimeRequestError extends Error {
     this.status = status;
     this.method = method;
     this.path = path;
+    this.code = code;
+    this.correlationId = correlationId;
+    this.incidentId = incidentId;
+    this.finding = finding;
   }
+}
+
+const ADMISSION_PHASES = new Set([
+  'GRAPHML_PARSE', 'SEMANTIC_STRUCTURE', 'PROPERTY_SCHEMA', 'CAPABILITY', 'RUNTIME_NATURE',
+  'BYPASS', 'RUNTIME_CONCURRENCY', 'RESOURCE_LIMIT', 'SOURCE_REQUIREMENT',
+  'SOURCE_CONSTRUCTION', 'SOURCE_START', 'MANAGED_INGRESS', 'STARTUP',
+]);
+const ADMISSION_REASONS = new Set([
+  'GRAPHML_REJECTED', 'INVALID_STRUCTURE', 'DUPLICATE_ELEMENT', 'MISSING_START', 'MISSING_END',
+  'INVALID_TERMINAL_COUNT', 'DANGLING_EDGE', 'INVALID_PROPERTY', 'REQUIRED_PROPERTY_MISSING',
+  'PROPERTY_TYPE_INVALID', 'PROPERTY_VALUE_NOT_ALLOWED', 'PROPERTY_OUT_OF_RANGE',
+  'PROPERTY_TOO_LARGE', 'PROPERTY_COLLECTION_INVALID', 'PROPERTY_NAME_NEAR_MISS',
+  'RESERVED_PROPERTY', 'WORKSPACE_REFERENCE_INVALID', 'REMOVED_BEHAVIOR',
+  'CAPABILITY_UNAVAILABLE', 'RUNTIME_NATURE_INVALID', 'RUNTIME_NATURE_NOT_ALLOWED',
+  'RUNTIME_NATURE_UNSUPPORTED', 'BYPASS_INVALID', 'RUNTIME_CONCURRENCY_INVALID',
+  'GRAPH_LIMIT_EXCEEDED', 'SOURCE_CAPABILITY_MISMATCH', 'SOURCE_REQUIRED',
+  'SOURCE_START_REFUSED', 'STARTUP_FAILED',
+]);
+const SAFE_HANDLE = /^[A-Za-z0-9._:-]{1,128}$/;
+const NODE_REF = /^sha256:[0-9a-f]{32}$/;
+const SOURCE_REASON = /^[a-z][a-z0-9-]{0,63}$/;
+const UNSAFE_DIAGNOSTIC_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+const UNREDACTED_CREDENTIAL = /(?:\b(?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer|basic)\s+|\bbearer\s+|\b(?:api[-_.]?key|access[-_.]?token|refresh[-_.]?token|id[-_.]?token|password|passwd|client[-_.]?secret|private[-_.]?key|credential|secret|token)\s*[:=]\s*)(?!\[ravenroot:redacted:credential\])\S+/iu;
+const JWT_CREDENTIAL = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/u;
+
+function safeDiagnosticToken(value, maximumBytes) {
+  return typeof value === 'string' && value.length > 0 && !UNSAFE_DIAGNOSTIC_TEXT.test(value)
+    && value === value.normalize('NFC') && !UNREDACTED_CREDENTIAL.test(value)
+    && !JWT_CREDENTIAL.test(value) && new TextEncoder().encode(value).length <= maximumBytes;
+}
+
+export function validateDiagnosticFinding(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contract !== 'ravenroot.graph-admission/1'
+      || !ADMISSION_PHASES.has(value.phase) || !ADMISSION_REASONS.has(value.reason)
+      || !SAFE_HANDLE.test(value.incidentId || '')
+      || (value.nodeId !== undefined && !safeDiagnosticToken(value.nodeId, 128))
+      || (value.nodeRef !== undefined && !NODE_REF.test(value.nodeRef))
+      || ((value.nodeId === undefined) !== (value.nodeRef === undefined))
+      || (value.propertyName !== undefined && !safeDiagnosticToken(value.propertyName, 64))) {
+    throw new Error('Graph admission finding is malformed');
+  }
+  return Object.freeze({ ...value });
+}
+
+export function validateStartupFailure(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contract !== 'ravenroot.startup-failure/1' || !ADMISSION_PHASES.has(value.phase)
+      || !(value.reason === 'STARTUP_FAILED' || SOURCE_REASON.test(value.reason || ''))
+      || !SAFE_HANDLE.test(value.incidentId || '')
+      || (value.nodeId !== undefined && !safeDiagnosticToken(value.nodeId, 128))
+      || (value.nodeRef !== undefined && !NODE_REF.test(value.nodeRef))
+      || ((value.nodeId === undefined) !== (value.nodeRef === undefined))) {
+    throw new Error('Startup failure is malformed');
+  }
+  return Object.freeze({ ...value });
+}
+
+function validatedErrorEnvelope(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contract !== 'ravenroot.error/1'
+      || typeof value.code !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(value.code)
+      || !safeDiagnosticToken(value.message, 512)
+      || (value.error !== undefined && value.error !== value.message)
+      || !SAFE_HANDLE.test(value.correlationId || '')
+      || (value.incidentId !== undefined && !SAFE_HANDLE.test(value.incidentId))) return null;
+  let finding = null;
+  try { if (value.finding !== undefined) finding = validateDiagnosticFinding(value.finding); }
+  catch { return null; }
+  if (finding && value.incidentId !== finding.incidentId) return null;
+  return Object.freeze({ code: value.code, message: value.message, correlationId: value.correlationId,
+    incidentId: value.incidentId || null, finding });
 }
 
 // The runtime refused to compile the artifact's source, and said why. Distinct from
@@ -157,7 +234,12 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
       || (value.deploymentId !== null && value.deploymentId !== undefined
         && (typeof value.deploymentId !== 'string' || !value.deploymentId))
       || (value.diagnostic !== null && value.diagnostic !== undefined
-        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
+        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192
+          || !safeDiagnosticToken(value.diagnostic, 768)))
+      || (value.failure !== null && value.failure !== undefined && (() => {
+        try { validateStartupFailure(value.failure); return false; } catch { return true; }
+      })())
+      || (value.failure !== null && value.failure !== undefined && value.state !== 'FAILED')) {
     throw new Error('Source session response is not a valid process-local status');
   }
   if (expectedSessionId && value.sessionId !== expectedSessionId) {
@@ -292,7 +374,12 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || (value.recoveryFailure !== null
         && (typeof value.recoveryFailure !== 'string' || !value.recoveryFailure))
       || (value.diagnostic !== null && value.diagnostic !== undefined
-        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
+        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192
+          || !safeDiagnosticToken(value.diagnostic, 768)))
+      || (value.failure !== null && value.failure !== undefined && (() => {
+        try { validateStartupFailure(value.failure); return false; } catch { return true; }
+      })())
+      || (value.failure !== null && value.failure !== undefined && value.state !== 'FAILED')) {
     throw new Error('Deployment response is not a valid process-local status');
   }
   if (expectedDeploymentId && value.deploymentId !== expectedDeploymentId) {
@@ -486,6 +573,22 @@ export class RavenrootRuntimeClient {
       headers: { 'Content-Type': 'application/graphml+xml; charset=utf-8' },
       body: graphMl,
     });
+  }
+
+  async inspectGraph(graphMl, purpose = 'EXECUTION') {
+    if (!['EXECUTION', 'LOCAL_DEPLOYMENT', 'SOURCE_SESSION'].includes(purpose)) {
+      throw new Error('Unsupported graph admission purpose');
+    }
+    const result = await this.#json(`/v1/graphs/inspect?purpose=${encodeURIComponent(purpose)}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/graphml+xml; charset=utf-8' },
+      body: graphMl,
+    });
+    if (!result || typeof result !== 'object' || Array.isArray(result)
+        || typeof result.valid !== 'boolean' || !Array.isArray(result.findings)
+        || result.findings.length > 1) throw new Error('Graph inspection response is malformed');
+    return Object.freeze({ ...result,
+      findings: Object.freeze(result.findings.map(validateDiagnosticFinding)) });
   }
 
   async run(graphMl, payload = '') {
@@ -1340,8 +1443,8 @@ export class RavenrootRuntimeClient {
         cache: 'no-store',
         headers: this.#headers(options.headers, credential.accessToken),
       });
-    } catch (error) {
-      throw new RuntimeRequestError(error.message || 'the request failed', { method, path });
+    } catch {
+      throw new RuntimeRequestError('Service request failed', { method, path });
     }
     if (response.status === 401 || response.status === 403) {
       await this.#clearAccessTokenIfCurrent(credential);
@@ -1373,11 +1476,15 @@ export class RavenrootRuntimeClient {
       }
     }
     if (!response.ok) {
-      const reason = readFailed
-        ? 'Service response could not be read'
-        : (body && typeof body.error === 'string' && body.error)
-          || (raw.trim() ? raw.trim().slice(0, 200) : 'Service request failed');
-      throw new RuntimeRequestError(reason, { status: response.status, method, path });
+      const envelope = readFailed ? null : validatedErrorEnvelope(body);
+      const legacyCode = !envelope && body && typeof body === 'object' && !Array.isArray(body)
+        && typeof body.error === 'string' && /^[A-Z][A-Z0-9_]{0,127}$/.test(body.error)
+        ? body.error : null;
+      const reason = readFailed ? 'Service response could not be read'
+        : envelope?.message || legacyCode || 'Service request failed';
+      throw new RuntimeRequestError(reason, { status: response.status, method, path,
+        code: envelope?.code || legacyCode, correlationId: envelope?.correlationId || null,
+        incidentId: envelope?.incidentId || null, finding: envelope?.finding || null });
     }
     if (readFailed) {
       throw new RuntimeRequestError('Service response could not be read', { status: response.status, method, path });

@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 88.
+Checked source reconciliations: 89.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 23839 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23832 |
-| Unchanged identities | 23823 |
-| Approved identity migrations | 2 |
-| Approved retirements | 7 |
-| Semantically classified additions | 14 |
+| Source inventory candidates | 23839 |
+| Unchanged identities | 23839 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 23839 |
 
 ## Final semantic review
@@ -16394,31 +16394,31 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e413b30f4c3b7f3200ce` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
 | `oc-2dc9405847d0b6fc3921` | `scripts/select_backend_tests.py:33` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
 | `oc-3e0670f1b5584aa5ada4` | `scripts/select_backend_tests.py:33` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-f1509fd1e5c1a4a7da3b` | `scripts/select_backend_tests.py:42` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
-| `oc-fd22f53eee775f10bee1` | `scripts/select_backend_tests.py:42` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
-| `oc-3442748dc56ae351565f` | `scripts/select_backend_tests.py:58` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-d1efc4f8dc8c4170d07f` | `scripts/select_backend_tests.py:74` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-3b241ba416cd8bac6750` | `scripts/select_backend_tests.py:96` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-c924e84ff3d350e1bad8` | `scripts/select_backend_tests.py:96` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-f8aefefb57ccafba55ef` | `scripts/select_backend_tests.py:96` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-9eb5d5746a796aa77bef` | `scripts/select_backend_tests.py:109` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-d8a9e47042c338eba9fe` | `scripts/select_backend_tests.py:109` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-fa0bd6798a708c09c60c` | `scripts/select_backend_tests.py:109` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-8842b8a150a335604bea` | `scripts/select_backend_tests.py:123` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-cc3de15214b819619dea` | `scripts/select_backend_tests.py:123` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-d0961e36f332a80349b2` | `scripts/select_backend_tests.py:123` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-4e1c62e116db91b62dd1` | `scripts/select_backend_tests.py:128` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-68b484c57601f4cd63c5` | `scripts/select_backend_tests.py:128` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-e25d3e67156371ab49e8` | `scripts/select_backend_tests.py:128` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-9ff2c932fa42e454dffb` | `scripts/select_backend_tests.py:139` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
-| `oc-efc364fe4d37f671208d` | `scripts/select_backend_tests.py:139` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
-| `oc-aae4b2192b4a80ecbba8` | `scripts/select_backend_tests.py:142` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-bc1b095cb1d2d1213dff` | `scripts/select_backend_tests.py:143` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-d610caabe26b8ea03c6c` | `scripts/select_backend_tests.py:143` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-a8fefaec6101dd75ba62` | `scripts/select_backend_tests.py:146` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-ff264f5e154750a709d4` | `scripts/select_backend_tests.py:146` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-1546da7fb5dc2dfc03af` | `scripts/select_backend_tests.py:150` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
-| `oc-8b1d8d51ef767b5cb85d` | `scripts/select_backend_tests.py:150` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-f1509fd1e5c1a4a7da3b` | `scripts/select_backend_tests.py:50` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
+| `oc-fd22f53eee775f10bee1` | `scripts/select_backend_tests.py:50` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
+| `oc-3442748dc56ae351565f` | `scripts/select_backend_tests.py:66` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-d1efc4f8dc8c4170d07f` | `scripts/select_backend_tests.py:82` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-3b241ba416cd8bac6750` | `scripts/select_backend_tests.py:104` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-c924e84ff3d350e1bad8` | `scripts/select_backend_tests.py:104` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-f8aefefb57ccafba55ef` | `scripts/select_backend_tests.py:104` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-9eb5d5746a796aa77bef` | `scripts/select_backend_tests.py:117` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-d8a9e47042c338eba9fe` | `scripts/select_backend_tests.py:117` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-fa0bd6798a708c09c60c` | `scripts/select_backend_tests.py:117` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-8842b8a150a335604bea` | `scripts/select_backend_tests.py:131` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-cc3de15214b819619dea` | `scripts/select_backend_tests.py:131` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-d0961e36f332a80349b2` | `scripts/select_backend_tests.py:131` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-4e1c62e116db91b62dd1` | `scripts/select_backend_tests.py:141` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-68b484c57601f4cd63c5` | `scripts/select_backend_tests.py:141` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-e25d3e67156371ab49e8` | `scripts/select_backend_tests.py:141` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-9ff2c932fa42e454dffb` | `scripts/select_backend_tests.py:152` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
+| `oc-efc364fe4d37f671208d` | `scripts/select_backend_tests.py:152` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
+| `oc-aae4b2192b4a80ecbba8` | `scripts/select_backend_tests.py:155` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-bc1b095cb1d2d1213dff` | `scripts/select_backend_tests.py:156` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-d610caabe26b8ea03c6c` | `scripts/select_backend_tests.py:156` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-a8fefaec6101dd75ba62` | `scripts/select_backend_tests.py:159` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-ff264f5e154750a709d4` | `scripts/select_backend_tests.py:159` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-1546da7fb5dc2dfc03af` | `scripts/select_backend_tests.py:163` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-8b1d8d51ef767b5cb85d` | `scripts/select_backend_tests.py:163` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
 | `oc-66a0037ae546de8528f0` | `scripts/verify-deployment-persistence-browser.sh:5` `module` | script | retained | security-ceiling-or-default | This script assignment selects repository paths or shell fallback values for the issue #464 persistence verification harness. |
 | `oc-845f733e72bfdac5fae5` | `scripts/verify-deployment-persistence-browser.sh:5` `module` | script | retained | security-ceiling-or-default | This script assignment selects repository paths or shell fallback values for the issue #464 persistence verification harness. |
 | `oc-d89cbf5382263cf13319` | `scripts/verify-deployment-persistence-browser.sh:5` `module` | script | retained | security-ceiling-or-default | This script assignment selects repository paths or shell fallback values for the issue #464 persistence verification harness. |

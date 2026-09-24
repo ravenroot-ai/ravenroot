@@ -354,6 +354,7 @@ class VerifyEventTest(unittest.TestCase):
             ("push", "", "dev", "postmerge"),
             ("workflow_dispatch", "", "feature/x", "full"),
             ("merge_group", "", "gh-readonly-queue/dev/pr-1", "full"),
+            ("schedule", "", "main", "full"),
         ):
             for tier in ("full", "postmerge", "promotion", "docs", "admission", "fast", ""):
                 if tier == expected:
@@ -369,7 +370,6 @@ class VerifyEventTest(unittest.TestCase):
     def test_an_unmodelled_event_is_refused_rather_than_assumed(self) -> None:
         for event, base, ref in (
             ("pull_request_target", "dev", "feature/x"),
-            ("schedule", "", "dev"),
             ("push", "", "feature/x"),
             ("pull_request", "feature/y", "feature/x"),
             ("", "", ""),

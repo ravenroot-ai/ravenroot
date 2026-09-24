@@ -73,12 +73,15 @@ class SourceSessionHttpTest {
                     new BrowserOriginPolicy(Set.of("https://editor.example")),
                     new SecurityHeadersPolicy(false), java.time.Duration.ofSeconds(30)))) {
                 server.start();
-                String marker = "password=hunter2-host=private.example";
+                String marker = "password=hunter2-host=private.example-profile=prod";
+                String hostileNode = "listener;host=private.example;profile=prod;"
+                        + "url=https://operator:pw@inside.example:8443/path";
                 String graph = SOURCE_GRAPH
                         .replace("<key id=\"outcome\"", "<key id=\"batch\" for=\"node\" attr.name=\"batchSize\" attr.type=\"string\"/>\n  <key id=\"outcome\"")
                         .replace("<data key=\"behavior\">test.http.source</data></node>",
                                 "<data key=\"behavior\">test.http.source</data><data key=\"batch\">"
-                                        + marker + "</data></node>");
+                                        + marker + "</data></node>")
+                        .replace("listener", hostileNode);
 
                 HttpResponse<String> inspected = request(server, "POST",
                         "/v1/graphs/inspect?purpose=SOURCE_SESSION", graph, "tenant-a");
@@ -90,10 +93,43 @@ class SourceSessionHttpTest {
                 for (String body : List.of(inspected.body(), started.body())) {
                     assertTrue(body.contains("\"phase\":\"PROPERTY_SCHEMA\""), body);
                     assertTrue(body.contains("\"reason\":\"PROPERTY_TYPE_INVALID\""), body);
-                    assertTrue(body.contains("\"nodeId\":\"listener\""), body);
+                    assertTrue(body.contains("\"nodeId\":"), body);
+                    assertTrue(body.contains("redacted:host"), body);
+                    assertTrue(body.contains("redacted:profile"), body);
+                    assertTrue(body.contains("\"nodeRef\":\"sha256:"), body);
                     assertTrue(body.contains("\"propertyName\":\"batchSize\""), body);
                     assertFalse(body.contains(marker), body);
                     assertFalse(body.contains("private.example"), body);
+                    assertFalse(body.contains("inside.example"), body);
+                    assertFalse(body.contains("operator"), body);
+                    assertFalse(body.contains("profile=prod"), body);
+                }
+            }
+        }
+    }
+
+    @Test
+    void sourcePurposeFindingSurvivesTheLegacySessionRefusalEnvelope() throws Exception {
+        try (var engine = new PekkoExecutionEngine("source-session-http-source-required")) {
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, true,
+                    new HeaderTenantAuthenticator(), new HttpSecurityConfiguration(
+                    new BrowserOriginPolicy(Set.of("https://editor.example")),
+                    new SecurityHeadersPolicy(false), java.time.Duration.ofSeconds(30)))) {
+                server.start();
+                String graph = SOURCE_GRAPH.replace(">test.http.source<", ">log<");
+
+                HttpResponse<String> inspected = request(server, "POST",
+                        "/v1/graphs/inspect?purpose=SOURCE_SESSION", graph, "tenant-a");
+                HttpResponse<String> started = request(server, "POST",
+                        "/v1/source-sessions?id=no-source", graph, "tenant-a");
+
+                assertEquals(200, inspected.statusCode(), inspected.body());
+                assertEquals(400, started.statusCode(), started.body());
+                for (String body : List.of(inspected.body(), started.body())) {
+                    assertTrue(body.contains("\"phase\":\"SOURCE_REQUIREMENT\""), body);
+                    assertTrue(body.contains("\"reason\":\"SOURCE_REQUIRED\""), body);
                 }
             }
         }

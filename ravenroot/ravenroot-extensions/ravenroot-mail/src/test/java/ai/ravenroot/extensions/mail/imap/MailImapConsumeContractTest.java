@@ -25,8 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MailImapConsumeContractTest {
-    @Test void declaresEveryPublicStartupCodeAsOneClosedSet() {
-        assertEquals(Set.of("content-preview-forbidden", "credential-resolver-busy", "credential-unavailable",
+    @Test void typedEmissionVocabularyIsExactlyTheTrustedDeclaration() {
+        Set<String> expected = Set.of("content-preview-forbidden", "credential-resolver-busy", "credential-unavailable",
                 "durable-ingress-lost", "durable-ingress-required", "imap-checkpoint-conflict",
                 "imap-checkpoint-invalid", "imap-consumer-already-active", "imap-consumer-failed",
                 "imap-consumer-ownership-unavailable", "imap-consumer-policy-unavailable",
@@ -37,7 +37,9 @@ class MailImapConsumeContractTest {
                 "invalid-content-mode", "invalid-initial-position", "invalid-max-in-flight",
                 "invalid-max-retry-backoff", "invalid-poison-attempts", "invalid-poll-interval",
                 "invalid-preview-chars", "invalid-retry-backoff", "startup-cancelled",
-                "unknown-graph-property"), behavior(new ImapConsumerTestSupport.FakeProtocol())
+                "unknown-graph-property");
+        assertEquals(expected, ImapSourceStartFailure.codes());
+        assertEquals(ImapSourceStartFailure.codes(), behavior(new ImapConsumerTestSupport.FakeProtocol())
                 .sourceStartFailureCodes());
     }
     private ImapConsumerSource source;

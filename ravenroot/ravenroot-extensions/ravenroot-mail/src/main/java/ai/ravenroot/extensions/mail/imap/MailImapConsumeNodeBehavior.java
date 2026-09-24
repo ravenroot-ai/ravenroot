@@ -110,18 +110,7 @@ public final class MailImapConsumeNodeBehavior implements NodeBehavior, InboundS
     }
 
     @Override public Set<String> sourceStartFailureCodes() {
-        return Set.of("content-preview-forbidden", "credential-resolver-busy", "credential-unavailable",
-                "durable-ingress-lost", "durable-ingress-required", "imap-checkpoint-conflict",
-                "imap-checkpoint-invalid", "imap-consumer-already-active", "imap-consumer-failed",
-                "imap-consumer-ownership-unavailable", "imap-consumer-policy-unavailable",
-                "imap-folder-not-authorized", "imap-folder-not-canonical", "imap-headers-not-authorized",
-                "imap-message-poison-halted", "imap-message-projection-halted", "imap-profile-unavailable",
-                "imap-uidvalidity-changed", "imap-uidvalidity-invalid", "invalid-allowed-headers",
-                "invalid-batch-size", "invalid-checkpoint-policy", "invalid-consumer-id",
-                "invalid-content-mode", "invalid-initial-position", "invalid-max-in-flight",
-                "invalid-max-retry-backoff", "invalid-poison-attempts", "invalid-poll-interval",
-                "invalid-preview-chars", "invalid-retry-backoff", "startup-cancelled",
-                "unknown-graph-property");
+        return ImapSourceStartFailure.codes();
     }
 
     static Set<String> knownConfiguration() { return CONFIGURATION; }

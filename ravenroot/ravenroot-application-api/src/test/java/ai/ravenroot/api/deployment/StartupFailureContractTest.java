@@ -20,4 +20,26 @@ class StartupFailureContractTest {
         assertThrows(IllegalArgumentException.class, () -> StartupFailure.declared(
                 GraphAdmissionPhase.SOURCE_START, "host.example.com/password=hunter2", "n", "incident:1"));
     }
+
+    @Test
+    void defaultStructuredLogProjectionContainsOnlySafeFields() {
+        StartupFailure failure = StartupFailure.declared(GraphAdmissionPhase.SOURCE_START,
+                "imap-folder-not-authorized",
+                "listener;host=private.example;profile=prod;url=https://operator:pw@inside.example/path;"
+                        + "password=hunter2",
+                "incident:1234");
+        String message = StartupFailureSink.safeLogMessage(
+                DeploymentId.of("deploy;host=control.internal;profile=production"), failure,
+                failure.nodeId());
+
+        assertTrue(message.contains("phase=SOURCE_START"), message);
+        assertTrue(message.contains("reason=imap-folder-not-authorized"), message);
+        assertTrue(message.contains("incident=incident:1234"), message);
+        assertTrue(message.contains("redacted:host"), message);
+        assertTrue(message.contains("redacted:profile"), message);
+        for (String forbidden : java.util.List.of("private.example", "control.internal", "production",
+                "profile=prod", "inside.example", "operator", "hunter2")) {
+            assertFalse(message.contains(forbidden), message);
+        }
+    }
 }

@@ -2,6 +2,7 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.GraphAdmissionPhase;
+import ai.ravenroot.api.application.DiagnosticIdentifier;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.deployment.DeploymentId;
@@ -93,7 +94,34 @@ class DefaultGraphDeploymentStartupFailureTest {
                 () -> fixture(Set.of("NOT_A_PUBLIC_CODE"), "valid-code", new RuntimeException("x")));
     }
 
+    @Test
+    void startupFailureStaysOutOfExecutionEventsAndRuntimeMetrics() throws Exception {
+        String rawNode = "listener;host=private.example;profile=prod;"
+                + "url=https://operator:pw@inside.example/path;password=hunter2";
+        String graph = GRAPH.replace("listener", rawNode);
+        try (var fixture = fixture(Set.of("imap-folder-not-authorized"),
+                "imap-folder-not-authorized", new RuntimeException("secret-marker"), graph)) {
+            assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> fixture.deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS));
+
+            var failure = fixture.deployment.status().failure().orElseThrow();
+            assertEquals(DiagnosticIdentifier.reference(rawNode), failure.nodeRef().orElseThrow());
+            assertFalse(failure.toString().contains("private.example"));
+            assertFalse(failure.toString().contains("inside.example"));
+            assertFalse(failure.toString().contains("profile=prod"));
+            assertEquals(0, fixture.monitor.snapshot().activeExecutions());
+            assertTrue(fixture.monitor.snapshot().activeNodeInstances().isEmpty());
+            assertTrue(fixture.monitor.eventsAfter(0).isEmpty(),
+                    "startup diagnostics are deployment state, not execution events");
+        }
+    }
+
     private static Fixture fixture(Set<String> declared, String emitted, RuntimeException original) {
+        return fixture(declared, emitted, original, GRAPH);
+    }
+
+    private static Fixture fixture(Set<String> declared, String emitted, RuntimeException original,
+                                   String graph) {
         var behavior = new FailingSourceBehavior(declared, emitted, original);
         NodePackage nodePackage = new NodePackage() {
             @Override public String id() { return "test.failure.package"; }
@@ -103,13 +131,15 @@ class DefaultGraphDeploymentStartupFailureTest {
         };
         BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage);
         var engine = new SpawnRecordingEngine();
+        var monitor = new ExecutionMonitor();
         var deployment = new DefaultGraphDeployment(DeploymentId.of("failure-test"), engine, registry,
-                new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                GRAPH.getBytes(StandardCharsets.UTF_8), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
-        return new Fixture(engine, deployment);
+                monitor, ExecutionIdentitySource.randomUuids(),
+                graph.getBytes(StandardCharsets.UTF_8), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
+        return new Fixture(engine, deployment, monitor);
     }
 
-    private record Fixture(SpawnRecordingEngine engine, DefaultGraphDeployment deployment) implements AutoCloseable {
+    private record Fixture(SpawnRecordingEngine engine, DefaultGraphDeployment deployment,
+                           ExecutionMonitor monitor) implements AutoCloseable {
         @Override public void close() throws Exception {
             deployment.shutdown().toCompletableFuture().get(10, TimeUnit.SECONDS);
             engine.close();

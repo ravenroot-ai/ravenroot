@@ -17,15 +17,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaConsumeContractTest {
-    @Test void declaresEveryPublicStartupCodeAsOneClosedSet() {
-        assertEquals(Set.of("assignment-lost-before-ready", "assignment-timeout", "broker-authorization-failed",
+    @Test void typedEmissionVocabularyIsExactlyTheTrustedDeclaration() {
+        Set<String> expected = Set.of("assignment-lost-before-ready", "assignment-timeout", "broker-authorization-failed",
                 "checkpoint-policy-forbidden", "cluster-profile-required", "cluster-profile-unavailable",
                 "consumer-failed", "consumer-wakeup", "credential-unavailable",
                 "dead-letter-topic-forbidden", "durable-ingress-lost", "durable-ingress-required",
                 "group-forbidden", "invalid-tightening", "membership-invalid", "partition-order-violation",
                 "poison-policy-forbidden", "poison-record-halted", "startup-cancelled",
                 "subscription-mode-invalid", "topic-pattern-forbidden", "topics-forbidden", "topics-invalid",
-                "unknown-graph-property"), behavior((profile, secret) -> new KafkaConsumerTestSupport.FakeOwner(),
+                "unknown-graph-property");
+        assertEquals(expected, KafkaSourceStartFailure.codes());
+        assertEquals(KafkaSourceStartFailure.codes(),
+                behavior((profile, secret) -> new KafkaConsumerTestSupport.FakeOwner(),
                         KafkaConsumerTestSupport.profile()).sourceStartFailureCodes());
     }
     @Test void descriptorIsConditionalCompleteAndCatalogValid() {

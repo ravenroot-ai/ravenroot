@@ -23,9 +23,8 @@ public record GraphAdmissionFinding(String contract, GraphAdmissionPhase phase,
         if ((nodeId == null) != (nodeRef == null)) {
             throw new IllegalArgumentException("node display and reference must travel together");
         }
-        if (propertyName != null && !DiagnosticIdentifier.isSafeDisplay(
-                propertyName, DiagnosticIdentifier.MAX_PROPERTY_UTF8_BYTES)) {
-            throw new IllegalArgumentException("propertyName is not a safe bounded display token");
+        if (propertyName != null && !DiagnosticIdentifier.isSafePropertyToken(propertyName)) {
+            throw new IllegalArgumentException("propertyName is not a safe bounded property token");
         }
         if (incidentId == null || !incidentId.matches("[A-Za-z0-9._:-]{1," + MAX_INCIDENT_LENGTH + "}")) {
             throw new IllegalArgumentException("incidentId is malformed");

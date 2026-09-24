@@ -38,11 +38,12 @@ class MatrixSyncSourceTest {
                 MatrixTestSupport.fixedClock());
         InboundSourceCapable capable = (InboundSourceCapable) MatrixTestSupport.behavior(
                 nodePackage, MatrixBehaviorDescriptors.SYNC);
-        assertEquals(Set.of("matrix-durable-ingress-required", "matrix-ingress-ambiguous",
+        Set<String> expected = Set.of("matrix-durable-ingress-required", "matrix-ingress-ambiguous",
                 "matrix-ingress-refused", "matrix-sync-authentication", "matrix-sync-cancelled",
                 "matrix-sync-capacity", "matrix-sync-event-limit", "matrix-sync-gap",
-                "matrix-sync-provider-status", "matrix-sync-rate-limit", "matrix-sync-transport"),
-                capable.sourceStartFailureCodes());
+                "matrix-sync-provider-status", "matrix-sync-rate-limit", "matrix-sync-transport");
+        assertEquals(expected, MatrixSourceStartFailure.codes());
+        assertEquals(MatrixSourceStartFailure.codes(), capable.sourceStartFailureCodes());
     }
 
     @Test void pollsWithManagedCredentialAndAdvancesOnlyAfterDurableReceipt() {

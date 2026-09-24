@@ -3736,8 +3736,14 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
             failGraphAdmission(exchange, httpContext, refusal);
         } catch (ai.ravenroot.api.application.SourceSessionException refusal) {
-            fail(exchange, httpContext, refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
-                    ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST);
+            ErrorCode code = refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
+                    ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST;
+            if (refusal.finding().isPresent()) {
+                fail(exchange, code.status(), ErrorEnvelope.of(code, httpContext.requestId())
+                        .withFinding(refusal.finding().orElseThrow()));
+            } else {
+                fail(exchange, httpContext, code);
+            }
         } catch (ai.ravenroot.api.deployment.DeploymentAdmissionException overCap) {
             fail(exchange, httpContext, ErrorCode.REQUEST_LIMIT_EXCEEDED);
         } catch (UnsupportedOperationException unsupported) {

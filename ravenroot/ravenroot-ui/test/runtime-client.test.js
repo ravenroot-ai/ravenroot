@@ -54,12 +54,21 @@ describe('bounded startup diagnostics', () => {
   });
 
   it.each(['password=hunter2', 'Authorization: Bearer secret-token',
-    'eyJabcdefgh.abcdefgh.abcdefgh'])('rejects credential-bearing diagnostic display text', nodeId => {
+    'eyJabcdefgh.abcdefgh.abcdefgh', 'host=private.example', 'profile=production',
+    'https://operator:pw@internal.example/a'])('rejects sensitive diagnostic display text', nodeId => {
     expect(() => validateDiagnosticFinding({
       contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
       reason: 'PROPERTY_TYPE_INVALID', nodeId, nodeRef, incidentId,
     })).toThrow(/malformed/);
   });
+
+  it.each(['bad/name', 'bad=name', 'bad|delimiter', 'profile=production', `x${'y'.repeat(80)}`])(
+    'rejects non-token property metadata %s', propertyName => {
+      expect(() => validateDiagnosticFinding({
+        contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+        reason: 'PROPERTY_TYPE_INVALID', nodeId: 'node', nodeRef, propertyName, incidentId,
+      })).toThrow(/malformed/);
+    });
 
   it.each([
     { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'UPPER_CASE', incidentId },

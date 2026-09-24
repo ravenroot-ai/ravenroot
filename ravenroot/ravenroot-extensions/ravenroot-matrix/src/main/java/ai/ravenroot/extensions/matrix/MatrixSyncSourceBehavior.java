@@ -43,10 +43,7 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
     @Override public Set<NodePackageCapability> requiredServices() { return Set.of(NodePackageCapability.OUTBOUND_HTTP); }
     @Override public NodeTypeDescriptor descriptor() { return MatrixBehaviorDescriptors.sync(); }
     @Override public Set<String> sourceStartFailureCodes() {
-        return Set.of("matrix-durable-ingress-required", "matrix-ingress-ambiguous", "matrix-ingress-refused",
-                "matrix-sync-authentication", "matrix-sync-cancelled", "matrix-sync-capacity",
-                "matrix-sync-event-limit", "matrix-sync-gap", "matrix-sync-provider-status",
-                "matrix-sync-rate-limit", "matrix-sync-transport");
+        return MatrixSourceStartFailure.codes();
     }
     @Override public NodeAction create(NodeConfiguration configuration) {
         return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
@@ -132,8 +129,8 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                         if (first && cursor == null && profile.initialSyncMode() == MatrixProfile.InitialSyncMode.SKIP) {
                             advance(key, storedCursor, page.nextBatch);
                         } else {
-                            if (page.gapped) throw sourceFailure("matrix-sync-gap");
-                            if (page.events.size() > maxEvents) throw sourceFailure("matrix-sync-event-limit");
+                            if (page.gapped) throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_GAP);
+                            if (page.events.size() > maxEvents) throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_EVENT_LIMIT);
                             for (Event event : page.events) {
                                 if (!current(session)) return;
                                 bindEvent(key, event);
@@ -142,9 +139,10 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                                         sourceId(key) + ":" + event.eventId);
                                 if (!receipt.acknowledgeable()) {
                                     if (receipt instanceof IngressReceipt.VolatileCustody)
-                                        throw sourceFailure("matrix-durable-ingress-required");
+                                        throw sourceFailure(MatrixSourceStartFailure.MATRIX_DURABLE_INGRESS_REQUIRED);
                                     throw sourceFailure(receipt instanceof IngressReceipt.Ambiguous
-                                            ? "matrix-ingress-ambiguous" : "matrix-ingress-refused");
+                                            ? MatrixSourceStartFailure.MATRIX_INGRESS_AMBIGUOUS
+                                            : MatrixSourceStartFailure.MATRIX_INGRESS_REFUSED);
                                 }
                             }
                             advance(key, storedCursor, page.nextBatch);
@@ -169,10 +167,10 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
 
         private SyncPage poll(InboundSourceContext context, String cursor, boolean initial) {
             Semaphore gate = runtime.gate(profile);
-            if (!gate.tryAcquire()) throw sourceFailure("matrix-sync-capacity");
+            if (!gate.tryAcquire()) throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_CAPACITY);
             String rateKey = context.identity().tenantId() + "\u0000" + profile.name();
             if (!runtime.rates.allow(rateKey, profile.maxPerSecond())) {
-                gate.release(); throw sourceFailure("matrix-sync-rate-limit");
+                gate.release(); throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_RATE_LIMIT);
             }
             StringBuilder path = new StringBuilder("/_matrix/client/v3/sync?timeout=")
                     .append(initial ? 0 : pollTimeoutMs);
@@ -195,12 +193,13 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                 completed = true;
                 if (response.statusCode() < 200 || response.statusCode() >= 300)
                     throw sourceFailure(response.statusCode() == 401 || response.statusCode() == 403
-                            ? "matrix-sync-authentication" : "matrix-sync-provider-status");
+                            ? MatrixSourceStartFailure.MATRIX_SYNC_AUTHENTICATION
+                            : MatrixSourceStartFailure.MATRIX_SYNC_PROVIDER_STATUS);
                 return SyncPage.parse(response.body(), profile);
             } catch (SourceStartException failure) { throw failure; }
             catch (InterruptedException failure) {
-                Thread.currentThread().interrupt(); throw sourceFailure("matrix-sync-cancelled");
-            } catch (Exception failure) { throw sourceFailure("matrix-sync-transport"); }
+                Thread.currentThread().interrupt(); throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_CANCELLED);
+            } catch (Exception failure) { throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_TRANSPORT); }
             finally {
                 if (!completed && call != null) call.cancel();
                 synchronized (lifecycle) { if (active == call) active = null; }
@@ -321,7 +320,7 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
-    private static SourceStartException sourceFailure(String code) {
-        return new SourceStartException(() -> code);
+    private static SourceStartException sourceFailure(MatrixSourceStartFailure code) {
+        return new SourceStartException(code);
     }
 }

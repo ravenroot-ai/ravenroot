@@ -134,7 +134,7 @@ final class KafkaConsumerSource implements InboundSource {
             settings = Settings.resolve(configuration, context, profiles, destinationPolicy);
             probeDurableIngress(context, settings.profile.startupTimeoutMs());
             Optional<SecretValue> resolved = credentials.resolve(settings.profile.credentialRef());
-            if (resolved == null || resolved.isEmpty()) throw sourceFailure("credential-unavailable");
+            if (resolved == null || resolved.isEmpty()) throw sourceFailure(KafkaSourceStartFailure.CREDENTIAL_UNAVAILABLE);
             secret = resolved.get(); password = secret.copy();
             client = protocol.open(settings.profile, password);
             owner = client;
@@ -155,12 +155,12 @@ final class KafkaConsumerSource implements InboundSource {
             while (!stopRequested && client.assignment().isEmpty()) {
                 active.accept(client.poll(Duration.ofMillis(settings.pollTimeoutMs)));
                 active.work();
-                if (!clock.instant().isBefore(startupDeadline)) throw sourceFailure("assignment-timeout");
+                if (!clock.instant().isBefore(startupDeadline)) throw sourceFailure(KafkaSourceStartFailure.ASSIGNMENT_TIMEOUT);
             }
-            if (stopRequested) throw sourceFailure("startup-cancelled");
+            if (stopRequested) throw sourceFailure(KafkaSourceStartFailure.STARTUP_CANCELLED);
             // Re-read immediately before completing the public start flight. The callback only
             // records assignment; it never publishes readiness or health on its own.
-            if (client.assignment().isEmpty()) throw sourceFailure("assignment-lost-before-ready");
+            if (client.assignment().isEmpty()) throw sourceFailure(KafkaSourceStartFailure.ASSIGNMENT_LOST_BEFORE_READY);
             claimReadiness(context, client, ready);
             while (!stopRequested) {
                 active.accept(client.poll(Duration.ofMillis(settings.pollTimeoutMs)));
@@ -172,14 +172,14 @@ final class KafkaConsumerSource implements InboundSource {
             }
             active.drainAndCommit(settings.drainTimeoutMs);
         } catch (WakeupException wakeup) {
-            if (!stopRequested) fail(context, ready, sourceFailure("consumer-wakeup"));
+            if (!stopRequested) fail(context, ready, sourceFailure(KafkaSourceStartFailure.CONSUMER_WAKEUP));
             if (runtime != null) runtime.drainAndCommit(settings == null ? 0 : settings.drainTimeoutMs);
         } catch (SourceStartException failure) {
             fail(context, ready, failure);
         } catch (AuthenticationException | AuthorizationException failure) {
-            fail(context, ready, sourceFailure("broker-authorization-failed"));
+            fail(context, ready, sourceFailure(KafkaSourceStartFailure.BROKER_AUTHORIZATION_FAILED));
         } catch (RuntimeException failure) {
-            fail(context, ready, sourceFailure("consumer-failed"));
+            fail(context, ready, sourceFailure(KafkaSourceStartFailure.CONSUMER_FAILED));
         } finally {
             owner = null;
             if (password != null) java.util.Arrays.fill(password, '\0');
@@ -202,9 +202,9 @@ final class KafkaConsumerSource implements InboundSource {
             // stop() owns the same monitor. Re-check the complete readiness predicate while claiming
             // READY so STOPPING can never be overwritten by health publication or start success.
             if (stopRequested || (state != State.STARTING && state != State.BACKING_OFF)) {
-                throw sourceFailure("startup-cancelled");
+                throw sourceFailure(KafkaSourceStartFailure.STARTUP_CANCELLED);
             }
-            if (client.assignment().isEmpty()) throw sourceFailure("assignment-lost-before-ready");
+            if (client.assignment().isEmpty()) throw sourceFailure(KafkaSourceStartFailure.ASSIGNMENT_LOST_BEFORE_READY);
             state = State.READY;
             context.reportHealthy();
             ready.complete(null);
@@ -216,7 +216,7 @@ final class KafkaConsumerSource implements InboundSource {
             context.ingress().sourceCheckpoint(context.identity(), context.nodeId()).toCompletableFuture()
                     .get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (Exception unavailable) {
-            throw sourceFailure("durable-ingress-required");
+            throw sourceFailure(KafkaSourceStartFailure.DURABLE_INGRESS_REQUIRED);
         }
     }
 
@@ -263,7 +263,7 @@ final class KafkaConsumerSource implements InboundSource {
                 PartitionState partition = partitions.get(record.partition());
                 if (partition == null || partition.generation != generation || partition.halted) continue;
                 if (partition.lastObservedOffset >= 0 && record.offset() < partition.lastObservedOffset) {
-                    throw sourceFailure("partition-order-violation");
+                    throw sourceFailure(KafkaSourceStartFailure.PARTITION_ORDER_VIOLATION);
                 }
                 partition.lastObservedOffset = Math.max(partition.lastObservedOffset, record.offset());
                 partition.records.putIfAbsent(record.offset(), new Pending(record, generation));
@@ -304,7 +304,7 @@ final class KafkaConsumerSource implements InboundSource {
                     return;
                 }
                 if (receipt instanceof IngressReceipt.VolatileCustody) {
-                    throw sourceFailure("durable-ingress-lost");
+                    throw sourceFailure(KafkaSourceStartFailure.DURABLE_INGRESS_LOST);
                 }
                 if (receipt instanceof IngressReceipt.Ambiguous) reason = "ambiguous-ingress";
                 else reason = "ingress-refused";
@@ -318,7 +318,7 @@ final class KafkaConsumerSource implements InboundSource {
                     return;
                 }
                 partition.halted = true;
-                throw sourceFailure("poison-record-halted");
+                throw sourceFailure(KafkaSourceStartFailure.POISON_RECORD_HALTED);
             }
             long multiplier = 1L << Math.min(30, pending.attempts - 1);
             long delay = Math.min(settings.maxRetryBackoffMs,
@@ -428,21 +428,21 @@ final class KafkaConsumerSource implements InboundSource {
                                 ReservedNetworkPolicy destinationPolicy) {
             for (String property : c.properties().keySet()) {
                 if (!KafkaConsumeNodeBehavior.knownConfiguration().contains(property)) {
-                    throw sourceFailure("unknown-graph-property");
+                    throw sourceFailure(KafkaSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
                 }
             }
-            String name = c.property("clusterProfile").orElseThrow(() -> sourceFailure("cluster-profile-required"));
+            String name = c.property("clusterProfile").orElseThrow(() -> sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_REQUIRED));
             KafkaConsumerProfile profile;
             try { profile = profiles.resolve(context.identity().tenantId(), name).orElse(null); }
             catch (RuntimeException invalid) { profile = null; }
             if (profile == null || !profile.tenant().equals(context.identity().tenantId()) || !profile.name().equals(name)) {
-                throw sourceFailure("cluster-profile-unavailable");
+                throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE);
             }
             try { EnvironmentKafkaProfileResolver.requireDestinations(
                     String.join(",", profile.bootstrapServers()), destinationPolicy); }
-            catch (SecurityException refused) { throw sourceFailure("cluster-profile-unavailable"); }
+            catch (SecurityException refused) { throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE); }
             String group = c.property("group", profile.groupLogicalName());
-            if (!group.equals(profile.groupLogicalName())) throw sourceFailure("group-forbidden");
+            if (!group.equals(profile.groupLogicalName())) throw sourceFailure(KafkaSourceStartFailure.GROUP_FORBIDDEN);
             String mode = c.property("subscriptionMode", "profile");
             KafkaConsumerProtocol.Subscription subscription = switch (mode) {
                 case "profile" -> profile.patternSubscription()
@@ -453,31 +453,31 @@ final class KafkaConsumerSource implements InboundSource {
                     boolean forbidden = topics.isEmpty();
                     for (String topic : topics) forbidden |= !profile.topics().contains(topic);
                     if (forbidden) {
-                        throw sourceFailure("topics-forbidden");
+                        throw sourceFailure(KafkaSourceStartFailure.TOPICS_FORBIDDEN);
                     }
                     yield new KafkaConsumerProtocol.Subscription(topics, null);
                 }
                 case "pattern" -> {
                     String pattern = c.requiredProperty("topicPattern");
                     if (!profile.patternSubscription() || !profile.topicPattern().equals(pattern)) {
-                        throw sourceFailure("topic-pattern-forbidden");
+                        throw sourceFailure(KafkaSourceStartFailure.TOPIC_PATTERN_FORBIDDEN);
                     }
                     yield new KafkaConsumerProtocol.Subscription(Set.of(), pattern);
                 }
-                default -> throw sourceFailure("subscription-mode-invalid");
+                default -> throw sourceFailure(KafkaSourceStartFailure.SUBSCRIPTION_MODE_INVALID);
             };
             String membership = c.property("staticMember", "profile");
-            if (!Set.of("profile", "dynamic").contains(membership)) throw sourceFailure("membership-invalid");
+            if (!Set.of("profile", "dynamic").contains(membership)) throw sourceFailure(KafkaSourceStartFailure.MEMBERSHIP_INVALID);
             if ("dynamic".equals(membership) && profile.staticMemberId() != null) {
                 profile = dynamic(profile);
             }
             String poison = c.property("poisonPolicy", "profile");
             if ("profile".equals(poison)) poison = profile.poisonPolicy();
-            if (!poison.equals(profile.poisonPolicy())) throw sourceFailure("poison-policy-forbidden");
+            if (!poison.equals(profile.poisonPolicy())) throw sourceFailure(KafkaSourceStartFailure.POISON_POLICY_FORBIDDEN);
             if ("dead-letter".equals(poison) && !c.property("deadLetterTopic", profile.deadLetterTopic())
-                    .equals(profile.deadLetterTopic())) throw sourceFailure("dead-letter-topic-forbidden");
+                    .equals(profile.deadLetterTopic())) throw sourceFailure(KafkaSourceStartFailure.DEAD_LETTER_TOPIC_FORBIDDEN);
             if (!"require-durable".equals(c.property("checkpointPolicy", "require-durable"))) {
-                throw sourceFailure("checkpoint-policy-forbidden");
+                throw sourceFailure(KafkaSourceStartFailure.CHECKPOINT_POLICY_FORBIDDEN);
             }
             int maxInFlight = tighten(c, "maxInFlight", profile.maxInFlight(), 1);
             int pollTimeout = tighten(c, "pollTimeoutMs", profile.pollTimeoutMs(), 10);
@@ -485,7 +485,7 @@ final class KafkaConsumerSource implements InboundSource {
             int retryBackoff = tighten(c, "retryBackoffMs", profile.retryBackoffMs(), 1);
             int maxRetryBackoff = tighten(c, "maxRetryBackoffMs", profile.maxRetryBackoffMs(), 1);
             int poisonAttempts = tighten(c, "poisonAttempts", profile.poisonAttempts(), 1);
-            if (maxRetryBackoff < retryBackoff) throw sourceFailure("invalid-tightening");
+            if (maxRetryBackoff < retryBackoff) throw sourceFailure(KafkaSourceStartFailure.INVALID_TIGHTENING);
             profile = tightened(profile, maxInFlight, pollTimeout, drainTimeout, retryBackoff,
                     maxRetryBackoff, poisonAttempts);
             return new Settings(profile, subscription, maxInFlight, pollTimeout, drainTimeout,
@@ -494,14 +494,14 @@ final class KafkaConsumerSource implements InboundSource {
         private static int tighten(NodeConfiguration c, String name, int ceiling, int minimum) {
             String raw = c.property(name, ""); if (raw.isEmpty()) return ceiling;
             try { int value = Integer.parseInt(raw); if (value < minimum || value > ceiling) throw new NumberFormatException(); return value; }
-            catch (NumberFormatException invalid) { throw sourceFailure("invalid-tightening"); }
+            catch (NumberFormatException invalid) { throw sourceFailure(KafkaSourceStartFailure.INVALID_TIGHTENING); }
         }
         private static Set<String> csv(String value) {
             if (value == null || value.isBlank()) return Set.of();
             Set<String> values = new HashSet<>();
             for (String item : value.split(",", -1)) {
                 String normalized = item.strip();
-                if (normalized.isEmpty() || !values.add(normalized)) throw sourceFailure("topics-invalid");
+                if (normalized.isEmpty() || !values.add(normalized)) throw sourceFailure(KafkaSourceStartFailure.TOPICS_INVALID);
             }
             return Set.copyOf(values);
         }
@@ -527,7 +527,7 @@ final class KafkaConsumerSource implements InboundSource {
         }
     }
 
-    private static SourceStartException sourceFailure(String code) {
-        return new SourceStartException(() -> code);
+    private static SourceStartException sourceFailure(KafkaSourceStartFailure code) {
+        return new SourceStartException(code);
     }
 }

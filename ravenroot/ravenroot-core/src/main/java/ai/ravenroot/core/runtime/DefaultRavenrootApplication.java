@@ -2963,7 +2963,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
             if (refusal.findings().getFirst().reason()
                     == ai.ravenroot.api.application.GraphAdmissionReason.SOURCE_REQUIRED) {
-                throw new SourceSessionException(SourceSessionException.Reason.NO_EFFECTIVE_SOURCE);
+                throw new SourceSessionException(SourceSessionException.Reason.NO_EFFECTIVE_SOURCE,
+                        refusal.findings().getFirst());
             }
             throw refusal;
         } catch (LocalDeploymentException refusal) {

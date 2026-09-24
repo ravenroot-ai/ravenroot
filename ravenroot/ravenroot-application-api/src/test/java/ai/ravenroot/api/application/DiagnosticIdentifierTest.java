@@ -16,7 +16,7 @@ class DiagnosticIdentifierTest {
     }
 
     @Test
-    void controlsBidiCredentialsAndLengthAreBoundedWithoutChangingTheReferenceIdentity() {
+    void controlsBidiCredentialsLocationsUrisAndLengthAreBoundedWithoutChangingTheReferenceIdentity() {
         String raw = "node\n\r\t\u202e" + "x".repeat(400);
         var formatted = DiagnosticIdentifier.node(raw);
         assertFalse(formatted.display().contains("\n"));
@@ -32,6 +32,18 @@ class DiagnosticIdentifierTest {
         assertFalse(secret.display().contains("private.example"));
         assertTrue(secret.display().contains("redacted"));
         assertFalse(secret.reference().contains("private"));
+
+        var location = DiagnosticIdentifier.node(
+                "listener;host=private.example;profile=production;url=https://operator:pw@internal.example:8443/a");
+        assertFalse(location.display().contains("private.example"));
+        assertFalse(location.display().contains("production"));
+        assertFalse(location.display().contains("internal.example"));
+        assertFalse(location.display().contains("operator"));
+        assertTrue(location.display().contains("redacted:host"));
+        assertTrue(location.display().contains("redacted:profile"));
+        assertEquals(DiagnosticIdentifier.reference(
+                "listener;host=private.example;profile=production;url=https://operator:pw@internal.example:8443/a"),
+                location.reference());
     }
 
     @Test
@@ -48,5 +60,21 @@ class DiagnosticIdentifierTest {
                 GraphAdmissionFinding.CONTRACT, GraphAdmissionPhase.PROPERTY_SCHEMA,
                 GraphAdmissionReason.PROPERTY_TYPE_INVALID, "node", null,
                 "batchSize", "incident:1"));
+    }
+
+    @Test
+    void propertyNamesUseAClosedGrammarAndUnsafeInputBecomesAnOpaqueToken() {
+        assertEquals("headers.1.displayName", DiagnosticIdentifier.property("headers.1.displayName").display());
+        for (String raw : java.util.List.of("bad/name", "bad=name", "bad\nname", "profile=prod",
+                "password=hunter2", "x".repeat(200), "bad|delimiter", "bad\u202ename")) {
+            String token = DiagnosticIdentifier.property(raw).display();
+            assertTrue(token.matches("property-[0-9a-f]{16}"), token);
+            assertFalse(token.contains(raw), token);
+            assertTrue(DiagnosticIdentifier.isSafePropertyToken(token), token);
+        }
+        assertThrows(IllegalArgumentException.class, () -> new GraphAdmissionFinding(
+                GraphAdmissionFinding.CONTRACT, GraphAdmissionPhase.PROPERTY_SCHEMA,
+                GraphAdmissionReason.INVALID_PROPERTY, "node", "sha256:" + "a".repeat(32),
+                "profile=prod", "incident:1"));
     }
 }

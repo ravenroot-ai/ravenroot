@@ -39,6 +39,14 @@ NON_BACKEND_SCRIPTS = {
     "scripts/operational-configuration-inventory.json",
     "scripts/select_backend_tests.py",
 }
+# These tests exercise CI selection and policy contracts only.  Keep this list explicit: an
+# unfamiliar script test must continue to fail closed to the full reactor.
+NON_BACKEND_CI_CONTRACT_TESTS = {
+    "scripts/tests/test_ci_required.py",
+    "scripts/tests/test_ci_topology.py",
+    "scripts/tests/test_classify_main_change.py",
+    "scripts/tests/test_select_backend_tests.py",
+}
 ALL_BACKEND_SCRIPT_PREFIXES = ("scripts/fixtures/", "scripts/verify-")
 
 KNOWN_LEAF_MODULES = {
@@ -121,7 +129,12 @@ def module_for_path(path: str) -> str | None:
 
 def is_known_non_backend_path(path: str) -> bool:
     """Return whether a path cannot select a Maven regression module."""
-    return path in NON_BACKEND_ROOT_FILES or path in NON_BACKEND_SCRIPTS or path.startswith(NON_BACKEND_PREFIXES)
+    return (
+        path in NON_BACKEND_ROOT_FILES
+        or path in NON_BACKEND_SCRIPTS
+        or path in NON_BACKEND_CI_CONTRACT_TESTS
+        or path.startswith(NON_BACKEND_PREFIXES)
+    )
 
 
 def select(event_name: str, paths: list[str]) -> Scope:

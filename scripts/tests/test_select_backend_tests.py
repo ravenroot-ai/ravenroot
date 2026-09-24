@@ -48,6 +48,24 @@ class BackendScopeSelectionTest(unittest.TestCase):
         self.assertEqual(scope.mode, "none")
         self.assertEqual(scope.projects, ())
 
+    def test_issue_475_exact_ci_contract_range_is_explicitly_none(self):
+        scope = select(
+            "pull_request",
+            [
+                ".github/workflows/ci.yml",
+                "docs/architecture/operational-configuration-audit.md",
+                "scripts/ci_required.py",
+                "scripts/operational-configuration-inventory.json",
+                "scripts/select_backend_tests.py",
+                "scripts/tests/test_ci_required.py",
+                "scripts/tests/test_ci_topology.py",
+                "scripts/tests/test_classify_main_change.py",
+                "scripts/tests/test_select_backend_tests.py",
+            ],
+        )
+        self.assertEqual(scope.mode, "none")
+        self.assertEqual(scope.projects, ())
+
     def test_all_only_backend_fixture_and_verification_scripts_use_the_full_reactor(self):
         for path in (
             "scripts/fixtures/runner_quota_acceptance.py",

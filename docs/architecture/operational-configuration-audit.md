@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23817 |
+| Atomic operational candidates discovered | 23830 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23817 |
+| Reviewed | 23830 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1951 |
-| Retained protocol or format invariants | 9895 |
+| Retained protocol or format invariants | 9908 |
 | Retained published contract descriptions | 528 |
 | Retained presentation text | 668 |
 | Retained derived values | 1076 |
 | Test fixtures | 8038 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2088.
+Retired source candidates preserved in inventory history: 2096.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 85.
+Checked source reconciliations: 86.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23817 candidates.
+zero-count or unclassified rows as needed and sums to 23830 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23817 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22156 |
+| retained | 22169 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 23817 candidates.
 | derived | 1076 |
 | operator-configurable | 1661 |
 | presentation-text | 668 |
-| protocol-or-format-invariant | 9895 |
+| protocol-or-format-invariant | 9908 |
 | published-contract-description | 528 |
 | security-ceiling-or-default | 1951 |
 | test-fixture | 8038 |
@@ -99,7 +99,7 @@ zero-count or unclassified rows as needed and sums to 23817 candidates.
 | deployment | 2858 |
 | deployment-example | 20 |
 | java | 7249 |
-| script | 2310 |
+| script | 2323 |
 | test-fixture | 8038 |
 | ui | 3342 |
 
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8530 |
-| Retained; no remediation required | 13267 |
+| Retained; no remediation required | 13280 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23785 |
-| Unchanged identities | 23784 |
+| Source inventory candidates | 23817 |
+| Unchanged identities | 23809 |
 | Approved identity migrations | 0 |
-| Approved retirements | 1 |
-| Semantically classified additions | 33 |
-| Current candidates | 23817 |
+| Approved retirements | 8 |
+| Semantically classified additions | 21 |
+| Current candidates | 23830 |
 
 ## Final semantic review
 
@@ -16387,22 +16387,35 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e609e93ec926a5595d18` | `scripts/release_contract.py:340` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-216a628f549cef153960` | `scripts/release_contract.py:346` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-f41d5a7b6405061be368` | `scripts/release_contract.py:382` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a3f38e8ad97d3ce92540` | `scripts/select_backend_tests.py:17` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-667ed674e7397a46b53e` | `scripts/select_backend_tests.py:26` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-d1efc4f8dc8c4170d07f` | `scripts/select_backend_tests.py:59` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-3b241ba416cd8bac6750` | `scripts/select_backend_tests.py:81` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-c924e84ff3d350e1bad8` | `scripts/select_backend_tests.py:81` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-f8aefefb57ccafba55ef` | `scripts/select_backend_tests.py:81` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-9eb5d5746a796aa77bef` | `scripts/select_backend_tests.py:94` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-d8a9e47042c338eba9fe` | `scripts/select_backend_tests.py:94` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-fa0bd6798a708c09c60c` | `scripts/select_backend_tests.py:94` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-4e1c62e116db91b62dd1` | `scripts/select_backend_tests.py:108` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-68b484c57601f4cd63c5` | `scripts/select_backend_tests.py:108` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-e25d3e67156371ab49e8` | `scripts/select_backend_tests.py:108` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-5a376cc7195d1551ccc1` | `scripts/select_backend_tests.py:119` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-bc1b095cb1d2d1213dff` | `scripts/select_backend_tests.py:119` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-774807446d00a397fa10` | `scripts/select_backend_tests.py:122` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
-| `oc-a8fefaec6101dd75ba62` | `scripts/select_backend_tests.py:122` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-328a92a902d0093f7ef5` | `scripts/select_backend_tests.py:24` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-5570c13753349cff54ed` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-69cc1f1141f6be7dbcc5` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-b766f87072d0b28e7676` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-bbc31c8d3e48bc5fa523` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-ed613489390cd5bf46f9` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-2dc9405847d0b6fc3921` | `scripts/select_backend_tests.py:33` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-3e0670f1b5584aa5ada4` | `scripts/select_backend_tests.py:33` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-3442748dc56ae351565f` | `scripts/select_backend_tests.py:50` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-d1efc4f8dc8c4170d07f` | `scripts/select_backend_tests.py:66` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-3b241ba416cd8bac6750` | `scripts/select_backend_tests.py:88` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-c924e84ff3d350e1bad8` | `scripts/select_backend_tests.py:88` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-f8aefefb57ccafba55ef` | `scripts/select_backend_tests.py:88` `changed_paths` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-9eb5d5746a796aa77bef` | `scripts/select_backend_tests.py:101` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-d8a9e47042c338eba9fe` | `scripts/select_backend_tests.py:101` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-fa0bd6798a708c09c60c` | `scripts/select_backend_tests.py:101` `module_for_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-8842b8a150a335604bea` | `scripts/select_backend_tests.py:115` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-cc3de15214b819619dea` | `scripts/select_backend_tests.py:115` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-d0961e36f332a80349b2` | `scripts/select_backend_tests.py:115` `is_known_non_backend_path` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-4e1c62e116db91b62dd1` | `scripts/select_backend_tests.py:120` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-68b484c57601f4cd63c5` | `scripts/select_backend_tests.py:120` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-e25d3e67156371ab49e8` | `scripts/select_backend_tests.py:120` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-aae4b2192b4a80ecbba8` | `scripts/select_backend_tests.py:132` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-5a376cc7195d1551ccc1` | `scripts/select_backend_tests.py:133` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-bc1b095cb1d2d1213dff` | `scripts/select_backend_tests.py:133` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-774807446d00a397fa10` | `scripts/select_backend_tests.py:136` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-a8fefaec6101dd75ba62` | `scripts/select_backend_tests.py:136` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI scope-selection vocabulary or deterministic local build routing; it is not operator-configurable. |
+| `oc-1546da7fb5dc2dfc03af` | `scripts/select_backend_tests.py:140` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
+| `oc-8b1d8d51ef767b5cb85d` | `scripts/select_backend_tests.py:140` `select` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
 | `oc-66a0037ae546de8528f0` | `scripts/verify-deployment-persistence-browser.sh:5` `module` | script | retained | security-ceiling-or-default | This script assignment selects repository paths or shell fallback values for the issue #464 persistence verification harness. |
 | `oc-845f733e72bfdac5fae5` | `scripts/verify-deployment-persistence-browser.sh:5` `module` | script | retained | security-ceiling-or-default | This script assignment selects repository paths or shell fallback values for the issue #464 persistence verification harness. |
 | `oc-d89cbf5382263cf13319` | `scripts/verify-deployment-persistence-browser.sh:5` `module` | script | retained | security-ceiling-or-default | This script assignment selects repository paths or shell fallback values for the issue #464 persistence verification harness. |

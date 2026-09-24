@@ -53,6 +53,9 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("-DskipTests clean install", self.jobs["backend-build"])
         self.assertNotIn("clean verify", self.jobs["backend-build"])
         self.assertIn("clean verify", self.jobs["full-backend-tests"])
+        self.assertIn("scripts/select_backend_tests.py", self.jobs["full-backend-tests"])
+        self.assertIn("-pl \"$BACKEND_PROJECTS\" -am verify", self.jobs["full-backend-tests"])
+        self.assertNotRegex(self.jobs["full-backend-tests"], r"mvn[^\n]*\s-amd(?:\s|$)")
         self.assertIn('= ravenroot-distribution ] && continue', self.jobs["backend-build"])
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])
@@ -181,6 +184,12 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_container_smoke_waits_for_every_parallel_regression(self) -> None:
         self.assertIn("full-regression", declared_needs(self.jobs["full-runtime-container-smoke"]))
+
+    def test_full_tier_has_a_scheduled_all_reactor_regression_lane(self) -> None:
+        self.assertIn("  schedule:\n    - cron:", self.contents)
+        backend = self.jobs["full-backend-tests"]
+        self.assertIn("Scheduled runs intentionally select the all-reactor regression path", backend)
+        self.assertEqual(5, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
 
 
 if __name__ == "__main__":

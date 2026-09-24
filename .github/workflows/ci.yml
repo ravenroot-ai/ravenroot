@@ -27,6 +27,10 @@ on:
   # place before a queue is enabled.
   merge_group:
     types: [checks_requested]
+  # The scheduled run is the deliberate all-reactor regression lane. Range-scoped review and
+  # merge-queue jobs keep feedback focused; this lane keeps broad optional integrations covered.
+  schedule:
+    - cron: "17 3 * * 0"
   workflow_dispatch:
     inputs:
       # Verifies one review candidate on the exact commit about to be reviewed. `full` is the only
@@ -712,15 +716,48 @@ jobs:
           cache-dependency-path: |
             ravenroot/pom.xml
             ravenroot/**/pom.xml
-      - name: Run the complete backend unit and integration suite
+      - name: Select backend regression scope from the exact candidate range
+        id: backend-scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
+          BASE_SHA: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # Scheduled runs intentionally select the all-reactor regression path. PRs, dispatches,
+          # and merge groups derive a safe focused scope from their exact candidate range instead.
+          base="$BASE_SHA"
+          head="$HEAD_SHA"
+          if [ "$EVENT_NAME" = schedule ]; then
+            base="$head"
+          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
+            base=$(git merge-base origin/dev "$head")
+          fi
+          test -n "$base"
+          test -n "$head"
+          python3 scripts/select_backend_tests.py --event "$EVENT_NAME" --base "$base" --head "$head"
+      - name: Run the selected backend unit and integration suite
         working-directory: ravenroot
-        run: mvn -B --no-transfer-progress clean verify
+        env:
+          BACKEND_SCOPE: ${{ steps.backend-scope.outputs.mode }}
+          BACKEND_PROJECTS: ${{ steps.backend-scope.outputs.projects }}
+        run: |
+          set -euo pipefail
+          if [ "$BACKEND_SCOPE" = all ]; then
+            mvn -B --no-transfer-progress clean verify
+          else
+            mvn -B --no-transfer-progress -pl "$BACKEND_PROJECTS" -am verify
+          fi
       - name: Verify the isolated writable runner acceptance fixture
+        if: steps.backend-scope.outputs.mode == 'all'
         run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint scripts.tests.test_kubernetes_runner_acceptance
       - name: Run secretless hermetic model-protocol Workspace acceptance on native XFS project quotas
+        if: steps.backend-scope.outputs.mode == 'all'
         timeout-minutes: 20
         run: python3 scripts/fixtures/runner_quota_acceptance.py
       - name: Install pinned native Kubernetes acceptance tools
+        if: steps.backend-scope.outputs.mode == 'all'
         shell: bash
         run: |
           set -euo pipefail
@@ -732,9 +769,11 @@ jobs:
           chmod 755 "$fixture_tools/minikube" "$fixture_tools/kubectl"
           echo "$fixture_tools" >> "$GITHUB_PATH"
       - name: Run native Kubernetes governed executor acceptance without capability skips
+        if: steps.backend-scope.outputs.mode == 'all'
         timeout-minutes: 20
         run: python3 scripts/fixtures/kubernetes_runner_acceptance.py
       - name: Verify the published extension pack from a clean staged consumer
+        if: steps.backend-scope.outputs.mode == 'all'
         run: ./scripts/verify-extension-pack-consumer.sh
 
   backend-test:

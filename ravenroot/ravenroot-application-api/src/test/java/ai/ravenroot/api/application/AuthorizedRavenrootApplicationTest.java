@@ -116,6 +116,22 @@ class AuthorizedRavenrootApplicationTest {
         assertEquals("tenant-b", raw.observedDeploymentTenants.getLast());
     }
 
+    @Test
+    void embedDiscoveryReturnsOnlyReadyTenantViewsAndSessionResolutionUsesTheCallerTenant() {
+        var raw = new FakeApplication();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, true);
+        var discovery = workloadContext("tenant-a", "ravenroot.embed.deployment.discover");
+        assertEquals(List.of("ready"), facade.readyEmbedDeploymentViews(discovery).stream()
+                .map(view -> view.source().deploymentId()).toList());
+        var creation = workloadContext("tenant-a", "ravenroot.embed.session.create");
+        assertTrue(facade.embedDeploymentViewForSession(creation, "ready").isPresent());
+        assertTrue(facade.embedDeploymentViewForSession(
+                workloadContext("tenant-b", "ravenroot.embed.session.create"), "ready").isEmpty());
+        assertThrows(AuthorizationDeniedException.class,
+                () -> facade.readyEmbedDeploymentViews(workloadContext("tenant-a")));
+    }
+
     /**
      * The API-02 surface has three public constructors. The widest one additionally requires an
      * explicit {@link ExecutionControlAuditSink} for cancel/drain's own CONTROL-category records, so
@@ -948,6 +964,11 @@ class AuthorizedRavenrootApplicationTest {
                 Set.of(scopes));
     }
 
+    private static RequestContext workloadContext(String tenant, String... scopes) {
+        return new RequestContext("request-workload", "host", PrincipalType.WORKLOAD, "issuer", tenant,
+                Set.of(Role.VIEWER), Set.of(scopes));
+    }
+
     private static RequestContext context(String subject, String tenant, Role role, String scope) {
         return new RequestContext("request", subject, PrincipalType.USER, "issuer", tenant, Set.of(role),
                 Set.of(scope));
@@ -1076,6 +1097,32 @@ class AuthorizedRavenrootApplicationTest {
                     && (deploymentId.equals("deployment") || deploymentId.equals("listening-session"))
                     ? java.util.Optional.of(LocalDeploymentStatus.of(deploymentId, LocalDeploymentState.READY, 0))
                     : java.util.Optional.empty();
+        }
+
+        @Override
+        public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId,
+                                                                             String deploymentId) {
+            if (!tenantId.equals("tenant-a") || !Set.of("ready", "stopped").contains(deploymentId)) {
+                return java.util.Optional.empty();
+            }
+            return java.util.Optional.of(embedView(deploymentId,
+                    deploymentId.equals("ready") ? LocalDeploymentState.READY : LocalDeploymentState.STOPPED));
+        }
+
+        @Override
+        public List<DeploymentViewerView> localDeploymentViews(String tenantId) {
+            return tenantId.equals("tenant-a")
+                    ? List.of(embedView("stopped", LocalDeploymentState.STOPPED),
+                            embedView("ready", LocalDeploymentState.READY)) : List.of();
+        }
+
+        private static DeploymentViewerView embedView(String deploymentId, LocalDeploymentState state) {
+            var projection = new ai.ravenroot.api.embed.EmbedGraphProjection(
+                    ai.ravenroot.api.embed.EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
+                    deploymentId, "graph-v1", "digest-" + deploymentId, List.of(), List.of());
+            return new DeploymentViewerView(DeploymentViewerView.CURRENT_SOURCE_VERSION,
+                    DeploymentViewerView.Source.deployment(deploymentId, "inc-" + deploymentId, "graph-v1"),
+                    state, "digest-" + deploymentId, projection);
         }
 
         @Override

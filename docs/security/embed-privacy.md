@@ -18,6 +18,9 @@ The embedded viewer exposes only a registered projection whose privacy and taked
   executes immutable deployed content. No GraphML or operator token reaches the browser.
 - Audit registration, acknowledgement, session issue, projection access, observation access, expiry,
   and revocation without logging token, proof, cursor, or secret values.
+- Dynamic discovery is a distinct workload-authorized read and returns only READY, tenant-owned,
+  process-local deployment coordinates. Dynamic grants are fixed read-only, short-lived, bounded,
+  revocable, stored only by digest, and pinned to the selected incarnation before browser exchange.
 
 The parent page receives protocol health messages but never the bearer, proof key, projection, cursor,
 or observation events. The frame uses an explicit credentialed request with an authorization header;

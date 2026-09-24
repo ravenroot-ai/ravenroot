@@ -2,7 +2,6 @@ package ai.ravenroot.server.embed;
 
 import ai.ravenroot.api.embed.EmbedProjectionResolution;
 import ai.ravenroot.api.embed.EmbedCapability;
-import ai.ravenroot.api.embed.EmbedRegistrationAggregate;
 import ai.ravenroot.api.embed.EmbedRegistrationResolution;
 import ai.ravenroot.api.embed.EmbedViewerSource;
 import ai.ravenroot.api.application.AuthorizedRavenrootApplication;
@@ -43,6 +42,8 @@ import java.util.concurrent.TimeUnit;
 /** Complete distinct-origin adapter for static v1 projections and additive v2 live-run viewing. */
 public final class EmbedBrowserHttpHandler {
     public static final String CREATE_PATH = "/v1/embed/sessions";
+    public static final String DISCOVERY_PATH = "/v1/embed/deployments";
+    public static final String GRANT_PATH = "/v1/embed/grants";
     public static final String ACKNOWLEDGEMENT_PATH = "/v1/embed/acknowledgements";
     public static final String LAUNCH_PATH = "/v1/embed/launch";
     public static final String EXCHANGE_PATH = "/v1/embed/exchange";
@@ -59,6 +60,8 @@ public final class EmbedBrowserHttpHandler {
     private final P256EmbedProofVerifier proofs;
     private final AuthorizedRavenrootApplication deployments;
     private final DeploymentObservationCursorStore cursors;
+    private final DynamicEmbedGrantAuthority dynamicGrants;
+    private final EmbedSessionAuthorizationCurrency currency;
 
     public EmbedBrowserHttpHandler(EmbedBrowserConfiguration configuration) {
         this(configuration, null, new DeploymentObservationCursorStore(configuration.clock()));
@@ -77,6 +80,17 @@ public final class EmbedBrowserHttpHandler {
                 configuration.replayCapacity());
         this.deployments = deployments;
         this.cursors = Objects.requireNonNull(cursors, "cursors");
+        this.dynamicGrants = configuration.dynamicPolicy().enabled()
+                ? new DynamicEmbedGrantAuthority(configuration.dynamicPolicy(), configuration.viewerOrigin(),
+                        configuration.clock(), configuration.dynamicGrantTtl(),
+                        configuration.dynamicGrantCapacity()) : null;
+        this.currency = authorization -> {
+            if (authorization instanceof EmbedSessionAuthorization.Registered registered) {
+                return configuration.registrations() != null
+                        && configuration.registrations().isCurrent(registered.registration());
+            }
+            return dynamicGrants != null && dynamicGrants.isCurrent(authorization);
+        };
     }
 
     public void createSession(HttpExchange exchange) throws IOException {
@@ -94,31 +108,157 @@ public final class EmbedBrowserHttpHandler {
         if (!requireExactPath(exchange, CREATE_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "POST") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
-        Map<String, String> body = body(exchange, Set.of("registrationId"));
+        Map<String, String> body = bodyOneOf(exchange, Set.of(
+                Set.of("registrationId"),
+                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin")));
         if (body == null) return;
-        EmbedRegistrationResolution resolution = configuration.sessionCreation().resolve(
-                requestContext.get(), body.get("registrationId"));
-        if (!(resolution instanceof EmbedRegistrationResolution.Available available)) {
-            unavailable(exchange, resolution instanceof EmbedRegistrationResolution.Temporary);
-            return;
+        RequestContext context = requestContext.get();
+        EmbedSessionAuthorization authorization;
+        String dynamicGrantId = null;
+        boolean temporaryFailure = false;
+        if (body.containsKey("registrationId")) {
+            if (configuration.sessionCreation() == null) { unavailable(exchange, false); return; }
+            EmbedRegistrationResolution resolution = configuration.sessionCreation().resolve(
+                    context, body.get("registrationId"));
+            if (!(resolution instanceof EmbedRegistrationResolution.Available available)) {
+                unavailable(exchange, resolution instanceof EmbedRegistrationResolution.Temporary);
+                return;
+            }
+            authorization = new EmbedSessionAuthorization.Registered(available.aggregate());
+        } else {
+            if (dynamicGrants == null || deployments == null) { unavailable(exchange, false); return; }
+            try {
+                var view = deployments.embedDeploymentViewForSession(context, body.get("deploymentId"));
+                if (view.isEmpty() || view.orElseThrow().lifecycle()
+                        != ai.ravenroot.api.application.LocalDeploymentState.READY
+                        || !view.orElseThrow().source().incarnationId().equals(body.get("incarnationId"))
+                        || !view.orElseThrow().source().graphVersion().equals(body.get("graphVersion"))) {
+                    unavailable(exchange, false); return;
+                }
+                var issued = dynamicGrants.issue(context, body.get("parentOrigin"), view.orElseThrow());
+                authorization = issued.authorization();
+                dynamicGrantId = issued.value();
+            } catch (ai.ravenroot.api.security.AuthorizationDeniedException | IllegalArgumentException denied) {
+                unavailable(exchange, false); return;
+            } catch (DynamicEmbedGrantAuthority.CapacityExceededException exhausted) {
+                temporary(exchange); return;
+            } catch (RuntimeException unavailable) {
+                temporaryFailure = true;
+                authorization = null;
+            }
         }
+        if (temporaryFailure || authorization == null) { temporary(exchange); return; }
         try {
-            validatedParentOrigin(available.aggregate());
+            validatedParentOrigin(authorization);
         } catch (IllegalArgumentException invalidAuthorityGrant) {
             unavailable(exchange, false);
             return;
         }
         try {
-            var issued = tickets.issue(available.aggregate());
-            audit(requestId.get(), available.aggregate(), EmbedSecurityAuditSink.Phase.SESSION_CREATED);
+            var issued = tickets.issue(authorization);
+            audit(requestId.get(), authorization, EmbedSecurityAuditSink.Phase.SESSION_CREATED);
             String launchUrl = configuration.viewerOrigin().value() + LAUNCH_PATH + "?ticket=" + issued.value();
+            String grant = dynamicGrantId == null ? ""
+                    : ",\"grantId\":\"" + JsonStrings.escape(dynamicGrantId) + "\"";
             json(exchange, 201, "{\"launchUrl\":\"" + JsonStrings.escape(launchUrl)
-                    + "\",\"expiresAt\":\"" + issued.expiresAt() + "\"}");
+                    + "\",\"expiresAt\":\"" + issued.expiresAt() + "\"" + grant + "}");
         } catch (EmbedLaunchTicketAuthority.CapacityExceededException exhausted) {
+            revokeUnpublishedDynamicGrant(context, dynamicGrantId);
             temporary(exchange);
         } catch (RuntimeException auditOrAuthorityFailure) {
+            revokeUnpublishedDynamicGrant(context, dynamicGrantId);
             temporary(exchange);
         }
+    }
+
+    /** Lists a bounded page of tenant-owned READY process-local deployment selections. */
+    public void discoverDeployments(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        if (!requireExactPath(exchange, DISCOVERY_PATH)) return;
+        privateResponse(exchange);
+        if (!method(exchange, "GET") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
+        if (dynamicGrants == null || deployments == null) { unavailable(exchange, false); return; }
+        try {
+            int limit = 50;
+            String cursor = null;
+            String query = exchange.getRequestURI().getRawQuery();
+            if (query != null && !query.isBlank()) {
+                var parameters = new HashSet<String>();
+                for (String pair : query.split("&", -1)) {
+                    String[] parts = pair.split("=", 2);
+                    if (parts.length != 2) { invalid(exchange); return; }
+                    String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
+                    String value = URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
+                    if (!parameters.add(key)) { invalid(exchange); return; }
+                    if ("limit".equals(key)) limit = Integer.parseInt(value);
+                    else if ("cursor".equals(key) && !value.isBlank() && value.length() <= 256) cursor = value;
+                    else { invalid(exchange); return; }
+                }
+            }
+            if (limit < 1 || limit > 100) { invalid(exchange); return; }
+            var views = deployments.readyEmbedDeploymentViews(requestContext.applicationContext());
+            final String after = cursor;
+            var remaining = views.stream().filter(view -> after == null
+                    || view.source().deploymentId().compareTo(after) > 0).toList();
+            var page = remaining.stream().limit(limit).toList();
+            String next = remaining.size() > page.size() && !page.isEmpty()
+                    ? page.getLast().source().deploymentId() : null;
+            StringBuilder json = new StringBuilder("{\"selectionVersion\":\"1\",\"scope\":\"LOCAL_PROCESS\",\"deployments\":[");
+            for (int index = 0; index < page.size(); index++) {
+                if (index > 0) json.append(',');
+                var view = page.get(index);
+                json.append("{\"deploymentId\":\"").append(JsonStrings.escape(view.source().deploymentId()))
+                        .append("\",\"incarnationId\":\"").append(JsonStrings.escape(view.source().incarnationId()))
+                        .append("\",\"graphVersion\":\"").append(JsonStrings.escape(view.source().graphVersion()))
+                        .append("\",\"canonicalDigest\":\"").append(JsonStrings.escape(view.canonicalDigest()))
+                        .append("\",\"lifecycle\":\"READY\"}");
+            }
+            json.append("],\"nextCursor\":");
+            if (next == null) json.append("null");
+            else json.append('"').append(JsonStrings.escape(next)).append('"');
+            json.append('}');
+            configuration.audit().record(new EmbedSecurityAuditSink.Event(configuration.clock().instant(),
+                    requestContext.requestId(), requestContext.applicationContext().tenantId(),
+                    requestContext.applicationContext().subject(), EmbedSecurityAuditSink.Phase.DISCOVERY_READ,
+                    EmbedSecurityAuditSink.Outcome.ALLOWED));
+            json(exchange, 200, json.toString());
+        } catch (IllegalArgumentException invalid) {
+            invalid(exchange);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            unavailable(exchange, false);
+        } catch (RuntimeException unavailable) {
+            temporary(exchange);
+        }
+    }
+
+    /** Revokes one dynamic grant without disclosing absent or foreign identifiers. */
+    public void revokeGrant(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        privateResponse(exchange);
+        if (!method(exchange, "DELETE") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
+        String path = exchange.getRequestURI().getPath();
+        String prefix = GRANT_PATH + "/";
+        if (!path.startsWith(prefix) || path.length() <= prefix.length()
+                || path.indexOf('/', prefix.length()) >= 0) { invalid(exchange); return; }
+        String grantId = URLDecoder.decode(path.substring(prefix.length()), StandardCharsets.UTF_8);
+        try {
+            if (deployments == null) { unavailable(exchange, false); return; }
+            deployments.authorizeEmbedGrant(requestContext.applicationContext(), grantId);
+            if (dynamicGrants != null && dynamicGrants.revoke(requestContext.applicationContext(), grantId)) {
+                configuration.audit().record(new EmbedSecurityAuditSink.Event(configuration.clock().instant(),
+                        requestContext.requestId(), requestContext.applicationContext().tenantId(),
+                        requestContext.applicationContext().subject(), EmbedSecurityAuditSink.Phase.GRANT_REVOKED,
+                        EmbedSecurityAuditSink.Outcome.ALLOWED));
+            }
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            unavailable(exchange, false);
+        } catch (RuntimeException auditFailure) {
+            temporary(exchange);
+        }
+    }
+
+    private void revokeUnpublishedDynamicGrant(RequestContext context, String grantId) {
+        if (dynamicGrants != null && grantId != null) dynamicGrants.revoke(context, grantId);
     }
 
     public void launch(HttpExchange exchange) throws IOException {
@@ -135,48 +275,49 @@ public final class EmbedBrowserHttpHandler {
         if (!method(exchange, "GET") || !fetch(exchange, "navigate", "iframe") || hasCookie(exchange)) return;
         String ticket = ticket(exchange);
         if (ticket == null) { invalid(exchange); return; }
-        var resolution = tickets.consume(ticket, configuration.registrations());
+        var resolution = tickets.consume(ticket, currency);
         if (!(resolution instanceof EmbedLaunchTicketAuthority.Resolution.Available available)) {
             unavailable(exchange, false);
             return;
         }
-        final EmbedParentOrigin parentOrigin;
+        final String parentOrigin;
         try {
-            parentOrigin = validatedParentOrigin(available.registration());
+            parentOrigin = validatedParentOrigin(available.authorization());
         } catch (IllegalArgumentException invalidAuthorityGrant) {
             unavailable(exchange, false);
             return;
         }
         String suppliedOrigin = optionalSingleHeader(exchange, "Origin");
-        if (suppliedOrigin != null && !parentOrigin.value().equals(suppliedOrigin)) {
+        if (suppliedOrigin != null && !parentOrigin.equals(suppliedOrigin)) {
             unavailable(exchange, false);
             return;
         }
         try {
-            var bootstrap = sessions.begin(available.registration());
-            boolean viewerV2 = available.registration().source() instanceof EmbedViewerSource.DeploymentV2;
+            var authorization = available.authorization();
+            var bootstrap = sessions.begin(authorization);
+            boolean viewerV2 = authorization.source() instanceof EmbedViewerSource.DeploymentV2;
             boolean showStartExecution = viewerV2
-                    && ((EmbedViewerSource.DeploymentV2) available.registration().source()).showStartExecution();
-            audit(requestId.get(), available.registration(), EmbedSecurityAuditSink.Phase.TICKET_CONSUMED);
+                    && ((EmbedViewerSource.DeploymentV2) authorization.source()).showStartExecution();
+            audit(requestId.get(), authorization, EmbedSecurityAuditSink.Phase.TICKET_CONSUMED);
             exchange.getResponseHeaders().remove("X-Frame-Options");
             exchange.getResponseHeaders().set("Content-Security-Policy",
                     "default-src 'none'; base-uri 'none'; form-action 'none'; script-src 'self'; "
                             + "style-src 'self'; connect-src 'self'; img-src data:; font-src 'none'; "
                             + "worker-src 'none'; frame-ancestors "
-                            + parentOrigin.value() + "; sandbox allow-scripts allow-same-origin");
+                            + parentOrigin + "; sandbox allow-scripts allow-same-origin");
             String bootstrapJson = "{\"exchangeId\":\"" + JsonStrings.escape(bootstrap.exchangeId())
                     + "\",\"challenge\":\"" + JsonStrings.escape(bootstrap.challenge())
                     + "\",\"channelId\":\"" + JsonStrings.escape(bootstrap.channelId())
                     + "\",\"acknowledgementId\":\"" + JsonStrings.escape(bootstrap.acknowledgementId())
-                    + "\",\"grantRevision\":\"" + available.registration().revision()
+                    + "\",\"grantRevision\":\"" + authorization.revision()
                     + "\",\"expiresAt\":\"" + bootstrap.expiresAt()
                     + "\",\"viewerOrigin\":\"" + JsonStrings.escape(configuration.viewerOrigin().value())
-                    + "\",\"parentOrigin\":\"" + JsonStrings.escape(parentOrigin.value())
-                    + "\",\"theme\":" + available.registration().sessionGrant().themeOverride()
+                    + "\",\"parentOrigin\":\"" + JsonStrings.escape(parentOrigin)
+                    + "\",\"theme\":" + authorization.themeOverride()
                     .map(theme -> "\"" + theme.wireValue() + "\"").orElse("null")
                     + (viewerV2 ? ",\"viewerSourceVersion\":\"2\",\"showStartExecution\":"
                     + showStartExecution : "") + "}";
-            String themeAttribute = available.registration().sessionGrant().themeOverride()
+            String themeAttribute = authorization.themeOverride()
                     .map(theme -> " data-theme=\"" + theme.wireValue() + "\"").orElse("");
             String viewControls = viewerV2
                     ? "<label class=\"embed-mode-label\">View <select data-viewer-mode>"
@@ -251,20 +392,36 @@ public final class EmbedBrowserHttpHandler {
         if (!requireExactPath(exchange, ACKNOWLEDGEMENT_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "POST") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
-        Map<String, String> body = body(exchange,
-                Set.of("registrationId", "acknowledgementId", "channelId", "correlationId"));
+        Map<String, String> body = bodyOneOf(exchange, Set.of(
+                Set.of("registrationId", "acknowledgementId", "channelId", "correlationId"),
+                Set.of("grantId", "acknowledgementId", "channelId", "correlationId")));
         if (body == null) return;
-        EmbedRegistrationResolution resolution = configuration.sessionCreation().resolve(
-                requestContext.get(), body.get("registrationId"));
-        if (!(resolution instanceof EmbedRegistrationResolution.Available available)) {
-            unavailable(exchange, resolution instanceof EmbedRegistrationResolution.Temporary);
-            return;
+        RequestContext context = requestContext.get();
+        EmbedSessionAuthorization authorization;
+        if (body.containsKey("registrationId")) {
+            if (configuration.sessionCreation() == null) { unavailable(exchange, false); return; }
+            EmbedRegistrationResolution resolution = configuration.sessionCreation().resolve(
+                    context, body.get("registrationId"));
+            if (!(resolution instanceof EmbedRegistrationResolution.Available available)) {
+                unavailable(exchange, resolution instanceof EmbedRegistrationResolution.Temporary);
+                return;
+            }
+            authorization = new EmbedSessionAuthorization.Registered(available.aggregate());
+        } else {
+            if (deployments == null) { unavailable(exchange, false); return; }
+            try {
+                deployments.authorizeEmbedGrant(context, body.get("grantId"));
+            } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+                unavailable(exchange, false); return;
+            }
+            authorization = dynamicGrants == null ? null : dynamicGrants.resolve(context, body.get("grantId"));
+            if (authorization == null) { unavailable(exchange, false); return; }
         }
         try {
-            validatedParentOrigin(available.aggregate());
+            validatedParentOrigin(authorization);
             if (!sessions.acknowledge(body.get("acknowledgementId"), body.get("channelId"),
-                    body.get("correlationId"), available.aggregate(), configuration.registrations(),
-                    () -> audit(requestId.get(), available.aggregate(),
+                    body.get("correlationId"), authorization, currency,
+                    () -> audit(requestId.get(), authorization,
                             EmbedSecurityAuditSink.Phase.PARENT_ACKNOWLEDGED))) {
                 unavailable(exchange, false);
                 return;
@@ -293,15 +450,18 @@ public final class EmbedBrowserHttpHandler {
                 Set.of("exchangeId", "channelId", "ackCorrelationId", "keyX", "keyY",
                         "nonce", "jti", "issuedAt", "signature"));
         if (body == null) return;
-        var pending = sessions.acknowledged(body.get("exchangeId"), configuration.registrations());
+        var pending = sessions.acknowledged(body.get("exchangeId"), currency);
         if (pending == null || !pending.challenge().equals(body.get("nonce"))
                 || !pending.channelId().equals(body.get("channelId"))
                 || !pending.ackCorrelationId().equals(body.get("ackCorrelationId"))) {
             unavailable(exchange, false);
             return;
         }
+        EmbedSessionAuthorization pendingAuthorization;
         try {
-            validatedParentOrigin(pending.registration());
+            pendingAuthorization = sessions.authorization(pending);
+            if (pendingAuthorization == null) throw new IllegalArgumentException("exchange is no longer current");
+            validatedParentOrigin(pendingAuthorization);
         } catch (IllegalArgumentException invalidAuthorityGrant) {
             unavailable(exchange, false);
             return;
@@ -310,15 +470,15 @@ public final class EmbedBrowserHttpHandler {
             ECPublicKey key = publicKey(body.get("keyX"), body.get("keyY"));
             Instant issuedAt = Instant.parse(body.get("issuedAt"));
             byte[] signature = decode(body.get("signature"), 64);
-            if (!proofs.verifyExchangeAndConsume(body.get("exchangeId"), pending.registration().revision(),
+            if (!proofs.verifyExchangeAndConsume(body.get("exchangeId"), pendingAuthorization.revision(),
                     body.get("nonce"), body.get("channelId"), body.get("ackCorrelationId"),
                     body.get("jti"), "POST", EXCHANGE_PATH, issuedAt, key, signature)) {
                 unavailable(exchange, false);
                 return;
             }
-            var bearer = sessions.activate(body.get("exchangeId"), pending, key, configuration.registrations());
+            var bearer = sessions.activate(body.get("exchangeId"), pending, key, currency);
             if (bearer == null) { unavailable(exchange, false); return; }
-            audit(requestId.get(), pending.registration(), EmbedSecurityAuditSink.Phase.BEARER_ISSUED);
+            audit(requestId.get(), pendingAuthorization, EmbedSecurityAuditSink.Phase.BEARER_ISSUED);
             json(exchange, 200, "{\"tokenType\":\"Bearer\",\"bearer\":\""
                     + JsonStrings.escape(bearer.bearer()) + "\",\"challenge\":\""
                     + JsonStrings.escape(bearer.challenge()) + "\",\"expiresAt\":\""
@@ -346,13 +506,16 @@ public final class EmbedBrowserHttpHandler {
         if (bearer == null) { unavailable(exchange, false); return; }
         Map<String, String> body = body(exchange, Set.of("nonce", "jti", "issuedAt", "signature"));
         if (body == null) return;
-        var session = sessions.resolve(bearer, configuration.registrations());
+        var session = sessions.resolve(bearer, currency);
         if (session == null || !session.challenge().equals(body.get("nonce"))) {
             unavailable(exchange, false);
             return;
         }
+        EmbedSessionAuthorization sessionAuthorization;
         try {
-            validatedParentOrigin(session.registration());
+            sessionAuthorization = sessions.authorization(session);
+            if (sessionAuthorization == null) throw new IllegalArgumentException("session is no longer current");
+            validatedParentOrigin(sessionAuthorization);
         } catch (IllegalArgumentException invalidAuthorityGrant) {
             unavailable(exchange, false);
             return;
@@ -360,43 +523,45 @@ public final class EmbedBrowserHttpHandler {
         try {
             Instant issuedAt = Instant.parse(body.get("issuedAt"));
             byte[] signature = decode(body.get("signature"), 64);
-            if (!proofs.verifyAndConsume(bearer, session.registration().revision(), body.get("nonce"),
+            if (!proofs.verifyAndConsume(bearer, sessionAuthorization.revision(), body.get("nonce"),
                     body.get("jti"), "POST", PROJECTION_PATH, issuedAt, session.key(), signature)) {
                 unavailable(exchange, false);
                 return;
             }
             // The captured aggregate, not a fresh lookup: the payload served here belongs to the
             // same revision as the grant this bearer was minted against, because it is carried by it.
-            var registration = session.registration();
-            var grant = registration.sessionGrant();
+            var authorization = sessionAuthorization;
             RequestContext context = new RequestContext(requestId.get(),
-                    grant.workloadSubject(), PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(),
+                    authorization.workloadSubject(), PrincipalType.WORKLOAD, authorization.workloadIssuer(),
+                    authorization.tenantId(),
                     Set.of(Role.VIEWER), Set.of("ravenroot.embed.graph.read"));
-            String deploymentId = deploymentId(registration.source());
+            String deploymentId = deploymentId(authorization.source());
             if (deploymentId != null) {
                 if (deployments == null
-                        || !grant.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)) {
+                        || !authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)) {
                     unavailable(exchange, false);
                     return;
                 }
-                RequestContext deploymentContext = deploymentContext(requestId.get(), registration);
+                RequestContext deploymentContext = deploymentContext(requestId.get(), authorization);
                 var view = deployments.localDeploymentView(deploymentContext, deploymentId);
                 if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                     unavailable(exchange, false);
                     return;
                 }
-                audit(requestId.get(), registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
-                if (registration.source() instanceof EmbedViewerSource.DeploymentV2) {
-                    json(exchange, 200, deploymentV2Json(registration, deploymentContext,
+                audit(requestId.get(), authorization, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
+                if (authorization.source() instanceof EmbedViewerSource.DeploymentV2) {
+                    json(exchange, 200, deploymentV2Json(authorization, deploymentContext,
                             view.orElseThrow()));
                 } else {
                     json(exchange, 200, view.orElseThrow().toJson());
                 }
                 return;
             }
-            EmbedProjectionResolution resolution = configuration.projections().read(context, registration);
+            if (!(authorization instanceof EmbedSessionAuthorization.Registered registered)
+                    || configuration.projections() == null) { unavailable(exchange, false); return; }
+            EmbedProjectionResolution resolution = configuration.projections().read(context, registered.registration());
             if (resolution instanceof EmbedProjectionResolution.Available available) {
-                audit(context.requestId(), registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
+                audit(context.requestId(), authorization, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
                 json(exchange, 200, available.projection().toJson());
             } else if (resolution instanceof EmbedProjectionResolution.DataTooLarge) {
                 error(exchange, 413, "EMBED_DATA_TOO_LARGE");
@@ -431,33 +596,34 @@ public final class EmbedBrowserHttpHandler {
                 Set.of("nonce", "jti", "issuedAt", "signature", "cursor"),
                 Set.of("nonce", "jti", "issuedAt", "signature", "cursor", "processInstanceId")));
         if (body == null) return;
-        var session = sessions.resolve(bearer, configuration.registrations());
+        var session = sessions.resolve(bearer, currency);
         if (session == null || !session.challenge().equals(body.get("nonce"))) {
             unavailable(exchange, false); return;
         }
-        var registration = session.registration();
-        String deploymentId = deploymentId(registration.source());
+        var authorization = sessions.authorization(session);
+        if (authorization == null) { unavailable(exchange, false); return; }
+        String deploymentId = deploymentId(authorization.source());
         if (deploymentId == null
-                || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)
+                || !authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)
                 || deployments == null) {
             unavailable(exchange, false); return;
         }
         try {
-            validatedParentOrigin(registration);
+            validatedParentOrigin(authorization);
             Instant issuedAt = Instant.parse(body.get("issuedAt"));
             byte[] signature = decode(body.get("signature"), 64);
-            if (!proofs.verifyObservationAndConsume(bearer, registration.revision(), body.get("nonce"),
+            if (!proofs.verifyObservationAndConsume(bearer, authorization.revision(), body.get("nonce"),
                     body.get("jti"), "POST", OBSERVATION_PATH, issuedAt, session.key(), signature)) {
                 unavailable(exchange, false); return;
             }
-            RequestContext context = deploymentContext(requestId.get(), registration);
+            RequestContext context = deploymentContext(requestId.get(), authorization);
             var view = deployments.localDeploymentView(context, deploymentId);
             if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                 unavailable(exchange, false); return;
             }
             var bound = view.orElseThrow();
             var binding = new DeploymentObservationCursorStore.Binding(
-                    "embed:" + registration.registrationId() + ":" + registration.revision() + ":"
+                    "embed:" + authorization.authorityId() + ":" + authorization.revision() + ":"
                             + EmbedLaunchTicketAuthority.digest(bearer), deploymentId,
                     bound.source().incarnationId(), bound.source().graphVersion(),
                     body.getOrDefault("processInstanceId", "").isBlank()
@@ -480,7 +646,7 @@ public final class EmbedBrowserHttpHandler {
                 }
                 sequence = resolved.sequence();
             }
-            audit(requestId.get(), registration, EmbedSecurityAuditSink.Phase.OBSERVATION_READ);
+            audit(requestId.get(), authorization, EmbedSecurityAuditSink.Phase.OBSERVATION_READ);
             streamObservation(exchange, bearer, session, context, binding, sequence, supplied.isBlank());
         } catch (IllegalArgumentException invalid) {
             invalid(exchange);
@@ -508,22 +674,23 @@ public final class EmbedBrowserHttpHandler {
         if (bearer == null) { unavailable(exchange, false); return; }
         Map<String, String> body = body(exchange, Set.of("nonce", "jti", "issuedAt", "signature"));
         if (body == null) return;
-        var session = sessions.resolve(bearer, configuration.registrations());
+        var session = sessions.resolve(bearer, currency);
         if (session == null || !session.challenge().equals(body.get("nonce"))) {
             unavailable(exchange, false); return;
         }
-        var registration = session.registration();
-        if (!(registration.source() instanceof EmbedViewerSource.DeploymentV2 source)
+        var authorization = sessions.authorization(session);
+        if (authorization == null) { unavailable(exchange, false); return; }
+        if (!(authorization.source() instanceof EmbedViewerSource.DeploymentV2 source)
                 || deployments == null
-                || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
+                || !authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
             unavailable(exchange, false); return;
         }
         try {
-            validatedParentOrigin(registration);
-            if (!verifyProof(body, bearer, registration, session, RUNS_PATH)) {
+            validatedParentOrigin(authorization);
+            if (!verifyProof(body, bearer, authorization, session, RUNS_PATH)) {
                 unavailable(exchange, false); return;
             }
-            RequestContext context = deploymentContext(requestId.get(), registration);
+            RequestContext context = deploymentContext(requestId.get(), authorization);
             var view = deployments.localDeploymentView(context, source.deploymentId());
             if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                 unavailable(exchange, false); return;
@@ -556,22 +723,23 @@ public final class EmbedBrowserHttpHandler {
         Map<String, String> body = body(exchange,
                 Set.of("nonce", "jti", "issuedAt", "signature", "requestId"));
         if (body == null) return;
-        var session = sessions.resolve(bearer, configuration.registrations());
+        var session = sessions.resolve(bearer, currency);
         if (session == null || !session.challenge().equals(body.get("nonce"))) {
             unavailable(exchange, false); return;
         }
-        var registration = session.registration();
-        if (!(registration.source() instanceof EmbedViewerSource.DeploymentV2 source)
+        var authorization = sessions.authorization(session);
+        if (authorization == null) { unavailable(exchange, false); return; }
+        if (!(authorization.source() instanceof EmbedViewerSource.DeploymentV2 source)
                 || !source.showStartExecution() || deployments == null
-                || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)) {
+                || !authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)) {
             unavailable(exchange, false); return;
         }
         try {
-            validatedParentOrigin(registration);
-            if (!verifyProof(body, bearer, registration, session, START_EXECUTION_PATH)) {
+            validatedParentOrigin(authorization);
+            if (!verifyProof(body, bearer, authorization, session, START_EXECUTION_PATH)) {
                 unavailable(exchange, false); return;
             }
-            RequestContext context = deploymentContext(requestId.get(), registration);
+            RequestContext context = deploymentContext(requestId.get(), authorization);
             var view = deployments.localDeploymentView(context, source.deploymentId());
             if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                 unavailable(exchange, false); return;
@@ -775,7 +943,7 @@ public final class EmbedBrowserHttpHandler {
                                                   EmbedBrowserSessionAuthority.ActiveSession expected,
                                                   RequestContext context,
                                                   DeploymentObservationCursorStore.Binding binding) {
-        var currentSession = sessions.resolve(bearer, configuration.registrations());
+        var currentSession = sessions.resolve(bearer, currency);
         if (currentSession != expected) return new EmbedViewResolution(null, "AUTHORITY_CHANGED");
         var view = deployments.localDeploymentView(context, binding.deploymentId());
         if (view.isEmpty()) return new EmbedViewResolution(null, "UNDEPLOYED");
@@ -801,22 +969,22 @@ public final class EmbedBrowserHttpHandler {
     }
 
     private boolean verifyProof(Map<String, String> body, String bearer,
-                                EmbedRegistrationAggregate registration,
+                                EmbedSessionAuthorization authorization,
                                 EmbedBrowserSessionAuthority.ActiveSession session,
                                 String path) {
         Instant issuedAt = Instant.parse(body.get("issuedAt"));
         byte[] signature = decode(body.get("signature"), 64);
-        return proofs.verifyRequestAndConsume(bearer, registration.revision(), body.get("nonce"),
+        return proofs.verifyRequestAndConsume(bearer, authorization.revision(), body.get("nonce"),
                 body.get("jti"), "POST", path, issuedAt, session.key(), signature);
     }
 
-    private String deploymentV2Json(EmbedRegistrationAggregate registration, RequestContext context,
+    private String deploymentV2Json(EmbedSessionAuthorization authorization, RequestContext context,
                                     DeploymentViewerView view) {
         String base = view.toJson().replace("\"viewerSourceVersion\":\"1\"",
                 "\"viewerSourceVersion\":\"2\"");
         return base.substring(0, base.length() - 1)
                 + ",\"showStartExecution\":"
-                + ((EmbedViewerSource.DeploymentV2) registration.source()).showStartExecution()
+                + ((EmbedViewerSource.DeploymentV2) authorization.source()).showStartExecution()
                 + ",\"runs\":" + runsArray(context, view) + "}";
     }
 
@@ -860,19 +1028,18 @@ public final class EmbedBrowserHttpHandler {
     }
 
     private static RequestContext deploymentContext(String requestId,
-                                                     EmbedRegistrationAggregate registration) {
-        var grant = registration.sessionGrant();
+                                                     EmbedSessionAuthorization authorization) {
         var scopes = new HashSet<String>();
         scopes.add("ravenroot.embed.graph.read");
         scopes.add("ravenroot.deployment.observe");
-        if (grant.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
+        if (authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
             scopes.add("ravenroot.embed.deployment.runs.read");
         }
-        if (grant.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)) {
+        if (authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)) {
             scopes.add("ravenroot.embed.deployment.execute");
         }
-        return new RequestContext(requestId, grant.workloadSubject(),
-                PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(), Set.of(Role.VIEWER),
+        return new RequestContext(requestId, authorization.workloadSubject(),
+                PrincipalType.WORKLOAD, authorization.workloadIssuer(), authorization.tenantId(), Set.of(Role.VIEWER),
                 Set.copyOf(scopes));
     }
 
@@ -948,18 +1115,22 @@ public final class EmbedBrowserHttpHandler {
         output.flush();
     }
 
-    private void audit(String requestId, EmbedRegistrationAggregate registration,
+    private void audit(String requestId, EmbedSessionAuthorization authorization,
                        EmbedSecurityAuditSink.Phase phase) {
-        var grant = Objects.requireNonNull(registration, "registration").sessionGrant();
+        Objects.requireNonNull(authorization, "authorization");
         configuration.audit().record(new EmbedSecurityAuditSink.Event(configuration.clock().instant(),
-                requestId, grant.tenantId(), grant.workloadSubject(),
+                requestId, authorization.tenantId(), authorization.workloadSubject(),
                 phase, EmbedSecurityAuditSink.Outcome.ALLOWED));
     }
 
-    private EmbedParentOrigin validatedParentOrigin(EmbedRegistrationAggregate registration) {
-        return EmbedOriginBoundary.fromAuthority(
-                Objects.requireNonNull(registration, "registration").sessionGrant().parentOrigin(),
-                configuration.viewerOrigin()).parent();
+    private String validatedParentOrigin(EmbedSessionAuthorization authorization) {
+        Objects.requireNonNull(authorization, "authorization");
+        if (authorization instanceof EmbedSessionAuthorization.Registered) {
+            return EmbedOriginBoundary.fromAuthority(authorization.parentOrigin(),
+                    configuration.viewerOrigin()).parent().value();
+        }
+        return configuration.dynamicPolicy().requireAllowed(authorization.parentOrigin(),
+                configuration.viewerOrigin());
     }
 
     /**

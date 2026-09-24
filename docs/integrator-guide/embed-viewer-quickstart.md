@@ -40,8 +40,8 @@ Read these before you write anything. Each one fails silently or confusingly if 
    session with `403 EMBED_SESSION_UNAVAILABLE`. Nothing reports the origin as the cause. If a brand
    new registration never produces a launch, compare its origin string against this rule character by
    character before you look anywhere else.
-3. **Two of the six endpoints are server-only, by construction.** `/v1/embed/sessions` and
-   `/v1/embed/acknowledgements` refuse any request that carries a `Cookie`, an `Origin` header, or
+3. **The discovery, session, acknowledgement, and revocation endpoints are server-only, by
+   construction.** They refuse any request that carries a `Cookie`, an `Origin` header, or
    any `Sec-Fetch-*` header. A browser always sends those, so these calls cannot be made from your
    page even if you tried. They belong to your server, which holds the workload token. The token
    never reaches the browser.
@@ -110,7 +110,9 @@ the viewer ignores any message that does not.
 
 | Endpoint | Method | Called by | Purpose |
 |---|---|---|---|
-| `/v1/embed/sessions` | POST | **Your server** | Mints a one-use launch URL from a registration id |
+| `/v1/embed/deployments` | GET | **Your server** | Discovers bounded READY deployment coordinates when dynamic policy is enabled |
+| `/v1/embed/sessions` | POST | **Your server** | Mints a one-use launch URL from a registration or exact dynamic selection |
+| `/v1/embed/grants/{id}` | DELETE | **Your server** | Idempotently revokes a dynamic grant |
 | `/v1/embed/launch` | GET | The browser, as an iframe navigation | Consumes the ticket, returns the viewer bootstrap |
 | `/v1/embed/acknowledgements` | POST | **Your server** | Vouches for the exact viewer channel before the exchange |
 | `/v1/embed/exchange` | POST | The viewer, by itself | Trades the bootstrap challenge for a short-lived bearer |
@@ -119,8 +121,35 @@ the viewer ignores any message that does not.
 | `/v1/embed/runs` | POST | The v2 viewer, by itself | Reconciles authorized runs for the exact deployment/version/incarnation |
 | `/v1/embed/executions` | POST | The v2 viewer, by itself | Optionally requests one separately-authorized idempotent server-side traversal |
 
-You implement the first and third. The viewer does the rest on its own; you never call `exchange` or
-`projection` or `observation`, and you never see the bearer, projection, or observation stream.
+Your server implements session creation and acknowledgement, plus discovery and revocation when it
+uses dynamic policy. The viewer does the rest on its own; you never call `exchange`, `projection`,
+or `observation`, and you never see the bearer, projection, or observation stream.
+
+## Dynamic selection alternative
+
+When the operator enables dynamic policy, your server may replace the registration-id lookup with
+two calls. First, call `GET /v1/embed/deployments?limit=50` using a workload token that has
+`ravenroot.embed.deployment.discover`. The response contains `scope: "LOCAL_PROCESS"`, a bounded
+`deployments` array, and a `nextCursor`. Each row is a tenant-owned READY selection with
+`deploymentId`, `incarnationId`, `graphVersion`, and `canonicalDigest`.
+
+Then send the exact selected tuple and parent origin to the existing session route:
+
+```json
+{
+  "deploymentId": "orders",
+  "incarnationId": "...",
+  "graphVersion": "...",
+  "parentOrigin": "https://app.example.com"
+}
+```
+
+A successful response also includes `grantId`. Use that id in the acknowledgement body instead of
+`registrationId`, and retain it only on your server so you can call
+`DELETE /v1/embed/grants/{grantId}`. Selection and acknowledgement require
+`ravenroot.embed.session.create`. The server re-resolves readiness and the exact source tuple; a stale
+selection receives the same non-disclosing session-unavailable response as an absent one. Dynamic
+grants expire, are fixed read-only, and never enable the Start execution action.
 
 ## Choose the registration source
 

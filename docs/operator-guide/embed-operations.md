@@ -2,6 +2,10 @@
 
 Provision and withdraw read-only graph delivery through explicit human attestations and auditable session controls.
 
+Legacy durable registrations and dynamic grants are additive authority modes. Dynamic mode is
+default-off and deliberately limited to tenant-owned READY deployments hosted by this server, where
+the authoritative projection and observation stream exists.
+
 ## Operator procedure
 
 1. Identify the exact source, host origin, accountable owner, and takedown route. Choose an immutable
@@ -27,6 +31,12 @@ After revocation, confirm that new launches fail, outstanding sessions cannot re
 continue observation, and the audit record identifies the operator action. An observation cursor is
 process-local and cannot survive a replay gap or source replacement; the recovery step is a fresh
 projection/session after policy review, never cursor fabrication or GraphML fallback.
+
+For dynamic mode, also verify discovery returns no stopped or foreign-tenant deployment, selection
+refuses a stale incarnation or graph version, revocation invalidates outstanding tickets and browser
+credentials, and a replacement deployment requires a fresh grant. Audit records identify discovery,
+session issue, acknowledgement, projection/observation reads, and revocation without recording grant,
+ticket, proof, cursor, or bearer values.
 
 - [Contract](../reference/embed-extension-contracts.md)
 - [Runbook](../troubleshooting/embed-backup.md)

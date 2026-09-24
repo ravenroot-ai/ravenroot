@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23830 |
+| Atomic operational candidates discovered | 23832 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23830 |
+| Reviewed | 23832 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
@@ -51,7 +51,7 @@ semantic review and focused source inventories remain required for those boundar
 | Retained published contract descriptions | 528 |
 | Retained presentation text | 668 |
 | Retained derived values | 1076 |
-| Test fixtures | 8038 |
+| Test fixtures | 8040 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 2096.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 86.
+Checked source reconciliations: 87.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23830 candidates.
+zero-count or unclassified rows as needed and sums to 23832 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23830 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22169 |
+| retained | 22171 |
 
 ### Classification counts
 
@@ -89,7 +89,7 @@ zero-count or unclassified rows as needed and sums to 23830 candidates.
 | protocol-or-format-invariant | 9908 |
 | published-contract-description | 528 |
 | security-ceiling-or-default | 1951 |
-| test-fixture | 8038 |
+| test-fixture | 8040 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -100,7 +100,7 @@ zero-count or unclassified rows as needed and sums to 23830 candidates.
 | deployment-example | 20 |
 | java | 7249 |
 | script | 2323 |
-| test-fixture | 8038 |
+| test-fixture | 8040 |
 | ui | 3342 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8530 |
-| Retained; no remediation required | 13280 |
+| Retained; no remediation required | 13282 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23817 |
-| Unchanged identities | 23809 |
+| Source inventory candidates | 23830 |
+| Unchanged identities | 23830 |
 | Approved identity migrations | 0 |
-| Approved retirements | 8 |
-| Semantically classified additions | 21 |
-| Current candidates | 23830 |
+| Approved retirements | 0 |
+| Semantically classified additions | 2 |
+| Current candidates | 23832 |
 
 ## Final semantic review
 

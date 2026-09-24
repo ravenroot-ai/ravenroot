@@ -73,6 +73,13 @@ const ACTION_LABEL = Object.freeze({
   drain: 'Drain', stop: 'Stop', restart: 'Restart', undeploy: 'Undeploy',
 });
 
+const UNAVAILABLE_REASON = Object.freeze({
+  NOT_AUTHORIZED: 'Not authorized for this target.',
+  TERMINAL_TARGET: 'The target has already reached a terminal state.',
+  INCOMPATIBLE_STATE: 'The authoritative state does not permit this operation.',
+  DURABLE_AUTHORITY_UNAVAILABLE: 'Durable lifecycle authority is unavailable.',
+});
+
 function advertisedCommands(target, scope) {
   const contract = target?.lifecycleCapabilities;
   if (!contract || contract.contractVersion !== 1 || contract.scope !== scope
@@ -85,6 +92,32 @@ function boundedReason(doc, label, action) {
   if (value === null) return null;
   const reason = String(value).trim();
   return reason && reason.length <= 256 ? reason : undefined;
+}
+
+function unavailableExplanation(capability) {
+  return UNAVAILABLE_REASON[capability.unavailableReason]
+    || capability.unavailableReason
+    || 'The server did not provide a reason.';
+}
+
+function reasonId(scope, targetId, action) {
+  return `${scope}-${targetId}-${action}-unavailable`.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function appendUnavailableReason(doc, row, button, capability, scope, targetId) {
+  const explanation = doc.createElement('small');
+  explanation.id = reasonId(scope, targetId, capability.action);
+  explanation.className = 'lifecycle-unavailable-reason';
+  explanation.textContent = `${ACTION_LABEL[capability.action]} unavailable: ${unavailableExplanation(capability)}`;
+  button.setAttribute('aria-disabled', 'true');
+  button.setAttribute('aria-describedby', explanation.id);
+  row.append(button, explanation);
+}
+
+function drainExplanation(bound) {
+  return bound === 'UNTIL_ACCEPTED_WORK_SETTLES'
+    ? 'Drain closes new admission immediately; work already accepted continues until it settles.'
+    : `Drain closes new admission immediately; work already accepted may continue for up to ${bound} before completion.`;
 }
 
 function validateDeploymentId(value) {
@@ -203,10 +236,16 @@ export function createDeploymentsWindow({
       const sourceText = entry.sourceCount > 0
         ? `${entry.sourceCount} inbound source node${entry.sourceCount === 1 ? '' : 's'}`
         : 'no inbound source';
-      detail.textContent = `${sourceText} · scope ${entry.scope}`;
+      detail.textContent = `tenant ${entry.tenantId} · graph ${entry.graphVersion || 'unavailable'}`
+        + ` · ${sourceText} · scope ${entry.scope} · continuity ${entry.continuity}`;
       if (entry.deploymentGeneration !== undefined && entry.deploymentGeneration !== null) {
         detail.textContent += ` · generation ${entry.deploymentGeneration}`;
       }
+      if (entry.deploymentRevision !== null) detail.textContent += ` · registry revision ${entry.deploymentRevision}`;
+      if (entry.desiredState !== null || entry.observedState !== null) {
+        detail.textContent += ` · reconciliation desired ${entry.desiredState || 'unknown'}, observed ${entry.observedState || 'unknown'}`;
+      }
+      if (entry.recoveryFailure) detail.textContent += ` · recovery failure ${entry.recoveryFailure}`;
 
       item.append(head, detail);
 
@@ -245,10 +284,15 @@ export function createDeploymentsWindow({
           button.textContent = ACTION_LABEL[action];
           button.dataset.deploymentAction = action;
           button.dataset.deploymentId = entry.deploymentId;
-          button.disabled = !capability.available;
-          if (!capability.available) button.title = capability.unavailableReason;
-          actionsRow.append(button);
+          if (capability.available) actionsRow.append(button);
+          else appendUnavailableReason(doc, actionsRow, button, capability, 'deployment', entry.deploymentId);
         }
+      }
+      if (entry.lifecycleCapabilities?.drainBound) {
+        const drain = doc.createElement('small');
+        drain.className = 'lifecycle-drain-bound';
+        drain.textContent = drainExplanation(entry.lifecycleCapabilities.drainBound);
+        actionsRow.append(drain);
       }
       item.append(actionsRow);
       const use = doc.createElement('button');
@@ -285,12 +329,15 @@ export function createDeploymentsWindow({
       identity.textContent = entry.processInstanceId;
       const state = doc.createElement('span');
       state.className = 'deployment-state';
-      state.textContent = entry.controlState || entry.status;
+      state.textContent = `Status ${entry.status}`;
       head.append(identity, state);
       const detail = doc.createElement('small');
       detail.textContent = `tenant ${entry.tenantId} · deployment ${entry.deploymentId || 'transient'} · graph ${entry.graphVersion}`
         + ` · revision ${entry.revision} · lifecycle generation ${entry.lifecycleGeneration}`
-        + ` · fence ${entry.fencingToken} · recovery ${entry.disposition}`;
+        + ` · fence ${entry.fencingToken} · recovery ${entry.disposition}`
+        + ` · control ${entry.controlState || 'unavailable'}`;
+      if (entry.terminationReason) detail.textContent += ` · terminal reason ${entry.terminationReason}`;
+      if (entry.cancelled) detail.textContent += ' · cancellation recorded';
       const select = doc.createElement('button');
       select.type = 'button';
       select.className = 'btn process-select';
@@ -309,13 +356,14 @@ export function createDeploymentsWindow({
           button.dataset.processAction = capability.action;
           button.dataset.processId = entry.processInstanceId;
           button.textContent = ACTION_LABEL[capability.action];
-          button.disabled = !capability.available || processBusy.has(entry.processInstanceId);
-          if (!capability.available) button.title = capability.unavailableReason;
-          actions.append(button);
+          button.disabled = processBusy.has(entry.processInstanceId);
+          if (capability.available) actions.append(button);
+          else appendUnavailableReason(doc, actions, button, capability, 'process', entry.processInstanceId);
         }
         if (entry.lifecycleCapabilities?.drainBound) {
           const drain = doc.createElement('small');
-          drain.textContent = `Drain closes admission; accepted work settles within ${entry.lifecycleCapabilities.drainBound}.`;
+          drain.className = 'lifecycle-drain-bound';
+          drain.textContent = drainExplanation(entry.lifecycleCapabilities.drainBound);
           actions.append(drain);
         }
         item.append(actions);

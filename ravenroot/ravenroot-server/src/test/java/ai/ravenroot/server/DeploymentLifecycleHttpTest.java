@@ -77,6 +77,12 @@ class DeploymentLifecycleHttpTest {
             var registered = fixture.request(
                     "POST", "/v1/deployments?id=durable", NO_SOURCE_GRAPH, "tenant-a");
             assertEquals(200, registered.statusCode(), registered.body());
+            assertTrue(registered.body().contains("\"tenantId\":\"tenant-a\""), registered.body());
+            assertTrue(registered.body().contains("\"graphVersion\":"), registered.body());
+            assertTrue(registered.body().contains("\"continuity\":\"DURABLE\""), registered.body());
+            assertTrue(registered.body().contains("\"deploymentRevision\":1"), registered.body());
+            assertTrue(registered.body().contains("\"desiredState\":\"STOPPED\""), registered.body());
+            assertTrue(registered.body().contains("\"observedState\":\"COLD\""), registered.body());
             assertTrue(registered.body().contains("\"deploymentGeneration\":0"), registered.body());
             assertTrue(registered.body().contains("\"contractVersion\":1"), registered.body());
             assertTrue(registered.body().contains("\"scope\":\"DEPLOYMENT\""), registered.body());

@@ -6,14 +6,18 @@ state from browser events, and it is independent of the graph node currently sel
 
 ## Select the intended scope
 
-A deployment row identifies the tenant-scoped deployment, immutable graph version, local runtime
-state, and durable generation when one exists. Choose **Select deployment and processes** to read the
+A deployment row identifies the authoritative tenant, immutable graph version, local runtime state,
+continuity (`PROCESS_LOCAL` or `DURABLE`), registry revision, desired and observed reconciliation
+states, recovery failure when present, and durable generation when one exists. Choose **Select deployment and processes** to read the
 durable process inventory filtered to that deployment. A process row separately identifies its
-tenant, process instance, graph version, stored status, control state, revision, lifecycle generation,
-fencing token, and recovery disposition. Select the process before using a process command.
+tenant, process instance, graph version, stored aggregate status, control state, terminal reason and
+cancellation marker when present, revision, lifecycle generation, fencing token, and recovery
+disposition. Aggregate status and control state are separate facts: a terminal aggregate status can
+coexist with a last-recorded `RUNNING` control state. Select the process before using a process command.
 
 The server advertises a versioned list of operations for every target. The console uses that list
-verbatim: an unavailable operation is disabled with the server's reason, and an older server that
+verbatim: an unavailable operation remains keyboard-focusable, is marked `aria-disabled`, and has
+the server's reason visibly rendered and associated with it for assistive technology. An older server that
 does not advertise the contract receives no inferred durable controls. Losing the
 `ravenroot.execution.control` scope therefore removes authority from the controls even if observation
 remains authorized. Ravenroot consumes the externally authenticated roles and scopes; the console

@@ -1252,6 +1252,9 @@
     .deployment-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .deployment-item-actions .btn { font-size: 9px; padding: 2px 8px; }
     .deployment-item-actions small { color: var(--tx-2); font-size: 9px; }
+    .deployment-item-actions .lifecycle-unavailable-reason,
+    .deployment-item-actions .lifecycle-drain-bound { flex-basis: 100%; }
+    .deployment-item-actions .lifecycle-unavailable-reason { color: var(--outcome-warning-text); }
     .deployment-operational-target, .process-select { align-self: flex-start; }
     .lifecycle-processes { border-top: 1px solid var(--bd); margin-top: 14px; padding-top: 12px; }
     .lifecycle-process-item { gap: 7px; }

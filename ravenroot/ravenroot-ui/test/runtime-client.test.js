@@ -535,7 +535,11 @@ describe('process-local deployment client', () => {
   const ready = {
     deploymentId: 'deployment-1', state: 'READY', sourceCount: 0,
     graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null,
+    tenantId: 'tenant-a', continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+    desiredState: null, observedState: null, recoveryFailure: null,
   };
+  const durable = (overrides = {}) => ({ ...ready, continuity: 'DURABLE', deploymentGeneration: 7,
+    deploymentRevision: 7, desiredState: 'RUNNING', observedState: 'READY', ...overrides });
 
   it('uses the dedicated authenticated register, observe, start, and stop routes', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
@@ -571,14 +575,15 @@ describe('process-local deployment client', () => {
   });
 
   it('accepts a safe authoritative generation and refuses one JavaScript would round', () => {
-    expect(validateLocalDeploymentStatus({ ...ready, deploymentGeneration: 7 }).deploymentGeneration).toBe(7);
-    expect(() => validateLocalDeploymentStatus({ ...ready,
-      deploymentGeneration: Number.MAX_SAFE_INTEGER + 1 })).toThrow(/process-local status/);
+    expect(validateLocalDeploymentStatus(durable()).deploymentGeneration).toBe(7);
+    expect(() => validateLocalDeploymentStatus(durable({
+      deploymentGeneration: Number.MAX_SAFE_INTEGER + 1 }))).toThrow(/process-local status/);
   });
 
   it('sends one durable Stop intent, parses its outcome, and reconciles authoritative state', async () => {
     const accepted = { outcome: 'ACCEPTED', commandId: 'command-1', fromGeneration: 7, generation: 8 };
-    const stopped = { ...ready, state: 'STOPPED', deploymentGeneration: 8 };
+    const stopped = durable({ state: 'STOPPED', deploymentGeneration: 8, deploymentRevision: 8,
+      desiredState: 'STOPPED', observedState: 'STOPPED' });
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(accepted) })
       .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(stopped) });
@@ -603,7 +608,7 @@ describe('process-local deployment client', () => {
       .mockRejectedValueOnce(new TypeError('connection reset'))
       .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(converged) })
       .mockResolvedValueOnce({ ok: true, status: 200,
-        text: async () => JSON.stringify({ ...ready, deploymentGeneration: 4 }) });
+        text: async () => JSON.stringify(durable({ deploymentGeneration: 4, deploymentRevision: 4 })) });
     const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
 
     await client.startDeployment('deployment-1', {
@@ -616,7 +621,8 @@ describe('process-local deployment client', () => {
   });
 
   it('reconciles authoritative state after both durable delivery responses are lost', async () => {
-    const observed = { ...ready, state: 'STOPPED', deploymentGeneration: 8 };
+    const observed = durable({ state: 'STOPPED', deploymentGeneration: 8, deploymentRevision: 8,
+      desiredState: 'STOPPED', observedState: 'STOPPED' });
     const fetchImpl = vi.fn()
       .mockRejectedValueOnce(new TypeError('first response lost'))
       .mockRejectedValueOnce(new TypeError('second response lost'))
@@ -661,7 +667,7 @@ describe('process-local deployment client', () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(stale) })
       .mockResolvedValueOnce({ ok: true, status: 200,
-        text: async () => JSON.stringify({ ...ready, deploymentGeneration: 4 }) });
+        text: async () => JSON.stringify(durable({ deploymentGeneration: 4, deploymentRevision: 4 })) });
     const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
 
     const result = await client.restartDeployment('deployment-1', {
@@ -767,7 +773,8 @@ describe('durable process inventory client (issue 154)', () => {
   const page = {
     items: [{
       tenantId: 'tenant-a', processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000001',
-      status: 'RUNNING', disposition: 'ACTIVE', revision: 3, lifecycleGeneration: 2,
+      status: 'RUNNING', terminationReason: null, cancelled: false, disposition: 'ACTIVE',
+      revision: 3, lifecycleGeneration: 2,
       graphVersion: 'sha256:deadbeef', deploymentId: null, workloadId: null, correlationId: null,
       ownerWorkerId: 'worker-1', fencingToken: 7, leaseExpiresAt: '2026-01-01T00:00:30Z',
       traversalCount: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:05Z',

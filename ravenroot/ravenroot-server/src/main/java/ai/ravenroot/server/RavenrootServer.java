@@ -4343,7 +4343,7 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"deployments\":[" + statuses.stream()
                 .filter(status -> durableDeploymentRecord(context.tenantId(), status.deploymentId())
                         .map(record -> record.tombstone() == null).orElse(true))
-                .map(status -> deploymentObject(status,
+                .map(status -> deploymentObject(context.tenantId(), status,
                         durableDeploymentRecord(context.tenantId(), status.deploymentId()).orElse(null),
                         lifecycleControlDecision(context, "deployment",
                                 status.deploymentId())))
@@ -4354,23 +4354,34 @@ public final class RavenrootServer implements AutoCloseable {
                                 ai.ravenroot.api.application.LocalDeploymentStatus status,
                                 ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record durable)
             throws IOException {
-        json(exchange, statusCode, deploymentObject(status, durable,
+        json(exchange, statusCode, deploymentObject(httpContext.applicationContext().tenantId(), status, durable,
                 lifecycleControlDecision(httpContext.applicationContext(), "deployment", status.deploymentId())));
     }
 
-    private String deploymentObject(ai.ravenroot.api.application.LocalDeploymentStatus status,
+    private String deploymentObject(String requestTenantId,
+                                    ai.ravenroot.api.application.LocalDeploymentStatus status,
                                     ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record durable,
                                     ai.ravenroot.api.security.AuthorizationDecision control) {
         Long generation = durable == null ? null : durable.generation();
+        String tenantId = durable == null ? requestTenantId : durable.tenantId();
         String diagnostic = status.diagnostic().map(value -> "\"" + escape(value) + "\"").orElse("null");
         String graphVersion = status.graphVersion().map(value -> "\"" + escape(value) + "\"")
                 .orElse("null");
         return "{\"deploymentId\":\"" + escape(status.deploymentId())
+                + "\",\"tenantId\":\"" + escape(tenantId)
                 + "\",\"state\":\"" + status.state().name()
                 + "\",\"sourceCount\":" + status.sourceCount()
                 + ",\"graphVersion\":" + graphVersion
                 + ",\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
                 + "\",\"diagnostic\":" + diagnostic
+                + ",\"continuity\":\"" + (durable == null ? "PROCESS_LOCAL" : "DURABLE") + "\""
+                + ",\"deploymentRevision\":" + (durable == null ? "null" : durable.revision())
+                + ",\"desiredState\":" + (durable == null ? "null"
+                        : "\"" + durable.desired().kind().name() + "\"")
+                + ",\"observedState\":" + (durable == null ? "null"
+                        : "\"" + durable.observed().state().name() + "\"")
+                + ",\"recoveryFailure\":" + (durable == null || durable.failure() == null ? "null"
+                        : "\"" + durable.failure().code() + "\"")
                 + (generation == null ? "" : ",\"deploymentGeneration\":" + generation)
                 + ",\"lifecycleCapabilities\":"
                 + lifecycleCapabilitiesObject("DEPLOYMENT", generation != null, false, control,

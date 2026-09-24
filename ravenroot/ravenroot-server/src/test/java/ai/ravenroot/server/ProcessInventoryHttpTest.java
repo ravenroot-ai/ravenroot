@@ -26,6 +26,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -78,6 +79,8 @@ class ProcessInventoryHttpTest {
              var store = new InMemoryExecutionStore()) {
             var application = applicationWith(engine, store);
             try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.installProcessLifecycle(new ai.ravenroot.core.process.ProcessLifecycleService(
+                        store, application, null, Clock.systemUTC()));
                 server.start();
 
                 var submitResponse = postAs(server, "/v1/executions?mode=run", GRAPH, "tenant-a");
@@ -92,7 +95,9 @@ class ProcessInventoryHttpTest {
                 assertTrue(inventory.contains("\"deploymentId\":null"),
                         () -> "a transient submission opens no deployment domain: " + inventory);
                 assertTrue(inventory.contains("\"retainedFrom\""), inventory);
-                assertTrue(inventory.contains("\"controlState\":null"), inventory);
+                assertTrue(inventory.contains("\"controlState\":\"RUNNING\""),
+                        () -> "terminal aggregate status and lifecycle control state are separate facts: "
+                                + inventory);
                 assertTrue(inventory.contains("\"contractVersion\":1,\"scope\":\"PROCESS\""), inventory);
                 assertTrue(inventory.contains("\"command\":\"PAUSE\",\"available\":false"), inventory);
                 assertTrue(inventory.contains("\"unavailableReason\":\"TERMINAL_TARGET\""),

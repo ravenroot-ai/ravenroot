@@ -33,7 +33,12 @@ const DURABLE_CAPABILITIES = { contractVersion: 1, scope: 'DEPLOYMENT', drainBou
     reasonRequired: ['PAUSE', 'CANCEL', 'STOP', 'UNDEPLOY'].includes(command.command),
     unavailableReason: null })) };
 const READY = { deploymentId: 'orders-v3', state: 'READY', sourceCount: 0, graphVersion: 'graph-v3',
-  scope: 'LOCAL_PROCESS', diagnostic: null, lifecycleCapabilities: LEGACY_CAPABILITIES };
+  scope: 'LOCAL_PROCESS', diagnostic: null, tenantId: 'tenant-a', continuity: 'PROCESS_LOCAL',
+  deploymentRevision: null, desiredState: null, observedState: null, recoveryFailure: null,
+  lifecycleCapabilities: LEGACY_CAPABILITIES };
+const DURABLE_READY = { ...READY, continuity: 'DURABLE', deploymentGeneration: 6,
+  deploymentRevision: 6, desiredState: 'RUNNING', observedState: 'READY',
+  lifecycleCapabilities: DURABLE_CAPABILITIES };
 
 let dialog;
 
@@ -108,11 +113,19 @@ describe('what the window renders', () => {
   it('shows the authoritative durable generation when the server supplies one', async () => {
     const window_ = createDeploymentsWindow({
       dialog, client: stubClient({ deployments: vi.fn(async () => [
-        { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 9 },
+        { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, continuity: 'DURABLE',
+          deploymentGeneration: 9, deploymentRevision: 12, desiredState: 'RUNNING',
+          observedState: 'READY', recoveryFailure: null },
       ]) }), pollMs: 0,
     });
     await window_.refresh();
+    expect(field('deployment-list').textContent).toContain('tenant tenant-a');
+    expect(field('deployment-list').textContent).toContain('graph graph-v3');
+    expect(field('deployment-list').textContent).toContain('continuity DURABLE');
     expect(field('deployment-list').textContent).toContain('generation 9');
+    expect(field('deployment-list').textContent).toContain('registry revision 12');
+    expect(field('deployment-list').textContent).toContain('desired RUNNING, observed READY');
+    expect(field('deployment-list').textContent).toContain('Drain closes new admission immediately');
   });
 
   it('shows a diagnostic when the server sends one', async () => {
@@ -286,7 +299,7 @@ describe('row actions', () => {
   });
 
   it('sends durable Stop with the displayed generation and an explicit reason', async () => {
-    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 6 };
+    const durable = DURABLE_READY;
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -301,7 +314,7 @@ describe('row actions', () => {
 
   it('surfaces reconciled state without inventing an outcome after both command responses are lost',
     async () => {
-      const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 6 };
+      const durable = DURABLE_READY;
       const client = stubClient({
         deployments: vi.fn(async () => [durable]),
         stopDeployment: vi.fn(async () => ({
@@ -322,7 +335,7 @@ describe('row actions', () => {
     });
 
   it('requires an explicit durable Undeploy disposition and reason', async () => {
-    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 11 };
+    const durable = { ...DURABLE_READY, deploymentGeneration: 11, deploymentRevision: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -342,7 +355,7 @@ describe('row actions', () => {
   });
 
   it('does not collect disposition or reason when durable Undeploy confirmation is cancelled', async () => {
-    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 11 };
+    const durable = { ...DURABLE_READY, deploymentGeneration: 11, deploymentRevision: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -361,7 +374,7 @@ describe('row actions', () => {
     ['disposition', [null]],
     ['reason', ['DRAIN_FIRST', null]],
   ])('does not send durable Undeploy when %s collection is cancelled', async (_field, answers) => {
-    const durable = { ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES, deploymentGeneration: 11 };
+    const durable = { ...DURABLE_READY, deploymentGeneration: 11, deploymentRevision: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
@@ -380,7 +393,8 @@ describe('row actions', () => {
     const process = {
       tenantId: 'tenant-a', deploymentId: 'orders-v3', graphVersion: 'graph-v3',
       processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000001', status: 'RUNNING',
-      controlState: 'RUNNING', disposition: 'ACTIVE', revision: 7, lifecycleGeneration: 4,
+      terminationReason: null, cancelled: false, controlState: 'RUNNING', disposition: 'ACTIVE',
+      revision: 7, lifecycleGeneration: 4,
       fencingToken: 9,
       lifecycleCapabilities: { contractVersion: 1, scope: 'PROCESS',
         drainBound: 'UNTIL_ACCEPTED_WORK_SETTLES', commands: [
@@ -390,8 +404,8 @@ describe('row actions', () => {
         ] },
     };
     const client = stubClient({
-      deployments: vi.fn(async () => [{ ...READY, lifecycleCapabilities: DURABLE_CAPABILITIES,
-        deploymentGeneration: 3 }]),
+      deployments: vi.fn(async () => [{ ...DURABLE_READY, deploymentGeneration: 3,
+        deploymentRevision: 3 }]),
       processInventory: vi.fn(async () => ({ items: [process], nextCursor: null,
         retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
       controlProcess: vi.fn(async () => ({ outcome: 'APPLIED', processInstanceId: process.processInstanceId,
@@ -404,7 +418,14 @@ describe('row actions', () => {
     field('lifecycle-process-list').querySelector('[data-process-select]').click();
 
     const resume = field('lifecycle-process-list').querySelector('[data-process-action="resume"]');
-    expect(resume.disabled).toBe(true);
+    expect(resume.disabled).toBe(false);
+    expect(resume.getAttribute('aria-disabled')).toBe('true');
+    expect(document.getElementById(resume.getAttribute('aria-describedby')).textContent)
+      .toContain('Resume unavailable:');
+    resume.focus();
+    expect(document.activeElement).toBe(resume);
+    resume.click();
+    expect(client.controlProcess).not.toHaveBeenCalled();
     vi.spyOn(window, 'prompt').mockReturnValue('maintenance');
     field('lifecycle-process-list').querySelector('[data-process-action="pause"]').click();
     await vi.waitFor(() => expect(client.controlProcess).toHaveBeenCalled());
@@ -413,6 +434,34 @@ describe('row actions', () => {
       expect.objectContaining({ reason: 'maintenance', idempotencyKey: expect.any(String) }));
     expect(document.querySelector('#human-task-dialog [data-process-action]')).toBeNull();
     vi.restoreAllMocks();
+  });
+
+  it('keeps terminal aggregate status, RUNNING control state, and cancellation evidence distinct', async () => {
+    const terminal = {
+      tenantId: 'tenant-a', deploymentId: 'orders-v3', graphVersion: 'graph-v3',
+      processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000002', status: 'FAILED',
+      terminationReason: 'CANCELLED', cancelled: true, controlState: 'RUNNING',
+      disposition: 'TERMINAL_RETAINED', revision: 8, lifecycleGeneration: 4, fencingToken: 9,
+      lifecycleCapabilities: { contractVersion: 1, scope: 'PROCESS', commands: [
+        { command: 'PAUSE', available: false, reasonRequired: false,
+          unavailableReason: 'TERMINAL_TARGET' },
+      ] },
+    };
+    const client = stubClient({
+      deployments: vi.fn(async () => [DURABLE_READY]),
+      processInventory: vi.fn(async () => ({ items: [terminal], nextCursor: null,
+        retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
+    });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    field('deployment-list').querySelector('[data-deployment-operational]').click();
+    await vi.waitFor(() => expect(client.processInventory).toHaveBeenCalled());
+
+    const row = field('lifecycle-process-list').querySelector('.lifecycle-process-item');
+    expect(row.querySelector('.deployment-state').textContent).toBe('Status FAILED');
+    expect(row.textContent).toContain('control RUNNING');
+    expect(row.textContent).toContain('terminal reason CANCELLED');
+    expect(row.textContent).toContain('cancellation recorded');
   });
 });
 

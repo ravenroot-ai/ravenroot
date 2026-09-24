@@ -276,6 +276,7 @@ function validateExecutionControlResult(value, expectedExecutionId, operation) {
 export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || typeof value.deploymentId !== 'string' || !value.deploymentId
+      || typeof value.tenantId !== 'string' || !value.tenantId
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
@@ -283,12 +284,26 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
         && !safeGeneration(value.deploymentGeneration))
       || (value.graphVersion !== null && value.graphVersion !== undefined
         && (typeof value.graphVersion !== 'string' || !value.graphVersion))
+      || !['PROCESS_LOCAL', 'DURABLE'].includes(value.continuity)
+      || (value.deploymentRevision !== null && (!safeGeneration(value.deploymentRevision)
+        || value.deploymentRevision < 1))
+      || (value.desiredState !== null && (typeof value.desiredState !== 'string' || !value.desiredState))
+      || (value.observedState !== null && (typeof value.observedState !== 'string' || !value.observedState))
+      || (value.recoveryFailure !== null
+        && (typeof value.recoveryFailure !== 'string' || !value.recoveryFailure))
       || (value.diagnostic !== null && value.diagnostic !== undefined
         && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
     throw new Error('Deployment response is not a valid process-local status');
   }
   if (expectedDeploymentId && value.deploymentId !== expectedDeploymentId) {
     throw new Error(`Deployment response id ${value.deploymentId} does not match ${expectedDeploymentId}`);
+  }
+  const durable = value.deploymentGeneration !== null && value.deploymentGeneration !== undefined;
+  if (durable !== (value.continuity === 'DURABLE')
+      || durable !== (value.deploymentRevision !== null)
+      || durable !== (value.desiredState !== null)
+      || durable !== (value.observedState !== null)) {
+    throw new Error('Deployment response carries inconsistent continuity metadata');
   }
   if (value.lifecycleCapabilities !== undefined) {
     validateLifecycleCapabilities(value.lifecycleCapabilities, 'DEPLOYMENT');
@@ -308,6 +323,9 @@ export function validateProcessInventoryPage(value) {
         || typeof item.tenantId !== 'string' || !item.tenantId
         || typeof item.processInstanceId !== 'string' || !item.processInstanceId
         || typeof item.status !== 'string' || !item.status
+        || (item.terminationReason !== null
+          && (typeof item.terminationReason !== 'string' || !item.terminationReason))
+        || typeof item.cancelled !== 'boolean'
         || typeof item.disposition !== 'string' || !item.disposition
         || typeof item.graphVersion !== 'string' || !item.graphVersion
         || !Number.isSafeInteger(item.revision) || item.revision < 1

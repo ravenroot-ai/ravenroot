@@ -34,6 +34,7 @@ import java.util.Optional;
  *                     absent only for compatibility producers that predate this projection
  * @param diagnostic fixed, bounded, operator-safe explanation, present only for degraded or failed
  *                   deployments
+ * @param failure structured startup failure, present only for failed startup when available
  */
 public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
                                     Optional<String> graphVersion, Optional<String> diagnostic,
@@ -68,7 +69,14 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
         }
     }
 
-    /** Compatibility constructor for the pre-structured-failure canonical shape. */
+    /**
+     * Compatibility constructor for the pre-structured-failure canonical shape.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param state truthful process-local lifecycle state
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param graphVersion immutable registered graph version when available
+     * @param diagnostic bounded operator-safe explanation when available
+     */
     public LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
                                  Optional<String> graphVersion, Optional<String> diagnostic) {
         this(deploymentId, state, sourceCount, graphVersion, diagnostic, Optional.empty());
@@ -142,7 +150,14 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
                 Optional.ofNullable(graphVersion), Optional.ofNullable(safeDiagnostic), Optional.empty());
     }
 
-    /** Failed projection retaining the engine's exact structured startup failure. */
+    /**
+     * Creates a failed projection retaining the engine's exact structured startup failure.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param graphVersion immutable registered graph version, or {@code null}
+     * @param failure safe structured startup failure
+     * @return failed local-deployment status
+     */
     public static LocalDeploymentStatus failed(String deploymentId, int sourceCount, String graphVersion,
             ai.ravenroot.api.deployment.StartupFailure failure) {
         return new LocalDeploymentStatus(deploymentId, LocalDeploymentState.FAILED, sourceCount,

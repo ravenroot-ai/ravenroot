@@ -52,7 +52,12 @@ public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<
         }
     }
 
-    /** Binary/source compatibility constructor for the pre-structured-failure shape. */
+    /**
+     * Binary/source compatibility constructor for the pre-structured-failure shape.
+     * @param id deployment whose lifecycle is observed
+     * @param state machine-readable current lifecycle state
+     * @param cause sanitized operator summary for degraded or failed states only
+     */
     public DeploymentStatus(DeploymentId id, DeploymentState state, Optional<String> cause) {
         this(id, state, cause, Optional.empty());
     }
@@ -78,7 +83,12 @@ public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<
         return new DeploymentStatus(id, state, Optional.ofNullable(sanitizedCause), Optional.empty());
     }
 
-    /** Failed state carrying the shared structured startup failure and legacy generic cause. */
+    /**
+     * Creates a failed state carrying the shared structured startup failure and legacy generic cause.
+     * @param id deployment whose lifecycle is observed
+     * @param failure safe structured startup failure
+     * @return failed deployment status
+     */
     public static DeploymentStatus failed(DeploymentId id, StartupFailure failure) {
         return new DeploymentStatus(id, DeploymentState.FAILED,
                 Optional.of("deployment startup failed"), Optional.of(failure));

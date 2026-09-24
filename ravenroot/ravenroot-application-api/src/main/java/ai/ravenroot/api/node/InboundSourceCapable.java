@@ -21,6 +21,7 @@ public interface InboundSourceCapable {
     /**
      * Closed codes this trusted source implementation may expose when startup is refused.
      * Undeclared codes are deliberately projected as a generic incident by the core.
+     * @return immutable declared public code set; empty by default
      */
     default java.util.Set<String> sourceStartFailureCodes() {
         return java.util.Set.of();

@@ -11,7 +11,9 @@ import java.util.regex.Pattern;
 
 /** Projection-only formatting for graph-authored identifiers at public and structured-log boundaries. */
 public final class DiagnosticIdentifier {
+    /** Maximum UTF-8 byte count for a public identifier display. */
     public static final int MAX_IDENTIFIER_UTF8_BYTES = 128;
+    /** Maximum UTF-8 byte count for a public property-name token. */
     public static final int MAX_PROPERTY_UTF8_BYTES = 64;
     private static final String TRUNCATED = "~#";
     private static final String HOST_REDACTION = "[ravenroot:redacted:host]";
@@ -24,10 +26,20 @@ public final class DiagnosticIdentifier {
 
     private DiagnosticIdentifier() { }
 
+    /**
+     * Formats a raw node identifier for a public or structured-log boundary.
+     * @param raw exact graph-authored node identifier
+     * @return sanitized display and opaque locator
+     */
     public static Formatted node(String raw) {
         return format(raw, MAX_IDENTIFIER_UTF8_BYTES, "node");
     }
 
+    /**
+     * Formats a raw property name as a closed token or opaque deterministic fallback.
+     * @param raw exact submitted property name
+     * @return bounded property display and opaque reference
+     */
     public static Formatted property(String raw) {
         Objects.requireNonNull(raw, "raw");
         String normalized = Normalizer.normalize(raw, Normalizer.Form.NFC);
@@ -37,7 +49,12 @@ public final class DiagnosticIdentifier {
                 reference);
     }
 
-    /** Verifies a display token produced by this formatter without interpreting escaped text. */
+    /**
+     * Verifies a display token produced by this formatter without interpreting escaped text.
+     * @param value candidate display token
+     * @param maximumUtf8Bytes maximum allowed UTF-8 byte count
+     * @return whether the token is normalized, bounded, and free of sensitive raw locations
+     */
     public static boolean isSafeDisplay(String value, int maximumUtf8Bytes) {
         if (value == null || value.isEmpty() || utf8(value) > maximumUtf8Bytes) return false;
         if (!Normalizer.isNormalized(value, Normalizer.Form.NFC)
@@ -50,13 +67,21 @@ public final class DiagnosticIdentifier {
         return projection != null && !projection.redacted();
     }
 
-    /** Closed ASCII token accepted for public property names. Unsafe names become opaque tokens. */
+    /**
+     * Checks the closed ASCII grammar accepted for public property names.
+     * @param value candidate property-name token
+     * @return whether the value is a safe bounded property token
+     */
     public static boolean isSafePropertyToken(String value) {
         return value != null && PROPERTY_TOKEN.matcher(value).matches()
                 && utf8(value) <= MAX_PROPERTY_UTF8_BYTES && isSafeDisplay(value, MAX_PROPERTY_UTF8_BYTES);
     }
 
-    /** Stable graph-local locator over the exact raw UTF-8 identifier; it contains no identifier text. */
+    /**
+     * Creates a stable graph-local locator containing no identifier text.
+     * @param raw exact graph-authored identifier
+     * @return fixed-size lowercase SHA-256 locator token
+     */
     public static String reference(String raw) {
         Objects.requireNonNull(raw, "raw");
         return "sha256:" + HexFormat.of().formatHex(digest(raw)).substring(0, 32);
@@ -137,7 +162,13 @@ public final class DiagnosticIdentifier {
         return value.getBytes(StandardCharsets.UTF_8).length;
     }
 
+    /**
+     * Safe display text paired with its text-free deterministic reference.
+     * @param display bounded sanitized display
+     * @param reference opaque fixed-size reference
+     */
     public record Formatted(String display, String reference) {
+        /** Validates both formatted identifier components. */
         public Formatted {
             Objects.requireNonNull(display, "display");
             Objects.requireNonNull(reference, "reference");

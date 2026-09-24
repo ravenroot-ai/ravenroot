@@ -39,7 +39,14 @@ public record GraphSummary(int nodes, int edges, int startNodes, int endNodes, L
         if (findings.size() > 1) throw new IllegalArgumentException("only one primary finding is supported");
     }
 
-    /** Compatibility constructor for callers compiled against the original summary shape. */
+    /**
+     * Compatibility constructor for callers compiled against the original summary shape.
+     * @param nodes nodes the property graph received
+     * @param edges edges the property graph received
+     * @param startNodes nodes declaring {@code kind=START}
+     * @param endNodes nodes declaring {@code kind=END}
+     * @param violations deterministic compatibility violations
+     */
     public GraphSummary(int nodes, int edges, int startNodes, int endNodes, List<String> violations) {
         this(nodes, edges, startNodes, endNodes, violations, List.of());
     }

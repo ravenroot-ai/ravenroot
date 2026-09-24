@@ -168,7 +168,11 @@ public final class ErrorEnvelope {
         return new ErrorEnvelope(contract, code, message, correlationId, incidentId, reason, finding);
     }
 
-    /** Adds one already bounded graph-admission finding. */
+    /**
+     * Adds one already bounded graph-admission finding.
+     * @param value validated public finding
+     * @return new immutable envelope carrying the finding and its incident handle
+     */
     public ErrorEnvelope withFinding(ai.ravenroot.api.application.GraphAdmissionFinding value) {
         java.util.Objects.requireNonNull(value, "finding");
         return new ErrorEnvelope(contract, code, message, correlationId,
@@ -311,6 +315,10 @@ public final class ErrorEnvelope {
         return assistantReason;
     }
 
+    /**
+     * Returns the optional structured graph-admission finding.
+     * @return finding, or {@code null} for legacy and unrelated errors
+     */
     public ai.ravenroot.api.application.GraphAdmissionFinding finding() { return finding; }
 
     /**

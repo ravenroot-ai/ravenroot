@@ -6,12 +6,23 @@ import ai.ravenroot.api.application.GraphAdmissionPhase;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Same safe startup failure carried by engine, deployment, and source-session status projections. */
+/**
+ * Same safe startup failure carried by engine, deployment, and source-session status projections.
+ * @param contract diagnostic contract identifier
+ * @param phase closed startup phase
+ * @param reason generic platform reason or trusted declared extension code
+ * @param nodeId sanitized bounded source-node display when available
+ * @param nodeRef opaque deterministic source-node locator when available
+ * @param incidentId bounded incident handle for trusted diagnostics
+ */
 public record StartupFailure(String contract, GraphAdmissionPhase phase, String reason,
                              Optional<String> nodeId, Optional<String> nodeRef, String incidentId) {
+    /** Current startup-failure diagnostic contract identifier. */
     public static final String CONTRACT = "ravenroot.startup-failure/1";
+    /** Generic reason used when no trusted declared classifier is available. */
     public static final String GENERIC_REASON = "STARTUP_FAILED";
 
+    /** Validates the bounded public startup-failure contract. */
     public StartupFailure {
         if (!CONTRACT.equals(contract)) throw new IllegalArgumentException("unsupported startup failure contract");
         Objects.requireNonNull(phase, "phase");
@@ -33,11 +44,25 @@ public record StartupFailure(String contract, GraphAdmissionPhase phase, String 
         }
     }
 
+    /**
+     * Creates an unclassified safe startup failure.
+     * @param phase closed startup phase
+     * @param incidentId bounded incident handle
+     * @return generic structured startup failure
+     */
     public static StartupFailure generic(GraphAdmissionPhase phase, String incidentId) {
         return new StartupFailure(CONTRACT, phase, GENERIC_REASON,
                 Optional.empty(), Optional.empty(), incidentId);
     }
 
+    /**
+     * Creates a declared source-start failure with a safely formatted node locator.
+     * @param phase closed startup phase
+     * @param reason trusted declared lower-kebab extension code
+     * @param rawNodeId exact graph-authored source-node identifier
+     * @param incidentId bounded incident handle
+     * @return declared structured startup failure
+     */
     public static StartupFailure declared(GraphAdmissionPhase phase, String reason,
                                           String rawNodeId, String incidentId) {
         SourceStartFailureCode.requireValid(reason);

@@ -2,13 +2,26 @@ package ai.ravenroot.api.application;
 
 import java.util.Objects;
 
-/** Versioned, bounded, value-free public finding for graph admission. */
+/**
+ * Versioned, bounded, value-free public finding for graph admission.
+ *
+ * @param contract diagnostic contract identifier
+ * @param phase closed admission phase
+ * @param reason closed platform-owned reason
+ * @param nodeId sanitized bounded node display, or {@code null}
+ * @param nodeRef opaque deterministic node locator, or {@code null}
+ * @param propertyName bounded property-name token, or {@code null}
+ * @param incidentId bounded incident handle for trusted diagnostics
+ */
 public record GraphAdmissionFinding(String contract, GraphAdmissionPhase phase,
                                     GraphAdmissionReason reason, String nodeId, String nodeRef,
                                     String propertyName, String incidentId) {
+    /** Current graph-admission diagnostic contract identifier. */
     public static final String CONTRACT = "ravenroot.graph-admission/1";
+    /** Maximum number of characters in a public incident handle. */
     public static final int MAX_INCIDENT_LENGTH = 128;
 
+    /** Validates the bounded public finding contract. */
     public GraphAdmissionFinding {
         if (!CONTRACT.equals(contract)) throw new IllegalArgumentException("unsupported finding contract");
         Objects.requireNonNull(phase, "phase");
@@ -31,6 +44,16 @@ public record GraphAdmissionFinding(String contract, GraphAdmissionPhase phase,
         }
     }
 
+    /**
+     * Formats authored identifiers and creates one safe finding.
+     *
+     * @param phase closed admission phase
+     * @param reason closed platform-owned reason
+     * @param nodeId raw authored node identifier, or {@code null}
+     * @param propertyName raw submitted property name, or {@code null}
+     * @param incidentId bounded incident handle
+     * @return validated value-free public finding
+     */
     public static GraphAdmissionFinding of(GraphAdmissionPhase phase, GraphAdmissionReason reason,
                                            String nodeId, String propertyName, String incidentId) {
         DiagnosticIdentifier.Formatted node = nodeId == null ? null : DiagnosticIdentifier.node(nodeId);

@@ -169,6 +169,10 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_audit_operational_configuration"))
         self.assertEqual(1, block.count("python3 scripts/audit_operational_configuration.py --check"))
 
+    def test_backend_scope_selector_contract_cannot_disappear_from_full_python_contracts(self) -> None:
+        block = self.jobs["full-python-contracts"]
+        self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_select_backend_tests"))
+
     def test_expensive_regressions_wait_for_the_light_preflight(self) -> None:
         preflight = declared_needs(self.jobs["full-preflight"])
         self.assertEqual(

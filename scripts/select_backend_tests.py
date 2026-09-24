@@ -27,11 +27,19 @@ FULL_REACTOR_MAIN_PREFIXES = (
     "ravenroot/ravenroot-distribution/src/main/",
 )
 
-NON_BACKEND_PREFIXES = (".changes/", ".github/", "adr/", "docs/", "scripts/")
+NON_BACKEND_PREFIXES = (".changes/", ".github/", "adr/", "docs/")
 NON_BACKEND_ROOT_FILES = {
     "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "GOVERNANCE.md", "LICENSE", "NOTICE", "README.md",
     "SECURITY.md", "SUPPORT.md",
 }
+NON_BACKEND_SCRIPTS = {
+    "scripts/audit_operational_configuration.py",
+    "scripts/ci_required.py",
+    "scripts/classify_main_change.py",
+    "scripts/operational-configuration-inventory.json",
+    "scripts/select_backend_tests.py",
+}
+ALL_BACKEND_SCRIPT_PREFIXES = ("scripts/fixtures/", "scripts/verify-")
 
 KNOWN_LEAF_MODULES = {
     "ravenroot-akka",
@@ -113,7 +121,7 @@ def module_for_path(path: str) -> str | None:
 
 def is_known_non_backend_path(path: str) -> bool:
     """Return whether a path cannot select a Maven regression module."""
-    return path in NON_BACKEND_ROOT_FILES or path.startswith(NON_BACKEND_PREFIXES)
+    return path in NON_BACKEND_ROOT_FILES or path in NON_BACKEND_SCRIPTS or path.startswith(NON_BACKEND_PREFIXES)
 
 
 def select(event_name: str, paths: list[str]) -> Scope:
@@ -127,6 +135,8 @@ def select(event_name: str, paths: list[str]) -> Scope:
 
     modules: set[str] = set()
     for path in paths:
+        if path.startswith(ALL_BACKEND_SCRIPT_PREFIXES):
+            return Scope("all", (), f"{path} is an all-reactor backend verification script")
         if is_known_non_backend_path(path):
             continue
         if path.endswith("pom.xml") or path.startswith(FULL_REACTOR_MAIN_PREFIXES):

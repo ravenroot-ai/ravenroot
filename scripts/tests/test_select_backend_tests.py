@@ -48,9 +48,23 @@ class BackendScopeSelectionTest(unittest.TestCase):
         self.assertEqual(scope.mode, "none")
         self.assertEqual(scope.projects, ())
 
+    def test_all_only_backend_fixture_and_verification_scripts_use_the_full_reactor(self):
+        for path in (
+            "scripts/fixtures/runner_quota_acceptance.py",
+            "scripts/fixtures/kubernetes_runner_acceptance.py",
+            "scripts/verify-extension-pack-consumer.sh",
+            "scripts/verify-deployment-persistence-browser.sh",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(select("pull_request", [path]).mode, "all")
+
+    def test_unknown_scripts_fail_closed_but_reviewed_ci_scripts_remain_none(self):
+        self.assertEqual(select("pull_request", ["scripts/check_new_backend_policy.py"]).mode, "all")
+        self.assertEqual(select("pull_request", ["scripts/select_backend_tests.py"]).mode, "none")
+
     def test_none_scope_is_not_rendered_as_a_reactor_in_the_audit_log(self):
         output = StringIO()
-        with patch("scripts.select_backend_tests.changed_paths", return_value=[".github/workflows/ci.yml"]), patch(
+        with patch("scripts.select_backend_tests.changed_paths", return_value=["scripts/select_backend_tests.py"]), patch(
             "sys.argv", ["select_backend_tests.py", "--event", "pull_request", "--base", "a", "--head", "b"]
         ), redirect_stdout(output):
             from scripts.select_backend_tests import main

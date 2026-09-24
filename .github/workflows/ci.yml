@@ -308,6 +308,7 @@ jobs:
           python3 -m unittest scripts.tests.test_ci_required
           python3 -m unittest scripts.tests.test_check_commit_attribution
           python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_select_backend_tests
           python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract

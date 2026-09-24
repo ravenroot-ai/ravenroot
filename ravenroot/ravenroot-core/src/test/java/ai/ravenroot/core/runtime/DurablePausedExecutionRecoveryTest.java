@@ -1,5 +1,6 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionTerminationReason;
@@ -262,6 +263,7 @@ final class DurablePausedExecutionRecoveryTest {
     void resumeAfterRestartContinuesFromTheBoundaryWithoutRepeatingACompletedEffect() throws Exception {
         var stores = new DurableStores();
         Held held = holdAndStop(stores);
+        stores.recordOrigin(held.key());
         var shutdownProbe = new ShutdownBoundProbeEngine();
         CompletableFuture<Boolean> resuming = null;
 
@@ -286,6 +288,14 @@ final class DurablePausedExecutionRecoveryTest {
             assertFalse(restarted.application().executionPaused(TENANT, held.traversalId()));
             assertEquals(TraversalStatus.COMPLETED,
                     stores.load(held.key()).state().traversals().get(held.traversalId()).status());
+            List<ExecutionEvent> continuedEvents = restarted.events().stream()
+                    .filter(event -> held.traversalId().equals(event.traversalId())).toList();
+            assertFalse(continuedEvents.isEmpty(), "the resumed traversal must publish events");
+            assertTrue(continuedEvents.stream().allMatch(event ->
+                            "source-session-a".equals(event.deploymentId())
+                                    && "source-message-1".equals(event.workloadId())),
+                    "every event after a durable pause restart must retain the source origin: "
+                            + continuedEvents);
             assertTrue(shutdownProbe.cancellationCount() > 0,
                     "pause recovery must use the application-selected runner shutdown bound");
         } finally {
@@ -855,6 +865,15 @@ final class DurablePausedExecutionRecoveryTest {
             return executions.load(key).toCompletableFuture().join();
         }
 
+        private void recordOrigin(ExecutionKey key) {
+            StoredProcessInstance current = load(key);
+            executions.apply(ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                    .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(current.revision()))
+                    .recordOrigin(ai.ravenroot.api.persistence.ExecutionOrigin.of(
+                            "source-session-a", "source-message-1", null))
+                    .build()).toCompletableFuture().join();
+        }
+
         private Optional<DurableExecutionPause> heldPause(UUID traversalId) {
             return executions.findHeldExecutionPause(TENANT, traversalId).toCompletableFuture().join();
         }
@@ -898,6 +917,7 @@ final class DurablePausedExecutionRecoveryTest {
     private static final class Restarted implements AutoCloseable {
         private final ExecutionEngine engine;
         private final ExecutionMonitor monitor = new ExecutionMonitor();
+        private final List<ExecutionEvent> events = Collections.synchronizedList(new ArrayList<>());
         private final List<String> effects;
         private final DefaultRavenrootApplication application;
         private final AutoCloseable subscription;
@@ -952,6 +972,7 @@ final class DurablePausedExecutionRecoveryTest {
                     GraphExecutionLimits.DEFAULTS, null, manifests, runnerShutdownStepBound);
             this.self.set(application);
             this.subscription = monitor.subscribe(event -> {
+                events.add(event);
                 if (event.type() == ExecutionEventType.EXECUTION_PAUSED) {
                     paused.countDown();
                 }
@@ -973,6 +994,10 @@ final class DurablePausedExecutionRecoveryTest {
 
         private List<String> effects() {
             return List.copyOf(effects);
+        }
+
+        private List<ExecutionEvent> events() {
+            return List.copyOf(events);
         }
 
         /**

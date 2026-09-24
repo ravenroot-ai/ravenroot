@@ -22,6 +22,10 @@ import { retireExecutionOutcomeClaim } from './execution-reconciliation.js';
 // A submission that has been sent but whose execution id has not come back yet.
 export const PENDING_EXECUTION = 'pending';
 export const DOCUMENT_MODES = Object.freeze({ DRAFT: 'draft', TEST: 'test', DEPLOYED: 'deployed' });
+const SOURCE_PROCESS_OWNERSHIP_LIMIT = 256;
+const ACTIVE_SOURCE_SESSION_STATES = new Set([
+  'STARTING', 'LISTENING', 'DEGRADED', 'STOPPING', 'UNKNOWN',
+]);
 
 // ── The definition of "the active document" ──────────────────────────────────────────────────────
 //
@@ -184,6 +188,11 @@ export function createDocumentRecord({
       stopPromise: null,
       stopRequested: false,
       observationUnavailable: false,
+      // Bounded, verified bridge from a source admission's stable process identity to this exact
+      // document/session incarnation. Entries are learned only after deployment identity has already
+      // routed an event here; they let a later durable re-entry with a fresh traversal id and no
+      // deployment field return to the same timeline. Never serialized.
+      processOwners: new Map(),
     },
     // Optional read-only deployment attachment. The graph remains an allowlisted projection;
     // closing the document detaches observation without controlling the server-side deployment.
@@ -284,6 +293,7 @@ export function createWorkspace() {
       const index = indexOf(id);
       if (index < 0) return null;
       const [removed] = documents.splice(index, 1);
+      retireSourceSessionProcessBindings(removed);
       if (removed.id !== activeId) return removed;
       const neighbour = documents[index - 1] || documents[index] || null;
       activeId = neighbour ? neighbour.id : null;
@@ -319,15 +329,11 @@ export function createWorkspace() {
 // much traffic it handled. The deployment is the identity that outlives the traversals and the one
 // the session's own status now names, so it is the only thing a document can hold in advance.
 //
-// A traversal that resumes an existing
-// process after a wait gets a NEW traversalId while keeping the same processInstanceId, introducing
-// a second value for the identifier used here. Such an
-// event will not match any `binding.executionId` here and will be silently dropped, even though the
-// document that submitted the original traversal is still open. The additional identifiers are
-// display-only by design (the
-// three identifiers are already on every event and are rendered per-row; see `appendActivityEvent`
-// in app.js) and deliberately do not alter this binding. Reattaching a resumed traversal to its
-// process's open document requires a separate routing rule; this display-only lookup does not decide it.
+// A traversal that resumes an existing process after a durable wait gets a NEW traversalId while
+// keeping the same processInstanceId. For a source session, the first event already proved its
+// document through deployment identity, so this module remembers that process ownership and uses it
+// for later re-entry events. The remembered route is intentionally narrower than deployment routing:
+// exact tenant/version plus the same document and session incarnation, bounded and transient.
 export function documentForRuntimeEvent(workspace, event) {
   const executionId = event?.executionId;
   if (!executionId) return null;
@@ -364,11 +370,24 @@ export function documentForRuntimeEvent(workspace, event) {
     // Deliberately not fenced on graphVersion. For a run, the version proves the event belongs to
     // the snapshot the document submitted; for a session, the deployment id already does, and it
     // keeps proving it after the author edits the document the session is not running.
-    const listening = workspace.documents.find(
-      doc => doc.sourceSession?.deploymentId === deploymentId,
-    );
-    if (listening) return listening;
+    const listening = workspace.documents.filter(doc => sourceSessionOwnsDeployment(doc, deploymentId)
+      && tenantCompatible(doc.tenantId, event.tenantId));
+    // A deployment claim is useful only while it is unique in this workspace. Two open documents
+    // claiming the same deployment are an ambiguity, not a reason to choose whichever was opened
+    // first.
+    if (listening.length === 1) {
+      rememberSourceProcessOwner(listening[0], event);
+      return listening[0];
+    }
   }
+
+  // A durable re-entry keeps processInstanceId but receives a new traversal/execution id. The
+  // process bridge is weaker than the deployment fact that taught it and stronger than the pending
+  // fallback below: it is accepted only under the same tenant, graph version, document incarnation,
+  // deployment, session id and session generation. Graph version by itself is never a route.
+  const resumed = documentsForRememberedSourceProcess(workspace, event);
+  if (resumed.length === 1) return resumed[0];
+  if (resumed.length > 1) return null;
 
   // The pending fallback is a guess, and a guess must not outrank a fact. When an open document
   // holds this execution id, the event belongs to that run — it reached here only because its
@@ -383,6 +402,80 @@ export function documentForRuntimeEvent(workspace, event) {
   // A document that has submitted but has not yet been told its execution id still claims the
   // events it is plainly waiting for, exactly as the single-document editor did.
   return workspace.documents.find(doc => doc.execution.executionId === PENDING_EXECUTION) || null;
+}
+
+/** Clears every process learned for one source binding without affecting the server deployment. */
+export function retireSourceSessionProcessBindings(document_) {
+  document_?.sourceSession?.processOwners?.clear();
+}
+
+function sourceSessionOwnsDeployment(document_, deploymentId) {
+  const session = document_?.sourceSession;
+  return Boolean(session?.sessionId && session.deploymentId === deploymentId
+    && ACTIVE_SOURCE_SESSION_STATES.has(session.state));
+}
+
+function tenantCompatible(documentTenant, eventTenant) {
+  const documentHasTenant = typeof documentTenant === 'string' && documentTenant.length > 0;
+  const eventHasTenant = typeof eventTenant === 'string' && eventTenant.length > 0;
+  if (documentHasTenant || eventHasTenant) return documentHasTenant && eventHasTenant
+    && documentTenant === eventTenant;
+  // Preserve old in-process adapters that expose neither tenant. Such an event can still use the
+  // deployment route and its remembered ownership remains fenced to that same legacy-null scope.
+  return true;
+}
+
+function rememberSourceProcessOwner(document_, event) {
+  const processInstanceId = typeof event?.processInstanceId === 'string' && event.processInstanceId
+    ? event.processInstanceId : null;
+  const graphVersion = typeof event?.graphVersion === 'string' && event.graphVersion
+    ? event.graphVersion : null;
+  const eventTenant = typeof event?.tenantId === 'string' && event.tenantId ? event.tenantId : null;
+  const session = document_?.sourceSession;
+  // Learning requires complete positive evidence for process, graph and deployment. Tenant is an
+  // exact scope too: modern authenticated documents carry the same non-null value; legacy adapters
+  // that omit it on both sides remain isolated in the null scope and can never match a named tenant.
+  if (!processInstanceId || !graphVersion || document_?.tenantId !== eventTenant
+      || !sourceSessionOwnsDeployment(document_, event.deploymentId)) return;
+  const owners = session.processOwners;
+  owners.delete(processInstanceId);
+  owners.set(processInstanceId, Object.freeze({
+    tenantId: eventTenant,
+    graphVersion,
+    documentIncarnation: document_.incarnation,
+    deploymentId: session.deploymentId,
+    sessionId: session.sessionId,
+    sessionGeneration: session.generation,
+  }));
+  while (owners.size > SOURCE_PROCESS_OWNERSHIP_LIMIT) {
+    owners.delete(owners.keys().next().value);
+  }
+}
+
+function documentsForRememberedSourceProcess(workspace, event) {
+  const processInstanceId = typeof event?.processInstanceId === 'string' && event.processInstanceId
+    ? event.processInstanceId : null;
+  const graphVersion = typeof event?.graphVersion === 'string' && event.graphVersion
+    ? event.graphVersion : null;
+  const tenantId = typeof event?.tenantId === 'string' && event.tenantId ? event.tenantId : null;
+  if (!processInstanceId || !graphVersion) return [];
+  const matches = [];
+  for (const document_ of workspace.documents) {
+    const session = document_.sourceSession;
+    const owner = session?.processOwners?.get(processInstanceId);
+    if (!owner) continue;
+    const current = document_.incarnation === owner.documentIncarnation
+      && document_.tenantId === owner.tenantId
+      && sourceSessionOwnsDeployment(document_, owner.deploymentId)
+      && session.sessionId === owner.sessionId
+      && session.generation === owner.sessionGeneration;
+    if (!current) {
+      session.processOwners.delete(processInstanceId);
+      continue;
+    }
+    if (owner.tenantId === tenantId && owner.graphVersion === graphVersion) matches.push(document_);
+  }
+  return matches;
 }
 
 // Leaving the page is a decision about the whole workspace, not about the document in front of the

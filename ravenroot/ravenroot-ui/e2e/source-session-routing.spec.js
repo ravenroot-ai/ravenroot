@@ -47,6 +47,34 @@ function sourceEventStream(deploymentId, nodeIds, admissions) {
   return frames.join('');
 }
 
+function durableHumanTaskReentryStream(deploymentId) {
+  const firstProcess = '10000000-0000-4000-8000-000000000001';
+  const firstTraversal = '20000000-0000-4000-8000-000000000001';
+  const resumedTraversal = '20000000-0000-4000-8000-000000000002';
+  const secondProcess = '10000000-0000-4000-8000-000000000002';
+  const secondTraversal = '20000000-0000-4000-8000-000000000003';
+  const frames = [
+    { processInstanceId: firstProcess, executionId: firstTraversal, traversalId: firstTraversal,
+      deploymentId, type: 'NODE_COMPLETED', nodeId: 'source', output: 'amqp-message-1' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, type: 'HANDLER_RESOLVED', nodeId: 'human-task' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, type: 'NODE_COMPLETED', nodeId: 'post-task-log', output: 'resolved-message-1' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, type: 'NODE_COMPLETED', nodeId: 'publish' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, type: 'EXECUTION_COMPLETED', nodeId: null },
+    { processInstanceId: secondProcess, executionId: secondTraversal, traversalId: secondTraversal,
+      deploymentId, type: 'NODE_COMPLETED', nodeId: 'source', output: 'amqp-message-2' },
+  ];
+  return frames.map((event, index) => `id: ${index + 1}\nevent: execution\ndata: ${JSON.stringify({
+    sequence: index + 1, occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub',
+    graphVersion: 'v1', activeInstances: 0, inFlightArrivals: 0, fallback: false,
+    description: 'stub', publicReason: null, message: null, messageRedacted: false,
+    messageTruncated: false, processingDuration: null, ...event,
+  })}\n\n`).join('');
+}
+
 async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
   const sourceCalls = [];
   const executionCalls = [];
@@ -68,7 +96,9 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: sourceEventStream(deploymentId, sourceTraffic.nodeIds, sourceTraffic.admissions),
+      body: sourceTraffic.body
+        ? sourceTraffic.body(deploymentId)
+        : sourceEventStream(deploymentId, sourceTraffic.nodeIds, sourceTraffic.admissions),
     });
   });
   await page.route('**/v1/source-sessions**', async route => {
@@ -140,6 +170,47 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
   await expect.poll(() => calls.executionCalls.filter(call => call.method === 'POST').length).toBe(1);
   expect(calls.sourceCalls.filter(call => call.method === 'POST')).toHaveLength(1);
   expect(calls.executionCalls.find(call => call.method === 'POST').url).not.toContain('mode=run');
+});
+
+test('source Human Task re-entry and a second AMQP message stay in one listening timeline', async ({ page }) => {
+  await stubRuntime(page, { sourceTraffic: { body: durableHumanTaskReentryStream } });
+  await page.goto('/');
+  await openGraph(page, sourceGraph('external.consume'), 'source-human-task.graphml');
+
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect(page.locator('#activity-log')).toContainText('resolved-message-1');
+  await expect(page.locator('#activity-log')).toContainText('amqp-message-2');
+
+  const timeline = await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      state: document_.sourceSession.state,
+      processOwners: [...document_.sourceSession.processOwners.keys()],
+      events: document_.execution.events.map(event => ({
+        type: event.type, executionId: event.executionId,
+        processInstanceId: event.processInstanceId, nodeId: event.nodeId,
+      })),
+    };
+  });
+  expect(timeline.state).toBe('LISTENING');
+  expect(timeline.processOwners).toEqual(expect.arrayContaining([
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+  ]));
+  expect(timeline.events).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'HANDLER_RESOLVED',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'post-task-log',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'publish',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'EXECUTION_COMPLETED',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'source',
+      executionId: '20000000-0000-4000-8000-000000000003' }),
+  ]));
 });
 
 test('Run preserves the one-shot route when the graph has no effective SOURCE', async ({ page }) => {

@@ -1,9 +1,14 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.LiveExecution;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.node.ToolCallContinuationAction;
+import ai.ravenroot.api.node.ToolCallContinuationInput;
+import ai.ravenroot.api.node.ToolCallContinuationResult;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
@@ -528,6 +533,52 @@ final class PausedExecutionObservabilityTest {
         private volatile Boolean heldWhileMonitorOwned;
     }
 
+    /** A tool-approval continuation restores the same process origin before publishing anything. */
+    @Test
+    void aTraversalResumedAfterToolApprovalRetainsItsDurableSourceOrigin() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var key = new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        List<ExecutionEvent> observed = Collections.synchronizedList(new ArrayList<>());
+
+        try (var store = new InMemoryExecutionStore();
+             var engine = new SameThreadExecutionEngine();
+             var document = GraphManager.readGraphMlDocument(
+                     new ByteArrayInputStream(ONE_EFFECT.getBytes(StandardCharsets.UTF_8)));
+             var runner = new GraphRunner(document.manager(), engine, new BehaviorRegistry(), monitor);
+             var subscription = monitor.subscribe(event -> {
+                 if (traversalId.equals(event.traversalId())) observed.add(event);
+             })) {
+            long revision = acceptReentry(store, key, traversalId);
+            try (var recorder = ExecutionRecorder.open(store, key, "tool-approval-origin", LEASE_TTL,
+                    revision)) {
+                var action = new ToolCallContinuationAction() {
+                    @Override public void validate(ToolCallContinuationInput input) {
+                    }
+
+                    @Override public java.util.concurrent.CompletionStage<ToolCallContinuationResult> resume(
+                            ToolCallContinuationInput input) {
+                        return CompletableFuture.completedFuture(new ToolCallContinuationResult(
+                                CompletableFuture.completedFuture(NodeResult.continueWith("resumed")), true));
+                    }
+                };
+                runner.executeFrom(TestIdentities.TENANT_A, key.processInstanceId(), traversalId,
+                        "effect", "v1", recorder,
+                        message -> new ToolCallContinuationInput(message, UUID.randomUUID(),
+                                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "test.effect",
+                                new byte[0], "args-digest", ToolCallContinuationInput.Decision.APPROVED,
+                                1, new byte[0], "checkpoint-digest"), ignored -> { }, action,
+                        new GraphExecutionBudgetSnapshot(1, 0, 0, 1, 0)).toCompletableFuture().join();
+            }
+        }
+
+        assertFalse(observed.isEmpty(), "the approval continuation must publish events");
+        assertTrue(observed.stream().allMatch(event ->
+                        "source-session-a".equals(event.deploymentId())
+                                && "source-message-1".equals(event.workloadId())),
+                "every tool-approval re-entry event must retain the source origin: " + observed);
+    }
+
     /**
      * A traversal resumed after a human task announces its hold like every other traversal.
      *
@@ -555,6 +606,7 @@ final class PausedExecutionObservabilityTest {
         var key = new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         List<ExecutionEventType> events = Collections.synchronizedList(new ArrayList<>());
+        List<ExecutionEvent> observed = Collections.synchronizedList(new ArrayList<>());
         var terminal = new CountDownLatch(1);
 
         try (var store = new InMemoryExecutionStore();
@@ -566,6 +618,7 @@ final class PausedExecutionObservabilityTest {
                  if (!traversalId.equals(event.traversalId())) {
                      return;
                  }
+                 observed.add(event);
                  events.add(event.type());
                  if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
                          || event.type() == ExecutionEventType.EXECUTION_FAILED
@@ -602,6 +655,10 @@ final class PausedExecutionObservabilityTest {
                                 ExecutionEventType.EXECUTION_COMPLETED),
                         lifecycle(events),
                         "the release pairs with the hold on this path exactly as on the other two");
+                assertTrue(observed.stream().allMatch(event -> "source-session-a".equals(event.deploymentId())
+                                && "source-message-1".equals(event.workloadId())),
+                        "every event after durable Human Task re-entry must retain the source origin: "
+                                + observed);
                 assertFalse(runner.isPaused(traversalId), "a finished traversal holds nothing");
             }
         }
@@ -630,6 +687,8 @@ final class PausedExecutionObservabilityTest {
                                 ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED,
                                 java.util.Map.of(traversalId, traversal)),
                         new ai.ravenroot.api.persistence.GraphVersionPin("v1")))
+                .recordOrigin(ExecutionOrigin.of(
+                        "source-session-a", "source-message-1", null))
                 .build()).toCompletableFuture().join();
         return store.apply(ai.ravenroot.api.persistence.ExecutionBatch.to(key)
                 .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(created.revision()))

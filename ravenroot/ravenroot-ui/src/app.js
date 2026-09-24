@@ -251,6 +251,7 @@ import {
   documentForRuntimeEvent,
   forkDocumentRecord,
   hasUnsavedWork,
+  retireSourceSessionProcessBindings,
 } from './workspace.js';
 import {
   canonicalGraphSnapshot,
@@ -3628,6 +3629,7 @@ function teardownDocument(target) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
+  retireSourceSessionProcessBindings(target);
   target.deploymentView?.disconnect?.();
   target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
@@ -11667,6 +11669,7 @@ function updateSourceSession(owner, status, token = null,
   // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
   // the recovery states above) carry no deploymentId and must not erase the one the server gave.
   if (typeof status.deploymentId === 'string' && status.deploymentId) {
+    if (session.deploymentId !== status.deploymentId) retireSourceSessionProcessBindings(owner);
     session.deploymentId = status.deploymentId;
     // The projection accumulates across every traversal this deployment produces, instead of being
     // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
@@ -11691,6 +11694,9 @@ function updateSourceSession(owner, status, token = null,
     }
   }
   session.state = status.state;
+  if (status.state === 'STOPPED' || status.state === 'FAILED') {
+    retireSourceSessionProcessBindings(owner);
+  }
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
   session.observationUnavailable = observationUnavailable;
@@ -11760,6 +11766,7 @@ function nextSourceSessionId(owner) {
 
 async function startSourceSession(owner, client, graphMl, sourceCount) {
   const session = owner.sourceSession;
+  retireSourceSessionProcessBindings(owner);
   session.pollController?.abort();
   if (!session.sessionId || session.state === 'STOPPED' || session.state === 'FAILED') {
     session.sessionId = nextSourceSessionId(owner);

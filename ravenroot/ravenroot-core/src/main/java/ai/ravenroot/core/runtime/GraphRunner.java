@@ -10,6 +10,7 @@ import ai.ravenroot.api.catalog.NodeRetryProperty;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.EdgeTraversalEventData;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.provenance.SyntheticProvenance;
@@ -1249,8 +1250,8 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(action, "action");
         java.util.Objects.requireNonNull(effectCompletion, "effectCompletion");
         GraphNode node = graph.node(nodeId);
-        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
-                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var identity = durableReentryIdentity(security, processInstanceId, traversalId, graphVersion,
+                recorder);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
@@ -1445,8 +1446,8 @@ public final class GraphRunner implements AutoCloseable {
                                                        UUID terminalEventId) {
         java.util.Objects.requireNonNull(result, "result");
         GraphNode node = graph.node(nodeId);
-        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
-                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var identity = durableReentryIdentity(security, processInstanceId, traversalId, graphVersion,
+                recorder);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
@@ -1622,8 +1623,8 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalArgumentException(
                     "the invocation a hold sat behind is not in traversal " + traversalId));
         }
-        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
-                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var identity = durableReentryIdentity(security, processInstanceId, traversalId, graphVersion,
+                recorder);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
@@ -1703,6 +1704,18 @@ public final class GraphRunner implements AutoCloseable {
         } else {
             monitor.executionFailed(identity, outcome);
         }
+    }
+
+    /** Restores deployment observability from the durable process inventory for every re-entry. */
+    private ExecutionMonitor.ExecutionIdentity durableReentryIdentity(SecurityContext security,
+                                                                       UUID processInstanceId,
+                                                                       UUID traversalId,
+                                                                       String graphVersion,
+                                                                       ExecutionRecorder recorder) {
+        ExecutionOrigin origin = recorder.origin();
+        return new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
+                processInstanceId, traversalId, nodeCatalogKeys,
+                origin.deploymentId().orElse(null), origin.workloadId().orElse(null));
     }
 
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {

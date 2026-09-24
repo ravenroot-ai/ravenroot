@@ -9,7 +9,8 @@ import {
   observeNodeActivity,
   resetMonitoringRuntimeState,
 } from '../src/monitoring-runtime-state.js';
-import { createDocumentRecord, documentForRuntimeEvent, createWorkspace, bindExecution, PENDING_EXECUTION }
+import { createDocumentRecord, documentForRuntimeEvent, createWorkspace, bindExecution, PENDING_EXECUTION,
+  retireSourceSessionProcessBindings }
   from '../src/workspace.js';
 import { validateSourceSessionStatus } from '../src/runtime-client.js';
 
@@ -23,6 +24,7 @@ const admission = (overrides = {}) => {
     processInstanceId: `process-${traversalCounter}`,
     graphVersion: 'graph-1',
     deploymentId: 'session-a',
+    tenantId: 'tenant-a',
     occurredAt: '2026-09-09T10:00:00Z',
     sequence: traversalCounter,
     ...overrides,
@@ -30,8 +32,9 @@ const admission = (overrides = {}) => {
 };
 
 const document_ = (id, sourceSession = {}) => {
-  const record = createDocumentRecord({ id });
+  const record = createDocumentRecord({ id, tenantId: 'tenant-a' });
   Object.assign(record.sourceSession, sourceSession);
+  if (sourceSession.deploymentId && !sourceSession.state) record.sourceSession.state = 'LISTENING';
   return record;
 };
 
@@ -94,6 +97,113 @@ describe('runtime events are attributed to a listening source graph', () => {
       sessionId: 'session-a', deploymentId: '', state: 'LISTENING', sourceCount: 1,
       scope: 'LOCAL_PROCESS', diagnostic: null,
     }, 'session-a')).toThrow(/not a valid process-local status/);
+  });
+
+  it('keeps a durable re-entry in the source timeline after deployment identity taught process ownership', () => {
+    const listening = document_('doc-source', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING', generation: 3,
+    });
+    const workspace = workspaceWith(listening);
+    const admitted = admission({ processInstanceId: 'process-waiting' });
+
+    expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
+    expect(documentForRuntimeEvent(workspace, {
+      ...admitted, executionId: 'traversal-after-human-task', traversalId: 'traversal-after-human-task',
+      deploymentId: null,
+    })).toBe(listening);
+  });
+
+  it('never routes a re-entry by graph version without a verified process owner', () => {
+    const listening = document_('doc-source', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING',
+    });
+    const workspace = workspaceWith(listening);
+
+    expect(documentForRuntimeEvent(workspace, admission({
+      deploymentId: null, processInstanceId: 'unknown-process', graphVersion: 'graph-1',
+    }))).toBeNull();
+  });
+
+  it('fences remembered ownership by tenant and graph version without discarding the valid claim', () => {
+    const listening = document_('doc-source', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING',
+    });
+    const workspace = workspaceWith(listening);
+    const admitted = admission({ processInstanceId: 'process-fenced' });
+    expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
+
+    expect(documentForRuntimeEvent(workspace, {
+      ...admitted, deploymentId: null, executionId: 'wrong-tenant', tenantId: 'tenant-b',
+    })).toBeNull();
+    expect(documentForRuntimeEvent(workspace, {
+      ...admitted, deploymentId: null, executionId: 'wrong-version', graphVersion: 'graph-2',
+    })).toBeNull();
+    expect(documentForRuntimeEvent(workspace, {
+      ...admitted, deploymentId: null, executionId: 'right-owner',
+    })).toBe(listening);
+  });
+
+  it('fails closed when the same process was verified for two live documents', () => {
+    const first = document_('doc-a', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING',
+    });
+    const second = document_('doc-b', {
+      sessionId: 'session-b', deploymentId: 'session-b', state: 'LISTENING',
+    });
+    const workspace = workspaceWith(first, second);
+    expect(documentForRuntimeEvent(workspace, admission({
+      processInstanceId: 'process-collision', deploymentId: 'session-a',
+    }))).toBe(first);
+    expect(documentForRuntimeEvent(workspace, admission({
+      processInstanceId: 'process-collision', deploymentId: 'session-b',
+    }))).toBe(second);
+
+    expect(documentForRuntimeEvent(workspace, admission({
+      processInstanceId: 'process-collision', deploymentId: null,
+    }))).toBeNull();
+  });
+
+  it('retires ownership on stop, replacement generation, and document close', () => {
+    const listening = document_('doc-source', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING', generation: 1,
+    });
+    const workspace = workspaceWith(listening);
+    const admitted = admission({ processInstanceId: 'process-retired' });
+    expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
+
+    listening.sourceSession.state = 'STOPPED';
+    expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
+    listening.sourceSession.state = 'LISTENING';
+    listening.sourceSession.generation += 1;
+    expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
+
+    expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
+    retireSourceSessionProcessBindings(listening);
+    expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
+    expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
+    workspace.close(listening.id);
+    expect(listening.sourceSession.processOwners.size).toBe(0);
+    expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
+  });
+
+  it('bounds remembered source processes and evicts the oldest verified owner', () => {
+    const listening = document_('doc-source', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING',
+    });
+    const workspace = workspaceWith(listening);
+    for (let index = 0; index < 257; index += 1) {
+      expect(documentForRuntimeEvent(workspace, admission({
+        processInstanceId: `bounded-${index}`,
+      }))).toBe(listening);
+    }
+
+    expect(listening.sourceSession.processOwners.size).toBe(256);
+    expect(documentForRuntimeEvent(workspace, admission({
+      processInstanceId: 'bounded-0', deploymentId: null,
+    }))).toBeNull();
+    expect(documentForRuntimeEvent(workspace, admission({
+      processInstanceId: 'bounded-256', deploymentId: null,
+    }))).toBe(listening);
   });
 });
 

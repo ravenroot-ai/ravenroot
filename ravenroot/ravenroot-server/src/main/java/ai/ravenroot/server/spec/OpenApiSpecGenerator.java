@@ -65,6 +65,7 @@ public final class OpenApiSpecGenerator {
         String existingSchemas = humanTaskSchemas();
         json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\n    }"));
         json.append(",\n").append(deploymentSchemas()).append(",\n")
+                .append(processInventorySchemas()).append(",\n")
                 .append(executionEventSchemas()).append("    }\n");
         json.append("  }\n");
         json.append("}\n");
@@ -180,6 +181,14 @@ public final class OpenApiSpecGenerator {
                     + "\"schema\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": "
                     + HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_PAGE_SIZE + ", \"default\": "
                     + HumanTaskPolicy.Confirmation.DEFAULTS.attentionDefaultPageSize() + "}}");
+        }
+        if ("/v1/executions/inventory".equals(route.path()) && "GET".equals(method)) {
+            parameters.add(queryParameter("status", "string", "Comma-separated process statuses."));
+            parameters.add(queryParameter("ownerWorkerId", "string", "Exact lease-holder worker id."));
+            parameters.add(queryParameter("deploymentId", "string", "Exact hosting deployment id."));
+            parameters.add(queryParameter("includeTerminal", "boolean", "Include completed and failed rows."));
+            parameters.add(queryParameter("cursor", "string", "Opaque cursor from nextCursor."));
+            parameters.add(queryParameter("limit", "integer", "Page size, bounded by maxPageSize."));
         }
         if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)
                 || isHumanTaskSettlement(route, method) || isHumanTaskInteraction(route, method)) {
@@ -306,6 +315,8 @@ public final class OpenApiSpecGenerator {
             schema = "HumanTaskInteractionLaunch";
         } else if ("/v1/deployments".equals(route.path()) && "GET".equals(method)) {
             schema = "LocalDeploymentStatusList";
+        } else if ("/v1/executions/inventory".equals(route.path()) && "GET".equals(method)) {
+            schema = "ProcessInventoryPage";
         } else if (("/v1/deployments".equals(route.path()) && "POST".equals(method))
                 || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))) {
             schema = "LocalDeploymentStatus";
@@ -318,13 +329,21 @@ public final class OpenApiSpecGenerator {
     }
 
     private static String deploymentSchemas() {
-        return "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\"],\"properties\":{"
-                + "\"deploymentId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"REGISTERED\",\"STARTING\",\"READY\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},"
+        return "      \"LifecycleCommandCapability\": {\"type\":\"object\",\"required\":[\"command\",\"available\",\"reasonRequired\",\"unavailableReason\"],\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"START\",\"PAUSE\",\"RESUME\",\"CANCEL\",\"DRAIN\",\"STOP\",\"RESTART\",\"UNDEPLOY\"]},\"available\":{\"type\":\"boolean\"},\"reasonRequired\":{\"type\":\"boolean\"},\"unavailableReason\":{\"type\":\"string\",\"nullable\":true}}},\n"
+                + "      \"LifecycleCapabilities\": {\"type\":\"object\",\"required\":[\"contractVersion\",\"scope\",\"commands\"],\"properties\":{\"contractVersion\":{\"type\":\"integer\",\"enum\":[1]},\"scope\":{\"type\":\"string\",\"enum\":[\"DEPLOYMENT\",\"PROCESS\"]},\"commands\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LifecycleCommandCapability\"}},\"drainBound\":{\"type\":\"string\"}}},\n"
+                + "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"tenantId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\",\"continuity\",\"deploymentRevision\",\"desiredState\",\"observedState\",\"recoveryFailure\",\"lifecycleCapabilities\"],\"properties\":{"
+                + "\"deploymentId\":{\"type\":\"string\"},\"tenantId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"REGISTERED\",\"STARTING\",\"READY\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},"
                 + "\"sourceCount\":{\"type\":\"integer\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\",\"nullable\":true},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},"
-                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"}}},\n"
+                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"continuity\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]},\"deploymentRevision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1,\"nullable\":true},\"desiredState\":{\"type\":\"string\",\"nullable\":true},\"observedState\":{\"type\":\"string\",\"nullable\":true},\"recoveryFailure\":{\"type\":\"string\",\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
                 + "      \"LocalDeploymentStatusList\": {\"type\":\"object\",\"required\":[\"scope\",\"deployments\"],\"properties\":{\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"deployments\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"}}}},\n"
                 + "      \"DeploymentCommandOutcome\": {\"type\":\"object\",\"required\":[\"outcome\"],\"properties\":{\"outcome\":{\"type\":\"string\",\"enum\":[\"ACCEPTED\",\"CONVERGED\",\"REPLAYED\",\"IDEMPOTENCY_CONFLICT\",\"STALE_GENERATION\",\"SUPERSEDED\",\"REFUSED\",\"FAILED\",\"TERMINAL\"]},\"commandId\":{\"type\":\"string\"},\"fromGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"generation\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"expected\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"observed\":{\"type\":\"string\"},\"key\":{\"type\":\"string\"},\"by\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"cause\":{\"type\":\"string\"},\"original\":{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}}},\n"
                 + "      \"DeploymentCommandResponse\": {\"oneOf\":[{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"},{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}],\"description\":\"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome.\"}";
+    }
+
+    private static String processInventorySchemas() {
+        return "      \"ProcessInventoryEntry\": {\"type\":\"object\",\"required\":[\"tenantId\",\"processInstanceId\",\"status\",\"terminationReason\",\"cancelled\",\"disposition\",\"revision\",\"lifecycleGeneration\",\"graphVersion\",\"deploymentId\",\"workloadId\",\"correlationId\",\"ownerWorkerId\",\"fencingToken\",\"leaseExpiresAt\",\"traversalCount\",\"createdAt\",\"updatedAt\",\"retainedUntil\",\"controlState\",\"lifecycleCapabilities\"],\"properties\":{"
+                + "\"tenantId\":{\"type\":\"string\"},\"processInstanceId\":{\"type\":\"string\",\"format\":\"uuid\"},\"status\":{\"type\":\"string\"},\"terminationReason\":{\"type\":\"string\",\"nullable\":true},\"cancelled\":{\"type\":\"boolean\"},\"disposition\":{\"type\":\"string\"},\"revision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1},\"lifecycleGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\"},\"deploymentId\":{\"type\":\"string\",\"nullable\":true},\"workloadId\":{\"type\":\"string\",\"nullable\":true},\"correlationId\":{\"type\":\"string\",\"nullable\":true},\"ownerWorkerId\":{\"type\":\"string\",\"nullable\":true},\"fencingToken\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"leaseExpiresAt\":{\"type\":\"string\",\"format\":\"date-time\",\"nullable\":true},\"traversalCount\":{\"type\":\"integer\",\"minimum\":0},\"createdAt\":{\"type\":\"string\",\"format\":\"date-time\"},\"updatedAt\":{\"type\":\"string\",\"format\":\"date-time\"},\"retainedUntil\":{\"type\":\"string\",\"format\":\"date-time\",\"nullable\":true},\"controlState\":{\"type\":\"string\",\"nullable\":true},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
+                + "      \"ProcessInventoryPage\": {\"type\":\"object\",\"required\":[\"items\",\"nextCursor\",\"retainedFrom\",\"maxPageSize\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/ProcessInventoryEntry\"}},\"nextCursor\":{\"type\":\"string\",\"nullable\":true},\"retainedFrom\":{\"type\":\"string\",\"format\":\"date-time\"},\"maxPageSize\":{\"type\":\"integer\",\"minimum\":1}}}";
     }
 
     /** JSON data schemas for named SSE frames; unknown future members remain permitted. */

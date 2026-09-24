@@ -10,6 +10,7 @@ Run Ravenroot as a controlled service with explicit identity, storage, deploymen
 - [Plugin bundle lifecycle](plugin-bundles.md) — Build, batch-select, validate, install, activate, include, update, remove, and verify optional node packages.
 - [Authoring assistant](authoring-assistant.md) — Configure hosted, local, or OAuth-backed workspace assistance and diagnose every availability boundary.
 - [Persistence, lifecycle, and recovery](persistence-lifecycle.md) — Operate readiness, drain, durable state, backup, restore, and controlled upgrades.
+- [Global lifecycle console](lifecycle-console.md) — Select authoritative deployment and process targets, understand command scope, and reconcile every outcome.
 - [Embedded-viewer operations](embed-operations.md) — Register a deployment, record seven attestations, issue sessions, audit access, and revoke it.
 - [Human Task operations](human-tasks.md) — Select responder enforcement, register sandbox/external providers, rotate secrets, and reconcile durable tasks.
 

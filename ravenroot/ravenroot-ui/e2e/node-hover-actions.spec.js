@@ -4,7 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 async function open(page, { editing = false } = {}) {
   await page.route('**/v1/node-types', route =>
     route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: '[]' }));
-  await page.route('**/v1/events', route =>
+  await page.route('**/v1/events**', route =>
     route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }));
   await page.goto('/');
   if (editing) await page.locator('#btn-modify').click();
@@ -970,14 +970,17 @@ test('read-only, keyboard, theme, zoom and document ownership keep the minibar h
     overlayExists: Boolean(document.querySelector(`.graph-node-actions-overlay[data-document-id="${closedId}"]`)),
   }), ownership.activeId)).toEqual({ documentExists: false, overlayExists: false });
 
-  await page.evaluate(() => {
-    window.ravenroot.replaceActiveDocumentFromText(JSON.stringify({
+  await page.evaluate(() => window.ravenroot.replaceActiveDocumentFromText(JSON.stringify({
       nodes: [{ id: 'graphify-node', label: 'Graphify node', type: 'file' }], edges: [],
-    }), 'catalog.json');
+    }), 'catalog.json'));
+  const activePane = page.locator('.doc-pane--active');
+  await expect(activePane).not.toHaveAttribute('aria-busy', 'true');
+  await page.evaluate(() => {
+    window.cy.stop(true);
     window.cy.getElementById('graphify-node').position({ x: 400, y: 220 });
     window.cy.fit(undefined, 100);
   });
-  const activePane = page.locator('.doc-pane--active');
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const graphifyTrace = activePane.locator('.graph-node-action[data-node-action="trace"]');
   await hoverNode(page, 'graphify-node', graphifyTrace);
   await expect(graphifyTrace).toBeVisible();

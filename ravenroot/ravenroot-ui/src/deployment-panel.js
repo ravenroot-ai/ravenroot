@@ -68,7 +68,57 @@ export function deploymentRowActions(state) {
   }
 }
 
-const ACTION_LABEL = Object.freeze({ start: 'Start', stop: 'Stop', restart: 'Restart', undeploy: 'Undeploy' });
+const ACTION_LABEL = Object.freeze({
+  start: 'Start', pause: 'Pause', resume: 'Resume', cancel: 'Cancel admitted work',
+  drain: 'Drain', stop: 'Stop', restart: 'Restart', undeploy: 'Undeploy',
+});
+
+const UNAVAILABLE_REASON = Object.freeze({
+  NOT_AUTHORIZED: 'Not authorized for this target.',
+  TERMINAL_TARGET: 'The target has already reached a terminal state.',
+  INCOMPATIBLE_STATE: 'The authoritative state does not permit this operation.',
+  DURABLE_AUTHORITY_UNAVAILABLE: 'Durable lifecycle authority is unavailable.',
+});
+
+function advertisedCommands(target, scope) {
+  const contract = target?.lifecycleCapabilities;
+  if (!contract || contract.contractVersion !== 1 || contract.scope !== scope
+      || !Array.isArray(contract.commands)) return [];
+  return contract.commands.map(command => ({ ...command, action: command.command.toLowerCase() }));
+}
+
+function boundedReason(doc, label, action) {
+  const value = doc.defaultView?.prompt?.(`Why should ${label} ${action}?`);
+  if (value === null) return null;
+  const reason = String(value).trim();
+  return reason && reason.length <= 256 ? reason : undefined;
+}
+
+function unavailableExplanation(capability) {
+  return UNAVAILABLE_REASON[capability.unavailableReason]
+    || capability.unavailableReason
+    || 'The server did not provide a reason.';
+}
+
+function reasonId(scope, targetId, action) {
+  return `${scope}-${targetId}-${action}-unavailable`.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function appendUnavailableReason(doc, row, button, capability, scope, targetId) {
+  const explanation = doc.createElement('small');
+  explanation.id = reasonId(scope, targetId, capability.action);
+  explanation.className = 'lifecycle-unavailable-reason';
+  explanation.textContent = `${ACTION_LABEL[capability.action]} unavailable: ${unavailableExplanation(capability)}`;
+  button.setAttribute('aria-disabled', 'true');
+  button.setAttribute('aria-describedby', explanation.id);
+  row.append(button, explanation);
+}
+
+function drainExplanation(bound) {
+  return bound === 'UNTIL_ACCEPTED_WORK_SETTLES'
+    ? 'Drain closes new admission immediately; work already accepted continues until it settles.'
+    : `Drain closes new admission immediately; work already accepted may continue for up to ${bound} before completion.`;
+}
 
 function validateDeploymentId(value) {
   const id = String(value ?? '').trim();
@@ -109,12 +159,19 @@ export function createDeploymentsWindow({
   const idInput = element('deployment-id-input');
   const idError = element('deployment-id-error');
   const registerButton = element('deployment-register');
+  const processList = element('lifecycle-process-list');
+  const processStatus = element('lifecycle-process-status');
+  const processScope = element('lifecycle-process-scope');
 
   let listing = { loaded: false, deployments: [] };
   let registering = false;
   let disposed = false;
   const rowBusy = new Set();
   let pollHandle = null;
+  let selectedDeploymentId = null;
+  let selectedProcessId = null;
+  let processes = [];
+  const processBusy = new Set();
 
   if (scope) scope.textContent = DEPLOYMENT_SCOPE_TEXT;
 
@@ -179,10 +236,16 @@ export function createDeploymentsWindow({
       const sourceText = entry.sourceCount > 0
         ? `${entry.sourceCount} inbound source node${entry.sourceCount === 1 ? '' : 's'}`
         : 'no inbound source';
-      detail.textContent = `${sourceText} · scope ${entry.scope}`;
+      detail.textContent = `tenant ${entry.tenantId} · graph ${entry.graphVersion || 'unavailable'}`
+        + ` · ${sourceText} · scope ${entry.scope} · continuity ${entry.continuity}`;
       if (entry.deploymentGeneration !== undefined && entry.deploymentGeneration !== null) {
         detail.textContent += ` · generation ${entry.deploymentGeneration}`;
       }
+      if (entry.deploymentRevision !== null) detail.textContent += ` · registry revision ${entry.deploymentRevision}`;
+      if (entry.desiredState !== null || entry.observedState !== null) {
+        detail.textContent += ` · reconciliation desired ${entry.desiredState || 'unknown'}, observed ${entry.observedState || 'unknown'}`;
+      }
+      if (entry.recoveryFailure) detail.textContent += ` · recovery failure ${entry.recoveryFailure}`;
 
       item.append(head, detail);
 
@@ -194,7 +257,7 @@ export function createDeploymentsWindow({
       }
 
       const busy = rowBusy.has(entry.deploymentId);
-      const actions = deploymentRowActions(entry.state);
+      const capabilities = advertisedCommands(entry, 'DEPLOYMENT');
       const actionsRow = doc.createElement('div');
       actionsRow.className = 'deployment-item-actions';
       const view = doc.createElement('button');
@@ -208,21 +271,28 @@ export function createDeploymentsWindow({
         const pending = doc.createElement('small');
         pending.textContent = 'Working…';
         actionsRow.append(pending);
-      } else if (actions.length === 0) {
+      } else if (capabilities.length === 0) {
         const pending = doc.createElement('small');
-        pending.textContent = entry.state === 'STARTING' || entry.state === 'STOPPING'
-          ? 'In progress…' : '';
+        pending.textContent = 'No server-advertised lifecycle operations.';
         if (pending.textContent) actionsRow.append(pending);
       } else {
-        for (const action of actions) {
+        for (const capability of capabilities) {
+          const action = capability.action;
           const button = doc.createElement('button');
           button.type = 'button';
           button.className = `btn deployment-action${action === 'undeploy' ? ' danger' : ''}`;
           button.textContent = ACTION_LABEL[action];
           button.dataset.deploymentAction = action;
           button.dataset.deploymentId = entry.deploymentId;
-          actionsRow.append(button);
+          if (capability.available) actionsRow.append(button);
+          else appendUnavailableReason(doc, actionsRow, button, capability, 'deployment', entry.deploymentId);
         }
+      }
+      if (entry.lifecycleCapabilities?.drainBound) {
+        const drain = doc.createElement('small');
+        drain.className = 'lifecycle-drain-bound';
+        drain.textContent = drainExplanation(entry.lifecycleCapabilities.drainBound);
+        actionsRow.append(drain);
       }
       item.append(actionsRow);
       const use = doc.createElement('button');
@@ -233,6 +303,71 @@ export function createDeploymentsWindow({
       use.disabled = !entry.graphVersion;
       if (!entry.graphVersion) use.title = 'This service did not provide the deployment graph version';
       item.append(use);
+      const operate = doc.createElement('button');
+      operate.type = 'button';
+      operate.className = 'btn deployment-operational-target';
+      operate.dataset.deploymentOperational = entry.deploymentId;
+      operate.textContent = selectedDeploymentId === entry.deploymentId
+        ? 'Selected operational target' : 'Select deployment and processes';
+      operate.setAttribute('aria-pressed', String(selectedDeploymentId === entry.deploymentId));
+      item.append(operate);
+      return item;
+    }));
+  }
+
+  function renderProcesses() {
+    if (!processList) return;
+    processList.hidden = processes.length === 0;
+    processList.replaceChildren(...processes.map(entry => {
+      const item = doc.createElement('li');
+      item.className = 'credential-item lifecycle-process-item';
+      item.dataset.processId = entry.processInstanceId;
+      const selected = entry.processInstanceId === selectedProcessId;
+      const head = doc.createElement('div');
+      head.className = 'deployment-item-head';
+      const identity = doc.createElement('b');
+      identity.textContent = entry.processInstanceId;
+      const state = doc.createElement('span');
+      state.className = 'deployment-state';
+      state.textContent = `Status ${entry.status}`;
+      head.append(identity, state);
+      const detail = doc.createElement('small');
+      detail.textContent = `tenant ${entry.tenantId} · deployment ${entry.deploymentId || 'transient'} · graph ${entry.graphVersion}`
+        + ` · revision ${entry.revision} · lifecycle generation ${entry.lifecycleGeneration}`
+        + ` · fence ${entry.fencingToken} · recovery ${entry.disposition}`
+        + ` · control ${entry.controlState || 'unavailable'}`;
+      if (entry.terminationReason) detail.textContent += ` · terminal reason ${entry.terminationReason}`;
+      if (entry.cancelled) detail.textContent += ' · cancellation recorded';
+      const select = doc.createElement('button');
+      select.type = 'button';
+      select.className = 'btn process-select';
+      select.dataset.processSelect = entry.processInstanceId;
+      select.textContent = selected ? 'Selected process' : 'Select process';
+      select.setAttribute('aria-pressed', String(selected));
+      item.append(head, detail, select);
+      if (selected) {
+        const actions = doc.createElement('div');
+        actions.className = 'deployment-item-actions process-item-actions';
+        const capabilities = advertisedCommands(entry, 'PROCESS');
+        for (const capability of capabilities) {
+          const button = doc.createElement('button');
+          button.type = 'button';
+          button.className = `btn process-action${['cancel', 'stop'].includes(capability.action) ? ' danger' : ''}`;
+          button.dataset.processAction = capability.action;
+          button.dataset.processId = entry.processInstanceId;
+          button.textContent = ACTION_LABEL[capability.action];
+          button.disabled = processBusy.has(entry.processInstanceId);
+          if (capability.available) actions.append(button);
+          else appendUnavailableReason(doc, actions, button, capability, 'process', entry.processInstanceId);
+        }
+        if (entry.lifecycleCapabilities?.drainBound) {
+          const drain = doc.createElement('small');
+          drain.className = 'lifecycle-drain-bound';
+          drain.textContent = drainExplanation(entry.lifecycleCapabilities.drainBound);
+          actions.append(drain);
+        }
+        item.append(actions);
+      }
       return item;
     }));
   }
@@ -255,6 +390,12 @@ export function createDeploymentsWindow({
       const deployments = await client.deployments();
       if (disposed) return;
       listing = { loaded: true, deployments };
+      if (selectedDeploymentId && !deployments.some(entry => entry.deploymentId === selectedDeploymentId)) {
+        selectedDeploymentId = null;
+        selectedProcessId = null;
+        processes = [];
+        renderProcesses();
+      }
       renderList();
       publish();
     } catch (error) {
@@ -263,6 +404,36 @@ export function createDeploymentsWindow({
       renderList();
       publish();
       say(`The deployments you hold could not be read: ${error?.message || error}`, 'error');
+    }
+  }
+
+  async function refreshProcesses() {
+    if (!client || !selectedDeploymentId || typeof client.processInventory !== 'function') {
+      processes = [];
+      renderProcesses();
+      return;
+    }
+    try {
+      const rows = [];
+      let cursor = null;
+      do {
+        const page = await client.processInventory({ deploymentId: selectedDeploymentId,
+          includeTerminal: true, ...(cursor ? { cursor } : {}) });
+        rows.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      processes = rows;
+      if (selectedProcessId && !rows.some(item => item.processInstanceId === selectedProcessId)) {
+        selectedProcessId = null;
+      }
+      renderProcesses();
+      processStatus.textContent = rows.length
+        ? `${rows.length} authoritative process instance${rows.length === 1 ? '' : 's'} for “${selectedDeploymentId}”.`
+        : `No durable process instances are recorded for “${selectedDeploymentId}”.`;
+    } catch (error) {
+      processes = [];
+      renderProcesses();
+      processStatus.textContent = `Process inventory could not be reconciled: ${error?.message || error}`;
     }
   }
 
@@ -311,14 +482,17 @@ export function createDeploymentsWindow({
     const entry = listing.deployments.find(candidate => candidate.deploymentId === deploymentId);
     const durable = entry?.deploymentGeneration !== undefined && entry?.deploymentGeneration !== null;
     const command = { expectedGeneration: entry?.deploymentGeneration };
-    if (durable && action === 'stop') {
-      const reason = doc.defaultView?.prompt?.(`Why should “${deploymentId}” stop?`);
+    const capability = advertisedCommands(entry, 'DEPLOYMENT')
+      .find(candidate => candidate.action === action);
+    if (!capability?.available) return;
+    if (durable && capability.reasonRequired && action !== 'undeploy') {
+      const reason = boundedReason(doc, `deployment “${deploymentId}”`, action);
       if (reason === null) return;
-      if (!String(reason).trim()) {
-        say('Stop was not sent: a durable stop requires a reason.', 'error');
+      if (!reason) {
+        say(`${ACTION_LABEL[action]} was not sent: a bounded reason is required.`, 'error');
         return;
       }
-      command.reason = String(reason).trim();
+      command.reason = reason;
     }
     if (action === 'undeploy') {
       const warning = durable
@@ -353,6 +527,10 @@ export function createDeploymentsWindow({
       let result;
       if (action === 'start') result = durable
         ? await client.startDeployment(deploymentId, command) : await client.startDeployment(deploymentId);
+      else if (action === 'pause') result = await client.pauseDeployment(deploymentId, command);
+      else if (action === 'resume') result = await client.resumeDeployment(deploymentId, command);
+      else if (action === 'cancel') result = await client.cancelDeployment(deploymentId, command);
+      else if (action === 'drain') result = await client.drainDeployment(deploymentId, command);
       else if (action === 'stop') result = durable
         ? await client.stopDeployment(deploymentId, command) : await client.stopDeployment(deploymentId);
       else if (action === 'restart') result = durable
@@ -378,6 +556,41 @@ export function createDeploymentsWindow({
     } finally {
       rowBusy.delete(deploymentId);
       if (!disposed) await refresh();
+    }
+  }
+
+  async function runProcessAction(processInstanceId, action) {
+    if (!client || processBusy.has(processInstanceId)) return;
+    const entry = processes.find(candidate => candidate.processInstanceId === processInstanceId);
+    const capability = advertisedCommands(entry, 'PROCESS').find(candidate => candidate.action === action);
+    if (!entry || !capability?.available) return;
+    let reason = '';
+    if (capability.reasonRequired) {
+      const supplied = boundedReason(doc, `process “${processInstanceId}”`, action);
+      if (supplied === null) return;
+      if (!supplied) {
+        processStatus.textContent = `${ACTION_LABEL[action]} was not sent: a bounded reason is required.`;
+        return;
+      }
+      reason = supplied;
+    }
+    const idempotencyKey = doc.defaultView?.crypto?.randomUUID?.();
+    if (!idempotencyKey) {
+      processStatus.textContent = 'A secure process command identity could not be created.';
+      return;
+    }
+    processBusy.add(processInstanceId);
+    renderProcesses();
+    processStatus.textContent = `${ACTION_LABEL[action]} is being reconciled for process “${processInstanceId}”…`;
+    try {
+      const outcome = await client.controlProcess(processInstanceId, action, entry.revision,
+        { idempotencyKey, reason });
+      processStatus.textContent = `${ACTION_LABEL[action]}: ${outcome.outcome}. Authoritative state will be read again.`;
+    } catch (error) {
+      processStatus.textContent = `${ACTION_LABEL[action]} response was refused or ambiguous: ${error?.message || error}. Re-reading authoritative state.`;
+    } finally {
+      processBusy.delete(processInstanceId);
+      await refreshProcesses();
     }
   }
 
@@ -459,6 +672,28 @@ export function createDeploymentsWindow({
       }
       return;
     }
+    const operational = event.target.closest?.('[data-deployment-operational]');
+    if (operational) {
+      selectedDeploymentId = operational.dataset.deploymentOperational;
+      selectedProcessId = null;
+      processes = [];
+      renderList();
+      renderProcesses();
+      if (processScope) processScope.textContent = `Deployment “${selectedDeploymentId}” is selected. Its process instances are read from the durable server inventory.`;
+      void refreshProcesses();
+      return;
+    }
+    const selectProcess = event.target.closest?.('[data-process-select]');
+    if (selectProcess) {
+      selectedProcessId = selectProcess.dataset.processSelect;
+      renderProcesses();
+      return;
+    }
+    const processAction = event.target.closest?.('[data-process-action]');
+    if (processAction) {
+      void runProcessAction(processAction.dataset.processId, processAction.dataset.processAction);
+      return;
+    }
     if (event.target.closest?.('#deployment-close')) close();
   };
   const onCancel = () => {};
@@ -474,11 +709,13 @@ export function createDeploymentsWindow({
   dialog.addEventListener('close', onDialogClose);
 
   renderList();
+  renderProcesses();
 
   return {
     open,
     close,
     refresh,
+    refreshProcesses,
     register,
     openDeployment,
     listing: () => ({ loaded: listing.loaded, deployments: listing.deployments }),
@@ -486,7 +723,11 @@ export function createDeploymentsWindow({
       client = next;
       if (!next) {
         listing = { loaded: false, deployments: [] };
+        processes = [];
+        selectedDeploymentId = null;
+        selectedProcessId = null;
         renderList();
+        renderProcesses();
         publish();
         return Promise.resolve();
       }

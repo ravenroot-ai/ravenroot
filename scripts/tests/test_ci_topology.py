@@ -58,6 +58,8 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertNotRegex(self.jobs["full-backend-tests"], r"mvn[^\n]*\s-amd(?:\s|$)")
         self.assertIn("[ \"$BACKEND_SCOPE\" = none ] && [ -z \"$BACKEND_PROJECTS\" ]", self.jobs["full-backend-tests"])
         self.assertIn("Refusing invalid backend scope", self.jobs["full-backend-tests"])
+        backend_checkout = self.jobs["full-backend-tests"].split("- name: Set up Java", 1)[0]
+        self.assertIn("fetch-depth: 0", backend_checkout)
         self.assertIn('= ravenroot-distribution ] && continue', self.jobs["backend-build"])
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])

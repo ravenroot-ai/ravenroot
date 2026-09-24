@@ -1,4 +1,7 @@
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
 
 from scripts.select_backend_tests import select
 
@@ -44,6 +47,16 @@ class BackendScopeSelectionTest(unittest.TestCase):
         scope = select("pull_request", [".github/workflows/ci.yml", "scripts/ci_required.py"])
         self.assertEqual(scope.mode, "none")
         self.assertEqual(scope.projects, ())
+
+    def test_none_scope_is_not_rendered_as_a_reactor_in_the_audit_log(self):
+        output = StringIO()
+        with patch("scripts.select_backend_tests.changed_paths", return_value=[".github/workflows/ci.yml"]), patch(
+            "sys.argv", ["select_backend_tests.py", "--event", "pull_request", "--base", "a", "--head", "b"]
+        ), redirect_stdout(output):
+            from scripts.select_backend_tests import main
+            main()
+        self.assertIn("projects=none", output.getvalue())
+        self.assertNotIn("projects=reactor", output.getvalue())
 
     def test_non_backend_paths_do_not_widen_a_leaf_scope(self):
         scope = select(

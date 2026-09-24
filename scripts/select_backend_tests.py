@@ -170,7 +170,8 @@ def main() -> int:
         scope = select(arguments.event, changed_paths(arguments.base, arguments.head))
     except (ValueError, subprocess.CalledProcessError) as exc:
         raise SystemExit(f"Backend scope selection failed closed: {exc}") from exc
-    print(f"backend-test scope: {scope.mode}; projects={','.join(scope.projects) or 'reactor'}; {scope.reason}")
+    projects = ",".join(scope.projects) if scope.projects else "none" if scope.mode == "none" else "reactor"
+    print(f"backend-test scope: {scope.mode}; projects={projects}; {scope.reason}")
     write_github_output(scope)
     return 0
 

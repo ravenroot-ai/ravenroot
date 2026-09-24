@@ -746,8 +746,13 @@ jobs:
           set -euo pipefail
           if [ "$BACKEND_SCOPE" = all ]; then
             mvn -B --no-transfer-progress clean verify
-          else
+          elif [ "$BACKEND_SCOPE" = selected ] && [ -n "$BACKEND_PROJECTS" ]; then
             mvn -B --no-transfer-progress -pl "$BACKEND_PROJECTS" -am verify
+          elif [ "$BACKEND_SCOPE" = none ] && [ -z "$BACKEND_PROJECTS" ]; then
+            echo "No backend paths changed; whole-reactor backend-build remains the compile gate."
+          else
+            echo "Refusing invalid backend scope '$BACKEND_SCOPE' with projects '$BACKEND_PROJECTS'." >&2
+            exit 1
           fi
       - name: Verify the isolated writable runner acceptance fixture
         if: steps.backend-scope.outputs.mode == 'all'

@@ -14,36 +14,43 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 
-ALL_MODULES = ""
-
 # Changes to these surfaces can affect consumers throughout the runtime graph.  They intentionally
 # select the complete reactor rather than trying to maintain an incomplete downstream graph.
-FULL_REACTOR_PREFIXES = (
-    "ravenroot/ravenroot-application-api/",
-    "ravenroot/ravenroot-core/",
-    "ravenroot/ravenroot-pekko/",
-    "ravenroot/ravenroot-akka/",
-    "ravenroot/ravenroot-programming-graalvm/",
-    "ravenroot/ravenroot-server/",
-    "ravenroot/ravenroot-cli/",
-    "ravenroot/ravenroot-distribution/",
+FULL_REACTOR_MAIN_PREFIXES = (
+    "ravenroot/ravenroot-application-api/src/main/",
+    "ravenroot/ravenroot-core/src/main/",
+    "ravenroot/ravenroot-pekko/src/main/",
+    "ravenroot/ravenroot-akka/src/main/",
+    "ravenroot/ravenroot-programming-graalvm/src/main/",
+    "ravenroot/ravenroot-server/src/main/",
+    "ravenroot/ravenroot-cli/src/main/",
+    "ravenroot/ravenroot-distribution/src/main/",
 )
 
-MAVEN_TOPOLOGY_PATHS = {
-    "ravenroot/pom.xml",
-    "ravenroot/ravenroot-extensions/pom.xml",
+NON_BACKEND_PREFIXES = (".changes/", ".github/", "adr/", "docs/", "scripts/")
+NON_BACKEND_ROOT_FILES = {
+    "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "GOVERNANCE.md", "LICENSE", "NOTICE", "README.md",
+    "SECURITY.md", "SUPPORT.md",
 }
 
 KNOWN_LEAF_MODULES = {
+    "ravenroot-akka",
     "ravenroot-api-testkit",
+    "ravenroot-application-api",
+    "ravenroot-cli",
+    "ravenroot-core",
+    "ravenroot-distribution",
     "ravenroot-engine-testkit",
     "ravenroot-node-starter",
+    "ravenroot-pekko",
     "ravenroot-persistence-postgresql",
     "ravenroot-persistence-sqlite",
     "ravenroot-persistence-testkit",
     "ravenroot-plugin-bundle",
+    "ravenroot-programming-graalvm",
     "ravenroot-sandbox-supervisor-testkit",
     "ravenroot-observability-otel",
+    "ravenroot-server",
     "ravenroot-extensions/ravenroot-mail",
     "ravenroot-extensions/ravenroot-telegram",
     "ravenroot-extensions/ravenroot-discord",
@@ -104,6 +111,11 @@ def module_for_path(path: str) -> str | None:
     return module if module in KNOWN_LEAF_MODULES else None
 
 
+def is_known_non_backend_path(path: str) -> bool:
+    """Return whether a path cannot select a Maven regression module."""
+    return path in NON_BACKEND_ROOT_FILES or path.startswith(NON_BACKEND_PREFIXES)
+
+
 def select(event_name: str, paths: list[str]) -> Scope:
     """Choose a safe scope for one CI event and its exact changed paths."""
     if event_name == "schedule":
@@ -115,12 +127,17 @@ def select(event_name: str, paths: list[str]) -> Scope:
 
     modules: set[str] = set()
     for path in paths:
-        if path in MAVEN_TOPOLOGY_PATHS or path.startswith(FULL_REACTOR_PREFIXES):
+        if is_known_non_backend_path(path):
+            continue
+        if path.endswith("pom.xml") or path.startswith(FULL_REACTOR_MAIN_PREFIXES):
             return Scope("all", (), f"{path} changes shared runtime or Maven topology")
         module = module_for_path(path)
         if module is None:
             return Scope("all", (), f"{path} is not a recognised backend leaf")
         modules.add(module)
+
+    if not modules:
+        return Scope("none", (), "range has no backend paths")
 
     # V2 embed registrations span SQLite persistence and the server composition root.  `-am` brings
     # their upstream dependencies only; object storage (and its MinIO integration test) is not a

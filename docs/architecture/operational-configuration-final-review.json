@@ -11503,7 +11503,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "ec9274910986967de2ba74858f3934bd3589111d031c7d8046ce0ebe6a6ccae3",
+          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],
@@ -11577,7 +11577,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "ec9274910986967de2ba74858f3934bd3589111d031c7d8046ce0ebe6a6ccae3",
+          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],
@@ -11648,7 +11648,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "ec9274910986967de2ba74858f3934bd3589111d031c7d8046ce0ebe6a6ccae3",
+          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],

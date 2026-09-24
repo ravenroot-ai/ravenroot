@@ -157,10 +157,10 @@ Detailed contract: [Embedded viewer](embed-extension-contracts.md).
 | Variable or family | Applicability and default boundary |
 |---|---|
 | `RAVENROOT_EMBED_BEARER_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
-| `RAVENROOT_EMBED_DYNAMIC_ALLOWED_ORIGINS` | Exact canonical allowlist used only by restricted dynamic embed policy. |
-| `RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY` | Process-local dynamic-grant bound; `4096`. |
-| `RAVENROOT_EMBED_DYNAMIC_GRANT_TTL_SECONDS` | Dynamic-grant lifetime in seconds; `300`. |
-| `RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY` | `disabled`, `restricted`, or `authenticated`; `disabled`. |
+| `RAVENROOT_EMBED_DYNAMIC_ALLOWED_ORIGINS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_GRANT_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_ENABLED` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_EXCHANGE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_PROOF_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |

@@ -12422,6 +12422,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   // Sized by instances, which is the workload of the node AS A ROLE. A resident node
   // therefore keeps a constant radius under any load instead of swelling with its queue -- that
   // swelling was the visible symptom of the wrong number, not a feature being lost here.
+  const previousRadius = datum.r;
   datum.r = Math.max(9, Math.min(34, 10 + Math.sqrt(Math.max(0, activeInstances)) * 7));
   renderer.nodeSelection.filter(node => node.id === nodeId)
     .transition().duration(180)
@@ -12432,9 +12433,13 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
     renderer.nodeLabelSelection.filter(node => node.id === nodeId)
       .text(() => runtimeNodeLabel(owner.cy.getElementById(nodeId)));
   }
-  if (renderer.simulation && rendererSessions.isLive(renderer.token)) {
-    renderer.simulation.force('collision', d3.forceCollide().radius(node => node.r + 8));
-    renderer.simulation.alpha(0.22).restart();
+  // A runtime instance-count change resizes a node, but resizing is not a layout change. Refresh the
+  // collision force's cached radii so the NEXT legitimate reheat uses the new sizes, yet never
+  // reheat or restart here: a settled Monitoring graph must stay settled with fixed coordinates (its
+  // visuals still update), and a running one picks the radii up on its next tick. Drag and explicit
+  // layout/force-control changes remain the only reheat sources.
+  if (datum.r !== previousRadius && rendererSessions.isLive(renderer.token)) {
+    renderer.refreshCollisionRadii?.();
   }
   renderer.updateNode?.(nodeId, datum);
 }

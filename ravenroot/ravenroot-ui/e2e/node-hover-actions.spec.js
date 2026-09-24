@@ -28,6 +28,26 @@ async function nodePoint(page, id) {
   }, id);
 }
 
+/**
+ * Hover a node until its minibar is genuinely showing, then leave the pointer on it.
+ *
+ * Sampling the node's point once and moving there is a race after the active document is replaced:
+ * `cy.fit()` and the rebuild settle asynchronously, so the sampled point can be stale by the time
+ * the pointer arrives, and a move to coordinates the pointer already occupies need not produce a
+ * fresh hover over a freshly built graph. Each attempt therefore leaves the node, re-samples its
+ * current point and moves back, so the pointer always crosses onto wherever the node is now. This
+ * waits for the state the assertions below are about instead of assuming one move achieved it, and
+ * it still fails if the minibar never appears.
+ */
+async function hoverNode(page, id, action) {
+  await expect.poll(async () => {
+    await page.mouse.move(4, 4);
+    const point = await nodePoint(page, id);
+    await page.mouse.move(point.x, point.y);
+    return action.isVisible();
+  }).toBe(true);
+}
+
 const graphState = page => page.evaluate(() => ({
   nodes: window.cy.nodes().map(node => node.id()).sort(),
   edges: window.cy.edges().map(edge => edge.id()).sort(),
@@ -957,10 +977,10 @@ test('read-only, keyboard, theme, zoom and document ownership keep the minibar h
     window.cy.getElementById('graphify-node').position({ x: 400, y: 220 });
     window.cy.fit(undefined, 100);
   });
-  const graphify = await nodePoint(page, 'graphify-node');
-  await page.mouse.move(graphify.x, graphify.y);
   const activePane = page.locator('.doc-pane--active');
-  await expect(activePane.locator('.graph-node-action[data-node-action="trace"]')).toBeVisible();
+  const graphifyTrace = activePane.locator('.graph-node-action[data-node-action="trace"]');
+  await hoverNode(page, 'graphify-node', graphifyTrace);
+  await expect(graphifyTrace).toBeVisible();
   await expect(activePane.locator('.graph-node-action[data-node-action="delete"]')).toBeHidden();
 
   await page.reload();

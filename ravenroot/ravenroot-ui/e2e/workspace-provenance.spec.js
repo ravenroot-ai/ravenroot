@@ -328,7 +328,9 @@ test('deployment registration persists the exact captured graph as an immutable 
   let releaseRegistration;
   const registrationGate = new Promise(resolve => { releaseRegistration = resolve; });
   const held = { deploymentId: 'orders', state: 'REGISTERED', sourceCount: 0,
-    graphVersion: 'deployed-v1', scope: 'LOCAL_PROCESS', diagnostic: null };
+    tenantId: tenant.value, graphVersion: 'deployed-v1', scope: 'LOCAL_PROCESS', diagnostic: null,
+    continuity: 'PROCESS_LOCAL', deploymentRevision: null, desiredState: null,
+    observedState: null, recoveryFailure: null };
   await page.route('**/v1/deployments**', async route => {
     const request = route.request();
     const url = new URL(request.url());

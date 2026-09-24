@@ -14,28 +14,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The typed runtime-nature contract (ADR 0024 §2).
  *
- * <p>The two assertions that matter most here are the ones easiest to satisfy in appearance: that a
- * descriptor which says nothing permits <em>only</em> {@code WORKER}, and that "said nothing" is
- * distinguishable from "declared WORKER". Both are what stop the fail-closed reading from quietly
- * becoming the permissive one.</p>
+ * <p>
+ * The two assertions that matter most here are the ones easiest to satisfy in
+ * appearance: that a
+ * descriptor which says nothing permits <em>only</em> {@code WORKER}, and that
+ * "said nothing" is
+ * distinguishable from "declared WORKER". Both are what stop the fail-closed
+ * reading from quietly
+ * becoming the permissive one.
+ * </p>
  */
 class NodeRuntimeNatureTest {
 
-    // ------------------------------------------------------------------ the default, asserted
+    // ------------------------------------------------------------------ the
+    // default, asserted
 
     @Test
     void aDescriptorAuthoredBeforeThisIssueMeansWorkerAndPermitsOnlyWorker() {
         NodeTypeDescriptor legacy = legacyDescriptor();
 
         assertEquals(NodeRuntimeNature.WORKER, legacy.effectiveDefaultNature());
-        assertEquals(Set.of(NodeRuntimeNature.WORKER), legacy.effectiveAllowedNatures());
+        assertEquals(Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.TRAVERSAL), legacy.effectiveAllowedNatures());
         assertFalse(legacy.declaresNature(), "a legacy descriptor declares nothing about nature");
     }
 
     @Test
     void anEmptyAllowedSetIsNotPermissive() {
-        // The whole privilege boundary rests on this reading. If empty meant "anything", every
-        // descriptor in the catalog -- all of which predate runtime natures -- would permit a graph to declare
+        // The whole privilege boundary rests on this reading. If empty meant
+        // "anything", every
+        // descriptor in the catalog -- all of which predate runtime natures -- would
+        // permit a graph to declare
         // AUTHORITY, and the escalation this rule prevents would ship as the default.
         NodeTypeDescriptor legacy = legacyDescriptor();
 
@@ -46,8 +54,10 @@ class NodeRuntimeNatureTest {
 
     @Test
     void absentIsDistinguishableFromDeclaredWorker() {
-        // Not a nicety: BehaviorRegistry may supply SOURCE to a descriptor that said nothing and must
-        // refuse one that said WORKER while implementing InboundSourceCapable. Collapse the two and
+        // Not a nicety: BehaviorRegistry may supply SOURCE to a descriptor that said
+        // nothing and must
+        // refuse one that said WORKER while implementing InboundSourceCapable. Collapse
+        // the two and
         // every legacy source package reads as a contradiction.
         assertFalse(legacyDescriptor().declaresNature());
         assertTrue(descriptor(NodeRuntimeNature.WORKER, Set.of(NodeRuntimeNature.WORKER)).declaresNature());
@@ -68,8 +78,10 @@ class NodeRuntimeNatureTest {
 
     @Test
     void refusesNearMissesRatherThanDefaultingThem() {
-        // A near miss must not silently become WORKER: an author who wrote "authority" and got a
-        // worker has been demoted without being told, which is the failure the declaration prevents.
+        // A near miss must not silently become WORKER: an author who wrote "authority"
+        // and got a
+        // worker has been demoted without being told, which is the failure the
+        // declaration prevents.
         assertTrue(NodeRuntimeNature.parse("worker").isEmpty());
         assertTrue(NodeRuntimeNature.parse("Authority").isEmpty());
         assertTrue(NodeRuntimeNature.parse("SUPERVISOR").isEmpty());
@@ -83,7 +95,8 @@ class NodeRuntimeNatureTest {
                 NodeRuntimeNatureProperty.allowedValues());
     }
 
-    // ------------------------------------------------------------------ descriptor coherence
+    // ------------------------------------------------------------------ descriptor
+    // coherence
 
     @Test
     void refusesADefaultOutsideItsOwnAllowlist() {
@@ -94,18 +107,20 @@ class NodeRuntimeNatureTest {
 
     @Test
     void acceptsADefaultInsideItsAllowlist() {
-        NodeTypeDescriptor choice =
-                descriptor(NodeRuntimeNature.WORKER, Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.SOURCE));
+        NodeTypeDescriptor choice = descriptor(NodeRuntimeNature.WORKER,
+                Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.SOURCE));
         assertEquals(NodeRuntimeNature.WORKER, choice.effectiveDefaultNature());
         assertEquals(Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.SOURCE), choice.effectiveAllowedNatures());
         assertEquals(List.of("WORKER", "SOURCE"), choice.allowedNatureIdentifiers());
     }
 
-    // ------------------------------------------------------------------ residency predicate
+    // ------------------------------------------------------------------ residency
+    // predicate
 
     @Test
     void residencyPredicateNamesExactlyAuthorityAndKeyed() {
-        // The single definition behind the deploy refusal. Residency support empties it, and the refusal tests
+        // The single definition behind the deploy refusal. Residency support empties
+        // it, and the refusal tests
         // invert visibly rather than being deleted.
         assertFalse(NodeRuntimeNature.WORKER.requiresUnimplementedResidency());
         assertFalse(NodeRuntimeNature.TRAVERSAL.requiresUnimplementedResidency());
@@ -114,12 +129,13 @@ class NodeRuntimeNatureTest {
         assertTrue(NodeRuntimeNature.KEYED.requiresUnimplementedResidency());
     }
 
-    // ------------------------------------------------------------------ effective resolution
+    // ------------------------------------------------------------------ effective
+    // resolution
 
     @Test
     void resolvesDeclaredValueOverTheDescriptorDefault() {
-        NodeTypeDescriptor type =
-                descriptor(NodeRuntimeNature.WORKER, Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.SOURCE));
+        NodeTypeDescriptor type = descriptor(NodeRuntimeNature.WORKER,
+                Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.SOURCE));
         assertEquals(NodeRuntimeNature.SOURCE, NodeRuntimeNatureProperty.effectiveNature(
                 type, Map.of(NodeRuntimeNatureProperty.NAME, "SOURCE")));
         assertEquals(NodeRuntimeNature.WORKER, NodeRuntimeNatureProperty.effectiveNature(type, Map.of()));
@@ -139,7 +155,8 @@ class NodeRuntimeNatureTest {
         assertFalse(NodeRuntimeNatureProperty.declaredBy(null));
     }
 
-    // ------------------------------------------------------------------ anti-collision at catalog load
+    // ------------------------------------------------------------------
+    // anti-collision at catalog load
 
     @Test
     void refusesABehaviorThatDeclaresThePlatformOwnedNameAsItsOwnProperty() {
@@ -169,7 +186,7 @@ class NodeRuntimeNatureTest {
     }
 
     private static NodeTypeDescriptor descriptor(NodeRuntimeNature defaultNature,
-                                                 Set<NodeRuntimeNature> allowed) {
+            Set<NodeRuntimeNature> allowed) {
         return new NodeTypeDescriptor("typed", "Typed", "Test", "d", "actor", false, List.of(), Set.of(),
                 defaultNature, allowed);
     }

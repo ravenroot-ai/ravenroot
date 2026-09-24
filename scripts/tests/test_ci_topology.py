@@ -53,6 +53,13 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("-DskipTests clean install", self.jobs["backend-build"])
         self.assertNotIn("clean verify", self.jobs["backend-build"])
         self.assertIn("clean verify", self.jobs["full-backend-tests"])
+        self.assertIn("scripts/select_backend_tests.py", self.jobs["full-backend-tests"])
+        self.assertIn("-pl \"$BACKEND_PROJECTS\" -am verify", self.jobs["full-backend-tests"])
+        self.assertNotRegex(self.jobs["full-backend-tests"], r"mvn[^\n]*\s-amd(?:\s|$)")
+        self.assertIn("[ \"$BACKEND_SCOPE\" = none ] && [ -z \"$BACKEND_PROJECTS\" ]", self.jobs["full-backend-tests"])
+        self.assertIn("Refusing invalid backend scope", self.jobs["full-backend-tests"])
+        backend_checkout = self.jobs["full-backend-tests"].split("- name: Set up Java", 1)[0]
+        self.assertIn("fetch-depth: 0", backend_checkout)
         self.assertIn('= ravenroot-distribution ] && continue', self.jobs["backend-build"])
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])
@@ -162,6 +169,10 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_audit_operational_configuration"))
         self.assertEqual(1, block.count("python3 scripts/audit_operational_configuration.py --check"))
 
+    def test_backend_scope_selector_contract_cannot_disappear_from_full_python_contracts(self) -> None:
+        block = self.jobs["full-python-contracts"]
+        self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_select_backend_tests"))
+
     def test_expensive_regressions_wait_for_the_light_preflight(self) -> None:
         preflight = declared_needs(self.jobs["full-preflight"])
         self.assertEqual(
@@ -181,6 +192,12 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_container_smoke_waits_for_every_parallel_regression(self) -> None:
         self.assertIn("full-regression", declared_needs(self.jobs["full-runtime-container-smoke"]))
+
+    def test_full_tier_has_a_scheduled_all_reactor_regression_lane(self) -> None:
+        self.assertIn("  schedule:\n    - cron:", self.contents)
+        backend = self.jobs["full-backend-tests"]
+        self.assertIn("Scheduled runs intentionally select the all-reactor regression path", backend)
+        self.assertEqual(5, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
 
 
 if __name__ == "__main__":

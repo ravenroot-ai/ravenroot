@@ -122,6 +122,7 @@ ALLOWED_TIERS_BY_EVENT = {
     ("push", "main"): frozenset({"full", "docs"}),
     ("workflow_dispatch", ""): frozenset({"full"}),
     ("merge_group", ""): frozenset({"full"}),
+    ("schedule", ""): frozenset({"full"}),
 }
 
 # The work-branch fast tier lives in its own workflow and is advice, not a gate. It is modelled here
@@ -291,8 +292,8 @@ def trigger_lines_without_comments(block: str) -> str:
 
 
 def verify_triggers(contents: str) -> list[str]:
-    """Hold ci.yml's events to the model: pull requests into dev and main, a merge-queue trigger,
-    no work-branch pushes, full dispatch.
+    """Hold ci.yml's events to the model: pull requests into dev and main, a merge queue, a
+    scheduled all-reactor regression, no work-branch pushes, and full dispatch.
 
     This is the complete intended trigger shape, asserted positively in both directions: each event
     ci.yml is supposed to fire on is named exactly, and `feature/**` — the one branch pattern that
@@ -321,6 +322,11 @@ def verify_triggers(contents: str) -> list[str]:
         problems.append(
             "ci.yml: the `merge_group` trigger is missing. Without it ci-required is never reported on "
             "a merge-group commit, and every pull request in a merge queue times out."
+        )
+    if "\n  schedule:\n" not in triggers:
+        problems.append(
+            "ci.yml: the scheduled all-reactor regression trigger is missing. Focused review runs "
+            "must not be the only path that exercises optional integrations together."
         )
     if "feature/" in trigger_lines_without_comments(triggers):
         problems.append(

@@ -46,6 +46,8 @@
       url: /operator-guide/identity-browser.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
+    - title: Global lifecycle console
+      url: /operator-guide/lifecycle-console.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle

@@ -1252,6 +1252,22 @@
     .deployment-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .deployment-item-actions .btn { font-size: 9px; padding: 2px 8px; }
     .deployment-item-actions small { color: var(--tx-2); font-size: 9px; }
+    .deployment-item-actions .lifecycle-unavailable-reason,
+    .deployment-item-actions .lifecycle-drain-bound { flex-basis: 100%; }
+    .deployment-item-actions .lifecycle-unavailable-reason { color: var(--outcome-warning-text); }
+    .deployment-operational-target, .process-select { align-self: flex-start; }
+    .lifecycle-processes { border-top: 1px solid var(--bd); margin-top: 14px; padding-top: 12px; }
+    .lifecycle-process-item { gap: 7px; }
+    .lifecycle-process-item b { overflow-wrap: anywhere; }
+    .process-item-actions .danger { color: var(--outcome-error-text); border-color: var(--outcome-error-text); }
+
+    @media (max-width: 640px) {
+      .deployments-dialog { width: min(100vw - 16px, 720px); max-height: calc(100vh - 16px); }
+      .deployment-item-head { align-items: flex-start; flex-direction: column; }
+      .deployment-item-actions .btn, .deployment-operational-target, .process-select {
+        min-height: 36px;
+      }
+    }
 
     /* ── STAGE COLUMN ─────────────────────────────────────────────────────────────────────────
        The graph and the bottom dock, stacked. The dock is a SIBLING of #cy-wrap and it PUSHES:

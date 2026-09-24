@@ -58,7 +58,9 @@ async function stubViewerService(page) {
     return route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ deployments: [{ deploymentId: 'visual-parity', state: 'READY',
-        sourceCount: 0, scope: 'LOCAL_PROCESS', diagnostic: null }] }),
+        tenantId: 'local', sourceCount: 0, graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS',
+        diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+        desiredState: null, observedState: null, recoveryFailure: null }] }),
     });
   });
 }

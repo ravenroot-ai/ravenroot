@@ -20,17 +20,20 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcDriverBundleEndToEndTest {
-    private static final String POSTGRESQL_ID = "postgresql-42.7.7";
+    private static final String POSTGRESQL_ID = "postgresql-42.7.12";
     private static final String POSTGRESQL_SHA256 =
-            "157963d60ae66d607e09466e8c0cdf8087e9cb20d0159899ffca96bca2528460";
+            "31fbf6f06b2217fb51d5100cee51b22625cc81640da0679b47914e54c1e6377c";
     private static final String MYSQL_ID = "mysql-connector-j-9.5.0";
     private static final String MYSQL_SHA256 =
             "f2ca3dfaf00d4aa311470db7ea3051962944ba0cb60005a2f75467549c39f425";
@@ -48,6 +51,7 @@ class JdbcDriverBundleEndToEndTest {
                 "the executable PostgreSQL example is pinned to exact driver bytes");
         String mysqlSha256 = sha256(mysqlJar);
         assertEquals(MYSQL_SHA256, mysqlSha256, "the executable MySQL example is pinned to exact driver bytes");
+        assertUnversioned(mysqlJar);
 
         Path extensionJar = jarModuleClasses(workspace.resolve("ravenroot-jdbc-e2e.jar"));
         Path bundle = workspace.resolve("bundle");
@@ -93,6 +97,21 @@ class JdbcDriverBundleEndToEndTest {
             // pgjdbc self-registers on initialization. Its own method performs deregistration from
             // the correct defining loader; no connection is opened by this regression.
             if (postgresql != null) postgresql.getClass().getMethod("deregister").invoke(null);
+        }
+    }
+
+    /**
+     * The flat half of the loader contract needs a real vendor jar that is one image, not a jar
+     * that merely happens to be one. MySQL Connector/J is that jar here, so its shape is asserted
+     * rather than assumed: a release that started publishing versioned entries would otherwise
+     * take this coverage away without failing anything.
+     */
+    private static void assertUnversioned(Path driverJar) throws Exception {
+        try (JarFile archive = new JarFile(driverJar.toFile())) {
+            assertNull(archive.getManifest().getMainAttributes().getValue(Attributes.Name.MULTI_RELEASE),
+                    "the flat fixture must not declare itself multi-release");
+            assertTrue(archive.stream().noneMatch(entry -> entry.getName().startsWith("META-INF/versions/")),
+                    "the flat fixture must carry no versioned entries");
         }
     }
 

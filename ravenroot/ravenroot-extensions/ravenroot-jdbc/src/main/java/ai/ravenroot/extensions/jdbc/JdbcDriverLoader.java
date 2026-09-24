@@ -125,38 +125,122 @@ interface JdbcDriverLoader {
         } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
-    /** Child loader backed only by the already verified immutable in-memory copy. */
+    /**
+     * Child loader backed only by the already verified immutable in-memory copy.
+     *
+     * <p>A multi-release jar is resolved here, once, into one flat image: for each name the entry of
+     * the highest release not above {@link #TARGET_RELEASE}, else the base entry. The running JVM's
+     * version plays no part, so the bytes a class is defined from are fixed by the verified digest
+     * alone.
+     *
+     * <p><b>What ambiguity means here.</b> A jar is ambiguous when <em>this</em> resolution is not
+     * well defined: when the jar admits more than one reading of what its image contains. It is not
+     * ambiguous merely because a reader at another release would select other entries, since a
+     * classpath JVM at any release above the target always would; that disagreement is the reason
+     * the resolution is pinned rather than a reason to refuse. Nor is a versioned entry that
+     * differs from what the pinned digest covered ambiguous: the digest already refuses it as
+     * {@link JdbcFailure.Code#DRIVER_REFUSED}, because substituted bytes are tampering, not a
+     * second reading.
+     */
     final class PrivateDriverClassLoader extends ClassLoader {
+        /** The product's Java release (maven.compiler.release), never the release of the running JVM. */
+        static final int TARGET_RELEASE = 21;
+        private static final String VERSIONS = "META-INF/versions/";
+        private static final int FIRST_VERSIONED_RELEASE = 9;
+
         private final Map<String, byte[]> entries;
         private final String digest;
 
         PrivateDriverClassLoader(byte[] jar, String digest) throws java.io.IOException {
             super(ClassLoader.getPlatformClassLoader());
             this.digest = digest;
+            this.entries = flatImage(jar);
+        }
+
+        private record Versioned(int release, String name, byte[] value) { }
+
+        private static Map<String, byte[]> flatImage(byte[] jar) throws java.io.IOException {
             Map<String, byte[]> copied = new LinkedHashMap<>();
+            java.util.List<Versioned> versioned = new java.util.ArrayList<>();
+            java.util.Set<String> names = new java.util.HashSet<>();
+            boolean manifestEntry = false;
             long expanded = 0;
+            Attributes mainAttributes;
             try (var input = new JarInputStream(new ByteArrayInputStream(jar))) {
-                if (input.getManifest() != null
-                        && input.getManifest().getMainAttributes().getValue(Attributes.Name.MULTI_RELEASE) != null) {
-                    throw refused();
-                }
+                mainAttributes = input.getManifest() == null ? null : input.getManifest().getMainAttributes();
                 for (JarEntry entry; (entry = input.getNextJarEntry()) != null;) {
                     if (entry.isDirectory()) continue;
-                    String lowerName = entry.getName().toLowerCase(java.util.Locale.ROOT);
-                    if (lowerName.startsWith("meta-inf/versions/")
-                            || lowerName.startsWith("meta-inf\\versions\\")) throw refused();
-                    if (copied.size() >= MAX_DRIVER_ENTRIES) throw refused();
+                    if (names.size() >= MAX_DRIVER_ENTRIES) throw refused();
                     byte[] value = input.readNBytes(MAX_DRIVER_ENTRY_BYTES + 1);
                     if (value.length > MAX_DRIVER_ENTRY_BYTES) throw refused();
                     expanded = Math.addExact(expanded, value.length);
-                    if (expanded > MAX_EXPANDED_DRIVER_BYTES || copied.putIfAbsent(entry.getName(), value) != null) {
-                        throw refused();
+                    if (expanded > MAX_EXPANDED_DRIVER_BYTES || !names.add(entry.getName())) throw refused();
+
+                    String folded = entry.getName().replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+                    if (folded.startsWith("meta-inf/versions/")) {
+                        versioned.add(versionedEntry(entry.getName(), value));
+                    } else {
+                        // JarInputStream consumes a leading manifest; one reaching this loop is a
+                        // second or misplaced manifest that other readers could take as the real one.
+                        manifestEntry |= folded.equals("meta-inf/manifest.mf");
+                        copied.put(entry.getName(), value);
                     }
                 }
             } catch (ArithmeticException invalid) {
                 throw refused();
             }
-            entries = Map.copyOf(copied);
+            if (versioned.isEmpty()) return Map.copyOf(copied);
+
+            // Versioned entries only mean something under one unambiguous Multi-Release: true
+            // manifest; otherwise some readers apply them and others do not.
+            if (mainAttributes == null || manifestEntry
+                    || !"true".equalsIgnoreCase(mainAttributes.getValue(Attributes.Name.MULTI_RELEASE))) {
+                throw ambiguous();
+            }
+            // Two versioned entries cannot collide at one release: a surviving entry name is
+            // exactly VERSIONS + release + '/' + name in one canonical spelling, so equal release
+            // and name mean an equal entry name, which the duplicate-name bound above already
+            // refused. Higher releases simply win, up to the target.
+            Map<String, Integer> selectedRelease = new java.util.HashMap<>();
+            for (Versioned entry : versioned) {
+                if (entry.release() > TARGET_RELEASE) continue;
+                Integer selected = selectedRelease.get(entry.name());
+                if (selected == null || entry.release() > selected) {
+                    selectedRelease.put(entry.name(), entry.release());
+                    copied.put(entry.name(), entry.value());
+                }
+            }
+            return Map.copyOf(copied);
+        }
+
+        /**
+         * Accepts only {@code META-INF/versions/<release>/<name>} spelled exactly as the JDK reads
+         * it: a canonical decimal release of at least 9 and a normalized name outside META-INF.
+         *
+         * <p>Every other spelling is content that some readers incorporate into the image and
+         * others discard, so the jar admits more than one reading of what its image contains. That
+         * holds for a release below 9 and for a versioned {@code META-INF/} entry as much as for a
+         * miscased namespace: the JDK discards all three, other tooling does not, and in a jar that
+         * declares {@code Multi-Release: true} they are entries meant to be selected. Copying them
+         * in under their literal names instead would ship an image whose content depends on who
+         * read the jar, which is what the pinned digest exists to rule out.
+         */
+        private static Versioned versionedEntry(String entryName, byte[] value) {
+            if (!entryName.startsWith(VERSIONS) || entryName.indexOf('\\') >= 0) throw ambiguous();
+            String rest = entryName.substring(VERSIONS.length());
+            int slash = rest.indexOf('/');
+            if (slash < 1 || slash > 4) throw ambiguous();
+            String release = rest.substring(0, slash);
+            if (release.charAt(0) == '0' || !release.chars().allMatch(c -> c >= '0' && c <= '9')) throw ambiguous();
+            int feature = Integer.parseInt(release);
+            String name = rest.substring(slash + 1);
+            if (feature < FIRST_VERSIONED_RELEASE || name.regionMatches(true, 0, "META-INF/", 0, 9)) {
+                throw ambiguous();
+            }
+            for (String segment : name.split("/", -1)) {
+                if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) throw ambiguous();
+            }
+            return new Versioned(feature, name, value);
         }
 
         @Override protected Class<?> findClass(String name) throws ClassNotFoundException {
@@ -199,4 +283,6 @@ interface JdbcDriverLoader {
     }
 
     private static JdbcFailure refused() { return new JdbcFailure(JdbcFailure.Code.DRIVER_REFUSED); }
+
+    private static JdbcFailure ambiguous() { return new JdbcFailure(JdbcFailure.Code.DRIVER_AMBIGUOUS); }
 }

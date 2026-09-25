@@ -123,6 +123,7 @@ class MinioFixtureContractTest(unittest.TestCase):
             'org.opencontainers.image.source="https://github.com/ravenroot-ai/ravenroot"',
             dockerfile,
         )
+        self.assertIn("ARG BASE_IMAGE=scratch", dockerfile)
 
     def test_java_fixture_has_no_independent_registry_authority(self) -> None:
         source = (ROOT / "ravenroot" / "ravenroot-extensions" / "ravenroot-object-storage" / "src" /

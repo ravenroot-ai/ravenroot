@@ -10,8 +10,8 @@ reads the package with its built-in token and only `packages: read`; no private 
 
 | Role | Upstream payload | Source revision | Packaging revision | Original digest | Project-owned digest | License |
 |---|---|---|---|---|---|---|
-| Server | MinIO `RELEASE.2025-05-24T17-08-30Z` | `ecde75f9112f8410cb6cacb4b76193f1475b587e` | Bitnami `2025.5.24-debian-12-r5` | `sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c` | `PENDING` | AGPL-3.0-only |
-| Client | `mc RELEASE.2025-05-21T01-59-54Z` | `f71ad84bcf0fd4369691952af5d925347837dcec` | Bitnami `2025.5.21-debian-12-r4` | `sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511` | `PENDING` | AGPL-3.0-only |
+| Server | MinIO `RELEASE.2025-05-24T17-08-30Z` | `ecde75f9112f8410cb6cacb4b76193f1475b587e` | Bitnami `2025.5.24-debian-12-r5` | `sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c` | `sha256:37522f98e22eb437fb824bad9c70a13239484ee632ccba9f67a50c41f3da7c0c` | AGPL-3.0-only |
+| Client | `mc RELEASE.2025-05-21T01-59-54Z` | `f71ad84bcf0fd4369691952af5d925347837dcec` | Bitnami `2025.5.21-debian-12-r4` | `sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511` | `sha256:32fc45d46e0b1e7adae40d22648f991835910be835a145e47c01297f7568a77f` | AGPL-3.0-only |
 
 The Bitnami images embed the corresponding AGPL source offer and full license text under each
 application's `/opt/bitnami/<application>/licenses/` directory. The server reports the recorded

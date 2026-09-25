@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 8044 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2126.
+Retired source candidates preserved in inventory history: 2128.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 92.
+Checked source reconciliations: 93.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 23933 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23865 |
-| Unchanged identities | 23831 |
-| Approved identity migrations | 21 |
-| Approved retirements | 13 |
-| Semantically classified additions | 81 |
+| Source inventory candidates | 23933 |
+| Unchanged identities | 23929 |
+| Approved identity migrations | 2 |
+| Approved retirements | 2 |
+| Semantically classified additions | 2 |
 | Current candidates | 23933 |
 
 ## Final semantic review
@@ -4305,7 +4305,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-c500d87e09c561740696` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:20` `DiagnosticIdentifier` | java | retained | protocol-or-format-invariant | Issue #473 fixes the shared diagnostic sanitization/format grammar represented by PROFILE_REDACTION; it is a public safety contract, not an operator setting. |
 | `oc-12a7b5313cbdcd591ef0` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:21` `DiagnosticIdentifier` | java | retained | protocol-or-format-invariant | Issue #473 fixes the shared diagnostic sanitization/format grammar represented by PROPERTY_TOKEN; it is a public safety contract, not an operator setting. |
 | `oc-09acf5e5ed5b2955c3af` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:23` `DiagnosticIdentifier` | java | retained | protocol-or-format-invariant | Issue #473 fixes the shared diagnostic sanitization/format grammar represented by SENSITIVE_ASSIGNMENT; it is a public safety contract, not an operator setting. |
-| `oc-25357745d7c23896b442` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:25` `DiagnosticIdentifier` | java | retained | protocol-or-format-invariant | Issue #473 fixes the shared diagnostic sanitization/format grammar represented by URI_AUTHORITY; it is a public safety contract, not an operator setting. |
+| `oc-7ccf38bfaf86f7182035` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:25` `DiagnosticIdentifier` | java | retained | protocol-or-format-invariant | Issue #473 fixes the shared URI authority sanitization grammar, including valid single-character schemes; it is a public safety contract, not an operator setting. |
 | `oc-2af556581e9d0c253847` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticText.java:24` `DiagnosticText` | java | retained | presentation-text | These strings are human-readable diagnostics or refusal detail and do not select runtime behavior. |
 | `oc-49f5396e7ba06c4bbfed` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/EdgeTraversalWireBudget.java:20` `EdgeTraversalWireBudget` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-6f0438f4336b5a3134c0` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/EdgeTraversalWireBudget.java:20` `EdgeTraversalWireBudget` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
@@ -14087,9 +14087,9 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-8dd1b95209b0ffed3004` | `ravenroot/ravenroot-ui/src/runtime-client.js:135` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact JWT_CREDENTIAL token or grammar atom 9_; malformed runtime data must fail closed. |
 | `oc-9de5d2065b2386d09db8` | `ravenroot/ravenroot-ui/src/runtime-client.js:135` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact JWT_CREDENTIAL token or grammar atom 9_; malformed runtime data must fail closed. |
 | `oc-d30aefa54945804ac56b` | `ravenroot/ravenroot-ui/src/runtime-client.js:136` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact UNREDACTED_LOCATION_ASSIGNMENT token or grammar atom 9_; malformed runtime data must fail closed. |
-| `oc-03cdc484df8c2bcd5d87` | `ravenroot/ravenroot-ui/src/runtime-client.js:137` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact UNREDACTED_URI_AUTHORITY token or grammar atom 1; malformed runtime data must fail closed. |
-| `oc-bcd030545e3889091597` | `ravenroot/ravenroot-ui/src/runtime-client.js:137` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact UNREDACTED_URI_AUTHORITY token or grammar atom 31; malformed runtime data must fail closed. |
-| `oc-d40080c6ebf843eb8f81` | `ravenroot/ravenroot-ui/src/runtime-client.js:137` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact UNREDACTED_URI_AUTHORITY token or grammar atom 9; malformed runtime data must fail closed. |
+| `oc-8c3b087d7334cb5d597e` | `ravenroot/ravenroot-ui/src/runtime-client.js:137` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates that a URI scheme may have zero trailing scheme characters so single-character-scheme authorities fail closed in public diagnostics. |
+| `oc-dde2d48dfde32fe6d021` | `ravenroot/ravenroot-ui/src/runtime-client.js:137` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact UNREDACTED_URI_AUTHORITY token or grammar atom 9; malformed runtime data must fail closed. |
+| `oc-f23564de63db357a3363` | `ravenroot/ravenroot-ui/src/runtime-client.js:137` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact UNREDACTED_URI_AUTHORITY token or grammar atom 31; malformed runtime data must fail closed. |
 | `oc-69d100574c1d66e10170` | `ravenroot/ravenroot-ui/src/runtime-client.js:138` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact PROPERTY_TOKEN token or grammar atom 63; malformed runtime data must fail closed. |
 | `oc-e93f301ef710df1a6bcd` | `ravenroot/ravenroot-ui/src/runtime-client.js:138` `constructor` | ui | retained | protocol-or-format-invariant | Issue #473 validates the closed diagnostic envelope using the exact PROPERTY_TOKEN token or grammar atom 0; malformed runtime data must fail closed. |
 | `oc-24af591fae06384ae80a` | `ravenroot/ravenroot-ui/src/runtime-client.js:265` `if` | ui | retained | protocol-or-format-invariant | This value is an exact HTTP, lifecycle outcome, parser, command, or document token consumed across a defined client/server boundary. |

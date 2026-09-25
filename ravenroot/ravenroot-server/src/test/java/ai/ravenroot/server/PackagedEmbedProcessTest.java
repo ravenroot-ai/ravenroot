@@ -79,12 +79,30 @@ class PackagedEmbedProcessTest {
     @Test
     void theProcessEnablesTheFiveRoutesCompletesTheFlowAndHonoursALiveRevocation() throws Exception {
         provisionRegistration();
+        provisionV2Registration();
         int port = freePort();
         Process child = startServer(port);
         try {
             awaitListening(child, port);
             var client = HttpClient.newHttpClient();
             String base = "http://127.0.0.1:" + port;
+
+            // The packaged composition reads the same durable store for a V2 registration and
+            // exposes its live-run selector, rather than treating its new source as a snapshot.
+            var v2Created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                    .header("Authorization", "Bearer " + TOKEN)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"registrationId\":\"packaged-v2-reg\"}")));
+            assertEquals(201, v2Created.statusCode(), v2Created.body());
+            URI v2LaunchUri = URI.create(json(v2Created.body(), "launchUrl"));
+            var v2Launched = send(client, request(base + v2LaunchUri.getRawPath() + "?"
+                    + v2LaunchUri.getRawQuery())
+                    .header("Sec-Fetch-Mode", "navigate").header("Sec-Fetch-Dest", "iframe").GET());
+            assertEquals(200, v2Launched.statusCode(), v2Launched.body());
+            assertTrue(v2Launched.body().contains("\"viewerSourceVersion\":\"2\""), v2Launched.body());
+            assertTrue(v2Launched.body().contains("data-viewer-run"), v2Launched.body());
+            assertTrue(v2Launched.body().contains("data-viewer-start>Start execution</button>"),
+                    v2Launched.body());
 
             // 1. create-session: the workload supplies only the registration id.
             var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
@@ -187,6 +205,16 @@ class PackagedEmbedProcessTest {
                 EmbedProjectionBudget.DEFAULTS)) {
             assertInstanceOf(EmbedRevokeOutcome.Revoked.class,
                     store.revoke(new EmbedRevokeCommand("packaged-reg", TENANT, 1)));
+        }
+    }
+
+    private void provisionV2Registration() {
+        try (var store = SqliteEmbedRegistrationStore.openUnder(storeDirectory(), Clock.systemUTC(),
+                EmbedProjectionBudget.DEFAULTS)) {
+            assertInstanceOf(EmbedProvisionOutcome.Provisioned.class,
+                    store.provision(EmbedProvisionCommand.deploymentV2WithExecutionCapability(
+                            "packaged-v2-reg", 0, ISSUER, SUBJECT, TENANT, PARENT, Optional.empty(),
+                            "packaged-deployment", true)));
         }
     }
 

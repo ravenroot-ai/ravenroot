@@ -204,6 +204,5 @@ class ClassifyTest(unittest.TestCase):
         )
         self.assertEqual(result["tier"], "full")
 
-
 if __name__ == "__main__":
     unittest.main()

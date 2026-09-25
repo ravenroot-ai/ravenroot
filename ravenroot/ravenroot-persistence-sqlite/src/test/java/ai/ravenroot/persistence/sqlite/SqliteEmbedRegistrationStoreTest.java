@@ -68,6 +68,52 @@ class SqliteEmbedRegistrationStoreTest {
     }
 
     @Test
+    void deploymentV2SourcesRoundTripTheirRunSelectorImmediatelyAndAfterReopen() {
+        for (boolean showStartExecution : List.of(false, true)) {
+            String registrationId = "v2-" + showStartExecution;
+            var command = EmbedProvisionCommand.deploymentV2(registrationId, 0,
+                    EmbedRegistrationFixtures.ISSUER, EmbedRegistrationFixtures.SUBJECT,
+                    EmbedRegistrationFixtures.TENANT, "https://parent.example", Optional.empty(),
+                    "orders-" + showStartExecution, showStartExecution);
+            try (var store = open()) {
+                assertInstanceOf(EmbedProvisionOutcome.Provisioned.class, store.provision(command));
+                assertV2Source(store.currentForOperator(EmbedRegistrationFixtures.TENANT, registrationId)
+                        .orElseThrow(), "orders-" + showStartExecution, showStartExecution);
+                assertV2Source(assertInstanceOf(EmbedRegistrationResolution.Available.class,
+                        store.resolveCurrent(EmbedRegistrationFixtures.workload(), registrationId)).aggregate(),
+                        "orders-" + showStartExecution, showStartExecution);
+            }
+            try (var reopened = open()) {
+                assertV2Source(reopened.currentForOperator(EmbedRegistrationFixtures.TENANT, registrationId)
+                        .orElseThrow(), "orders-" + showStartExecution, showStartExecution);
+                assertV2Source(assertInstanceOf(EmbedRegistrationResolution.Available.class,
+                        reopened.resolveCurrent(EmbedRegistrationFixtures.workload(), registrationId)).aggregate(),
+                        "orders-" + showStartExecution, showStartExecution);
+            }
+        }
+    }
+
+    @Test
+    void aMalformedV2SourceRowFailsClosed() throws Exception {
+        Path databaseFile;
+        try (var store = open()) {
+            provisioned(store, EmbedRegistrationFixtures.command(0, "sha256:a", "start"));
+            databaseFile = store.databaseFile();
+        }
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databaseFile);
+             Statement statement = connection.createStatement()) {
+            assertEquals(1, statement.executeUpdate("UPDATE embed_registration SET source_version = '2', "
+                    + "source_kind = 'deployment-v2', source_deployment_id = 'orders', "
+                    + "source_show_start_execution = 'not-a-selector'"));
+        }
+        try (var reopened = open()) {
+            assertInstanceOf(EmbedRegistrationResolution.Unavailable.class,
+                    reopened.resolveCurrent(EmbedRegistrationFixtures.workload(),
+                            EmbedRegistrationFixtures.REGISTRATION));
+        }
+    }
+
+    @Test
     void populatedV1DatabaseUpgradesAtomicallyAndConcurrentOpenersObserveOneSnapshotMigration()
             throws Exception {
         var expected = EmbedRegistrationFixtures.command(0, "sha256:v1", "start", "next")
@@ -84,7 +130,7 @@ class SqliteEmbedRegistrationStoreTest {
         }
         for (Future<EmbedRegistrationAggregate> opened : migrated) {
             assertEquals(expected, opened.get(),
-                    "both openers must see the one complete v2 migration, never a half-upgraded row");
+                    "both openers must see the one complete v3 migration, never a half-upgraded row");
             assertInstanceOf(EmbedViewerSource.Snapshot.class, opened.get().source());
         }
 
@@ -93,19 +139,20 @@ class SqliteEmbedRegistrationStoreTest {
              var statement = connection.createStatement()) {
             try (var rows = statement.executeQuery("PRAGMA user_version")) {
                 assertTrue(rows.next());
-                assertEquals(2, rows.getInt(1));
+                assertEquals(3, rows.getInt(1));
             }
             try (var rows = statement.executeQuery("SELECT source_version, source_kind, "
-                    + "source_deployment_id FROM embed_registration")) {
+                    + "source_deployment_id, source_show_start_execution FROM embed_registration")) {
                 assertTrue(rows.next());
                 assertEquals("1", rows.getString("source_version"));
                 assertEquals("snapshot", rows.getString("source_kind"));
                 assertNull(rows.getString("source_deployment_id"));
+                assertNull(rows.getString("source_show_start_execution"));
                 assertFalse(rows.next());
             }
         }
 
-        // A later retry/reopen is a no-op at schema v2 and still reconstructs the exact legacy
+        // A later retry/reopen is a no-op at schema v3 and still reconstructs the exact legacy
         // aggregate and projection, including layout and edge ordering.
         try (var reopened = open()) {
             var loaded = reopened.currentForOperator(EmbedRegistrationFixtures.TENANT,
@@ -444,5 +491,11 @@ class SqliteEmbedRegistrationStoreTest {
                                                           ai.ravenroot.api.embed.EmbedProvisionCommand command) {
         return assertInstanceOf(EmbedProvisionOutcome.Provisioned.class,
                 store.provision(command)).aggregate();
+    }
+
+    private static void assertV2Source(EmbedRegistrationAggregate aggregate, String deploymentId,
+                                       boolean showStartExecution) {
+        assertEquals(new EmbedViewerSource.DeploymentV2(deploymentId, showStartExecution),
+                aggregate.source());
     }
 }

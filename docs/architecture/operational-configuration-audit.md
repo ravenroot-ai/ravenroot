@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 8044 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2103.
+Retired source candidates preserved in inventory history: 2106.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 89.
+Checked source reconciliations: 90.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 23839 candidates.
@@ -128,10 +128,10 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 23839 |
-| Unchanged identities | 23839 |
-| Approved identity migrations | 0 |
-| Approved retirements | 0 |
-| Semantically classified additions | 0 |
+| Unchanged identities | 23829 |
+| Approved identity migrations | 7 |
+| Approved retirements | 3 |
+| Semantically classified additions | 3 |
 | Current candidates | 23839 |
 
 ## Final semantic review
@@ -9318,19 +9318,19 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-d385abd0ae9003e27667` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java:1258` `if` | java | retained | protocol-or-format-invariant | The PRAGMA SQL prefix is a fixed statement format; the actual busy-timeout value is supplied separately by registry policy. |
 | `oc-85e3818daf0fb72df696` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java:1364` `onWorker` | java | retained | derived | This loop/index or timed-worker control value is local execution arithmetic, not a user-selectable registry limit. |
 | `oc-04683384b464795a95c8` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:79` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-cf8d8bed07d2560ad9c6` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:82` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
+| `oc-38859ee32739dc394d49` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:82` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
 | `oc-b9ccf935be59fa831d37` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:92` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-270b7643f788735a40d6` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:94` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-f70ff99dd2cb338ec0d0` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:94` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
-| `oc-cb7275df9eb7847c3b5d` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:120` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | The SQLite storage statement is a fixed registry-format invariant. |
-| `oc-8d71e7ed641ab10fe497` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:123` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-91c01231125c24fd3ff7` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:124` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-ab7c4da3c95a2f576a61` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:127` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-c08b4f593a5262172bce` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:128` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-47e2eb9adefb84113215` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:129` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-e07c2fbcd15c2d517a05` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:130` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
-| `oc-85e19b3aef09e13fe6ff` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:131` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
-| `oc-3e7bdbe0b3dd73bc83bf` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:132` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-30633a9362c50f3dfabe` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:94` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
+| `oc-ade47e63fbbef1aca43d` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:94` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-50b99684c20976f9f0b8` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:121` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | The SQLite storage statement is a fixed registry-format invariant. |
+| `oc-8d71e7ed641ab10fe497` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:124` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-91c01231125c24fd3ff7` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:125` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-6b4e77de63ca88897081` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:128` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-401ad744cc23eaf74f12` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:129` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-cebac805e934a73b211a` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:130` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-45681c44c00e552cd32f` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:131` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
+| `oc-c5296f1486d46975fdbc` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:132` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
+| `oc-b124c35adf7f2ad78695` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java:133` `SqliteEmbedRegistrationStore` | java | retained | protocol-or-format-invariant | Filename, schema/gate width, DDL/index, and SELECT projection define the durable embed-registration format and strict reconstruction path. |
 | `oc-5fabbd5e63edb8b57165` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionManifestStore.java:72` `SqliteExecutionManifestStore` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-4b27cdea3e1113c28e7b` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionManifestStore.java:73` `SqliteExecutionManifestStore` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-1aba7d38c449a31c3f49` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionManifestStore.java:74` `SqliteExecutionManifestStore` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

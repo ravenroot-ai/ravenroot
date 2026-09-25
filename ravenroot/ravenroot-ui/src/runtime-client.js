@@ -134,7 +134,7 @@ const UNSAFE_DIAGNOSTIC_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2
 const UNREDACTED_CREDENTIAL = /(?:\b(?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer|basic)\s+|\bbearer\s+|\b(?:api[-_.]?key|access[-_.]?token|refresh[-_.]?token|id[-_.]?token|password|passwd|client[-_.]?secret|private[-_.]?key|credential|secret|token)\s*[:=]\s*)(?!\[ravenroot:redacted:credential\])\S+/iu;
 const JWT_CREDENTIAL = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/u;
 const UNREDACTED_LOCATION_ASSIGNMENT = /(?:^|[^A-Za-z0-9_])(?:host(?:name)?|profile)\s*[:=]\s*(?!\[ravenroot:redacted:(?:host|profile)\])[^\s,;|?&#]+/iu;
-const UNREDACTED_URI_AUTHORITY = /[a-z][a-z0-9+.-]{1,31}:\/\/(?!\[ravenroot:redacted:host\])[^\s/?#]+/iu;
+const UNREDACTED_URI_AUTHORITY = /[a-z][a-z0-9+.-]{0,31}:\/\/(?!\[ravenroot:redacted:host\])[^\s/?#]+/iu;
 const PROPERTY_TOKEN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u;
 
 function safeDiagnosticToken(value, maximumBytes) {

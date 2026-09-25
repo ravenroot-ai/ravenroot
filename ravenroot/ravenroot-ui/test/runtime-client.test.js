@@ -55,7 +55,8 @@ describe('bounded startup diagnostics', () => {
 
   it.each(['password=hunter2', 'Authorization: Bearer secret-token',
     'eyJabcdefgh.abcdefgh.abcdefgh', 'host=private.example', 'profile=production',
-    'https://operator:pw@internal.example/a'])('rejects sensitive diagnostic display text', nodeId => {
+    'https://operator:pw@internal.example/a',
+    'node-url=x://operator:pw@private.example/path'])('rejects sensitive diagnostic display text', nodeId => {
     expect(() => validateDiagnosticFinding({
       contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
       reason: 'PROPERTY_TYPE_INVALID', nodeId, nodeRef, incidentId,

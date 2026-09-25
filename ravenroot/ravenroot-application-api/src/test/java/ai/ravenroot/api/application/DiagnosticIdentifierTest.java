@@ -44,6 +44,15 @@ class DiagnosticIdentifierTest {
         assertEquals(DiagnosticIdentifier.reference(
                 "listener;host=private.example;profile=production;url=https://operator:pw@internal.example:8443/a"),
                 location.reference());
+
+        var singleCharacterScheme = DiagnosticIdentifier.node(
+                "node-url=x://operator:pw@private.example/path");
+        assertEquals("node-url=x://[ravenroot:redacted:host]/path", singleCharacterScheme.display());
+        assertFalse(singleCharacterScheme.display().contains("operator"));
+        assertFalse(singleCharacterScheme.display().contains("pw"));
+        assertFalse(singleCharacterScheme.display().contains("private.example"));
+        assertEquals(DiagnosticIdentifier.reference(
+                "node-url=x://operator:pw@private.example/path"), singleCharacterScheme.reference());
     }
 
     @Test

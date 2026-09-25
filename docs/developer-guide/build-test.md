@@ -26,8 +26,8 @@ exists to prove.
 
 The object-storage module runs its TLS and SigV4 acceptance against real MinIO server and client
 containers. Their only authority is the project-owned, digest-pinned manifest at
-[`scripts/fixtures/minio/minio-fixtures.properties`](../../scripts/fixtures/minio/minio-fixtures.properties);
-the accompanying [fixture provenance and rotation guide](../../scripts/fixtures/minio/README.md)
+[`scripts/fixtures/minio/minio-fixtures.properties`](https://github.com/ravenroot-ai/ravenroot/blob/dev/scripts/fixtures/minio/minio-fixtures.properties);
+the accompanying [fixture provenance and rotation guide](https://github.com/ravenroot-ai/ravenroot/blob/dev/scripts/fixtures/minio/README.md)
 records the upstream source commits, original digests, licenses, and verified update procedure.
 
 Before running the Maven reactor on a clean host, verify and pull the fixtures for the host

@@ -45,7 +45,7 @@ final class KafkaConsumerSource implements InboundSource {
     private final KafkaConsumerProtocol protocol;
     private final Executor executor;
     private final Clock clock;
-    private final ReservedNetworkPolicy destinationPolicy;
+    private final DestinationAdmission destinationAdmission;
     private final Object lifecycle = new Object();
 
     private volatile State state = State.STOPPED;
@@ -59,19 +59,19 @@ final class KafkaConsumerSource implements InboundSource {
                         KafkaConsumerProfileResolver profiles, KafkaConsumerProtocol protocol,
                         Executor executor, Clock clock) {
         this(configuration, credentials, profiles, protocol, executor, clock,
-                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+                defaultDestinationAdmission());
     }
 
     KafkaConsumerSource(NodeConfiguration configuration, CredentialResolver credentials,
                         KafkaConsumerProfileResolver profiles, KafkaConsumerProtocol protocol,
-                        Executor executor, Clock clock, ReservedNetworkPolicy destinationPolicy) {
+                        Executor executor, Clock clock, DestinationAdmission destinationAdmission) {
         this.configuration = Objects.requireNonNull(configuration);
         this.credentials = Objects.requireNonNull(credentials);
         this.profiles = Objects.requireNonNull(profiles);
         this.protocol = Objects.requireNonNull(protocol);
         this.executor = Objects.requireNonNull(executor);
         this.clock = Objects.requireNonNull(clock);
-        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
+        this.destinationAdmission = Objects.requireNonNull(destinationAdmission);
     }
 
     @Override public CompletionStage<Void> start(InboundSourceContext context) {
@@ -131,7 +131,7 @@ final class KafkaConsumerSource implements InboundSource {
         char[] password = null;
         RuntimeState runtime = null;
         try {
-            settings = Settings.resolve(configuration, context, profiles, destinationPolicy);
+            settings = Settings.resolve(configuration, context, profiles, destinationAdmission);
             probeDurableIngress(context, settings.profile.startupTimeoutMs());
             Optional<SecretValue> resolved = credentials.resolve(settings.profile.credentialRef());
             if (resolved == null || resolved.isEmpty()) throw sourceFailure(KafkaSourceStartFailure.CREDENTIAL_UNAVAILABLE);
@@ -427,7 +427,7 @@ final class KafkaConsumerSource implements InboundSource {
                             int maxRetryBackoffMs, int poisonAttempts, String poisonPolicy) {
         static Settings resolve(NodeConfiguration c, InboundSourceContext context,
                                 KafkaConsumerProfileResolver profiles,
-                                ReservedNetworkPolicy destinationPolicy) {
+                                DestinationAdmission destinationAdmission) {
             for (String property : c.properties().keySet()) {
                 if (!KafkaConsumeNodeBehavior.knownConfiguration().contains(property)) {
                     throw sourceFailure(KafkaSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
@@ -436,13 +436,16 @@ final class KafkaConsumerSource implements InboundSource {
             String name = c.property("clusterProfile").orElseThrow(() -> sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_REQUIRED));
             KafkaConsumerProfile profile;
             try { profile = profiles.resolve(context.identity().tenantId(), name).orElse(null); }
-            catch (RuntimeException invalid) { profile = null; }
+            catch (RuntimeException invalid) {
+                throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE, invalid);
+            }
             if (profile == null || !profile.tenant().equals(context.identity().tenantId()) || !profile.name().equals(name)) {
                 throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE);
             }
-            try { EnvironmentKafkaProfileResolver.requireDestinations(
-                    String.join(",", profile.bootstrapServers()), destinationPolicy); }
-            catch (SecurityException refused) { throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE); }
+            try { destinationAdmission.requireAllowed(profile); }
+            catch (SecurityException refused) {
+                throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE, refused);
+            }
             String group = c.property("group", profile.groupLogicalName());
             if (!group.equals(profile.groupLogicalName())) throw sourceFailure(KafkaSourceStartFailure.GROUP_FORBIDDEN);
             String mode = c.property("subscriptionMode", "profile");
@@ -535,5 +538,16 @@ final class KafkaConsumerSource implements InboundSource {
 
     private static SourceStartException sourceFailure(KafkaSourceStartFailure code, Throwable cause) {
         return new SourceStartException(code, cause);
+    }
+
+    static DestinationAdmission defaultDestinationAdmission() {
+        ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(System.getenv());
+        return profile -> EnvironmentKafkaProfileResolver.requireDestinations(
+                String.join(",", profile.bootstrapServers()), policy);
+    }
+
+    @FunctionalInterface
+    interface DestinationAdmission {
+        void requireAllowed(KafkaConsumerProfile profile);
     }
 }

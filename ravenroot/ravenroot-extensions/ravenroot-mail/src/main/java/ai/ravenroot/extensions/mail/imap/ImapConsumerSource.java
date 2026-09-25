@@ -107,7 +107,7 @@ final class ImapConsumerSource implements InboundSource {
             catch (RuntimeException rejected) {
                 stopRequested = true;
                 state = State.FAILED;
-                startFlight.completeExceptionally(new IllegalStateException("imap-consumer-submission-failed"));
+                startFlight.completeExceptionally(rejected);
                 stopFlight.complete(null);
             }
             return startFlight;
@@ -539,9 +539,9 @@ final class ImapConsumerSource implements InboundSource {
                     try {
                         Optional<SecretValue> resolved = credentials.resolve(profile.credentialRef());
                         outcome = new CredentialOutcome(resolved == null || resolved.isEmpty()
-                                ? null : resolved.get());
+                                ? null : resolved.get(), null);
                     } catch (RuntimeException unavailable) {
-                        outcome = new CredentialOutcome(null);
+                        outcome = new CredentialOutcome(null, unavailable);
                     }
                     handoff.publish(outcome);
                 } finally {
@@ -669,7 +669,7 @@ final class ImapConsumerSource implements InboundSource {
         void reset() { attempts = 0; }
     }
 
-    private record CredentialOutcome(SecretValue secret) { }
+    private record CredentialOutcome(SecretValue secret, RuntimeException failure) { }
 
     private record ResolverAdmission(String key, Object token, boolean acquired) {
         static ResolverAdmission acquire(String tenant, String profile) {
@@ -746,6 +746,8 @@ final class ImapConsumerSource implements InboundSource {
             if (interrupt != null) interrupt.interrupt();
             close(late);
             if (interrupted) Thread.currentThread().interrupt();
+            if (available != null && available.failure() != null)
+                throw sourceFailure(ImapSourceStartFailure.CREDENTIAL_UNAVAILABLE, available.failure());
             if (available == null || available.secret() == null) throw sourceFailure(failure);
             return available.secret();
         }

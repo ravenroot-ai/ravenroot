@@ -3,9 +3,9 @@ const INSPECTION_PATH = '/v1/graphs/inspect';
 /**
  * Model the smallest successful graph-admission response exposed by the runtime.
  *
- * Existing browser specs provide only the runtime surfaces that matter to their scenario. Since
- * graph inspection is now a mandatory preflight, those synthetic runtimes must explicitly admit
- * the submitted graph before a Run or Play request can be exercised.
+ * Existing browser specs provide only the runtime surfaces that matter to their scenario. The
+ * shared happy-path fixture models the current structured inspection response; dedicated
+ * compatibility specs separately prove that inspection remains an optional early answer.
  */
 export function respondWithSuccessfulGraphInspection(request, response, options = {}) {
   const pathname = new URL(request.url, 'http://runtime.fixture').pathname;

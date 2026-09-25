@@ -119,7 +119,12 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                     context.deploymentId().value(), context.nodeId());
             boolean first = true;
             try {
-                String storedCursor = store.cursor(key);
+                String storedCursor;
+                try { storedCursor = store.cursor(key); }
+                catch (RuntimeException failure) {
+                    ready.completeExceptionally(failure);
+                    return;
+                }
                 String cursor = storedCursor == null && !profile.initialSince().isEmpty()
                         ? profile.initialSince() : storedCursor;
                 while (current(session)) {

@@ -72,6 +72,32 @@ class ImapStartupFailureDeploymentTest {
                 "STARTUP_FAILED", false);
     }
 
+    @Test
+    void credentialResolutionFailureKeepsItsCauseAndDeclaredProjection() throws Exception {
+        var sentinel = new IllegalStateException("host=private.example password=secret");
+        NodeBehavior behavior = new MailImapConsumeNodeBehavior(
+                (tenant, name) -> Optional.of(ImapConsumerTestSupport.profile()),
+                ignored -> { throw sentinel; },
+                (tenant, name) -> Optional.of(ImapConsumerTestSupport.policy()),
+                (profile, folder, password, opening) -> {
+                    throw new AssertionError("protocol must not open");
+                }, task -> Thread.ofVirtual().start(task), Clock.systemUTC());
+        assertFailure(sentinel, behavior, "credential-unavailable", true);
+    }
+
+    @Test
+    void executorRejectionKeepsItsCauseAndProjectsOnlyTheGenericReason() throws Exception {
+        var sentinel = new IllegalStateException("host=private.example password=secret");
+        NodeBehavior behavior = new MailImapConsumeNodeBehavior(
+                (tenant, name) -> Optional.of(ImapConsumerTestSupport.profile()),
+                ignored -> Optional.of(new SecretValue("credential".toCharArray())),
+                (tenant, name) -> Optional.of(ImapConsumerTestSupport.policy()),
+                (profile, folder, password, opening) -> {
+                    throw new AssertionError("protocol must not open");
+                }, task -> { throw sentinel; }, Clock.systemUTC());
+        assertFailure(sentinel, behavior, "STARTUP_FAILED", false);
+    }
+
     private void assertFailure(Throwable sentinel, ImapConsumerProtocol protocol,
                                String expectedReason, boolean classified) throws Exception {
         NodeBehavior behavior = new MailImapConsumeNodeBehavior(
@@ -79,6 +105,11 @@ class ImapStartupFailureDeploymentTest {
                 ignored -> Optional.of(new SecretValue("credential".toCharArray())),
                 (tenant, name) -> Optional.of(ImapConsumerTestSupport.policy()), protocol,
                 task -> Thread.ofVirtual().start(task), Clock.systemUTC());
+        assertFailure(sentinel, behavior, expectedReason, classified);
+    }
+
+    private void assertFailure(Throwable sentinel, NodeBehavior behavior,
+                               String expectedReason, boolean classified) throws Exception {
         BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage(behavior));
         AtomicInteger sinkCalls = new AtomicInteger();
         AtomicReference<Throwable> recorded = new AtomicReference<>();

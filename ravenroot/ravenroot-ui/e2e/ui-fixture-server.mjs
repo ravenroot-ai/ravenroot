@@ -35,8 +35,8 @@ createServer(async (request, response) => {
     return;
   }
   // Individual specs still own execution/session/deployment responses with page.route(), while
-  // the real-process harness owns refusal semantics. The shared synthetic runtime explicitly
-  // admits happy-path graphs before those mutation requests are exercised.
+  // the real-process harness owns refusal semantics. The shared synthetic runtime models the
+  // current happy-path response; inspection compatibility is exercised by a dedicated spec.
   if (respondWithSuccessfulGraphInspection(request, response, {
     headers: { 'Content-Security-Policy': CSP },
   })) return;

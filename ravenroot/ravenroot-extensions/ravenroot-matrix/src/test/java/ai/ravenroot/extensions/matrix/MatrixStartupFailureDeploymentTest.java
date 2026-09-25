@@ -89,6 +89,25 @@ class MatrixStartupFailureDeploymentTest {
                 "STARTUP_FAILED", false);
     }
 
+    @Test
+    void cursorReadFailureKeepsItsCauseAndProjectsOnlyTheGenericReason() throws Exception {
+        var sentinel = new IllegalStateException("host=private.example password=secret");
+        MatrixConfiguration configuration = MatrixTestSupport.configuration(directory.resolve("cursor.db"));
+        MatrixSyncStore store = new MatrixSyncStore() {
+            @Override public String cursor(SourceKey source) { throw sentinel; }
+            @Override public Decision bindEvent(SourceKey source, String eventId, String digest,
+                                                long deadline, CancellationSignal cancellation) {
+                throw new AssertionError("event binding must not run");
+            }
+            @Override public void advance(SourceKey source, String expected, String next,
+                                          long deadline, CancellationSignal cancellation) {
+                throw new AssertionError("cursor advance must not run");
+            }
+        };
+        assertFailure(sentinel, new MatrixNodePackage(configuration, store, MatrixTestSupport.fixedClock()),
+                new MatrixTestSupport.HttpHarness(), "STARTUP_FAILED", false);
+    }
+
     private static MatrixTestSupport.HttpHarness failedHttp(RuntimeException sentinel) {
         var http = new MatrixTestSupport.HttpHarness();
         http.pending = new OutboundCall<>() {

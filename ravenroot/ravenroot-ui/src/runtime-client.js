@@ -591,8 +591,17 @@ export class RavenrootRuntimeClient {
       body: graphMl,
     });
     if (!result || typeof result !== 'object' || Array.isArray(result)
-        || typeof result.valid !== 'boolean' || !Array.isArray(result.findings)
-        || result.findings.length > 1) throw new Error('Graph inspection response is malformed');
+        || typeof result.valid !== 'boolean') throw new Error('Graph inspection response is malformed');
+    // `findings` was added after the inspection endpoint. An N-1 runtime still returns the
+    // authoritative `valid` flag plus its legacy `violations` array; absence of the new field is
+    // not itself a refusal and must not make optional preflight a dependency of start.
+    if (result.findings === undefined) {
+      if (!Array.isArray(result.violations)) throw new Error('Graph inspection response is malformed');
+      return Object.freeze({ ...result, findings: Object.freeze([]) });
+    }
+    if (!Array.isArray(result.findings) || result.findings.length > 1) {
+      throw new Error('Graph inspection response is malformed');
+    }
     return Object.freeze({ ...result,
       findings: Object.freeze(result.findings.map(validateDiagnosticFinding)) });
   }

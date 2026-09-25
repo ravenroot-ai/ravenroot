@@ -72,12 +72,51 @@ class KafkaStartupFailureDeploymentTest {
         assertFailure(sentinel, (profile, password) -> { throw sentinel; }, "STARTUP_FAILED", false);
     }
 
+    @Test
+    void profileResolutionFailureKeepsItsCauseAndDeclaredProjection() throws Exception {
+        var sentinel = new IllegalStateException("host=private.example password=secret");
+        NodeBehavior behavior = new KafkaConsumeNodeBehavior(
+                ignored -> Optional.of(new SecretValue("credential".toCharArray())),
+                (tenant, name) -> { throw sentinel; },
+                (profile, password) -> { throw new AssertionError("protocol must not open"); },
+                task -> Thread.ofVirtual().start(task), Clock.systemUTC());
+        assertFailure(sentinel, behavior, "cluster-profile-unavailable", true);
+    }
+
+    @Test
+    void destinationPolicyFailureKeepsItsCauseAndDeclaredProjection() throws Exception {
+        var sentinel = new SecurityException("host=private.example password=secret");
+        NodeBehavior behavior = behaviorWithDestinationAdmission(profile -> { throw sentinel; });
+        assertFailure(sentinel, behavior, "cluster-profile-unavailable", true);
+    }
+
+    @Test
+    void unexpectedDestinationAdmissionFailureStaysGenericAndKeepsItsCause() throws Exception {
+        var sentinel = new IllegalStateException("host=private.example password=secret");
+        NodeBehavior behavior = behaviorWithDestinationAdmission(profile -> { throw sentinel; });
+        assertFailure(sentinel, behavior, "STARTUP_FAILED", false);
+    }
+
     private void assertFailure(Throwable sentinel, KafkaConsumerProtocol protocol,
                                String expectedReason, boolean classified) throws Exception {
         NodeBehavior behavior = new KafkaConsumeNodeBehavior(
                 ignored -> Optional.of(new SecretValue("credential".toCharArray())),
                 (tenant, name) -> Optional.of(KafkaConsumerTestSupport.profile()), protocol,
                 task -> Thread.ofVirtual().start(task), Clock.systemUTC());
+        assertFailure(sentinel, behavior, expectedReason, classified);
+    }
+
+    private static NodeBehavior behaviorWithDestinationAdmission(
+            KafkaConsumerSource.DestinationAdmission destinationAdmission) {
+        return new KafkaConsumeNodeBehavior(
+                ignored -> Optional.of(new SecretValue("credential".toCharArray())),
+                (tenant, name) -> Optional.of(KafkaConsumerTestSupport.profile()),
+                (profile, password) -> { throw new AssertionError("protocol must not open"); },
+                task -> Thread.ofVirtual().start(task), Clock.systemUTC(), destinationAdmission);
+    }
+
+    private void assertFailure(Throwable sentinel, NodeBehavior behavior,
+                               String expectedReason, boolean classified) throws Exception {
         BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage(behavior));
         AtomicInteger sinkCalls = new AtomicInteger();
         AtomicReference<Throwable> recorded = new AtomicReference<>();

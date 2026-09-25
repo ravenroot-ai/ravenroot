@@ -12126,17 +12126,21 @@ async function playGraph(mode = 'test') {
   try {
     const inspection = await executionClient.inspectGraph(graphMl,
       sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
-    if (!inspection.valid) {
+    if (!inspection.valid && inspection.findings[0]) {
       releaseExecutionCommand(flight);
       await presentRuntimeRefusal(owner, inspection.findings[0], 'Graph admission refused');
       return;
     }
   } catch (error) {
-    releaseExecutionCommand(flight);
-    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, 'Graph admission refused');
-    else if (owner === workspace.active) addActivityMessage('Graph inspection unavailable',
-      `${error?.message || 'The runtime inspection could not be completed'}. No start was submitted.`, 'failed');
-    return;
+    // Inspection is an advisory early answer, not an availability dependency. Only a validated
+    // structured finding is authoritative enough to refuse here; an older, unavailable, or
+    // malformed inspection response falls through to the mutation path, which revalidates the
+    // exact bytes and returns the same safe finding when it actually refuses them.
+    if (error?.finding) {
+      releaseExecutionCommand(flight);
+      await presentRuntimeRefusal(owner, error.finding, 'Graph admission refused');
+      return;
+    }
   }
   // Run has two meanings. A graph with an
   // effective SOURCE starts a local listener session (unchanged below). Every other graph gets

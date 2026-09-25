@@ -88,6 +88,19 @@ describe('bounded startup diagnostics', () => {
       failure: { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START',
         reason: 'host=private', incidentId } })).toThrow(/not a valid/);
   });
+
+  it('accepts an N-1 valid inspection response without structured findings', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      nodes: 3, edges: 2, startNodes: 1, endNodes: 1, valid: true, violations: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl });
+
+    const inspection = await client.inspectGraph('<graphml/>');
+
+    expect(inspection).toMatchObject({ valid: true, violations: [] });
+    expect(inspection.findings).toEqual([]);
+    expect(Object.isFrozen(inspection.findings)).toBe(true);
+  });
 });
 import {
   applyDeploymentViewFrame,

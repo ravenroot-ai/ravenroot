@@ -77,9 +77,11 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real TLS/SigV4 integration against a pinned S3-compatible MinIO server. */
 class StorageMinioIntegrationTest {
     private static final String MINIO_IMAGE =
-            "quay.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e";
+            "bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c";
     private static final String MC_IMAGE =
-            "quay.io/minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3";
+            "bitnamilegacy/minio-client@sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511";
+    // Bitnami defaults to uid 1001 with HOME=/; fixture containers use uid 0 so the root-only
+    // TLS key and transient mc configuration remain usable without loosening host permissions.
     private static final String TENANT = "tenant-a";
     private static final String RECOVERY_NODE = "recover-list";
     private static final Duration LEASE_TTL = Duration.ofSeconds(30);
@@ -378,10 +380,12 @@ class StorageMinioIntegrationTest {
                 CommandResult started = retryStart(
                         () -> sensitiveCommand(Duration.ofSeconds(60), Map.of(
                                         "MINIO_ROOT_USER", accessKey, "MINIO_ROOT_PASSWORD", secretKey),
-                                "docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::9000",
+                                "docker", "run", "-d", "--rm", "--user", "0", "--name", name,
+                                "-p", "127.0.0.1::9000",
                                 "-e", "MINIO_ROOT_USER", "-e", "MINIO_ROOT_PASSWORD", "-v",
                                 tlsDirectory.toAbsolutePath() + ":/root/.minio/certs:ro", MINIO_IMAGE,
-                                "server", "/data", "--address", ":9000"),
+                                "server", "/data", "--address", ":9000", "--certs-dir",
+                                "/root/.minio/certs"),
                         () -> removeContainer(name),
                         failedAttempts -> Thread.sleep(START_RETRY_DELAY.multipliedBy(failedAttempts).toMillis()));
                 requireSuccess(started, "MinIO start");
@@ -409,7 +413,7 @@ class StorageMinioIntegrationTest {
 
         boolean versionExists(String key, String versionId) {
             CommandResult result = sensitiveCommand(Duration.ofSeconds(30), credentialEnvironment(),
-                    "docker", "run", "--rm", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
+                    "docker", "run", "--rm", "--user", "0", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
                     "--network", "container:" + name, "-e", "VERSION_ID=" + versionId, "-e", "OBJECT_KEY=" + key,
                     "--entrypoint", "/bin/sh", MC_IMAGE, "-c", alias()
                     + " && mc --insecure stat --version-id \"$VERSION_ID\" \"local/bucket-a/$OBJECT_KEY\"");
@@ -418,8 +422,8 @@ class StorageMinioIntegrationTest {
 
         private CommandResult mc(String operation) {
             return sensitiveCommand(Duration.ofSeconds(30), credentialEnvironment(), "docker", "run", "--rm",
-                    "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY", "--network", "container:" + name,
-                    "--entrypoint", "/bin/sh", MC_IMAGE, "-c",
+                    "--user", "0", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
+                    "--network", "container:" + name, "--entrypoint", "/bin/sh", MC_IMAGE, "-c",
                     alias() + " && " + operation);
         }
 

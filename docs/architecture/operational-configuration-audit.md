@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23928 |
+| Atomic operational candidates discovered | 23968 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23928 |
+| Reviewed | 23968 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1956 |
-| Retained protocol or format invariants | 9931 |
+| Retained protocol or format invariants | 9938 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 669 |
 | Retained derived values | 1076 |
-| Test fixtures | 8105 |
+| Test fixtures | 8138 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2114.
+Retired source candidates preserved in inventory history: 2127.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 92.
+Checked source reconciliations: 93.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23928 candidates.
+zero-count or unclassified rows as needed and sums to 23968 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23928 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22267 |
+| retained | 22307 |
 
 ### Classification counts
 
@@ -86,21 +86,21 @@ zero-count or unclassified rows as needed and sums to 23928 candidates.
 | derived | 1076 |
 | operator-configurable | 1661 |
 | presentation-text | 669 |
-| protocol-or-format-invariant | 9931 |
+| protocol-or-format-invariant | 9938 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1956 |
-| test-fixture | 8105 |
+| test-fixture | 8138 |
 | unclassified | 0 |
 
 ### Surface counts
 
 | Surface | Candidates |
 |---|---:|
-| deployment | 2858 |
+| deployment | 2865 |
 | deployment-example | 20 |
 | java | 7275 |
 | script | 2328 |
-| test-fixture | 8105 |
+| test-fixture | 8138 |
 | ui | 3342 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8529 |
-| Retained; no remediation required | 13379 |
+| Retained; no remediation required | 13419 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23865 |
-| Unchanged identities | 23863 |
-| Approved identity migrations | 1 |
-| Approved retirements | 1 |
-| Semantically classified additions | 64 |
-| Current candidates | 23928 |
+| Source inventory candidates | 23928 |
+| Unchanged identities | 23911 |
+| Approved identity migrations | 4 |
+| Approved retirements | 13 |
+| Semantically classified additions | 53 |
+| Current candidates | 23968 |
 
 ## Final semantic review
 
@@ -15526,6 +15526,13 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-0c6c6315a30d0a28c57e` | `scripts/e2e_report_names.mjs:34` `if` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-4af94323fd91ac4ac707` | `scripts/e2e_report_names.mjs:45` `for` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-a6a1949d1b0551ea04d2` | `scripts/e2e_report_names.mjs:46` `for` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4daacb14c1a90b8baa12` | `scripts/fixtures/minio/Dockerfile:13` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
+| `oc-86be0c2588a59740ea70` | `scripts/fixtures/minio/Dockerfile:14` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
+| `oc-77afd6627d48cc7a5fbd` | `scripts/fixtures/minio/Dockerfile:15` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
+| `oc-e3689ab54a48620fffbf` | `scripts/fixtures/minio/Dockerfile:16` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
+| `oc-7cca917b7e9bf86f8cbf` | `scripts/fixtures/minio/Dockerfile:17` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
+| `oc-fc02b28bb5fe5ce65f5c` | `scripts/fixtures/minio/Dockerfile:18` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
+| `oc-5d95b3e8abc93d1eee8e` | `scripts/fixtures/minio/Dockerfile:19` `module` | deployment | retained | protocol-or-format-invariant | This OCI label is part of the reviewed repository-link and immutable fixture provenance contract. |
 | `oc-400691183723d68d6fb2` | `scripts/github_release.py:2` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
 | `oc-a48db9f13ca0a70c04c3` | `scripts/github_release.py:2` `module` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
 | `oc-ad91689d9238147fdfe3` | `scripts/github_release.py:2` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |

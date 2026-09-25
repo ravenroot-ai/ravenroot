@@ -242,13 +242,24 @@ public final class RouteTable {
             // contexts and their exact-origin protocol. NEVER excludes both the S2S grant exchange
             // and the child viewer's proof-bound surface from the authoring assistant.
             new RouteDescriptor(Set.of("POST"), "/v1/embed/sessions",
-                    "Creates a one-use embedded-viewer launch ticket from an opaque, pre-registered "
-                            + "registration id. Requires a WORKLOAD bearer and accepts no graph coordinates.",
+                    "Creates a one-use embedded-viewer launch ticket from either an opaque legacy "
+                            + "registration or an exact READY deployment selection under dynamic policy.",
                     true, false, 201,
                     List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
                             WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
                             WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
                             WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/embed/deployments",
+                    "Lists a bounded page of the workload tenant's READY process-local deployment selections.",
+                    true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE), NEVER, false),
+            new RouteDescriptor(Set.of("DELETE"), "/v1/embed/grants/{id}",
+                    "Idempotently revokes one dynamic embed grant owned by the authenticated workload.",
+                    true, false, 204,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/embed/acknowledgements",
                     "Records the integrating BFF's authenticated, one-use acknowledgement of the "
                             + "exact viewer channel before child exchange is permitted.",

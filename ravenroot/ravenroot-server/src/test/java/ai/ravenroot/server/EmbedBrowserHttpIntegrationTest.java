@@ -32,6 +32,7 @@ import ai.ravenroot.server.embed.EmbedBrowserConfiguration;
 import ai.ravenroot.server.embed.EmbedBrowserHttpHandler;
 import ai.ravenroot.server.embed.EmbedSecurityAuditSink;
 import ai.ravenroot.server.embed.EmbedViewerOrigin;
+import ai.ravenroot.server.embed.DynamicEmbedAuthorizationPolicy;
 import ai.ravenroot.server.embed.P256EmbedProofVerifier;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import ai.ravenroot.server.security.AuthenticationException;
@@ -69,6 +70,106 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmbedBrowserHttpIntegrationTest {
     private static final String VIEWER = "https://viewer.example";
     private static final String PARENT = "https://parent.example";
+
+    @Test
+    void dynamicDiscoverySelectsOnlyCurrentReadyIncarnationAndGrantIsRevocable() throws Exception {
+        try (var engine = new PekkoExecutionEngine("embed-dynamic-discovery")) {
+            var environment = BehaviorEnvironment.safeDefaults();
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                    BehaviorRegistry.standard(environment), environment.artifacts(), environment.programRuntime(),
+                    ExecutionIdentitySource.randomUuids(), null, 8);
+            var authorization = new DefaultAuthorizationService(event -> { });
+            var facade = new ai.ravenroot.api.application.AuthorizedRavenrootApplication(
+                    application, authorization, event -> { }, false);
+            var policy = DynamicEmbedAuthorizationPolicy.fromEnvironment(Map.of(
+                    DynamicEmbedAuthorizationPolicy.MODE_VARIABLE, "authenticated"),
+                    new EmbedViewerOrigin(VIEWER));
+            var config = new EmbedBrowserConfiguration(true, new EmbedViewerOrigin(VIEWER),
+                    null, null, null, event -> { }, Clock.systemUTC(), Duration.ofMinutes(1),
+                    Duration.ofMinutes(1), Duration.ofMinutes(2), Duration.ofMinutes(1),
+                    16, 16, 32, 1, true, policy, Duration.ofMinutes(2), 16);
+            var handler = new EmbedBrowserHttpHandler(config, facade,
+                    new DeploymentObservationCursorStore(Clock.systemUTC()));
+            var explicit = HttpRequestContext.create("dynamic-request").withClient("127.0.0.1", false)
+                    .withPrincipal(new AuthenticatedPrincipal("workload", AuthenticatedPrincipal.Type.WORKLOAD,
+                            "issuer", "tenant", Set.of(Role.VIEWER), Set.of(
+                            "ravenroot.embed.deployment.discover", "ravenroot.embed.session.create")));
+            var raw = com.sun.net.httpserver.HttpServer.create(
+                    new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+            raw.createContext(EmbedBrowserHttpHandler.DISCOVERY_PATH,
+                    exchange -> handler.discoverDeployments(exchange, explicit));
+            raw.createContext(EmbedBrowserHttpHandler.CREATE_PATH,
+                    exchange -> handler.createSession(exchange, explicit));
+            raw.createContext(EmbedBrowserHttpHandler.GRANT_PATH,
+                    exchange -> handler.revokeGrant(exchange, explicit));
+            raw.createContext(EmbedBrowserHttpHandler.LAUNCH_PATH,
+                    exchange -> handler.launch(exchange, explicit));
+            raw.start();
+            try {
+                var client = HttpClient.newHttpClient();
+                String base = "http://127.0.0.1:" + raw.getAddress().getPort();
+                var before = send(client, request(base + EmbedBrowserHttpHandler.DISCOVERY_PATH).GET());
+                assertEquals(200, before.statusCode(), before.body());
+                assertTrue(before.body().contains("\"deployments\":[]"), before.body());
+                assertEquals(400, send(client, request(base + EmbedBrowserHttpHandler.DISCOVERY_PATH
+                        + "?limit=101").GET()).statusCode());
+                assertEquals(400, send(client, request(base + EmbedBrowserHttpHandler.DISCOVERY_PATH
+                        + "?limit=1&limit=2").GET()).statusCode());
+
+                application.registerLocalDeployment(new SecurityContext("register", "tenant", "operator",
+                                PrincipalType.USER, "issuer"), "orders",
+                        new ByteArrayInputStream(LIVE_GRAPH.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                application.startLocalDeployment(new SecurityContext("start", "tenant", "operator",
+                                PrincipalType.USER, "issuer"), "orders")
+                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                var notReady = application.localDeploymentView("tenant", "orders").orElseThrow();
+                application.stopLocalDeployment("tenant", "orders")
+                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                String beforeReady = "{\"deploymentId\":\"orders\",\"incarnationId\":\""
+                        + notReady.source().incarnationId() + "\",\"graphVersion\":\""
+                        + notReady.source().graphVersion() + "\",\"parentOrigin\":\"" + PARENT + "\"}";
+                var deniedBeforeReady = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(beforeReady)));
+                assertEquals(403, deniedBeforeReady.statusCode(), deniedBeforeReady.body());
+                application.startLocalDeployment(new SecurityContext("restart", "tenant", "operator",
+                                PrincipalType.USER, "issuer"), "orders")
+                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                var discovered = send(client, request(base + EmbedBrowserHttpHandler.DISCOVERY_PATH).GET());
+                assertEquals(200, discovered.statusCode(), discovered.body());
+                assertTrue(discovered.body().contains("\"deploymentId\":\"orders\""), discovered.body());
+                String incarnation = json(discovered.body(), "incarnationId");
+                String version = json(discovered.body(), "graphVersion");
+
+                String dynamic = "{\"deploymentId\":\"orders\",\"incarnationId\":\"" + incarnation
+                        + "\",\"graphVersion\":\"" + version + "\",\"parentOrigin\":\"" + PARENT + "\"}";
+                var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(dynamic)));
+                assertEquals(201, created.statusCode(), created.body());
+                String grantId = json(created.body(), "grantId");
+                URI launchUri = URI.create(json(created.body(), "launchUrl"));
+
+                var stale = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(dynamic.replace(incarnation, "stale"))));
+                assertEquals(403, stale.statusCode(), stale.body());
+
+                var revoked = send(client, request(base + EmbedBrowserHttpHandler.GRANT_PATH + "/" + grantId)
+                        .DELETE());
+                assertEquals(204, revoked.statusCode());
+                var launchAfterRevoke = send(client, request(base + launchUri.getRawPath() + "?"
+                        + launchUri.getRawQuery()).header("Sec-Fetch-Mode", "navigate")
+                        .header("Sec-Fetch-Dest", "iframe").GET());
+                assertEquals(403, launchAfterRevoke.statusCode(), launchAfterRevoke.body());
+                var repeated = send(client, request(base + EmbedBrowserHttpHandler.GRANT_PATH + "/" + grantId)
+                        .DELETE());
+                assertEquals(204, repeated.statusCode());
+            } finally {
+                raw.stop(0);
+            }
+        }
+    }
 
     @Test
     void contextualAdapterIgnoresConflictingLegacyPrincipalAndKeepsTheCarrierRequestId() throws Exception {
@@ -252,8 +353,9 @@ class EmbedBrowserHttpIntegrationTest {
     }
 
     @Test
-    void conditionalRouteTableSurfaceMatchesTheFiveLiveHandlerPaths() {
+    void conditionalRouteTableSurfaceMatchesTheLiveHandlerPaths() {
         var expected = Set.of(EmbedBrowserHttpHandler.CREATE_PATH,
+                EmbedBrowserHttpHandler.DISCOVERY_PATH, EmbedBrowserHttpHandler.GRANT_PATH + "/{id}",
                 EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH, EmbedBrowserHttpHandler.LAUNCH_PATH,
                 EmbedBrowserHttpHandler.EXCHANGE_PATH, EmbedBrowserHttpHandler.PROJECTION_PATH,
                 EmbedBrowserHttpHandler.OBSERVATION_PATH, EmbedBrowserHttpHandler.RUNS_PATH,

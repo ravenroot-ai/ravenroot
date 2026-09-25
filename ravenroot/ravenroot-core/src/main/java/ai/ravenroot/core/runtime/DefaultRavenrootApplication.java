@@ -2655,6 +2655,18 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public java.util.List<DeploymentViewerView> localDeploymentViews(String tenantId) {
+        String tenant = requireTenant(tenantId);
+        return localDeployments.keySet().stream()
+                .filter(key -> key.tenantId().equals(tenant))
+                .map(LocalDeploymentKey::deploymentId)
+                .sorted()
+                .map(id -> localDeploymentView(tenant, id))
+                .flatMap(java.util.Optional::stream)
+                .toList();
+    }
+
+    @Override
     public EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
                                                                String deploymentId,
                                                                String incarnationId,

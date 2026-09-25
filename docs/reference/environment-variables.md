@@ -157,6 +157,10 @@ Detailed contract: [Embedded viewer](embed-extension-contracts.md).
 | Variable or family | Applicability and default boundary |
 |---|---|
 | `RAVENROOT_EMBED_BEARER_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_ALLOWED_ORIGINS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_GRANT_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_ENABLED` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_EXCHANGE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_PROOF_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |

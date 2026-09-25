@@ -69,6 +69,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -76,14 +77,70 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real TLS/SigV4 integration against a pinned S3-compatible MinIO server. */
 class StorageMinioIntegrationTest {
     private static final String MINIO_IMAGE =
-            "quay.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e";
+            "bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c";
     private static final String MC_IMAGE =
-            "quay.io/minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3";
+            "bitnamilegacy/minio-client@sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511";
+    // Bitnami defaults to uid 1001 with HOME=/; fixture containers use uid 0 so the root-only
+    // TLS key and transient mc configuration remain usable without loosening host permissions.
     private static final String TENANT = "tenant-a";
     private static final String RECOVERY_NODE = "recover-list";
     private static final Duration LEASE_TTL = Duration.ofSeconds(30);
 
     @TempDir Path directory;
+
+    @Test
+    void minioStartupRetriesPositiveProcessFailuresAfterCleanup() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger cleanups = new AtomicInteger();
+        AtomicInteger delays = new AtomicInteger();
+        CommandResult result = MinioServer.retryStart(
+                () -> attempts.incrementAndGet() < 3
+                        ? new CommandResult(125, "sensitive command output withheld")
+                        : new CommandResult(0, "sensitive command output withheld"),
+                cleanups::incrementAndGet,
+                ignored -> delays.incrementAndGet());
+
+        assertEquals(0, result.exitCode());
+        assertEquals(3, attempts.get());
+        assertEquals(2, cleanups.get());
+        assertEquals(2, delays.get());
+    }
+
+    @Test
+    void minioStartupRetryIsBoundedAndKeepsTheFinalFailureOpaque() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger cleanups = new AtomicInteger();
+        CommandResult result = MinioServer.retryStart(
+                () -> {
+                    attempts.incrementAndGet();
+                    return new CommandResult(125, "sensitive command output withheld");
+                },
+                cleanups::incrementAndGet,
+                ignored -> { });
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> requireSuccess(result, "MinIO start"));
+        assertEquals("MinIO start failed: sensitive command output withheld", failure.getMessage());
+        assertEquals(3, attempts.get());
+        assertEquals(2, cleanups.get());
+    }
+
+    @Test
+    void minioStartupDoesNotRetryTimeoutOrInterruptionSentinels() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger cleanups = new AtomicInteger();
+        CommandResult result = MinioServer.retryStart(
+                () -> {
+                    attempts.incrementAndGet();
+                    return new CommandResult(-1, "command timed out");
+                },
+                cleanups::incrementAndGet,
+                ignored -> fail("a non-process failure must not be delayed or retried"));
+
+        assertEquals(-1, result.exitCode());
+        assertEquals(1, attempts.get());
+        assertEquals(0, cleanups.get());
+    }
 
     @Test
     @Timeout(value = 180, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
@@ -290,6 +347,9 @@ class StorageMinioIntegrationTest {
     }
 
     private static final class MinioServer implements AutoCloseable {
+        private static final int START_ATTEMPTS = 3;
+        private static final Duration START_RETRY_DELAY = Duration.ofSeconds(1);
+
         private final String name;
         private final URI endpoint;
         private final HttpClient client;
@@ -317,12 +377,17 @@ class StorageMinioIntegrationTest {
             String secretKey = UUID.randomUUID().toString().replace("-", "")
                     + UUID.randomUUID().toString().replace("-", "");
             try {
-                CommandResult started = sensitiveCommand(Duration.ofSeconds(60), Map.of(
-                                "MINIO_ROOT_USER", accessKey, "MINIO_ROOT_PASSWORD", secretKey),
-                        "docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::9000",
-                        "-e", "MINIO_ROOT_USER", "-e", "MINIO_ROOT_PASSWORD", "-v",
-                        tlsDirectory.toAbsolutePath() + ":/root/.minio/certs:ro", MINIO_IMAGE,
-                        "server", "/data", "--address", ":9000");
+                CommandResult started = retryStart(
+                        () -> sensitiveCommand(Duration.ofSeconds(60), Map.of(
+                                        "MINIO_ROOT_USER", accessKey, "MINIO_ROOT_PASSWORD", secretKey),
+                                "docker", "run", "-d", "--rm", "--user", "0", "--name", name,
+                                "-p", "127.0.0.1::9000",
+                                "-e", "MINIO_ROOT_USER", "-e", "MINIO_ROOT_PASSWORD", "-v",
+                                tlsDirectory.toAbsolutePath() + ":/root/.minio/certs:ro", MINIO_IMAGE,
+                                "server", "/data", "--address", ":9000", "--certs-dir",
+                                "/root/.minio/certs"),
+                        () -> removeContainer(name),
+                        failedAttempts -> Thread.sleep(START_RETRY_DELAY.multipliedBy(failedAttempts).toMillis()));
                 requireSuccess(started, "MinIO start");
                 CommandResult port = requireSuccess(command(Duration.ofSeconds(10), "docker", "port", name,
                         "9000/tcp"), "MinIO port lookup");
@@ -348,7 +413,7 @@ class StorageMinioIntegrationTest {
 
         boolean versionExists(String key, String versionId) {
             CommandResult result = sensitiveCommand(Duration.ofSeconds(30), credentialEnvironment(),
-                    "docker", "run", "--rm", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
+                    "docker", "run", "--rm", "--user", "0", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
                     "--network", "container:" + name, "-e", "VERSION_ID=" + versionId, "-e", "OBJECT_KEY=" + key,
                     "--entrypoint", "/bin/sh", MC_IMAGE, "-c", alias()
                     + " && mc --insecure stat --version-id \"$VERSION_ID\" \"local/bucket-a/$OBJECT_KEY\"");
@@ -357,8 +422,8 @@ class StorageMinioIntegrationTest {
 
         private CommandResult mc(String operation) {
             return sensitiveCommand(Duration.ofSeconds(30), credentialEnvironment(), "docker", "run", "--rm",
-                    "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY", "--network", "container:" + name,
-                    "--entrypoint", "/bin/sh", MC_IMAGE, "-c",
+                    "--user", "0", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
+                    "--network", "container:" + name, "--entrypoint", "/bin/sh", MC_IMAGE, "-c",
                     alias() + " && " + operation);
         }
 
@@ -413,6 +478,26 @@ class StorageMinioIntegrationTest {
                 if (!attemptInterrupted && !"command interrupted".equals(result.output())) break;
             }
             return new CleanupCommandResult(result, interrupted);
+        }
+
+        private static CommandResult retryStart(
+                StartAttempt start, Runnable cleanup, RetryDelay delay) throws InterruptedException {
+            CommandResult result = new CommandResult(-1, "MinIO start did not run");
+            for (int attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+                result = start.run();
+                if (result.exitCode() <= 0 || attempt == START_ATTEMPTS
+                        || Thread.currentThread().isInterrupted()) {
+                    return result;
+                }
+                cleanup.run();
+                try {
+                    delay.pause(attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
+                }
+            }
+            return result;
         }
 
         private static HttpClient trustedClient(Path certificate) throws Exception {
@@ -549,4 +634,6 @@ class StorageMinioIntegrationTest {
 
     private record CommandResult(int exitCode, String output) { }
     private record CleanupCommandResult(CommandResult result, boolean interrupted) { }
+    @FunctionalInterface private interface StartAttempt { CommandResult run(); }
+    @FunctionalInterface private interface RetryDelay { void pause(int failedAttempts) throws InterruptedException; }
 }

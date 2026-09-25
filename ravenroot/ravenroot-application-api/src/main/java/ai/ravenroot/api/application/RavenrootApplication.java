@@ -392,6 +392,20 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Lists browser-safe views for the tenant's process-local deployments.
+     *
+     * <p>The caller applies its own lifecycle filter. Returning the complete local set here keeps
+     * discovery and exact session-time resolution on the same source of truth, while the authorized
+     * facade decides which subset may cross an adapter boundary.</p>
+     * @param tenantId tenant whose local deployment views are read
+     * @return deterministic immutable list of currently resolvable deployment views
+     */
+    default java.util.List<DeploymentViewerView> localDeploymentViews(String tenantId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        return java.util.List.of();
+    }
+
+    /**
      * Replays only events belonging to one exact local deployment incarnation and graph version.
      * Implementations filter before returning the page; callers must never filter a tenant-wide page.
      * @param tenantId tenant that owns the deployment

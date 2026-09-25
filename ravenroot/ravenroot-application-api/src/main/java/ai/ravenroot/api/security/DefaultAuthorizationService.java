@@ -68,6 +68,10 @@ public final class DefaultAuthorizationService implements AuthorizationService {
                 && context.principalType() != PrincipalType.WORKLOAD) {
             return deny("embed sessions require a workload principal");
         }
+        if (action == AuthorizationAction.EMBED_DEPLOYMENT_DISCOVER
+                && context.principalType() != PrincipalType.WORKLOAD) {
+            return deny("embed deployment discovery requires a workload principal");
+        }
         // The mirror image of the rule above. Every embed HTTP route authenticates a WORKLOAD,
         // so requiring a USER here is what makes provision and revoke unreachable from the browser
         // boundary, from a graph and from a plugin, independently of which roles a token carries.
@@ -102,6 +106,7 @@ public final class DefaultAuthorizationService implements AuthorizationService {
                 AuthorizationAction.GRAPH_READ, AuthorizationAction.EXECUTION_START);
         put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.EMBED_GRAPH_READ, AuthorizationAction.EMBED_SESSION_CREATE,
+                AuthorizationAction.EMBED_DEPLOYMENT_DISCOVER,
                 AuthorizationAction.DEPLOYMENT_OBSERVE, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
                 AuthorizationAction.EMBED_DEPLOYMENT_EXECUTE);
         // Deliberately narrower than the actions above, which VIEWER holds. Deciding which

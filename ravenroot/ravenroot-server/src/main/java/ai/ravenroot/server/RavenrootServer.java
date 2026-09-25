@@ -844,6 +844,20 @@ public final class RavenrootServer implements AutoCloseable {
                         exchange.getResponseHeaders().set("Pragma", "no-cache");
                         protectedRequest(embed::acknowledgeParent).handle(exchange, httpContext);
                     }));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.DISCOVERY_PATH,
+                    publicContext((exchange, httpContext) -> {
+                        if (!ai.ravenroot.server.embed.EmbedBrowserHttpHandler.requireExactPath(exchange,
+                                ai.ravenroot.server.embed.EmbedBrowserHttpHandler.DISCOVERY_PATH)) return;
+                        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                        exchange.getResponseHeaders().set("Pragma", "no-cache");
+                        protectedRequest(embed::discoverDeployments).handle(exchange, httpContext);
+                    }));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.GRANT_PATH,
+                    publicContext((exchange, httpContext) -> {
+                        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                        exchange.getResponseHeaders().set("Pragma", "no-cache");
+                        protectedRequest(embed::revokeGrant).handle(exchange, httpContext);
+                    }));
             // Browser routes perform their own exact viewer Origin/Sec-Fetch checks and emit no CORS.
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.LAUNCH_PATH,
                     publicContext(embed::launch));

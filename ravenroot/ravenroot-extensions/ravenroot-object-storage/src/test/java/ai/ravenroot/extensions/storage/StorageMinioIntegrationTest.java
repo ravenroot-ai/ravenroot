@@ -76,9 +76,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real TLS/SigV4 integration against a pinned S3-compatible MinIO server. */
 class StorageMinioIntegrationTest {
     private static final String MINIO_IMAGE =
-            "quay.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e";
+            "docker.io/bitnamilegacy/minio@sha256:d7cd0e172c4cc0870f4bdc3142018e2a37be9acf04d68f386600daad427e0cab";
     private static final String MC_IMAGE =
-            "quay.io/minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3";
+            "docker.io/bitnamilegacy/minio-client@sha256:28e38f52642c06a2344fa974cf55786b4c52601b6b9b0676c68d40ee0876a5bc";
     private static final String TENANT = "tenant-a";
     private static final String RECOVERY_NODE = "recover-list";
     private static final Duration LEASE_TTL = Duration.ofSeconds(30);
@@ -321,8 +321,8 @@ class StorageMinioIntegrationTest {
                                 "MINIO_ROOT_USER", accessKey, "MINIO_ROOT_PASSWORD", secretKey),
                         "docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::9000",
                         "-e", "MINIO_ROOT_USER", "-e", "MINIO_ROOT_PASSWORD", "-v",
-                        tlsDirectory.toAbsolutePath() + ":/root/.minio/certs:ro", MINIO_IMAGE,
-                        "server", "/data", "--address", ":9000");
+                        tlsDirectory.toAbsolutePath() + ":/certs:ro", MINIO_IMAGE,
+                        "server", "/bitnami/minio/data", "--address", ":9000", "--certs-dir", "/certs");
                 requireSuccess(started, "MinIO start");
                 CommandResult port = requireSuccess(command(Duration.ofSeconds(10), "docker", "port", name,
                         "9000/tcp"), "MinIO port lookup");

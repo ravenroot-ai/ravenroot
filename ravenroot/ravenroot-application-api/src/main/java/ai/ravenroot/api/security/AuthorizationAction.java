@@ -90,7 +90,10 @@ public enum AuthorizationAction {
     EMBED_DEPLOYMENT_EXECUTE("ravenroot.embed.deployment.execute", true),
 
     /** Explicitly override one Human Task decision policy with attributable operator intent. */
-    HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true);
+    HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true),
+
+    /** Discover the caller tenant's process-local deployments that are currently ready to embed. */
+    EMBED_DEPLOYMENT_DISCOVER("ravenroot.embed.deployment.discover", true);
 
     private final String requiredScope;
     private final boolean available;

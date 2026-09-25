@@ -4,7 +4,8 @@ Integrate a host page with the viewer without exposing an operator token or a mu
 
 ## Integration sequence
 
-1. Obtain the registered deployment identifier and exact allowed origin from the operator.
+1. Either obtain a legacy registration from the operator, or discover a READY deployment under the
+   authenticated dynamic policy and retain its exact deployment/incarnation/version tuple.
 2. Request a one-time launch server-side and deliver only that launch value to the browser.
 3. Let the viewer exchange it for a scoped short-lived session, then fetch the authorized projection.
 4. For a deployment-backed registration, let the viewer open the signed, bearer-authenticated
@@ -16,10 +17,13 @@ Integrate a host page with the viewer without exposing an operator token or a mu
 
 ## Authority boundary
 
-The integrator owns host placement and workload-token handling. Only the operator owns registration
-and the snapshot form's seven gate attestations; the viewer has read-only projection and observation
-authority. The browser bearer and proof key stay inside the viewer frame. Projection and observation
-payloads are never sent to the parent through `postMessage`.
+The integrator owns host placement and workload-token handling. Legacy registration and snapshot
+attestations remain operator-owned. Dynamic selection is a distinct, default-off server policy: the
+authenticated workload may discover only its tenant's READY `LOCAL_PROCESS` deployments, then request
+a short-lived grant for one exact incarnation and graph version. Dynamic grants always contain only
+graph read, deployment observation, and run read; they never contain execution authority. The browser
+bearer and proof key stay inside the viewer frame. Projection and observation payloads are never sent
+to the parent through `postMessage`.
 
 ## Source and continuity contract
 
@@ -54,7 +58,10 @@ a replacement incarnation.
 
 The v2-only browser endpoints are `POST /v1/embed/runs` and `POST /v1/embed/executions`. Both use the
 same origin, cookie exclusion, short-lived bearer, proof-of-possession, revision, and replay checks
-as projection and observation. They do not expose tenant-wide discovery or global lifecycle control.
+as projection and observation. Dynamic grants can use run reads but cannot use execution. The separate
+server-only `GET /v1/embed/deployments` discovery is tenant-bound, READY-only, bounded to 100 rows,
+and process-local; it is not global inventory or lifecycle control. `DELETE /v1/embed/grants/{id}`
+revokes a dynamic grant without disclosing whether a missing or foreign id exists.
 
 ## Linked contracts
 

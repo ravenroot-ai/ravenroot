@@ -97,6 +97,8 @@ All settlement transports return deterministic typed outcomes from the same dura
 | `GET, POST, DELETE /v1/assistant/connection` | Read, establish, or remove the caller’s connection |
 | `POST /v1/assistant/messages` | Submit a message through the established connection |
 | `POST /v1/embed/sessions` | Create an authorized embedded session request |
+| `GET /v1/embed/deployments` | Discover a bounded page of tenant-owned READY local deployment selections |
+| `DELETE /v1/embed/grants/{id}` | Revoke a dynamic read-only embed grant idempotently |
 | `POST /v1/embed/acknowledgements` | Record the browser acknowledgement |
 | `GET /v1/embed/launch` | Serve the launch boundary |
 | `POST /v1/embed/exchange` | Exchange a one-time launch value |

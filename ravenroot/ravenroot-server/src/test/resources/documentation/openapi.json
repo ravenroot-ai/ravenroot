@@ -619,6 +619,20 @@
         }
       }
     },
+    "/v1/embed/deployments": {
+      "get": {
+        "summary": "Lists a bounded page of the workload tenant's READY process-local deployment selections.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"}
+        }
+      }
+    },
     "/v1/embed/exchange": {
       "post": {
         "summary": "Exchanges the bootstrap challenge and a P-256 proof for a short-lived, child-memory-only projection bearer.",
@@ -646,6 +660,22 @@
           "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
           "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
           "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
+        }
+      }
+    },
+    "/v1/embed/grants/{id}": {
+      "delete": {
+        "summary": "Idempotently revokes one dynamic embed grant owned by the authenticated workload.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "204": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"}
         }
       }
     },
@@ -709,7 +739,7 @@
     },
     "/v1/embed/sessions": {
       "post": {
-        "summary": "Creates a one-use embedded-viewer launch ticket from an opaque, pre-registered registration id. Requires a WORKLOAD bearer and accepts no graph coordinates.",
+        "summary": "Creates a one-use embedded-viewer launch ticket from either an opaque legacy registration or an exact READY deployment selection under dynamic policy.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "responses": {

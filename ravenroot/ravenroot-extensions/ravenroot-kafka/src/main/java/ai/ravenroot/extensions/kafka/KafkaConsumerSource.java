@@ -172,14 +172,15 @@ final class KafkaConsumerSource implements InboundSource {
             }
             active.drainAndCommit(settings.drainTimeoutMs);
         } catch (WakeupException wakeup) {
-            if (!stopRequested) fail(context, ready, sourceFailure(KafkaSourceStartFailure.CONSUMER_WAKEUP));
+            if (!stopRequested)
+                fail(context, ready, sourceFailure(KafkaSourceStartFailure.CONSUMER_WAKEUP, wakeup));
             if (runtime != null) runtime.drainAndCommit(settings == null ? 0 : settings.drainTimeoutMs);
         } catch (SourceStartException failure) {
             fail(context, ready, failure);
         } catch (AuthenticationException | AuthorizationException failure) {
-            fail(context, ready, sourceFailure(KafkaSourceStartFailure.BROKER_AUTHORIZATION_FAILED));
+            fail(context, ready, sourceFailure(KafkaSourceStartFailure.BROKER_AUTHORIZATION_FAILED, failure));
         } catch (RuntimeException failure) {
-            fail(context, ready, sourceFailure(KafkaSourceStartFailure.CONSUMER_FAILED));
+            fail(context, ready, failure);
         } finally {
             owner = null;
             if (password != null) java.util.Arrays.fill(password, '\0');
@@ -216,15 +217,16 @@ final class KafkaConsumerSource implements InboundSource {
             context.ingress().sourceCheckpoint(context.identity(), context.nodeId()).toCompletableFuture()
                     .get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (Exception unavailable) {
-            throw sourceFailure(KafkaSourceStartFailure.DURABLE_INGRESS_REQUIRED);
+            throw sourceFailure(KafkaSourceStartFailure.DURABLE_INGRESS_REQUIRED, unavailable);
         }
     }
 
-    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, SourceStartException failure) {
+    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, RuntimeException failure) {
         synchronized (lifecycle) {
             if (stopRequested || state == State.STOPPING) return;
             state = State.FAILED;
-            context.reportDegraded(failure.code());
+            if (failure instanceof SourceStartException classified) context.reportDegraded(classified.code());
+            else if (ready.isDone()) context.reportDegraded("consumer-failed");
             ready.completeExceptionally(failure);
         }
     }
@@ -529,5 +531,9 @@ final class KafkaConsumerSource implements InboundSource {
 
     private static SourceStartException sourceFailure(KafkaSourceStartFailure code) {
         return new SourceStartException(code);
+    }
+
+    private static SourceStartException sourceFailure(KafkaSourceStartFailure code, Throwable cause) {
+        return new SourceStartException(code, cause);
     }
 }

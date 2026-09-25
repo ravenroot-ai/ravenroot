@@ -153,7 +153,7 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                         if (!ready.isDone()) { ready.completeExceptionally(failure); break; }
                         context.reportDegraded(failure.code()); awaitBackoff();
                     } catch (RuntimeException failure) {
-                        if (!ready.isDone()) { ready.completeExceptionally(new IllegalStateException("matrix-sync-failed")); break; }
+                        if (!ready.isDone()) { ready.completeExceptionally(failure); break; }
                         context.reportDegraded("matrix-sync-reconnecting"); awaitBackoff();
                     }
                 }
@@ -198,8 +198,11 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                 return SyncPage.parse(response.body(), profile);
             } catch (SourceStartException failure) { throw failure; }
             catch (InterruptedException failure) {
-                Thread.currentThread().interrupt(); throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_CANCELLED);
-            } catch (Exception failure) { throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_TRANSPORT); }
+                Thread.currentThread().interrupt();
+                throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_CANCELLED, failure);
+            } catch (Exception failure) {
+                throw sourceFailure(MatrixSourceStartFailure.MATRIX_SYNC_TRANSPORT, failure);
+            }
             finally {
                 if (!completed && call != null) call.cancel();
                 synchronized (lifecycle) { if (active == call) active = null; }
@@ -322,5 +325,9 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
     }
     private static SourceStartException sourceFailure(MatrixSourceStartFailure code) {
         return new SourceStartException(code);
+    }
+
+    private static SourceStartException sourceFailure(MatrixSourceStartFailure code, Throwable cause) {
+        return new SourceStartException(code, cause);
     }
 }

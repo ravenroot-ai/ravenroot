@@ -166,7 +166,7 @@ final class ImapConsumerSource implements InboundSource {
                 activeIngress = settings.consumerId.isEmpty() ? context.ingress()
                         : context.ingress().openDurableConsumer(settings.consumerId);
             } catch (RuntimeException unavailable) {
-                throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_OWNERSHIP_UNAVAILABLE);
+                throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_OWNERSHIP_UNAVAILABLE, unavailable);
             }
             probeDurability(context, context.nodeId() + "/imap/durable-probe", settings.timeoutMs);
             leaseKey = leaseKey(policy.tenant(), profileName, settings.folder);
@@ -215,7 +215,8 @@ final class ImapConsumerSource implements InboundSource {
                             reconnectFailures, projectionFailures, sessionGeneration);
                 } catch (ImapConsumerProtocol.Failure failure) {
                     if (stopRequested) break;
-                        if (failure.permanent() || !ready.isDone()) throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_FAILED);
+                    if (failure.permanent() || !ready.isDone())
+                        throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_FAILED, failure);
                     degrade(context, "imap-consumer-reconnecting", State.RECONNECTING);
                     closeOwner();
                     awaitReconnectBackoff(jitteredBackoff(settings, reconnectFailures.failed()));
@@ -231,7 +232,7 @@ final class ImapConsumerSource implements InboundSource {
         } catch (SourceStartException failure) {
             fail(context, ready, failure);
         } catch (RuntimeException failure) {
-            fail(context, ready, sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_FAILED));
+            fail(context, ready, failure);
         } finally {
             synchronized (lifecycle) { generation++; owner = null; opening = null; }
             if (activeIngress instanceof ai.ravenroot.api.deployment.DurableConsumerIngress consumer)
@@ -357,7 +358,9 @@ final class ImapConsumerSource implements InboundSource {
             return await(activeIngress.advanceSourceCheckpoint(expected, uid + 1), timeoutMs,
                     ImapSourceStartFailure.IMAP_CHECKPOINT_CONFLICT);
         } catch (SourceStartException failure) { throw failure; }
-        catch (RuntimeException failure) { throw sourceFailure(ImapSourceStartFailure.IMAP_CHECKPOINT_CONFLICT); }
+        catch (RuntimeException failure) {
+            throw sourceFailure(ImapSourceStartFailure.IMAP_CHECKPOINT_CONFLICT, failure);
+        }
     }
 
     private JournalCursor checkpoint(InboundSourceContext context, String sourceId, int timeoutMs) {
@@ -373,7 +376,9 @@ final class ImapConsumerSource implements InboundSource {
             }
             return cursor;
         } catch (SourceStartException failure) { throw failure; }
-        catch (RuntimeException failure) { throw sourceFailure(ImapSourceStartFailure.DURABLE_INGRESS_REQUIRED); }
+        catch (RuntimeException failure) {
+            throw sourceFailure(ImapSourceStartFailure.DURABLE_INGRESS_REQUIRED, failure);
+        }
     }
 
     private void probeDurability(InboundSourceContext context, String sourceId, int timeoutMs) {
@@ -401,9 +406,9 @@ final class ImapConsumerSource implements InboundSource {
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 future.cancel(true);
-                throw sourceFailure(ImapSourceStartFailure.STARTUP_CANCELLED);
+                throw sourceFailure(ImapSourceStartFailure.STARTUP_CANCELLED, interrupted);
             } catch (java.util.concurrent.ExecutionException failure) {
-                throw sourceFailure(failureReason);
+                throw sourceFailure(failureReason, failure);
             }
         }
     }
@@ -436,11 +441,12 @@ final class ImapConsumerSource implements InboundSource {
         }
     }
 
-    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, SourceStartException failure) {
+    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, RuntimeException failure) {
         synchronized (lifecycle) {
             if (stopRequested || state == State.STOPPING) return;
             state = State.FAILED;
-            context.reportDegraded(failure.code());
+            if (failure instanceof SourceStartException classified) context.reportDegraded(classified.code());
+            else if (ready.isDone()) context.reportDegraded("imap-consumer-failed");
             ready.completeExceptionally(failure);
         }
     }
@@ -499,7 +505,9 @@ final class ImapConsumerSource implements InboundSource {
             destinationPolicy.requireAllowedLiteral(profile.host());
             return profile;
         } catch (SourceStartException failure) { throw failure; }
-        catch (RuntimeException failure) { throw sourceFailure(ImapSourceStartFailure.IMAP_PROFILE_UNAVAILABLE); }
+        catch (RuntimeException failure) {
+            throw sourceFailure(ImapSourceStartFailure.IMAP_PROFILE_UNAVAILABLE, failure);
+        }
     }
 
     private ImapConsumerPolicy resolvePolicy(String tenant, String name) {
@@ -510,7 +518,9 @@ final class ImapConsumerSource implements InboundSource {
                 throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_POLICY_UNAVAILABLE);
             return policy;
         } catch (SourceStartException failure) { throw failure; }
-        catch (RuntimeException failure) { throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_POLICY_UNAVAILABLE); }
+        catch (RuntimeException failure) {
+            throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_POLICY_UNAVAILABLE, failure);
+        }
     }
 
     private SecretValue resolveCredential(ImapProfile profile, long sessionGeneration) {
@@ -544,7 +554,7 @@ final class ImapConsumerSource implements InboundSource {
         } catch (RuntimeException submissionFailure) {
             handoff.abandon();
             admission.release();
-            throw sourceFailure(ImapSourceStartFailure.CREDENTIAL_UNAVAILABLE);
+            throw sourceFailure(ImapSourceStartFailure.CREDENTIAL_UNAVAILABLE, submissionFailure);
         }
         return handoff.await(() -> current(sessionGeneration),
                 Math.min(AngusImapConsumerProtocol.MAX_IO_TIMEOUT_MS, profile.connectTimeoutMs()));
@@ -773,5 +783,9 @@ final class ImapConsumerSource implements InboundSource {
 
     private static SourceStartException sourceFailure(ImapSourceStartFailure code) {
         return new SourceStartException(code);
+    }
+
+    private static SourceStartException sourceFailure(ImapSourceStartFailure code, Throwable cause) {
+        return new SourceStartException(code, cause);
     }
 }

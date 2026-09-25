@@ -149,7 +149,8 @@ final class AmqpConsumerSource implements InboundSource {
                     consume(context, policy, settings, attempts, reconnectFailures, sessionGeneration);
                 } catch (AmqpConsumerProtocol.Failure failure) {
                     if (stopRequested) break;
-                    if (failure.permanent() || !ready.isDone()) throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_FAILED);
+                    if (failure.permanent() || !ready.isDone())
+                        throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_FAILED, failure);
                     degrade(context, "amqp-consumer-reconnecting", State.RECONNECTING);
                     closeOwner(settings.drainTimeoutMs);
                     awaitReconnectBackoff(jitteredReconnectBackoff(settings, reconnectFailures.failed()));
@@ -160,7 +161,7 @@ final class AmqpConsumerSource implements InboundSource {
         } catch (SourceStartException failure) {
             fail(context, ready, failure);
         } catch (RuntimeException failure) {
-            fail(context, ready, sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_FAILED));
+            fail(context, ready, failure);
         } finally {
             synchronized (lifecycle) { generation++; owner = null; }
             if (password != null) java.util.Arrays.fill(password, '\0');
@@ -249,10 +250,12 @@ final class AmqpConsumerSource implements InboundSource {
         }
     }
 
-    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, SourceStartException failure) {
+    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, RuntimeException failure) {
         synchronized (lifecycle) {
             if (stopRequested || state == State.STOPPING) return;
-            state = State.FAILED; context.reportDegraded(failure.code());
+            state = State.FAILED;
+            if (failure instanceof SourceStartException classified) context.reportDegraded(classified.code());
+            else if (ready.isDone()) context.reportDegraded("amqp-consumer-failed");
             ready.completeExceptionally(failure);
         }
     }
@@ -325,7 +328,9 @@ final class AmqpConsumerSource implements InboundSource {
             return profile;
         }
         catch (SourceStartException failure) { throw failure; }
-        catch (RuntimeException failure) { throw sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE); }
+        catch (RuntimeException failure) {
+            throw sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE, failure);
+        }
     }
 
     private AmqpConsumerPolicy resolvePolicy(String tenant, String name) {
@@ -337,13 +342,17 @@ final class AmqpConsumerSource implements InboundSource {
             return policy;
         }
         catch (SourceStartException failure) { throw failure; }
-        catch (RuntimeException failure) { throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_POLICY_UNAVAILABLE); }
+        catch (RuntimeException failure) {
+            throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_POLICY_UNAVAILABLE, failure);
+        }
     }
 
     private static void probeDurability(InboundSourceContext context, int timeoutMs) {
         try { context.ingress().sourceCheckpoint(context.identity(), context.nodeId()).toCompletableFuture()
                 .get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS); }
-        catch (Exception failure) { throw sourceFailure(AmqpSourceStartFailure.DURABLE_INGRESS_REQUIRED); }
+        catch (Exception failure) {
+            throw sourceFailure(AmqpSourceStartFailure.DURABLE_INGRESS_REQUIRED, failure);
+        }
     }
 
     private record Settings(int prefetch, int retryBackoffMs, int maxRetryBackoffMs,
@@ -400,5 +409,9 @@ final class AmqpConsumerSource implements InboundSource {
 
     private static SourceStartException sourceFailure(AmqpSourceStartFailure code) {
         return new SourceStartException(code);
+    }
+
+    private static SourceStartException sourceFailure(AmqpSourceStartFailure code, Throwable cause) {
+        return new SourceStartException(code, cause);
     }
 }

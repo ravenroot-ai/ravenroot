@@ -5,6 +5,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SERVICE_ORIGIN, UI_PORT } from './ports.mjs';
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 
 const root = fileURLToPath(new URL('../dist/', import.meta.url));
 const MIME_TYPES = new Map([
@@ -33,6 +34,12 @@ createServer(async (request, response) => {
     response.end(body);
     return;
   }
+  // Individual specs still own execution/session/deployment responses with page.route(), while
+  // the real-process harness owns refusal semantics. The shared synthetic runtime explicitly
+  // admits happy-path graphs before those mutation requests are exercised.
+  if (respondWithSuccessfulGraphInspection(request, response, {
+    headers: { 'Content-Security-Policy': CSP },
+  })) return;
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const file = normalize(join(root, relative));
   if (!file.startsWith(root) || !existsSync(file) || !(await stat(file)).isFile()) {

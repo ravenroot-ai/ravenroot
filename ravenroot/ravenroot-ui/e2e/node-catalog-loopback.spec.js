@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
 
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 // Against a loopback service that requires no authentication the palette rendered
@@ -36,6 +37,7 @@ let catalogUnavailable = false;
 
 function startService() {
   service = createServer((request, response) => {
+    if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
     const headers = {
       'Access-Control-Allow-Origin': UI_ORIGIN,
       Vary: 'Origin',

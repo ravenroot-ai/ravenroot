@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
 
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 // Saving must preserve what the author writes in the source field. Defects, one fixture set:
@@ -95,6 +96,7 @@ function startService() {
   executionRequests = 0;
   return new Promise((resolve, reject) => {
     service = createServer((request, response) => {
+      if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
       const headers = {
         'Access-Control-Allow-Origin': UI_ORIGIN,
         Vary: 'Origin',

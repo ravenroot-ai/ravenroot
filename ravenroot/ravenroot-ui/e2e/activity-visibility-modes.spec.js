@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
 
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 // The Activity panel's three observation levels (issue #458): Output, Nodes and Trace.
@@ -57,6 +58,7 @@ let submissions;
 function startService() {
   return new Promise((resolve, reject) => {
     service = createServer((request, response) => {
+      if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
       // `runtime-client.js#start` POSTs with `Content-Type: application/graphml+xml`, which is not a
       // "simple" CORS content type, so the browser preflights before the real request.
       if (request.method === 'OPTIONS') {

@@ -28,10 +28,13 @@ Read these before you write anything. Each one fails silently or confusingly if 
    launch URL in a browser tab returns an error document, not a broken viewer. The viewer's own
    bootstrap enforces the same rule a second time from inside the page, refusing to start when
    `window.parent === window`. Neither refusal explains itself, so recognise the shape.
-2. **Both origins must be canonical HTTPS origins, and they must differ.** The viewer's origin and
-   your page's origin are `https://host` or `https://host:port` — scheme, host, optional port,
-   nothing else. No `http`, not even on loopback; no trailing slash, no path, no explicit `:443`,
-   no `*`. The two must also be distinct: your page cannot be served from the viewer's own origin.
+2. **Origins must be canonical, and they must differ.** The viewer origin is always HTTPS. A durable
+   registration's parent origin is also `https://host` or `https://host:port`. Authenticated dynamic
+   policy additionally permits a parent served by canonical HTTP loopback: `http://localhost`,
+   `http://127.0.0.1`, `http://[::1]`, or `http://[0:0:0:0:0:0:0:1]`, each optionally followed by a
+   non-default port. That exception never permits non-loopback HTTP or an HTTP viewer origin. Origins
+   have no trailing slash, path, default port (`:443` for HTTPS or `:80` for loopback HTTP), or `*`.
+   The two must also be distinct: your page cannot be served from the viewer's own origin.
 
    **This is checked when a session is created, not when the registration is written.** The deployment's
    own viewer origin is validated at startup, so a bad one stops the server. Your parent origin is
@@ -143,6 +146,10 @@ Then send the exact selected tuple and parent origin to the existing session rou
   "parentOrigin": "https://app.example.com"
 }
 ```
+
+In authenticated dynamic mode, `parentOrigin` may use the canonical HTTP loopback forms listed in
+constraint 2 for local integration. HTTPS remains mandatory for non-loopback parents, and the
+restricted mode accepts only the exact canonical origins configured by the operator.
 
 A successful response also includes `grantId`. Use that id in the acknowledgement body instead of
 `registrationId`, and retain it only on your server so you can call

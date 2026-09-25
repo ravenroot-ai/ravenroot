@@ -105,8 +105,10 @@ public record DynamicEmbedAuthorizationPolicy(Mode mode, Set<String> allowedOrig
     }
 
     private static boolean loopback(String host) {
-        return "localhost".equals(host) || "127.0.0.1".equals(host) || "::1".equals(host)
-                || "0:0:0:0:0:0:0:1".equals(host);
+        String address = host.startsWith("[") && host.endsWith("]")
+                ? host.substring(1, host.length() - 1) : host;
+        return "localhost".equals(address) || "127.0.0.1".equals(address) || "::1".equals(address)
+                || "0:0:0:0:0:0:0:1".equals(address);
     }
 
     private static String policyDigest(String canonicalPolicy) {

@@ -68,10 +68,15 @@ class DynamicEmbedAuthorizationPolicyTest {
                 DynamicEmbedAuthorizationPolicy.MODE_VARIABLE, "authenticated"), viewer);
         assertEquals("https://any.example:8443", policy.requireAllowed("https://any.example:8443", viewer));
         assertEquals("http://localhost:5173", policy.requireAllowed("http://localhost:5173", viewer));
+        assertEquals("http://[::1]", policy.requireAllowed("http://[::1]", viewer));
+        assertEquals("http://[0:0:0:0:0:0:0:1]:5173",
+                policy.requireAllowed("http://[0:0:0:0:0:0:0:1]:5173", viewer));
         assertThrows(IllegalArgumentException.class,
                 () -> policy.requireAllowed("http://public.example", viewer));
         assertThrows(IllegalArgumentException.class,
                 () -> policy.requireAllowed("http://127.0.0.2:5173", viewer));
+        assertThrows(IllegalArgumentException.class,
+                () -> policy.requireAllowed("http://[2001:db8::1]:5173", viewer));
         assertThrows(IllegalArgumentException.class,
                 () -> policy.requireAllowed("https://viewer.example", viewer));
         assertThrows(IllegalArgumentException.class,

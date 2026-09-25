@@ -58,6 +58,18 @@ test('an N-1 valid inspection response without findings still starts', async ({ 
   expect(starts[0]).toContain('<graphml');
 });
 
+test('a malformed optional inspection response still reaches authoritative execution admission', async ({ page }) => {
+  const starts = await installRuntime(page, {
+    status: 200,
+    body: { valid: true, violations: [], findings: { reason: 'INVALID_STRUCTURE' } },
+  });
+
+  await submitTest(page);
+
+  await expect.poll(() => starts.length).toBe(1);
+  expect(starts[0]).toContain('<graphml');
+});
+
 test('an explicit structured inspection refusal blocks the mutation', async ({ page }) => {
   const starts = await installRuntime(page, {
     status: 200,

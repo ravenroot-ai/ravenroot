@@ -101,6 +101,37 @@ describe('bounded startup diagnostics', () => {
     expect(inspection.findings).toEqual([]);
     expect(Object.isFrozen(inspection.findings)).toBe(true);
   });
+
+  it.each([
+    null,
+    [],
+    {},
+    { valid: 'true', violations: [] },
+    { valid: true },
+    { valid: true, violations: 'none' },
+    { valid: true, violations: [], findings: {} },
+    { valid: true, violations: [], findings: [{
+      contract: 'ravenroot.graph-admission/1', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }, {
+      contract: 'ravenroot.graph-admission/1', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }] },
+    { valid: false, violations: ['invalid structure'], findings: [{
+      contract: 'ravenroot.graph-admission/2', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }] },
+  ])('rejects malformed inspection response %#', async response => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(response), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl });
+
+    await expect(client.inspectGraph('<graphml/>')).rejects.toThrow(/malformed|not valid JSON/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://runtime.example/v1/graphs/inspect?purpose=EXECUTION');
+  });
 });
 import {
   applyDeploymentViewFrame,

@@ -63,6 +63,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -76,10 +77,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real TLS/SigV4 integration against a pinned S3-compatible MinIO server. */
 class StorageMinioIntegrationTest {
-    private static final String MINIO_IMAGE =
-            "bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c";
-    private static final String MC_IMAGE =
-            "bitnamilegacy/minio-client@sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511";
+    private static final FixtureImages FIXTURES = FixtureImages.load();
     // Bitnami defaults to uid 1001 with HOME=/; fixture containers use uid 0 so the root-only
     // TLS key and transient mc configuration remain usable without loosening host permissions.
     private static final String TENANT = "tenant-a";
@@ -143,12 +141,20 @@ class StorageMinioIntegrationTest {
     }
 
     @Test
+    void minioFixtureManifestProducesDistinctDigestOnlyReferences() {
+        assertTrue(FIXTURES.serverImage().contains("@sha256:"));
+        assertTrue(FIXTURES.clientImage().contains("@sha256:"));
+        assertNotEquals(FIXTURES.serverImage(), FIXTURES.clientImage());
+    }
+
+    @Test
     @Timeout(value = 180, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void realMinioPreservesVersionAndPaginationAuthorityAcrossDurableRestart() throws Exception {
         Assumptions.assumeTrue(command(Duration.ofSeconds(10), "docker", "info").exitCode == 0,
                 "Docker is required for the pinned MinIO integration");
         Assumptions.assumeTrue(command(Duration.ofSeconds(10), "openssl", "version").exitCode == 0,
                 "OpenSSL is required to mint the ephemeral test-only TLS identity");
+        FIXTURES.pullAndVerify();
         ReservedNetworkPolicy previousPolicy = EgressAddressGuard.policy();
         boolean cleanupInterruptionExercised = false;
         EgressAddressGuard.configure(
@@ -383,7 +389,7 @@ class StorageMinioIntegrationTest {
                                 "docker", "run", "-d", "--rm", "--user", "0", "--name", name,
                                 "-p", "127.0.0.1::9000",
                                 "-e", "MINIO_ROOT_USER", "-e", "MINIO_ROOT_PASSWORD", "-v",
-                                tlsDirectory.toAbsolutePath() + ":/root/.minio/certs:ro", MINIO_IMAGE,
+                                tlsDirectory.toAbsolutePath() + ":/root/.minio/certs:ro", FIXTURES.serverImage(),
                                 "server", "/data", "--address", ":9000", "--certs-dir",
                                 "/root/.minio/certs"),
                         () -> removeContainer(name),
@@ -415,7 +421,7 @@ class StorageMinioIntegrationTest {
             CommandResult result = sensitiveCommand(Duration.ofSeconds(30), credentialEnvironment(),
                     "docker", "run", "--rm", "--user", "0", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
                     "--network", "container:" + name, "-e", "VERSION_ID=" + versionId, "-e", "OBJECT_KEY=" + key,
-                    "--entrypoint", "/bin/sh", MC_IMAGE, "-c", alias()
+                    "--entrypoint", "/bin/sh", FIXTURES.clientImage(), "-c", alias()
                     + " && mc --insecure stat --version-id \"$VERSION_ID\" \"local/bucket-a/$OBJECT_KEY\"");
             return result.exitCode == 0;
         }
@@ -423,7 +429,7 @@ class StorageMinioIntegrationTest {
         private CommandResult mc(String operation) {
             return sensitiveCommand(Duration.ofSeconds(30), credentialEnvironment(), "docker", "run", "--rm",
                     "--user", "0", "-e", "RR_ACCESS_KEY", "-e", "RR_SECRET_KEY",
-                    "--network", "container:" + name, "--entrypoint", "/bin/sh", MC_IMAGE, "-c",
+                    "--network", "container:" + name, "--entrypoint", "/bin/sh", FIXTURES.clientImage(), "-c",
                     alias() + " && " + operation);
         }
 
@@ -630,6 +636,55 @@ class StorageMinioIntegrationTest {
     private static String bounded(String value) {
         String sanitized = value == null ? "" : value.replaceAll("[\\r\\n\\t]+", " ").strip();
         return sanitized.length() <= 512 ? sanitized : sanitized.substring(0, 512);
+    }
+
+    private record FixtureImages(String serverImage, String clientImage) {
+        private static final String RESOURCE = "/minio-fixtures.properties";
+
+        static FixtureImages load() {
+            Properties properties = new Properties();
+            try (InputStream input = StorageMinioIntegrationTest.class.getResourceAsStream(RESOURCE)) {
+                if (input == null) throw new IllegalStateException("MinIO fixture manifest is missing");
+                properties.load(input);
+            } catch (IOException failure) {
+                throw new IllegalStateException("MinIO fixture manifest is unreadable", failure);
+            }
+            if (!"1".equals(properties.getProperty("schema.version"))) {
+                throw new IllegalStateException("MinIO fixture manifest schema is unsupported");
+            }
+            String repository = requireProperty(properties, "project.repository");
+            if (repository.contains("@") || repository.contains(":latest") || repository.chars().anyMatch(Character::isWhitespace)) {
+                throw new IllegalStateException("MinIO fixture repository is not canonical");
+            }
+            return new FixtureImages(reference(repository, properties, "server"),
+                    reference(repository, properties, "client"));
+        }
+
+        void pullAndVerify() {
+            pull("server", serverImage);
+            pull("client", clientImage);
+        }
+
+        private static void pull(String role, String image) {
+            requireSuccess(command(Duration.ofSeconds(120), "docker", "pull", image),
+                    "MinIO " + role + " fixture pull");
+        }
+
+        private static String reference(String repository, Properties properties, String role) {
+            String digest = requireProperty(properties, role + ".project.digest");
+            if (!digest.matches("sha256:[0-9a-f]{64}")) {
+                throw new IllegalStateException("MinIO " + role + " fixture digest is not immutable");
+            }
+            return repository + "@" + digest;
+        }
+
+        private static String requireProperty(Properties properties, String name) {
+            String value = properties.getProperty(name);
+            if (value == null || value.isBlank()) {
+                throw new IllegalStateException("MinIO fixture manifest is missing " + name);
+            }
+            return value.strip();
+        }
     }
 
     private record CommandResult(int exitCode, String output) { }

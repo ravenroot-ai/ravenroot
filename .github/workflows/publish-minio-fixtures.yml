@@ -1,0 +1,65 @@
+name: Publish MinIO acceptance fixtures
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-minio-fixtures
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: mirror-immutable-minio-fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the requested fixture authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate immutable fixture provenance
+        run: |
+          python3 scripts/fixtures/minio/verify.py validate
+          python3 -m unittest scripts.tests.test_minio_fixture
+      - name: Resolve reviewed source and target references
+        id: fixtures
+        run: python3 scripts/fixtures/minio/verify.py github-output --destination "$GITHUB_OUTPUT"
+      - name: Authenticate only for the project-owned registry write
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Copy complete immutable multi-platform indexes
+        env:
+          SERVER_SOURCE: ${{ steps.fixtures.outputs.server_source }}
+          SERVER_TARGET: ${{ steps.fixtures.outputs.server_target_tag }}
+          CLIENT_SOURCE: ${{ steps.fixtures.outputs.client_source }}
+          CLIENT_TARGET: ${{ steps.fixtures.outputs.client_target_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "$SERVER_TARGET" "$SERVER_SOURCE"
+          docker buildx imagetools create --tag "$CLIENT_TARGET" "$CLIENT_SOURCE"
+      - name: Verify published digests and declared architectures
+        env:
+          SERVER_TARGET: ${{ steps.fixtures.outputs.server_target_ref }}
+          CLIENT_TARGET: ${{ steps.fixtures.outputs.client_target_ref }}
+          SERVER_PLATFORMS: ${{ steps.fixtures.outputs.server_platforms }}
+          CLIENT_PLATFORMS: ${{ steps.fixtures.outputs.client_platforms }}
+        run: |
+          set -euo pipefail
+          for entry in "server|$SERVER_TARGET|$SERVER_PLATFORMS" "client|$CLIENT_TARGET|$CLIENT_PLATFORMS"; do
+            role=${entry%%|*}
+            remainder=${entry#*|}
+            reference=${remainder%%|*}
+            platforms=${remainder#*|}
+            inspection=$(docker buildx imagetools inspect "$reference")
+            while IFS= read -r platform; do
+              grep -F "Platform:  $platform" <<<"$inspection" >/dev/null || {
+                echo "$role fixture $reference is missing declared platform $platform" >&2
+                exit 1
+              }
+            done < <(tr ',' '\n' <<<"$platforms")
+            echo "$role fixture published and verified at $reference"
+          done

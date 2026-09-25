@@ -11659,7 +11659,7 @@ async function executionLifecycleCommand(action) {
 // can carry a deployment identity, and only the first can prove one is missing: warning on a local
 // STARTING placeholder would report the runtime for something the runtime was never asked.
 function updateSourceSession(owner, status, token = null,
-  { observationUnavailable = false, fromRuntime = false } = {}) {
+  { observationUnavailable = false, fromRuntime = false, silentActivity = false } = {}) {
   if (token && !sourceSessionCommandIsCurrent(owner, token)) return false;
   const session = owner.sourceSession;
   const changed = session.state !== status.state || session.diagnostic !== (status.diagnostic || '')
@@ -11693,11 +11693,16 @@ function updateSourceSession(owner, status, token = null,
   session.state = status.state;
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
+  session.failure = status.failure || null;
   session.observationUnavailable = observationUnavailable;
   if (owner === workspace.active) {
     syncSourceSessionChrome(owner);
     refreshCommands();
-    if (changed) {
+    if (status.state === 'FAILED' && status.failure
+        && session.lastFailureIncident !== status.failure.incidentId) {
+      session.lastFailureIncident = status.failure.incidentId;
+      void presentRuntimeRefusal(owner, status.failure, 'Source session refused');
+    } else if (changed && !silentActivity) {
       const detail = status.diagnostic || `${status.sourceCount} source node${status.sourceCount === 1 ? '' : 's'} · local process only`;
       addActivityMessage(`Source session ${status.state.toLowerCase()}`, detail,
         status.state === 'FAILED' || status.state === 'DEGRADED' || status.state === 'UNKNOWN'
@@ -11771,9 +11776,7 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
   const token = captureSourceSessionToken(session);
   updateSourceSession(owner, {
     sessionId, state: 'STARTING', sourceCount, scope: 'LOCAL_PROCESS', diagnostic: null,
-  }, token);
-  if (owner === workspace.active) addActivityMessage('Source session request',
-    'Starting listeners in this server process. No initial payload or traversal was submitted.');
+  }, token, { silentActivity: true });
   const startPromise = client.startSourceSession(sessionId, graphMl);
   session.startPromise = startPromise;
   try {
@@ -11791,12 +11794,12 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
     updateSourceSession(owner, {
       state: explicitFailure ? 'FAILED' : 'UNKNOWN', sourceCount,
       diagnostic: explicitFailure ? 'The server rejected the source session start.' : '',
-    }, token, { observationUnavailable: !explicitFailure });
-    if (owner === workspace.active) addActivityMessage('Source session request failed',
+      failure: error?.finding || null,
+    }, token, { observationUnavailable: !explicitFailure, silentActivity: explicitFailure });
+    if (owner === workspace.active && !error?.finding) addActivityMessage('Source session request failed',
       explicitFailure
-        ? 'The server rejected the local listener start. Correct the graph or runtime issue, then retry.'
-        : 'The start response was lost. The editor will observe the existing id before allowing another Run.',
-      'failed');
+        ? `The server rejected the local listener start${error?.incidentId ? ` · incident ${error.incidentId}` : ''}.`
+        : 'The start response was lost. The editor will observe the existing id before allowing another Run.', 'failed');
     if (!explicitFailure && !session.stopRequested) void observeSourceSession(owner, token);
     return false;
   } finally {
@@ -12004,6 +12007,66 @@ async function preflightUnknownExecution(owner, flight) {
   return result.allowed;
 }
 
+async function diagnosticNodeRef(value) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  const hex = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return `sha256:${hex.slice(0, 32)}`;
+}
+
+async function focusRuntimeFinding(owner, finding) {
+  if (owner !== workspace.active || !owner.cy || !finding?.nodeRef) return;
+  let node = finding.nodeId && owner.graph?.nodeMap?.[finding.nodeId]
+    ? owner.cy.getElementById(finding.nodeId) : null;
+  if (!node?.nonempty?.()) {
+    for (const candidate of owner.graph?.nodes || []) {
+      if (await diagnosticNodeRef(candidate.id) === finding.nodeRef) {
+        node = owner.cy.getElementById(candidate.id);
+        break;
+      }
+    }
+  }
+  if (!node?.nonempty?.()) return;
+  owner.cy.elements().unselect();
+  node.select();
+  if (finding.propertyName && !modifyEnabled && canModifyGraph(owner.graph, layoutMode)) {
+    setModifyMode(true);
+  }
+  showNodeInfo(node);
+  if (finding.propertyName) {
+    [...document.querySelectorAll('[data-catalog-property]')]
+      .find(control => control.dataset.catalogProperty === finding.propertyName)?.focus();
+  }
+}
+
+const REFUSAL_REMEDIATION = Object.freeze({
+  INVALID_STRUCTURE: 'Correct the graph structure and retry.',
+  REQUIRED_PROPERTY_MISSING: 'Provide the required property and retry.',
+  PROPERTY_TYPE_INVALID: 'Use the property type declared by the trusted catalog.',
+  PROPERTY_VALUE_NOT_ALLOWED: 'Choose a value allowed by the trusted catalog.',
+  PROPERTY_OUT_OF_RANGE: 'Choose a value inside the catalog bounds.',
+  PROPERTY_TOO_LARGE: 'Reduce the property to the catalog size bound.',
+  PROPERTY_NAME_NEAR_MISS: 'Correct the property spelling to match the trusted catalog.',
+  SOURCE_REQUIRED: 'Add and configure an inbound source before starting a listener session.',
+  SOURCE_CAPABILITY_MISMATCH: 'Install or enable the trusted source package for this node.',
+  STARTUP_FAILED: 'Quote the incident handle to an operator, then retry after the runtime issue is resolved.',
+});
+
+async function presentRuntimeRefusal(owner, finding, title = 'Start refused') {
+  if (!finding || owner !== workspace.active) return;
+  const location = [finding.nodeId && `node ${finding.nodeId}`,
+    finding.propertyName && `property ${finding.propertyName}`].filter(Boolean).join(' · ');
+  const remediation = REFUSAL_REMEDIATION[finding.reason]
+    || (String(finding.reason || '').includes('-')
+      ? 'Correct the source configuration or runtime authority named by this declared reason, then retry.'
+      : 'Correct the graph admission issue and retry.');
+  const handle = finding.incidentId ? ` · incident ${finding.incidentId}` : '';
+  addActivityMessage(title,
+    `${finding.phase} · ${finding.reason}${location ? ` · ${location}` : ''}. ${remediation}${handle}`,
+    'failed');
+  await focusRuntimeFinding(owner, finding);
+}
+
 async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
@@ -12044,12 +12107,10 @@ async function playGraph(mode = 'test') {
   const ownerVisualStyle = visualStyle;
   const violations = validateWorkflow(ownerGraph);
   if (violations.length) {
-    releaseExecutionCommand(flight);
     document.getElementById('info-title').textContent = 'Validation';
-    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>Cannot execute</h4>
+    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>Local advisory</h4>
+      <p>The runtime admission service is checking the exact GraphML that will be submitted.</p>
       <ul class="validation-list">${violations.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
-    addActivityMessage('validation', `${violations.length} violation(s)`, 'failed');
-    return;
   }
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
@@ -12060,6 +12121,27 @@ async function playGraph(mode = 'test') {
     return;
   }
   const sourceCount = mode === 'run' ? effectiveSourceCount(ownerGraph, nodeTypeCatalog) : 0;
+  if (!runtimeClient) connectRuntime();
+  const executionClient = runtimeClient;
+  try {
+    const inspection = await executionClient.inspectGraph(graphMl,
+      sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
+    if (!inspection.valid && inspection.findings[0]) {
+      releaseExecutionCommand(flight);
+      await presentRuntimeRefusal(owner, inspection.findings[0], 'Graph admission refused');
+      return;
+    }
+  } catch (error) {
+    // Inspection is an advisory early answer, not an availability dependency. Only a validated
+    // structured finding is authoritative enough to refuse here; an older, unavailable, or
+    // malformed inspection response falls through to the mutation path, which revalidates the
+    // exact bytes and returns the same safe finding when it actually refuses them.
+    if (error?.finding) {
+      releaseExecutionCommand(flight);
+      await presentRuntimeRefusal(owner, error.finding, 'Graph admission refused');
+      return;
+    }
+  }
   // Run has two meanings. A graph with an
   // effective SOURCE starts a local listener session (unchanged below). Every other graph gets
   // a real one-shot execution with effects (mode=run). The deployments panel lets that graph also be
@@ -12072,8 +12154,6 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  if (!runtimeClient) connectRuntime();
-  const executionClient = runtimeClient;
   if (!await preflightUnknownExecution(owner, flight)) {
     releaseExecutionCommand(flight);
     return;
@@ -12152,8 +12232,11 @@ async function playGraph(mode = 'test') {
     setDocumentExecution(owner, null, null);
     if (workspace.activeId !== owner.id) return;
     refreshCommands();
-    addActivityMessage('request failed', error.message, 'failed');
-    showInspectorMessage(error.message);
+    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, 'Execution refused');
+    else {
+      addActivityMessage('request failed', error.message, 'failed');
+      showInspectorMessage(error.message);
+    }
   }
 }
 

@@ -15,6 +15,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,7 +53,8 @@ class BehaviorPropertySchemaTest {
 
         assertEquals("probe", failure.nodeId());
         assertEquals("count", failure.propertyName());
-        assertTrue(failure.getMessage().contains("must be an integer"), failure.getMessage());
+        assertEquals(BehaviorPropertySchema.BehaviorPropertyException.Reason.INVALID_TYPE, failure.reason());
+        assertFalse(failure.getMessage().contains("12.5"), failure.getMessage());
     }
 
     @Test
@@ -120,7 +122,8 @@ class BehaviorPropertySchemaTest {
     void rejectsAValueOutsideTheCatalogsAllowedSet() {
         var failure = assertThrows(BehaviorPropertySchema.BehaviorPropertyException.class,
                 () -> schema.validate(graphWith(Map.of("requiredText", "x", "mode", "turbo"))));
-        assertTrue(failure.getMessage().contains("must be one of"), failure.getMessage());
+        assertEquals(BehaviorPropertySchema.BehaviorPropertyException.Reason.VALUE_NOT_ALLOWED, failure.reason());
+        assertFalse(failure.getMessage().contains("turbo"), failure.getMessage());
     }
 
     @Test
@@ -163,8 +166,7 @@ class BehaviorPropertySchemaTest {
 
         assertEquals("probe", failure.nodeId());
         assertEquals("credentialref", failure.propertyName());
-        assertTrue(failure.getMessage().contains("differs only by case from 'credentialRef'"),
-                failure.getMessage());
+        assertEquals(BehaviorPropertySchema.BehaviorPropertyException.Reason.NAME_NEAR_MISS, failure.reason());
     }
 
     @Test
@@ -328,6 +330,8 @@ class BehaviorPropertySchemaTest {
                 () -> new GraphRunner(graph, engine, registry(), new ExecutionMonitor()));
 
         assertEquals("count", failure.propertyName());
+        assertEquals(BehaviorPropertySchema.BehaviorPropertyException.Reason.INVALID_TYPE,
+                failure.reason());
         assertEquals(0, engine.spawns, "no actor may be spawned for a graph that fails validation");
         graph.close();
         engine.close();

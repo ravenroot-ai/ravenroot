@@ -92,26 +92,29 @@ public final class BehaviorPropertySchema {
     void validate(GraphDefinition graph, java.util.function.Predicate<GraphNode> include) {
         Objects.requireNonNull(graph, "graph");
         Objects.requireNonNull(include, "include");
-        for (GraphNode node : graph.nodes()) {
+        for (GraphNode node : graph.nodes().stream().sorted(java.util.Comparator.comparing(GraphNode::id)).toList()) {
             if (include.test(node)) {
                 validateNode(node);
             }
         }
-        for (GraphNode node : graph.nodes()) {
+        for (GraphNode node : graph.nodes().stream().sorted(java.util.Comparator.comparing(GraphNode::id)).toList()) {
             if (!ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)) continue;
             String reference = Objects.toString(node.properties().get("workspaceRef"));
             var matches = graph.nodes().stream().filter(value -> value.id().equals(reference)).toList();
             if (matches.size() != 1 || !"workspace".equals(matches.getFirst().behavior())) {
-                throw new BehaviorPropertyException(node.id(), "workspaceRef", "must reference exactly one Workspace declared in this graph");
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.WORKSPACE_REFERENCE,
+                        node.id(), "workspaceRef", "invalid workspace reference");
             }
-            if (behaviors.runnerJobs() == null) throw new BehaviorPropertyException(node.id(), "workspaceRef", "governed runner plane is unavailable");
+            if (behaviors.runnerJobs() == null) throw new BehaviorPropertyException(
+                    BehaviorPropertyException.Reason.WORKSPACE_REFERENCE, node.id(), "workspaceRef",
+                    "governed runner plane is unavailable");
         }
     }
 
     private void validateNode(GraphNode node) {
         for (String key : node.properties().keySet()) {
             if (ReservedGraphProperties.isReserved(key)) {
-                throw new BehaviorPropertyException(node.id(), key,
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.RESERVED, node.id(), key,
                         "the '" + ReservedGraphProperties.PREFIX + "' namespace is reserved for Ravenroot's own "
                                 + "operative state and cannot be set by graph content");
             }
@@ -120,7 +123,8 @@ public final class BehaviorPropertySchema {
             return;
         }
         if ("workspace-agent".equals(node.behavior())) {
-            throw new BehaviorPropertyException(node.id(), "behavior", "workspace-agent was removed; declare a Workspace and an Agent with workspaceRef");
+            throw new BehaviorPropertyException(BehaviorPropertyException.Reason.REMOVED_BEHAVIOR,
+                    node.id(), "behavior", "removed behavior");
         }
         Optional<NodeTypeDescriptor> catalogued = behaviors.descriptor(node);
         if (catalogued.isEmpty()) {
@@ -145,7 +149,8 @@ public final class BehaviorPropertySchema {
             for (String key : node.properties().keySet()) {
                 if (!key.startsWith(group.name() + ".")) continue;
                 var match = group.match(key).orElseThrow(() -> new BehaviorPropertyException(
-                        node.id(), key, "does not match the dynamic '" + group.name()
+                        BehaviorPropertyException.Reason.COLLECTION_INVALID, node.id(), key,
+                        "does not match the dynamic '" + group.name()
                                 + ".<positive-index>.<field>' contract"));
                 items.computeIfAbsent(match.index(), ignored -> new LinkedHashMap<>())
                         .put(match.field().name(), group.property(match.index(), match.field()));
@@ -153,13 +158,15 @@ public final class BehaviorPropertySchema {
             int expected = 1;
             for (var item : items.entrySet()) {
                 if (item.getKey() != expected) {
-                    throw new BehaviorPropertyException(node.id(), group.name() + "." + item.getKey(),
+                    throw new BehaviorPropertyException(BehaviorPropertyException.Reason.COLLECTION_INVALID,
+                            node.id(), group.name() + "." + item.getKey(),
                             "is not contiguous; dynamic collection indices must start at 1 and have no gaps");
                 }
                 for (NodePropertyDescriptor field : group.fields()) {
                     NodePropertyDescriptor concrete = item.getValue().get(field.name());
                     if (concrete == null) {
-                        throw new BehaviorPropertyException(node.id(), group.name() + "." + item.getKey(),
+                        throw new BehaviorPropertyException(BehaviorPropertyException.Reason.COLLECTION_INVALID,
+                                node.id(), group.name() + "." + item.getKey(),
                                 "is incomplete; required field '" + field.name() + "' is missing");
                     }
                     validateProperty(node, concrete, false, List.of(concrete));
@@ -222,7 +229,8 @@ public final class BehaviorPropertySchema {
             }
             String intended = byFoldedName.get(key.toLowerCase(Locale.ROOT));
             if (intended != null) {
-                throw new BehaviorPropertyException(node.id(), key,
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.NAME_NEAR_MISS,
+                        node.id(), key,
                         "differs only by case from '" + intended + "', which behavior '" + node.behavior()
                                 + "' declares. A property that is not spelled exactly as the catalog declares it "
                                 + "is not applied, so the node would run on the default instead of the "
@@ -308,7 +316,8 @@ public final class BehaviorPropertySchema {
             // type and allowed-value checks below, and the reserved-namespace refusal above already
             // ran unconditionally.
             if (requiredHere(node, property) && !unconfigured) {
-                throw new BehaviorPropertyException(node.id(), property.name(),
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.REQUIRED_MISSING,
+                        node.id(), property.name(),
                         "is required by behavior '" + node.behavior() + "' but is absent or blank");
             }
             // An absent optional property keeps its catalog default at execution. Deliberately not
@@ -437,7 +446,8 @@ public final class BehaviorPropertySchema {
         if (allowed.isEmpty() || allowed.contains(value.trim())) {
             return;
         }
-        throw new BehaviorPropertyException(node.id(), property.name(),
+        throw new BehaviorPropertyException(BehaviorPropertyException.Reason.VALUE_NOT_ALLOWED,
+                node.id(), property.name(),
                 "must be one of " + allowed + " but was '" + value + "'");
     }
 
@@ -446,31 +456,36 @@ public final class BehaviorPropertySchema {
             BigDecimal parsed = new BigDecimal(value);
             if (!property.minimumValue().isEmpty()
                     && parsed.compareTo(new BigDecimal(property.minimumValue())) < 0) {
-                throw new BehaviorPropertyException(node.id(), property.name(),
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.OUT_OF_RANGE,
+                        node.id(), property.name(),
                         "must be at least " + property.minimumValue());
             }
             if (!property.maximumValue().isEmpty()
                     && parsed.compareTo(new BigDecimal(property.maximumValue())) > 0) {
-                throw new BehaviorPropertyException(node.id(), property.name(),
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.OUT_OF_RANGE,
+                        node.id(), property.name(),
                         "must be at most " + property.maximumValue());
             }
         }
         if (property.maximumUtf8Bytes() > 0
                 && value.getBytes(StandardCharsets.UTF_8).length > property.maximumUtf8Bytes()) {
-            throw new BehaviorPropertyException(node.id(), property.name(),
+            throw new BehaviorPropertyException(BehaviorPropertyException.Reason.TOO_LARGE,
+                    node.id(), property.name(),
                     "exceeds " + property.maximumUtf8Bytes() + " UTF-8 bytes");
         }
         if (property.maximumItems() > 0 || property.maximumItemUtf8Bytes() > 0) {
             String[] items = value.split(",", -1);
             if (property.maximumItems() > 0 && items.length > property.maximumItems()) {
-                throw new BehaviorPropertyException(node.id(), property.name(),
+                throw new BehaviorPropertyException(BehaviorPropertyException.Reason.COLLECTION_INVALID,
+                        node.id(), property.name(),
                         "contains more than " + property.maximumItems() + " items");
             }
             if (property.maximumItemUtf8Bytes() > 0) {
                 for (String item : items) {
                     if (item.strip().getBytes(StandardCharsets.UTF_8).length
                             > property.maximumItemUtf8Bytes()) {
-                        throw new BehaviorPropertyException(node.id(), property.name(),
+                        throw new BehaviorPropertyException(BehaviorPropertyException.Reason.COLLECTION_INVALID,
+                                node.id(), property.name(),
                                 "contains an item above " + property.maximumItemUtf8Bytes()
                                         + " UTF-8 bytes");
                     }
@@ -481,7 +496,8 @@ public final class BehaviorPropertySchema {
 
     private static BehaviorPropertyException typeFailure(GraphNode node, NodePropertyDescriptor property,
                                                           String value, String expectation) {
-        return new BehaviorPropertyException(node.id(), property.name(),
+        return new BehaviorPropertyException(BehaviorPropertyException.Reason.INVALID_TYPE,
+                node.id(), property.name(),
                 "must be " + expectation + " for behavior '" + node.behavior() + "' but was '" + value + "'");
     }
 
@@ -489,14 +505,65 @@ public final class BehaviorPropertySchema {
     public static final class BehaviorPropertyException extends IllegalArgumentException {
         private static final long serialVersionUID = 1L;
 
+        /** Closed schema-refusal vocabulary; values and prose never determine the public reason. */
+        public enum Reason {
+            INVALID_PROPERTY(ai.ravenroot.api.application.GraphAdmissionReason.INVALID_PROPERTY),
+            REQUIRED_MISSING(ai.ravenroot.api.application.GraphAdmissionReason.REQUIRED_PROPERTY_MISSING),
+            INVALID_TYPE(ai.ravenroot.api.application.GraphAdmissionReason.PROPERTY_TYPE_INVALID),
+            VALUE_NOT_ALLOWED(ai.ravenroot.api.application.GraphAdmissionReason.PROPERTY_VALUE_NOT_ALLOWED),
+            OUT_OF_RANGE(ai.ravenroot.api.application.GraphAdmissionReason.PROPERTY_OUT_OF_RANGE),
+            TOO_LARGE(ai.ravenroot.api.application.GraphAdmissionReason.PROPERTY_TOO_LARGE),
+            COLLECTION_INVALID(ai.ravenroot.api.application.GraphAdmissionReason.PROPERTY_COLLECTION_INVALID),
+            NAME_NEAR_MISS(ai.ravenroot.api.application.GraphAdmissionReason.PROPERTY_NAME_NEAR_MISS),
+            RESERVED(ai.ravenroot.api.application.GraphAdmissionReason.RESERVED_PROPERTY),
+            WORKSPACE_REFERENCE(ai.ravenroot.api.application.GraphAdmissionReason.WORKSPACE_REFERENCE_INVALID),
+            REMOVED_BEHAVIOR(ai.ravenroot.api.application.GraphAdmissionReason.REMOVED_BEHAVIOR);
+
+            private final ai.ravenroot.api.application.GraphAdmissionReason publicReason;
+            Reason(ai.ravenroot.api.application.GraphAdmissionReason publicReason) {
+                this.publicReason = publicReason;
+            }
+            public ai.ravenroot.api.application.GraphAdmissionReason publicReason() { return publicReason; }
+        }
+
         private final String nodeId;
         private final String propertyName;
+        private final Reason reason;
 
         BehaviorPropertyException(String nodeId, String propertyName, String problem) {
-            super("Node '" + nodeId + "' property '" + propertyName + "' " + problem);
+            this(Reason.INVALID_PROPERTY, nodeId, propertyName, problem);
+        }
+
+        BehaviorPropertyException(Reason reason, String nodeId, String propertyName, String problem) {
+            super(message(reason, nodeId, propertyName));
+            this.reason = java.util.Objects.requireNonNull(reason, "reason");
             this.nodeId = nodeId;
             this.propertyName = propertyName;
         }
+
+        private static String message(Reason reason, String nodeId, String propertyName) {
+            String problem = switch (reason) {
+                case INVALID_PROPERTY -> "is invalid";
+                case REQUIRED_MISSING -> "is required by behavior";
+                case INVALID_TYPE -> "has an invalid type";
+                case VALUE_NOT_ALLOWED -> "has a value outside the declared set";
+                case OUT_OF_RANGE -> "is outside declared bounds";
+                case TOO_LARGE -> "exceeds the declared size bound";
+                case COLLECTION_INVALID -> "has an invalid collection shape";
+                case NAME_NEAR_MISS -> "does not exactly match the declared name";
+                case RESERVED -> "is platform-owned";
+                case WORKSPACE_REFERENCE -> "has an invalid workspace reference";
+                case REMOVED_BEHAVIOR -> "belongs to a removed behavior";
+            };
+            return "Node '" + ai.ravenroot.api.application.DiagnosticIdentifier
+                    .node(nodeId == null ? "node" : nodeId).display()
+                    + "' property '"
+                    + ai.ravenroot.api.application.DiagnosticIdentifier
+                    .property(propertyName == null ? "property" : propertyName).display()
+                    + "' " + problem;
+        }
+
+        public Reason reason() { return reason; }
 
         public String nodeId() {
             return nodeId;

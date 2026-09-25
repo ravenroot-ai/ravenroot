@@ -177,6 +177,8 @@ export function createDocumentRecord({
       state: '',
       sourceCount: 0,
       diagnostic: '',
+      failure: null,
+      lastFailureIncident: null,
       client: null,
       generation: 0,
       pollController: null,

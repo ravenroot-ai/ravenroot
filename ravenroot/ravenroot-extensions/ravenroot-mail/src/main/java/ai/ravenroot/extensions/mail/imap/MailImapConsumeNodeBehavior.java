@@ -109,6 +109,10 @@ public final class MailImapConsumeNodeBehavior implements NodeBehavior, InboundS
         return new ImapConsumerSource(configuration, credentials, profiles, policies, protocol, executor, clock);
     }
 
+    @Override public Set<String> sourceStartFailureCodes() {
+        return ImapSourceStartFailure.codes();
+    }
+
     static Set<String> knownConfiguration() { return CONFIGURATION; }
 
     private static Executor defaultExecutor() {

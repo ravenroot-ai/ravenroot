@@ -169,8 +169,10 @@ abstract class CliBackendContract {
      * byte-identical whether the document was a valid graph or not: {@code CliBackend.InspectView}
      * carried only the four counts {@link #inspectReportsExactNodeAndEdgeCounts} checks above, and an
      * unknown node kind never showed up in them (see the measured example on {@code GraphSummary}'s
-     * own Javadoc). This is the same document {@link #GRAPH} constant would otherwise use, with its
-     * error terminal's kind corrupted to something Ravenroot does not know.
+     * own Javadoc). The shared admission contract now projects a closed phase/reason instead of
+     * returning graph-authored identifiers or values through this compatibility list. This is the
+     * same document {@link #GRAPH} constant would otherwise use, with its error terminal's kind
+     * corrupted to something Ravenroot does not know.
      */
     @Test
     final void inspectNamesASemanticViolationOnBothTransports() throws Exception {
@@ -178,9 +180,9 @@ abstract class CliBackendContract {
         var summary = backend.inspect(invalidGraph.getBytes(StandardCharsets.UTF_8));
 
         assertFalse(summary.valid());
-        assertEquals(List.of("Node 'mystery' declares an unknown kind 'SUBGRAPH'; "
-                        + "the known kinds are START, PASSTHROUGH, BEHAVIOR, END, ERROR"),
-                summary.violations());
+        assertEquals(List.of("SEMANTIC_STRUCTURE: INVALID_STRUCTURE"), summary.violations());
+        assertFalse(summary.violations().toString().contains("mystery"));
+        assertFalse(summary.violations().toString().contains("SUBGRAPH"));
         // The counts still print: an unrunnable document remains inspectable.
         assertEquals(3, summary.nodes());
         assertEquals(1, summary.edges());

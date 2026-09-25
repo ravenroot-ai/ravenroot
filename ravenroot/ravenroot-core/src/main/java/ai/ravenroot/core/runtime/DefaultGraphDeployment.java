@@ -1,7 +1,10 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.GraphAdmissionPhase;
+import ai.ravenroot.api.application.GraphAdmissionPurpose;
 import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.DeploymentStartupException;
 import ai.ravenroot.api.deployment.DeploymentState;
 import ai.ravenroot.api.deployment.DeploymentStatus;
 import ai.ravenroot.api.deployment.GraphDeployment;
@@ -10,6 +13,9 @@ import ai.ravenroot.api.deployment.IngressOverflowPolicy;
 import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.deployment.SourceStartException;
+import ai.ravenroot.api.deployment.StartupFailure;
+import ai.ravenroot.api.deployment.StartupFailureSink;
 import ai.ravenroot.api.deployment.RequestReplyAdmission;
 import ai.ravenroot.api.deployment.RequestReplyIngress;
 import ai.ravenroot.api.deployment.RequestReplyLimits;
@@ -219,6 +225,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     /** Sources stopped for restart but still owed their terminal release if this registration ends. */
     private List<SourceHandle> restartableSources = List.of();
     private volatile ManagedIngress managedIngress;
+    private volatile StartupFailureSink startupFailureSink = StartupFailureSink.logging();
     /**
      * The generation admission is currently open at, and the value every arrival admitted through
      * {@link IngressView} is stamped with.
@@ -793,6 +800,14 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         this.managedIngress = Objects.requireNonNull(managedIngress, "managedIngress");
     }
 
+    /** Installs the privileged once-per-failed-start recorder before the deployment is started. */
+    public synchronized void installStartupFailureSink(StartupFailureSink sink) {
+        if (status.state() != DeploymentState.COLD) {
+            throw new IllegalStateException("startup failure sink must be installed before start");
+        }
+        startupFailureSink = Objects.requireNonNull(sink, "sink");
+    }
+
     /** Establishes the already-authorized identity used by durable authority-driven starts. */
     synchronized void bindLifecycleIdentity(SecurityContext security) {
         this.lifecycleIdentity = Objects.requireNonNull(security, "security");
@@ -1321,6 +1336,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         List<SourceHandle> startedSources;
         long generation;
         try {
+            new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+                    .require(graphMl, GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
             openedDomain = engine.openDomain(id.value());
             openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl), graphExecutionLimits.graphMl());
             builtRunner = new GraphRunner(openedManager, engine, openedDomain, behaviors, monitor,
@@ -1341,14 +1358,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             } catch (RuntimeException | Error cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
+            StartupFailure publicFailure = classifyStartupFailure(failure);
             try {
-                recordFailure(failure);
+                recordFailure(failure, publicFailure);
             } catch (RuntimeException | Error stateFailure) {
                 failure.addSuppressed(stateFailure);
             }
             // The interface contract: "a stage completed exceptionally if startup failed after
             // rolling back". The rollback above already ran; this is what makes the stage exceptional.
-            throw failure;
+            throw new DeploymentStartupException(publicFailure);
         }
         lock.lock();
         try {
@@ -1430,6 +1448,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             BehaviorRegistry.SourceRegistration sourceAuthority = context.bind(packageAuthority);
             InboundSource source = null;
             boolean recorded = false;
+            GraphAdmissionPhase phase = GraphAdmissionPhase.SOURCE_CONSTRUCTION;
             try {
                 source = capableFactory.get().createSource(node, context);
                 if (source == null) {
@@ -1437,6 +1456,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                             + "' returned no inbound source for node '" + node.id() + "'");
                 }
                 sourceAuthority.activate();
+                phase = GraphAdmissionPhase.SOURCE_START;
                 joinSourceStart(source.start(context));
                 // From this point the source owns live resources. Record it before managed route
                 // activation so an acquisition failure rolls back this source and retires any lease
@@ -1444,6 +1464,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 started.add(new SourceHandle(node.id(), source, owner, sourceAuthority));
                 recorded = true;
                 if (source instanceof ManagedIngressSource ingressSource) {
+                    phase = GraphAdmissionPhase.MANAGED_INGRESS;
                     IngressRouteAuthority authority = context.ingressRoutes().orElseThrow(() ->
                             new IllegalStateException("managed ingress is unavailable for source"));
                     joinSourceStart(ingressSource.activateManagedIngress(authority));
@@ -1461,7 +1482,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 } else {
                     rollbackSources(started);
                 }
-                throw failure;
+                throw new SourceStartupBoundaryException(node.id(), node.behavior(), phase, failure);
             }
         }
         return List.copyOf(started);
@@ -1505,11 +1526,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
-    private void recordFailure(Throwable failure) {
-        // Sanitized: the class name only, never the message -- which may carry graph content, a
-        // catalog identifier or another node's payload. Same discipline DeploymentStatus's own
-        // Javadoc requires of every cause.
-        String cause = "startup failed: " + failure.getClass().getSimpleName();
+    private void recordFailure(Throwable originalFailure, StartupFailure publicFailure) {
         lock.lock();
         try {
             this.domain = null;
@@ -1522,11 +1539,49 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             // Preserve a definition published by an earlier READY run. A first failed start still
             // has null here, while a failed restart remains an observable FAILED lifecycle of the
             // same immutable source instead of looking like an undeploy/version invalidation.
-            this.status = DeploymentStatus.of(id, DeploymentState.FAILED, cause);
+            this.status = DeploymentStatus.failed(id, publicFailure);
             this.inFlightStart = null;
         } finally {
             lock.unlock();
         }
+        try {
+            java.util.Optional<String> sourceNode = originalFailure instanceof SourceStartupBoundaryException boundary
+                    ? java.util.Optional.of(ai.ravenroot.api.application.DiagnosticIdentifier
+                            .node(boundary.nodeId()).display())
+                    : java.util.Optional.empty();
+            startupFailureSink.record(id, publicFailure, sourceNode, originalFailure);
+        } catch (RuntimeException | Error ignoredTrustedSinkFailure) {
+            // Status convergence wins over diagnostics. The sink is invoked exactly once.
+        }
+    }
+
+    private StartupFailure classifyStartupFailure(Throwable failure) {
+        String incident = "incident:" + UUID.randomUUID().toString().replace("-", "");
+        if (failure instanceof SourceStartupBoundaryException boundary
+                && boundary.getCause() instanceof SourceStartException source
+                && behaviors.sourceStartFailureCodes(boundary.behavior()).contains(source.code())) {
+            return StartupFailure.declared(boundary.phase(), source.code(), boundary.nodeId(), incident);
+        }
+        GraphAdmissionPhase phase = failure instanceof SourceStartupBoundaryException boundary
+                ? boundary.phase() : GraphAdmissionPhase.STARTUP;
+        return StartupFailure.generic(phase, incident);
+    }
+
+    /** Internal carrier only; public completions receive DeploymentStartupException without this cause. */
+    private static final class SourceStartupBoundaryException extends RuntimeException {
+        private final String nodeId;
+        private final String behavior;
+        private final GraphAdmissionPhase phase;
+
+        SourceStartupBoundaryException(String nodeId, String behavior, GraphAdmissionPhase phase, Throwable cause) {
+            super("Inbound source startup failed", cause);
+            this.nodeId = nodeId;
+            this.behavior = behavior;
+            this.phase = phase;
+        }
+        String nodeId() { return nodeId; }
+        String behavior() { return behavior; }
+        GraphAdmissionPhase phase() { return phase; }
     }
 
     /**
@@ -1656,7 +1711,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             // once the deployment settles back to READY) without touching status now.
             if (wasEmpty && status.state() == DeploymentState.READY) {
                 status = DeploymentStatus.of(id, DeploymentState.DEGRADED,
-                        "source '" + nodeId + "' degraded: " + sanitizedReason);
+                        "one or more inbound sources reported degraded health");
             }
         } finally {
             lock.unlock();

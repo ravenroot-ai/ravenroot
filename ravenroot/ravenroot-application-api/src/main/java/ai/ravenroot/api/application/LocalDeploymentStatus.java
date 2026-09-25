@@ -34,9 +34,11 @@ import java.util.Optional;
  *                     absent only for compatibility producers that predate this projection
  * @param diagnostic fixed, bounded, operator-safe explanation, present only for degraded or failed
  *                   deployments
+ * @param failure structured startup failure, present only for failed startup when available
  */
 public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
-                                    Optional<String> graphVersion, Optional<String> diagnostic) {
+                                    Optional<String> graphVersion, Optional<String> diagnostic,
+                                    Optional<ai.ravenroot.api.deployment.StartupFailure> failure) {
     /** Honest ownership label returned on the wire; intentionally makes no multi-replica claim. */
     public static final String SCOPE = "LOCAL_PROCESS";
     /** Defense in depth for implementations other than the reference implementation. */
@@ -57,10 +59,27 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
         diagnostic = diagnostic == null ? Optional.empty() : diagnostic
                 .map(String::trim).filter(text -> !text.isEmpty())
                 .map(text -> text.substring(0, Math.min(text.length(), MAX_DIAGNOSTIC_CHARACTERS)));
+        failure = failure == null ? Optional.empty() : failure;
         if (diagnostic.isPresent() && state != LocalDeploymentState.DEGRADED
                 && state != LocalDeploymentState.FAILED) {
             throw new IllegalArgumentException("only degraded and failed deployments carry diagnostics");
         }
+        if (failure.isPresent() && state != LocalDeploymentState.FAILED) {
+            throw new IllegalArgumentException("only failed deployments carry startup failures");
+        }
+    }
+
+    /**
+     * Compatibility constructor for the pre-structured-failure canonical shape.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param state truthful process-local lifecycle state
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param graphVersion immutable registered graph version when available
+     * @param diagnostic bounded operator-safe explanation when available
+     */
+    public LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
+                                 Optional<String> graphVersion, Optional<String> diagnostic) {
+        this(deploymentId, state, sourceCount, graphVersion, diagnostic, Optional.empty());
     }
 
     /**
@@ -72,7 +91,7 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
      */
     public LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
                                  Optional<String> diagnostic) {
-        this(deploymentId, state, sourceCount, Optional.empty(), diagnostic);
+        this(deploymentId, state, sourceCount, Optional.empty(), diagnostic, Optional.empty());
     }
 
     /**
@@ -84,7 +103,7 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
      */
     public static LocalDeploymentStatus of(String deploymentId, LocalDeploymentState state, int sourceCount) {
         return new LocalDeploymentStatus(deploymentId, state, sourceCount,
-                Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty(), Optional.empty());
     }
 
     /**
@@ -98,7 +117,7 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
     public static LocalDeploymentStatus withGraph(String deploymentId, LocalDeploymentState state,
                                                   int sourceCount, String graphVersion) {
         return new LocalDeploymentStatus(deploymentId, state, sourceCount,
-                Optional.ofNullable(graphVersion), Optional.empty());
+                Optional.ofNullable(graphVersion), Optional.empty(), Optional.empty());
     }
 
     /**
@@ -112,7 +131,7 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
     public static LocalDeploymentStatus of(String deploymentId, LocalDeploymentState state, int sourceCount,
                                            String safeDiagnostic) {
         return new LocalDeploymentStatus(deploymentId, state, sourceCount,
-                Optional.empty(), Optional.ofNullable(safeDiagnostic));
+                Optional.empty(), Optional.ofNullable(safeDiagnostic), Optional.empty());
     }
 
     /**
@@ -128,6 +147,21 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
                                                   int sourceCount, String graphVersion,
                                                   String safeDiagnostic) {
         return new LocalDeploymentStatus(deploymentId, state, sourceCount,
-                Optional.ofNullable(graphVersion), Optional.ofNullable(safeDiagnostic));
+                Optional.ofNullable(graphVersion), Optional.ofNullable(safeDiagnostic), Optional.empty());
+    }
+
+    /**
+     * Creates a failed projection retaining the engine's exact structured startup failure.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param graphVersion immutable registered graph version, or {@code null}
+     * @param failure safe structured startup failure
+     * @return failed local-deployment status
+     */
+    public static LocalDeploymentStatus failed(String deploymentId, int sourceCount, String graphVersion,
+            ai.ravenroot.api.deployment.StartupFailure failure) {
+        return new LocalDeploymentStatus(deploymentId, LocalDeploymentState.FAILED, sourceCount,
+                Optional.ofNullable(graphVersion), Optional.of("deployment startup failed in this process"),
+                Optional.of(java.util.Objects.requireNonNull(failure, "failure")));
     }
 }

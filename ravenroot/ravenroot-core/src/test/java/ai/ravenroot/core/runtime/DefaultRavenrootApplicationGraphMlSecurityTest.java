@@ -91,9 +91,10 @@ class DefaultRavenrootApplicationGraphMlSecurityTest {
         assertEquals(1, summary.startNodes());
         assertEquals(1, summary.endNodes());
         assertEquals(false, summary.valid(), "an undeclared-and-unknown kind is not a valid graph");
-        assertEquals(List.of("Node 'mystery' declares an unknown kind 'SUBGRAPH'; "
-                        + "the known kinds are START, PASSTHROUGH, BEHAVIOR, END, ERROR"),
-                summary.violations());
+        assertEquals(List.of("SEMANTIC_STRUCTURE: INVALID_STRUCTURE"), summary.violations());
+        assertEquals(ai.ravenroot.api.application.GraphAdmissionReason.INVALID_STRUCTURE,
+                summary.findings().getFirst().reason());
+        assertEquals("mystery", summary.findings().getFirst().nodeId());
         application.close();
     }
 
@@ -126,8 +127,9 @@ class DefaultRavenrootApplicationGraphMlSecurityTest {
         assertEquals(1, summary.startNodes());
         assertEquals(1, summary.endNodes());
         assertEquals(false, summary.valid(), "a graph may declare at most one error terminal");
-        assertEquals(List.of("A graph must contain at most one error node, and 2 are declared: first, second"),
-                summary.violations());
+        assertEquals(List.of("SEMANTIC_STRUCTURE: INVALID_STRUCTURE"), summary.violations());
+        assertEquals(ai.ravenroot.api.application.GraphAdmissionReason.INVALID_STRUCTURE,
+                summary.findings().getFirst().reason());
         application.close();
     }
 
@@ -182,8 +184,8 @@ class DefaultRavenrootApplicationGraphMlSecurityTest {
         var summary = assertDoesNotThrow(() -> application.inspectGraphMl(new ByteArrayInputStream(document)));
 
         assertEquals(false, summary.valid());
-        assertEquals(List.of("Node 'mystery' declares kind 'BEHAVIOR' without a behavior name"),
-                summary.violations());
+        assertEquals(List.of("SEMANTIC_STRUCTURE: INVALID_STRUCTURE"), summary.violations());
+        assertEquals("mystery", summary.findings().getFirst().nodeId());
         // The specific regression: the counts must still be there, not lost to a throw.
         assertEquals(3, summary.nodes());
         assertEquals(2, summary.edges());

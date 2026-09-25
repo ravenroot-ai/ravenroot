@@ -53,6 +53,26 @@ class DiagnosticIdentifierTest {
         assertFalse(singleCharacterScheme.display().contains("private.example"));
         assertEquals(DiagnosticIdentifier.reference(
                 "node-url=x://operator:pw@private.example/path"), singleCharacterScheme.reference());
+
+        String longSchemeRaw = "node-url=a" + "1".repeat(35)
+                + "://operator:pw@private.example/path";
+        var longScheme = DiagnosticIdentifier.node(longSchemeRaw);
+        assertEquals("node-url=a" + "1".repeat(35)
+                + "://[ravenroot:redacted:host]/path", longScheme.display());
+        assertFalse(longScheme.display().contains("operator"));
+        assertFalse(longScheme.display().contains("pw"));
+        assertFalse(longScheme.display().contains("private.example"));
+        assertEquals(DiagnosticIdentifier.reference(longSchemeRaw), longScheme.reference());
+
+        String oversizedSchemeRaw = "node-url=a" + "1".repeat(1_024)
+                + "://operator:pw@private.example/path";
+        var oversizedScheme = DiagnosticIdentifier.node(oversizedSchemeRaw);
+        assertTrue(oversizedScheme.display().getBytes(StandardCharsets.UTF_8).length
+                <= DiagnosticIdentifier.MAX_IDENTIFIER_UTF8_BYTES);
+        assertFalse(oversizedScheme.display().contains("operator"));
+        assertFalse(oversizedScheme.display().contains("pw"));
+        assertFalse(oversizedScheme.display().contains("private.example"));
+        assertEquals(DiagnosticIdentifier.reference(oversizedSchemeRaw), oversizedScheme.reference());
     }
 
     @Test

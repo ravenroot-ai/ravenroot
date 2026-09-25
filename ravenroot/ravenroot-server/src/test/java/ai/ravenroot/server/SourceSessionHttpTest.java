@@ -75,7 +75,8 @@ class SourceSessionHttpTest {
                 server.start();
                 String marker = "password=hunter2-host=private.example-profile=prod";
                 String hostileNode = "listener;host=private.example;profile=prod;"
-                        + "url=x://operator:pw@inside.example:8443/path";
+                        + "url=a" + "1".repeat(35)
+                        + "://operator:pw@inside.example:8443/path";
                 String graph = SOURCE_GRAPH
                         .replace("<key id=\"outcome\"", "<key id=\"batch\" for=\"node\" attr.name=\"batchSize\" attr.type=\"string\"/>\n  <key id=\"outcome\"")
                         .replace("<data key=\"behavior\">test.http.source</data></node>",

@@ -22,7 +22,7 @@ public final class DiagnosticIdentifier {
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
             "(?i)(^|[^A-Za-z0-9_])(host(?:name)?|profile)\\s*[:=]\\s*([^\\s,;|?&#]+)");
     private static final Pattern URI_AUTHORITY = Pattern.compile(
-            "(?i)([a-z][a-z0-9+.-]{0,31}://)(?:[^\\s/?#@]+@)?(?:\\[[^]]+]|[^\\s/?#:]+)(?::[0-9]{1,5})?");
+            "(?i)([a-z][a-z0-9+.-]*://)(?:[^\\s/?#@]+@)?(?:\\[[^]]+]|[^\\s/?#:]+)(?::[0-9]{1,5})?");
 
     private DiagnosticIdentifier() { }
 

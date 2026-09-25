@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,11 +16,16 @@ from typing import Callable, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = Path(__file__).with_name("minio-fixtures.properties")
-PROJECT_REPOSITORY = "ghcr.io/ravenroot-ai/ravenroot-minio-fixtures"
+PROJECT_REPOSITORY = "ghcr.io/ravenroot-ai/ravenroot-minio-acceptance"
+PENDING_DIGEST = "PENDING"
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 PLATFORM = re.compile(r"linux/(?:amd64|arm64)\Z")
 ROLES = ("server", "client")
+DOCKERFILE = Path(__file__).with_name("Dockerfile")
+SOURCE_DATE_EPOCH = "0"
+REGISTRY_USER_ENV = "RAVENROOT_FIXTURE_REGISTRY_USER"
+REGISTRY_TOKEN_ENV = "RAVENROOT_FIXTURE_REGISTRY_TOKEN"
 
 
 class FixtureError(RuntimeError):
@@ -35,6 +42,7 @@ class Fixture:
     upstream_version: str
     upstream_source: str
     upstream_revision: str
+    upstream_created: str
     packaging_source: str
     packaging_revision: str
     license: str
@@ -42,6 +50,8 @@ class Fixture:
 
     @property
     def project_reference(self) -> str:
+        if self.project_digest == PENDING_DIGEST:
+            raise FixtureError(f"{self.role} project digest has not been promoted")
         return f"{self.project_repository}@{self.project_digest}"
 
     @property
@@ -76,7 +86,7 @@ def _required(values: dict[str, str], key: str) -> str:
         raise FixtureError(f"missing required fixture property: {key}") from failure
 
 
-def load_manifest(path: Path = MANIFEST) -> tuple[Fixture, ...]:
+def load_manifest(path: Path = MANIFEST, *, allow_pending: bool = False) -> tuple[Fixture, ...]:
     values = _parse_properties(path)
     if _required(values, "schema.version") != "1":
         raise FixtureError("unsupported MinIO fixture manifest schema")
@@ -88,7 +98,7 @@ def load_manifest(path: Path = MANIFEST) -> tuple[Fixture, ...]:
     expected_keys = {"schema.version", "project.repository"}
     suffixes = (
         "project.digest", "upstream.repository", "upstream.digest", "upstream.version",
-        "upstream.source", "upstream.revision", "packaging.source", "packaging.revision",
+        "upstream.source", "upstream.revision", "upstream.created", "packaging.source", "packaging.revision",
         "license", "platforms",
     )
     for role in ROLES:
@@ -102,27 +112,35 @@ def load_manifest(path: Path = MANIFEST) -> tuple[Fixture, ...]:
             upstream_version=_required(values, f"{role}.upstream.version"),
             upstream_source=_required(values, f"{role}.upstream.source"),
             upstream_revision=_required(values, f"{role}.upstream.revision"),
+            upstream_created=_required(values, f"{role}.upstream.created"),
             packaging_source=_required(values, f"{role}.packaging.source"),
             packaging_revision=_required(values, f"{role}.packaging.revision"),
             license=_required(values, f"{role}.license"),
             platforms=tuple(part.strip() for part in _required(values, f"{role}.platforms").split(",")),
         )
-        _validate_fixture(fixture)
+        _validate_fixture(fixture, allow_pending=allow_pending)
         fixtures.append(fixture)
     unknown = sorted(set(values) - expected_keys)
     if unknown:
         raise FixtureError(f"unknown fixture properties: {', '.join(unknown)}")
-    if len({fixture.project_digest for fixture in fixtures}) != len(fixtures):
+    promoted_digests = {
+        fixture.project_digest for fixture in fixtures if fixture.project_digest != PENDING_DIGEST
+    }
+    if len(promoted_digests) != sum(
+        fixture.project_digest != PENDING_DIGEST for fixture in fixtures
+    ):
         raise FixtureError("server and client must not share a project digest")
     return tuple(fixtures)
 
 
-def _validate_fixture(fixture: Fixture) -> None:
-    for label, value in (("project", fixture.project_digest), ("upstream", fixture.upstream_digest)):
-        if not DIGEST.fullmatch(value):
-            raise FixtureError(f"{fixture.role}.{label}.digest must be an immutable sha256 digest")
-    if fixture.project_digest != fixture.upstream_digest:
-        raise FixtureError(f"{fixture.role} mirror digest must equal the byte-for-byte upstream index digest")
+def _validate_fixture(fixture: Fixture, *, allow_pending: bool) -> None:
+    if fixture.project_digest == PENDING_DIGEST:
+        if not allow_pending:
+            raise FixtureError(f"{fixture.role}.project.digest has not been promoted")
+    elif not DIGEST.fullmatch(fixture.project_digest):
+        raise FixtureError(f"{fixture.role}.project.digest must be an immutable sha256 digest")
+    if not DIGEST.fullmatch(fixture.upstream_digest):
+        raise FixtureError(f"{fixture.role}.upstream.digest must be an immutable sha256 digest")
     if not fixture.upstream_repository.startswith("docker.io/bitnamilegacy/"):
         raise FixtureError(f"{fixture.role}.upstream.repository must name the reviewed archival source")
     if "@" in fixture.upstream_repository or ":" in fixture.upstream_repository:
@@ -133,6 +151,8 @@ def _validate_fixture(fixture: Fixture) -> None:
         raise FixtureError(f"{fixture.role}.packaging.source must name the public packaging source")
     if not COMMIT.fullmatch(fixture.upstream_revision):
         raise FixtureError(f"{fixture.role}.upstream.revision must be a full source commit")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", fixture.upstream_created) is None:
+        raise FixtureError(f"{fixture.role}.upstream.created must be a canonical UTC timestamp")
     if fixture.license != "AGPL-3.0-only":
         raise FixtureError(f"{fixture.role}.license must preserve the embedded application license")
     if not fixture.platforms or len(set(fixture.platforms)) != len(fixture.platforms):
@@ -143,8 +163,8 @@ def _validate_fixture(fixture: Fixture) -> None:
         raise FixtureError(f"{fixture.role}.platforms must include the GitHub runner architecture linux/amd64")
 
 
-def validate(path: Path = MANIFEST) -> tuple[Fixture, ...]:
-    fixtures = load_manifest(path)
+def validate(path: Path = MANIFEST, *, allow_pending: bool = False) -> tuple[Fixture, ...]:
+    fixtures = load_manifest(path, allow_pending=allow_pending)
     print(f"MinIO fixture manifest valid: {len(fixtures)} immutable project-owned indexes")
     return fixtures
 
@@ -158,12 +178,28 @@ def _run(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(arguments, check=False, capture_output=True, text=True)
 
 
+def registry_login_if_configured() -> None:
+    user = os.environ.get(REGISTRY_USER_ENV)
+    token = os.environ.get(REGISTRY_TOKEN_ENV)
+    if user is None and token is None:
+        return
+    if not user or not token:
+        raise FixtureError(f"{REGISTRY_USER_ENV} and {REGISTRY_TOKEN_ENV} must be set together")
+    result = subprocess.run(
+        ("docker", "login", "ghcr.io", "--username", user, "--password-stdin"),
+        input=token, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise FixtureError("fixture registry authentication failed")
+
+
 def preflight(
     fixtures: Sequence[Fixture], platform: str, pull: bool,
     runner: Callable[[Sequence[str]], subprocess.CompletedProcess[str]] = _run,
 ) -> None:
     if not PLATFORM.fullmatch(platform):
         raise FixtureError(f"unsupported requested platform: {platform}")
+    registry_login_if_configured()
     for fixture in fixtures:
         if platform not in fixture.platforms:
             raise FixtureError(f"{fixture.role} fixture does not declare {platform}")
@@ -193,39 +229,81 @@ def preflight(
         print(f"{fixture.role} fixture ready: {fixture.project_reference} ({platform})")
 
 
-def emit_github_output(fixtures: Sequence[Fixture], destination: Path) -> None:
-    lines = []
-    for fixture in fixtures:
-        prefix = fixture.role
-        lines.extend((
-            f"{prefix}_source={fixture.upstream_reference}",
-            f"{prefix}_target_tag={fixture.publication_tag}",
-            f"{prefix}_target_ref={fixture.project_reference}",
-            f"{prefix}_platforms={','.join(fixture.platforms)}",
-        ))
-    with destination.open("a", encoding="utf-8") as output:
-        output.write("\n".join(lines) + "\n")
+def build_command(fixture: Fixture, metadata_file: Path, *, push: bool) -> tuple[str, ...]:
+    output = f"type=image,name={fixture.publication_tag},push={'true' if push else 'false'},rewrite-timestamp=true"
+    return (
+        "docker", "buildx", "build", "--file", str(DOCKERFILE),
+        "--platform", ",".join(fixture.platforms),
+        "--build-arg", f"BASE_IMAGE={fixture.upstream_reference}",
+        "--build-arg", f"FIXTURE_ROLE={fixture.role}",
+        "--build-arg", f"UPSTREAM_VERSION={fixture.upstream_version}",
+        "--build-arg", f"UPSTREAM_SOURCE={fixture.upstream_source}",
+        "--build-arg", f"UPSTREAM_REVISION={fixture.upstream_revision}",
+        "--build-arg", f"UPSTREAM_DIGEST={fixture.upstream_digest}",
+        "--build-arg", f"UPSTREAM_CREATED={fixture.upstream_created}",
+        "--build-arg", f"FIXTURE_LICENSE={fixture.license}",
+        "--build-arg", f"SOURCE_DATE_EPOCH={SOURCE_DATE_EPOCH}",
+        "--build-arg", "BUILDKIT_MULTI_PLATFORM=1",
+        "--provenance=false", "--sbom=false", "--output", output,
+        "--metadata-file", str(metadata_file), str(DOCKERFILE.parent),
+    )
+
+
+def build(fixture: Fixture, metadata_file: Path, *, push: bool, github_output: Path | None) -> str:
+    registry_login_if_configured()
+    arguments = build_command(fixture, metadata_file, push=push)
+    print("Executing reproducible fixture build:", shlex.join(arguments))
+    result = subprocess.run(arguments, check=False)
+    if result.returncode != 0:
+        raise FixtureError(f"{fixture.role} fixture build failed with exit code {result.returncode}")
+    try:
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        digest = metadata["containerimage.digest"]
+    except (OSError, json.JSONDecodeError, KeyError) as failure:
+        raise FixtureError(f"{fixture.role} fixture build did not report an image digest") from failure
+    if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+        raise FixtureError(f"{fixture.role} fixture build reported an invalid image digest")
+    if fixture.project_digest != PENDING_DIGEST and digest != fixture.project_digest:
+        raise FixtureError(
+            f"{fixture.role} fixture digest drifted: expected {fixture.project_digest}, got {digest}"
+        )
+    if github_output is not None:
+        with github_output.open("a", encoding="utf-8") as output_file:
+            output_file.write(f"{fixture.role}_digest={digest}\n")
+            output_file.write(f"{fixture.role}_tag={fixture.publication_tag}\n")
+            output_file.write(f"{fixture.role}_platforms={','.join(fixture.platforms)}\n")
+    print(f"{fixture.role} fixture built at {fixture.publication_tag}@{digest}")
+    return digest
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("validate")
+    validate_parser = subparsers.add_parser("validate")
+    validate_parser.add_argument("--allow-pending-project-digests", action="store_true")
     preflight_parser = subparsers.add_parser("preflight")
     preflight_parser.add_argument("--platform", required=True)
     preflight_parser.add_argument("--pull", action="store_true")
-    output_parser = subparsers.add_parser("github-output")
-    output_parser.add_argument("--destination", type=Path, required=True)
+    build_parser = subparsers.add_parser("build")
+    build_parser.add_argument("--role", choices=ROLES, required=True)
+    build_parser.add_argument("--metadata-file", type=Path, required=True)
+    build_parser.add_argument("--github-output", type=Path)
+    build_parser.add_argument("--push", action="store_true")
     arguments = parser.parse_args()
     try:
-        fixtures = load_manifest(arguments.manifest)
+        allow_pending = arguments.command == "build" or (
+            arguments.command == "validate" and arguments.allow_pending_project_digests
+        )
+        fixtures = load_manifest(arguments.manifest, allow_pending=allow_pending)
         if arguments.command == "validate":
             print(f"MinIO fixture manifest valid: {len(fixtures)} immutable project-owned indexes")
         elif arguments.command == "preflight":
             preflight(fixtures, arguments.platform, arguments.pull)
         else:
-            emit_github_output(fixtures, arguments.destination)
+            fixture = next(candidate for candidate in fixtures if candidate.role == arguments.role)
+            build(fixture, arguments.metadata_file, push=arguments.push,
+                  github_output=arguments.github_output)
     except (FixtureError, OSError) as failure:
         parser.exit(1, f"MinIO fixture verification failed: {failure}\n")
     return 0

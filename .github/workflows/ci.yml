@@ -680,12 +680,18 @@ jobs:
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Check out repository-controlled fixture authority
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Pull immutable public fixtures and verify the runner architecture
+      - name: Pull immutable repository-owned fixtures and verify the runner architecture
+        env:
+          RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}
+          RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}
         run: python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
 
   # Cheap policy, dependency, unit and build checks form a hard first phase. Nothing expensive is
@@ -719,6 +725,9 @@ jobs:
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -759,6 +768,9 @@ jobs:
           python3 scripts/select_backend_tests.py --event "$EVENT_NAME" --base "$base" --head "$head"
       - name: Revalidate and cache MinIO fixtures before Maven needs them
         if: steps.backend-scope.outputs.mode == 'all' || contains(steps.backend-scope.outputs.projects, 'ravenroot-extensions/ravenroot-object-storage')
+        env:
+          RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}
+          RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}
         run: python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
       - name: Run the selected backend unit and integration suite
         working-directory: ravenroot

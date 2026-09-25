@@ -30,17 +30,20 @@ containers. Their only authority is the project-owned, digest-pinned manifest at
 the accompanying [fixture provenance and rotation guide](../../scripts/fixtures/minio/README.md)
 records the upstream source commits, original digests, licenses, and verified update procedure.
 
-Before running the Maven reactor on a clean host, verify and pull the public fixtures for the host
-architecture. GitHub-hosted runners use:
+Before running the Maven reactor on a clean host, verify and pull the fixtures for the host
+architecture. GitHub-hosted runners supply their built-in token with only `packages: read`:
 
 ```sh
 python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
 mvn -f ravenroot/pom.xml -pl ravenroot-extensions/ravenroot-object-storage -am verify
 ```
 
-The preflight performs anonymous GHCR reads and fails with a bounded, non-secret reference and
-architecture diagnostic. The integration test pulls both immutable indexes before creating a
-container, so an unavailable server or client image cannot leave a partially started fixture.
+For a private package, local developers set `RAVENROOT_FIXTURE_REGISTRY_USER` and
+`RAVENROOT_FIXTURE_REGISTRY_TOKEN`; the verifier passes the token to `docker login` only through
+standard input and never includes it in a command or diagnostic. A public package also works without
+those variables. The preflight fails with a bounded, non-secret reference and architecture
+diagnostic. The integration test pulls both immutable indexes before creating a container, so an
+unavailable server or client image cannot leave a partially started fixture.
 
 ## Sandbox supervisor CPU red control
 

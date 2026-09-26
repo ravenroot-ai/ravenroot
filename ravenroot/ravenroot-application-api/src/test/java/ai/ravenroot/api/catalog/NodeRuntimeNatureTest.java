@@ -15,13 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The typed runtime-nature contract (ADR 0024 §2).
  *
  * <p>
- * The two assertions that matter most here are the ones easiest to satisfy in
- * appearance: that a
- * descriptor which says nothing permits <em>only</em> {@code WORKER}, and that
- * "said nothing" is
- * distinguishable from "declared WORKER". Both are what stop the fail-closed
- * reading from quietly
- * becoming the permissive one.
+ * A descriptor with no allowlist permits WORKER and TRAVERSAL, but does not
+ * admit every nature. An absent declaration remains distinguishable from an
+ * explicit WORKER declaration for catalog registration.
  * </p>
  */
 class NodeRuntimeNatureTest {
@@ -30,12 +26,20 @@ class NodeRuntimeNatureTest {
     // default, asserted
 
     @Test
-    void aDescriptorAuthoredBeforeThisIssueMeansWorkerAndPermitsOnlyWorker() {
+    void aLegacyDescriptorDefaultsToWorkerAndAlsoPermitsTraversal() {
         NodeTypeDescriptor legacy = legacyDescriptor();
 
         assertEquals(NodeRuntimeNature.WORKER, legacy.effectiveDefaultNature());
         assertEquals(Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.TRAVERSAL), legacy.effectiveAllowedNatures());
         assertFalse(legacy.declaresNature(), "a legacy descriptor declares nothing about nature");
+    }
+
+    @Test
+    void anExplicitWorkerDefaultWithNoAllowlistAlsoPermitsTraversal() {
+        assertEquals(Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.TRAVERSAL),
+                descriptor(NodeRuntimeNature.WORKER, Set.of()).effectiveAllowedNatures());
+        assertEquals(Set.of(NodeRuntimeNature.WORKER),
+                descriptor(NodeRuntimeNature.WORKER, Set.of(NodeRuntimeNature.WORKER)).effectiveAllowedNatures());
     }
 
     @Test

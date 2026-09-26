@@ -152,21 +152,13 @@ public record NodeTypeDescriptor(
      * The natures graph content may choose for a node of this type.
      *
      * <p>
-     * <strong>Empty means exactly the effective default, never "anything".</strong>
-     * The permissive
-     * reading is the one that has to be argued against, because it is what an empty
-     * collection usually
-     * means elsewhere: under it, every descriptor authored before runtime natures
-     * existed would
-     * silently permit a graph to declare {@link NodeRuntimeNature#AUTHORITY} on any
-     * node, which is the
-     * privilege escalation this rule prevents, delivered by the default.
-     * Fail-closed costs a
-     * descriptor that wants choice one explicit declaration.
+     * An empty allowlist permits the effective default and, when that default is
+     * {@link NodeRuntimeNature#WORKER}, {@link NodeRuntimeNature#TRAVERSAL}.
+     * It never permits every nature: a legacy descriptor must not silently admit
+     * {@link NodeRuntimeNature#AUTHORITY}.
      * </p>
      *
-     * @return declared allowed natures, or a singleton containing the effective
-     *         default
+     * @return declared allowed natures, or the limited fallback for an empty allowlist
      */
     public Set<NodeRuntimeNature> effectiveAllowedNatures() {
         return allowedNatures.isEmpty()

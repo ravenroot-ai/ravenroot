@@ -215,11 +215,12 @@ class RavenrootServerTest {
             // that the catalog was really served and really read.
             assertTrue(catalog.body().contains("\"agentic\":false"), catalog.body());
             // The nature contract the Inspector renders from. Effective values, so an editor
-            // never has to know what "absent" means; every built-in says nothing about nature and
-            // therefore publishes the fail-closed default, which is what makes the editor offer no
-            // escalation the server would then refuse.
+            // never has to know what "absent" means. Worker-default node types
+            // also offer TRAVERSAL, while other natures remain unavailable unless declared.
             assertTrue(catalog.body().contains("\"defaultNature\":\"WORKER\""), catalog.body());
-            assertTrue(catalog.body().contains("\"allowedNatures\":[\"WORKER\"]"), catalog.body());
+            assertTrue(catalog.body().contains(
+                    "\"defaultNature\":\"WORKER\",\"allowedNatures\":[\"WORKER\",\"TRAVERSAL\"]"),
+                    catalog.body());
             assertTrue(catalog.body().contains("\"natureProperty\":\"runtime.nature\""), catalog.body());
             assertTrue(catalog.body().contains("\"allowedNatures\":[\"WORKER\",\"TRAVERSAL\"]"),
                     "Programmer must publish the declared lifecycle choices: " + catalog.body());

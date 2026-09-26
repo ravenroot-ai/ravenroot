@@ -2,6 +2,9 @@ name: Publish MinIO acceptance fixtures
 
 on:
   workflow_dispatch:
+  # Bootstrap proof only: remove after this branch's scoped GITHUB_TOKEN publication run.
+  push:
+    branches: [feature/issue_480]
 
 permissions: {}
 

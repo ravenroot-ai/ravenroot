@@ -147,7 +147,7 @@ class MinioFixtureContractTest(unittest.TestCase):
     def test_publication_is_manual_pinned_and_has_only_scoped_package_write(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish-minio-fixtures.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
-        self.assertNotIn("\n  push:", workflow)
+        self.assertIn("push:\n    branches: [feature/issue_480]", workflow)
         self.assertIn("permissions: {}", workflow)
         self.assertIn("contents: read\n      packages: write", workflow)
         self.assertIn("moby/buildkit@sha256:", workflow)

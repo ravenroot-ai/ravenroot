@@ -3,8 +3,8 @@
 The object-storage acceptance test consumes the two repository-controlled, immutable image indexes
 recorded in [`minio-fixtures.properties`](minio-fixtures.properties). The `project.repository`
 namespace is owned by the Ravenroot GitHub organization. Each image records this public source
-repository in its OCI metadata; that provenance label does not imply a GitHub
-package-to-repository association.
+repository in its OCI metadata; that
+provenance label does not imply a GitHub package-to-repository association.
 Neither Java nor CI pulls the archival upstream repositories directly.
 
 The package is private and explicitly grants `ravenroot-ai/ravenroot` Read under **Manage Actions

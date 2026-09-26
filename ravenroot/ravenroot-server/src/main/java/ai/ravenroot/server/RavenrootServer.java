@@ -844,6 +844,20 @@ public final class RavenrootServer implements AutoCloseable {
                         exchange.getResponseHeaders().set("Pragma", "no-cache");
                         protectedRequest(embed::acknowledgeParent).handle(exchange, httpContext);
                     }));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.DISCOVERY_PATH,
+                    publicContext((exchange, httpContext) -> {
+                        if (!ai.ravenroot.server.embed.EmbedBrowserHttpHandler.requireExactPath(exchange,
+                                ai.ravenroot.server.embed.EmbedBrowserHttpHandler.DISCOVERY_PATH)) return;
+                        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                        exchange.getResponseHeaders().set("Pragma", "no-cache");
+                        protectedRequest(embed::discoverDeployments).handle(exchange, httpContext);
+                    }));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.GRANT_PATH,
+                    publicContext((exchange, httpContext) -> {
+                        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                        exchange.getResponseHeaders().set("Pragma", "no-cache");
+                        protectedRequest(embed::revokeGrant).handle(exchange, httpContext);
+                    }));
             // Browser routes perform their own exact viewer Origin/Sec-Fetch checks and emit no CORS.
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.LAUNCH_PATH,
                     publicContext(embed::launch));
@@ -2474,15 +2488,24 @@ public final class RavenrootServer implements AutoCloseable {
             if (graph == null) {
                 return;
             }
+            ai.ravenroot.api.application.GraphAdmissionPurpose purpose;
+            try {
+                purpose = ai.ravenroot.api.application.GraphAdmissionPurpose.valueOf(
+                        query(exchange).getOrDefault("purpose", "EXECUTION").toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException unsupportedPurpose) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
             var summary = authorizedApplication.inspectGraphMl(
                     httpContext.applicationContext(),
-                    new java.io.ByteArrayInputStream(graph));
+                    new java.io.ByteArrayInputStream(graph), purpose);
             // "valid" and "violations" distinguish validity on this exact endpoint;
             // POST /v1/graphs/inspect otherwise reports the same four counts whether
             // the document was a sound graph or not.
             json(exchange, 200, "{\"nodes\":" + summary.nodes() + ",\"edges\":" + summary.edges()
                     + ",\"startNodes\":" + summary.startNodes() + ",\"endNodes\":" + summary.endNodes()
                     + ",\"valid\":" + summary.valid() + ",\"violations\":" + stringArrayJson(summary.violations())
+                    + ",\"findings\":" + findingsJson(summary.findings())
                     + "}");
         } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
             failGraphExecutionLimit(exchange, httpContext, rejection);
@@ -2492,6 +2515,8 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, httpContext, error);
         } catch (PayloadException rejection) {
             failPayload(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
+            failGraphAdmission(exchange, httpContext, refusal);
         } catch (IllegalArgumentException error) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
@@ -3722,9 +3747,17 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, httpContext, error);
         } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
             failGraphExecutionLimit(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
+            failGraphAdmission(exchange, httpContext, refusal);
         } catch (ai.ravenroot.api.application.SourceSessionException refusal) {
-            fail(exchange, httpContext, refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
-                    ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST);
+            ErrorCode code = refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
+                    ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST;
+            if (refusal.finding().isPresent()) {
+                fail(exchange, code.status(), ErrorEnvelope.of(code, httpContext.requestId())
+                        .withFinding(refusal.finding().orElseThrow()));
+            } else {
+                fail(exchange, httpContext, code);
+            }
         } catch (ai.ravenroot.api.deployment.DeploymentAdmissionException overCap) {
             fail(exchange, httpContext, ErrorCode.REQUEST_LIMIT_EXCEEDED);
         } catch (UnsupportedOperationException unsupported) {
@@ -3918,6 +3951,8 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, httpContext, error);
         } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
             failGraphExecutionLimit(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
+            failGraphAdmission(exchange, httpContext, refusal);
         } catch (ai.ravenroot.api.application.LocalDeploymentException refusal) {
             fail(exchange, httpContext, refusal.reason()
                     == ai.ravenroot.api.application.LocalDeploymentException.Reason.GRAPH_CONFLICT
@@ -4374,6 +4409,7 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"graphVersion\":" + graphVersion
                 + ",\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
                 + "\",\"diagnostic\":" + diagnostic
+                + ",\"failure\":" + status.failure().map(RavenrootServer::startupFailureJson).orElse("null")
                 + ",\"continuity\":\"" + (durable == null ? "PROCESS_LOCAL" : "DURABLE") + "\""
                 + ",\"deploymentRevision\":" + (durable == null ? "null" : durable.revision())
                 + ",\"desiredState\":" + (durable == null ? "null"
@@ -4434,7 +4470,18 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"state\":\"" + status.state().name()
                 + "\",\"sourceCount\":" + status.sourceCount()
                 + ",\"scope\":\"" + ai.ravenroot.api.application.SourceSessionStatus.SCOPE
-                + "\",\"diagnostic\":" + diagnostic + "}");
+                + "\",\"diagnostic\":" + diagnostic
+                + ",\"failure\":" + status.failure().map(RavenrootServer::startupFailureJson).orElse("null")
+                + "}");
+    }
+
+    private static String startupFailureJson(ai.ravenroot.api.deployment.StartupFailure value) {
+        var body = new StringBuilder("{\"contract\":\"").append(escape(value.contract()))
+                .append("\",\"phase\":\"").append(value.phase()).append("\",\"reason\":\"")
+                .append(escape(value.reason())).append('"');
+        value.nodeId().ifPresent(node -> body.append(",\"nodeId\":\"").append(escape(node)).append('"'));
+        value.nodeRef().ifPresent(ref -> body.append(",\"nodeRef\":\"").append(escape(ref)).append('"'));
+        return body.append(",\"incidentId\":\"").append(escape(value.incidentId())).append("\"}").toString();
     }
 
     /**
@@ -4502,6 +4549,8 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, httpContext, error);
         } catch (PayloadException rejection) {
             failPayload(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
+            failGraphAdmission(exchange, httpContext, refusal);
         } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
             failGraphExecutionLimit(exchange, httpContext, rejection);
         } catch (UnsupportedOperationException unsupportedPolicy) {
@@ -5158,6 +5207,22 @@ public final class RavenrootServer implements AutoCloseable {
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
     }
 
+    private static String findingsJson(List<ai.ravenroot.api.application.GraphAdmissionFinding> values) {
+        return values.stream().map(RavenrootServer::findingJson)
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    }
+
+    private static String findingJson(ai.ravenroot.api.application.GraphAdmissionFinding value) {
+        var body = new StringBuilder("{\"contract\":\"").append(escape(value.contract()))
+                .append("\",\"phase\":\"").append(value.phase()).append("\",\"reason\":\"")
+                .append(value.reason()).append('"');
+        if (value.nodeId() != null) body.append(",\"nodeId\":\"").append(escape(value.nodeId())).append('"');
+        if (value.nodeRef() != null) body.append(",\"nodeRef\":\"").append(escape(value.nodeRef())).append('"');
+        if (value.propertyName() != null) body.append(",\"propertyName\":\"")
+                .append(escape(value.propertyName())).append('"');
+        return body.append(",\"incidentId\":\"").append(escape(value.incidentId())).append("\"}").toString();
+    }
+
     /**
      * The three per-traversal control operations (API-02 for cancel, plus pause and resume),
      * sharing one handler because they share every part that is not the call itself: the same path
@@ -5286,8 +5351,12 @@ public final class RavenrootServer implements AutoCloseable {
                 caller == null ? GraphMlRejectionAuditEvent.UNKNOWN : caller.subject(), error));
         int status = error.reason() == GraphMlParseException.Reason.DOCUMENT_TOO_LARGE
                 || error.reason() == GraphMlParseException.Reason.RESOURCE_LIMIT ? 413 : 400;
+        var finding = ai.ravenroot.api.application.GraphAdmissionFinding.of(
+                ai.ravenroot.api.application.GraphAdmissionPhase.GRAPHML_PARSE,
+                ai.ravenroot.api.application.GraphAdmissionReason.GRAPHML_REJECTED,
+                null, null, error.incidentId());
         fail(exchange, status, ErrorEnvelope.of(graphMlCode(error.reason()), requestId)
-                .withIncident(error.incidentId()));
+                .withIncident(error.incidentId()).withFinding(finding));
     }
 
     /**
@@ -6164,6 +6233,14 @@ public final class RavenrootServer implements AutoCloseable {
                 caller == null ? PayloadRejectionAuditEvent.UNKNOWN : caller.tenantId(),
                 caller == null ? PayloadRejectionAuditEvent.UNKNOWN : caller.subject(), rejection));
         fail(exchange, rejection.reason().recommendedStatus(), ErrorEnvelope.of(rejection, correlationId));
+    }
+
+    /** Public graph refusal is assembled only from the closed finding, never from exception text. */
+    private static void failGraphAdmission(HttpExchange exchange, HttpRequestContext httpContext,
+            ai.ravenroot.api.application.GraphAdmissionException refusal) throws IOException {
+        ai.ravenroot.api.application.GraphAdmissionFinding finding = refusal.findings().getFirst();
+        fail(exchange, ErrorCode.INVALID_REQUEST.status(),
+                ErrorEnvelope.of(ErrorCode.INVALID_REQUEST, httpContext.requestId()).withFinding(finding));
     }
 
     private static void json(HttpExchange exchange, int status, String body) throws IOException {

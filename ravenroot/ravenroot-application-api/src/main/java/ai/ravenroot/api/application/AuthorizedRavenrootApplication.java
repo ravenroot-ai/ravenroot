@@ -414,6 +414,18 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
+     * Performs purpose-aware inspection after the same graph-read authorization.
+     * @param context authenticated request context used for authorization and audit attribution
+     * @param graphMl readable exact GraphML bytes; ownership remains with the caller
+     * @param purpose operation for which the graph is being admitted
+     * @return authorized policy-independent admission summary
+     */
+    public GraphSummary inspectGraphMl(RequestContext context, InputStream graphMl, GraphAdmissionPurpose purpose) {
+        require(context, AuthorizationAction.GRAPH_READ, collection("graphs", context));
+        return delegate.inspectGraphMl(graphMl, purpose);
+    }
+
+    /**
  * Starts a traversal with a structured payload.
  *
  * <p>This is the surface an adapter should prefer. The {@code Object} overload below remains for
@@ -644,6 +656,49 @@ public final class AuthorizedRavenrootApplication {
                 ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
                         context.tenantId()));
         return delegate.localDeploymentView(context.tenantId(), deploymentId);
+    }
+
+    /**
+     * Discovers only current READY process-local views for the authenticated workload's tenant.
+     * Discovery is descriptive: callers must resolve the exact source tuple again when creating a
+     * session because a deployment can be replaced or leave READY immediately after this read.
+     * @param context authenticated workload request
+     * @return deterministic tenant-owned READY deployment views
+     */
+    public java.util.List<DeploymentViewerView> readyEmbedDeploymentViews(RequestContext context) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_DISCOVER,
+                ProtectedResource.owned("embed-deployment-discovery", "ready", context.tenantId()));
+        return delegate.localDeploymentViews(context.tenantId()).stream()
+                .filter(view -> view.lifecycle() == LocalDeploymentState.READY)
+                .sorted(java.util.Comparator.comparing(view -> view.source().deploymentId()))
+                .toList();
+    }
+
+    /**
+     * Re-resolves one selected deployment under session-create authority. Unknown, foreign,
+     * non-local and unprojectable identifiers remain the same empty result.
+     * @param context authenticated workload creating the session
+     * @param deploymentId selected tenant-scoped deployment id
+     * @return current browser-safe view when this tenant owns a local source
+     */
+    public java.util.Optional<DeploymentViewerView> embedDeploymentViewForSession(
+            RequestContext context, String deploymentId) {
+        require(context, AuthorizationAction.EMBED_SESSION_CREATE,
+                ProtectedResource.owned("embed-session", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        return delegate.localDeploymentView(context.tenantId(), deploymentId);
+    }
+
+    /**
+     * Authorizes a dynamic embed grant lifecycle operation without requiring the selected
+     * deployment to remain present. This keeps revocation available after a deployment disappears.
+     * @param context authenticated workload managing its own grant
+     * @param grantId opaque grant identifier used only as the protected-resource key
+     */
+    public void authorizeEmbedGrant(RequestContext context, String grantId) {
+        require(context, AuthorizationAction.EMBED_SESSION_CREATE,
+                ProtectedResource.owned("embed-grant", requireText(grantId, "grant id"),
+                        context.tenantId()));
     }
 
     /**

@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
 import { logSummary, scanForViolations, summarizeViolations } from './accessibility-helpers.mjs';
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 const condition = (property, value) => ({ contract: 'ravenroot.property-condition/1', property,
@@ -80,6 +81,7 @@ function json(response, status, body, headers) {
 
 function startService() {
   service = createServer(async (request, response) => {
+    if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
     const headers = { 'Access-Control-Allow-Origin': UI_ORIGIN, Vary: 'Origin',
       'Access-Control-Allow-Headers': 'authorization,content-type',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };

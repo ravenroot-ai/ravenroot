@@ -13,12 +13,129 @@ import {
   validateDeploymentViewEnvelope,
   validateDeploymentViewFrame,
   validateDeploymentCommandOutcome,
+  validateDiagnosticFinding,
   validateLifecycleCapabilities,
   validateLocalDeploymentStatus,
   validateProcessInventoryPage,
   validateRuntimeConfiguration,
   validateSourceSessionStatus,
+  validateStartupFailure,
 } from '../src/runtime-client.js';
+
+describe('bounded startup diagnostics', () => {
+  const incidentId = 'incident:0123456789abcdef';
+  const nodeRef = 'sha256:0123456789abcdef0123456789abcdef';
+
+  it('accepts the versioned closed admission and startup shapes', () => {
+    expect(validateDiagnosticFinding({
+      contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'mail\\u{000A}source', nodeRef,
+      propertyName: 'pollIntervalMs', incidentId,
+    })).toMatchObject({ reason: 'PROPERTY_TYPE_INVALID', nodeRef });
+    expect(validateStartupFailure({
+      contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START',
+      reason: 'imap-folder-not-authorized', nodeId: 'mail', nodeRef, incidentId,
+    })).toMatchObject({ reason: 'imap-folder-not-authorized', incidentId });
+  });
+
+  it.each([
+    { contract: 'ravenroot.graph-admission/2', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'adapter-supplied-text', incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'x', incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'secret='.repeat(30), nodeRef, incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'node\nspoof\u202e', nodeRef, incidentId },
+  ])('rejects malformed admission metadata %#', finding => {
+    expect(() => validateDiagnosticFinding(finding)).toThrow(/malformed/);
+  });
+
+  it.each(['password=hunter2', 'Authorization: Bearer secret-token',
+    'eyJabcdefgh.abcdefgh.abcdefgh', 'host=private.example', 'profile=production',
+    'https://operator:pw@internal.example/a',
+    'node-url=x://operator:pw@private.example/path',
+    `node-url=a${'1'.repeat(35)}://operator:pw@private.example/path`])(
+    'rejects sensitive diagnostic display text', nodeId => {
+    expect(() => validateDiagnosticFinding({
+      contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId, nodeRef, incidentId,
+    })).toThrow(/malformed/);
+  });
+
+  it.each(['bad/name', 'bad=name', 'bad|delimiter', 'profile=production', `x${'y'.repeat(80)}`])(
+    'rejects non-token property metadata %s', propertyName => {
+      expect(() => validateDiagnosticFinding({
+        contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+        reason: 'PROPERTY_TYPE_INVALID', nodeId: 'node', nodeRef, propertyName, incidentId,
+      })).toThrow(/malformed/);
+    });
+
+  it.each([
+    { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'UPPER_CASE', incidentId },
+    { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'known',
+      nodeId: 'node', nodeRef: 'sha256:not-a-digest', incidentId },
+    { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'known',
+      nodeId: 'node', incidentId },
+  ])('rejects malformed startup metadata %#', failure => {
+    expect(() => validateStartupFailure(failure)).toThrow(/malformed/);
+  });
+
+  it('keeps older source-session status compatible while validating structured failure when present', () => {
+    expect(validateSourceSessionStatus({ sessionId: 's', deploymentId: 's', state: 'FAILED',
+      sourceCount: 1, scope: 'LOCAL_PROCESS', diagnostic: 'startup failed' })).not.toHaveProperty('failure');
+    expect(() => validateSourceSessionStatus({ sessionId: 's', deploymentId: 's', state: 'FAILED',
+      sourceCount: 1, scope: 'LOCAL_PROCESS', diagnostic: 'startup failed',
+      failure: { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START',
+        reason: 'host=private', incidentId } })).toThrow(/not a valid/);
+  });
+
+  it('accepts an N-1 valid inspection response without structured findings', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      nodes: 3, edges: 2, startNodes: 1, endNodes: 1, valid: true, violations: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl });
+
+    const inspection = await client.inspectGraph('<graphml/>');
+
+    expect(inspection).toMatchObject({ valid: true, violations: [] });
+    expect(inspection.findings).toEqual([]);
+    expect(Object.isFrozen(inspection.findings)).toBe(true);
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { valid: 'true', violations: [] },
+    { valid: true },
+    { valid: true, violations: 'none' },
+    { valid: true, violations: [], findings: {} },
+    { valid: true, violations: [], findings: [{
+      contract: 'ravenroot.graph-admission/1', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }, {
+      contract: 'ravenroot.graph-admission/1', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }] },
+    { valid: false, violations: ['invalid structure'], findings: [{
+      contract: 'ravenroot.graph-admission/2', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }] },
+  ])('rejects malformed inspection response %#', async response => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(response), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl });
+
+    await expect(client.inspectGraph('<graphml/>')).rejects.toThrow(/malformed|not valid JSON/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://runtime.example/v1/graphs/inspect?purpose=EXECUTION');
+  });
+});
 import {
   applyDeploymentViewFrame,
   applyDeploymentViewStateToRenderer,
@@ -2067,7 +2184,8 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(error.status).toBe(405);
     expect(error.method).toBe('POST');
     expect(error.path).toBe('/v1/executions?payload=hello');
-    expect(error.message).toContain('FIXTURE: verb not permitted on this route');
+    expect(error.message).toContain('Service request failed');
+    expect(error.message).not.toContain('FIXTURE: verb not permitted on this route');
     expect(error.message).toContain('HTTP 405');
     expect(error.message).toContain('POST');
     expect(error.message).toContain('/v1/executions');
@@ -2117,7 +2235,8 @@ describe('Ravenroot runtime client security boundary', () => {
 
     expect(error).toBeInstanceOf(RuntimeRequestError);
     expect(error.status).toBeNull();
-    expect(error.message).toContain('Failed to fetch');
+    expect(error.message).toContain('Service request failed');
+    expect(error.message).not.toContain('Failed to fetch');
     expect(error.message).toMatch(/check the runtime service address/i);
     // The forbidden assertion: a rejected promise is not proof the request never reached the
     // service, so the message must not say so.
@@ -2147,8 +2266,8 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(error.message).toContain('HTTP 404');
     expect(error.message).toContain('GET');
     expect(error.message).toContain('/v1/node-types');
-    // The raw body text is usable diagnostic content, not swallowed.
-    expect(error.message).toContain('404 Not Found');
+    // An unversioned proxy body is arbitrary text, so it is not presented as runtime detail.
+    expect(error.message).not.toContain('404 Not Found');
   });
 
   it('turns a non-JSON body on an otherwise-ok response into a typed error rather than throwing raw', async () => {

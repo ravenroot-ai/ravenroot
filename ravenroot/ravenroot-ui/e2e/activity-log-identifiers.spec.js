@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
 
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 // Process, traversal and invocation must be distinguishable in the UI and in
@@ -56,6 +57,7 @@ let releaseSubmission;
 function startService() {
   return new Promise((resolve, reject) => {
     service = createServer((request, response) => {
+      if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
       // `runtime-client.js#start` POSTs with `Content-Type: application/graphml+xml`, not a "simple"
       // CORS content type, so the browser sends an OPTIONS preflight before the real request. Missing
       // omitting this response makes the POST fail with a plain "Failed to fetch" and no server-side

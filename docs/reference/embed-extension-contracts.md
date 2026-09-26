@@ -62,6 +62,25 @@ window. A reconnect can resume within that window. V2 clears observed state and 
 process's durable stream on a gap; a truncated stream or mismatched binding requires a fresh
 projection/session and never changes the registered source.
 
+## Dynamic read-only policy
+
+Legacy registrations remain supported unchanged. As an additive alternative, an operator can enable
+dynamic grants with `RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY=restricted` or `authenticated`. The default
+is `disabled`. Restricted mode accepts only exact canonical origins from
+`RAVENROOT_EMBED_DYNAMIC_ALLOWED_ORIGINS`. Authenticated mode accepts canonical HTTPS origins and
+loopback HTTP (`localhost`, `127.0.0.1`, or `::1`) for local development. Parent and viewer origins
+must differ.
+
+Discovery requires an authenticated workload with `ravenroot.embed.deployment.discover`; creation,
+acknowledgement, and revocation require `ravenroot.embed.session.create`. Discovery returns only
+tenant-owned READY deployments hosted in the current server process, with exact deployment id,
+incarnation id, graph version, and canonical digest. Creation re-resolves all of them. The resulting
+opaque grant is stored only by digest, expires after a bounded TTL, is explicitly revocable, and pins
+the exact source before the browser session begins. Tenant, workload identity, readiness, incarnation,
+graph version, policy revision, origin, capabilities, expiry, and revocation are rechecked at the
+relevant session boundary. Replacement, stop, expiry, revocation, or policy change fails closed and
+never follows another deployment.
+
 ## Extension discovery
 
 Node packages, model adapters, agent runtimes, engine adapters, persistence adapters, and connector plugins declare identity, version, compatibility, and capabilities. Discovery is descriptive, not authoritative: installing code does not grant credential, tool, egress, or deployment rights.

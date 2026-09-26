@@ -351,7 +351,7 @@ class AuthoredNodeBypassTest {
                 BehaviorPropertySchema.BehaviorPropertyException.class,
                 () -> new GraphRunner(GraphManager.from(aiChain(Map.of("execution.bypass", "true"))),
                         engine, registry, new ExecutionMonitor()));
-        assertTrue(refusal.getMessage().contains("is required by behavior 'aiBehavior'"),
+        assertTrue(refusal.getMessage().contains("property 'model' is required by behavior"),
                 "the refusal is the ordinary required-property one, unchanged by the flag: "
                         + refusal.getMessage());
 

@@ -182,6 +182,19 @@ public interface RavenrootApplication extends AutoCloseable {
     GraphSummary inspectGraphMl(InputStream graphMl);
 
     /**
+     * Purpose-aware admission inspection; old implementations retain execution inspection semantics.
+     * @param graphMl readable exact GraphML bytes; ownership remains with the caller
+     * @param purpose operation for which the graph is being admitted
+     * @return policy-independent admission summary for the requested purpose
+     */
+    default GraphSummary inspectGraphMl(InputStream graphMl, GraphAdmissionPurpose purpose) {
+        if (purpose != GraphAdmissionPurpose.EXECUTION) {
+            throw new UnsupportedOperationException("purpose-aware graph inspection is unavailable");
+        }
+        return inspectGraphMl(graphMl);
+    }
+
+    /**
  * Trusted start contract for adapters that must establish security state before execution events
  * can be published. Implementations must use exactly {@code executionId} or fail before starting.
  *
@@ -389,6 +402,20 @@ public interface RavenrootApplication extends AutoCloseable {
      */
     default java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
         return java.util.Optional.empty();
+    }
+
+    /**
+     * Lists browser-safe views for the tenant's process-local deployments.
+     *
+     * <p>The caller applies its own lifecycle filter. Returning the complete local set here keeps
+     * discovery and exact session-time resolution on the same source of truth, while the authorized
+     * facade decides which subset may cross an adapter boundary.</p>
+     * @param tenantId tenant whose local deployment views are read
+     * @return deterministic immutable list of currently resolvable deployment views
+     */
+    default java.util.List<DeploymentViewerView> localDeploymentViews(String tenantId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        return java.util.List.of();
     }
 
     /**

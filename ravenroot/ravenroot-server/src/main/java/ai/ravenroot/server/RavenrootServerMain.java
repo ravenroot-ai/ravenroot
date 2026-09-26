@@ -457,29 +457,29 @@ public final class RavenrootServerMain {
                 runnerConfiguration.artifacts(), java.time.Clock.systemUTC());
         var localRunner = LocalRunnerSupervisor.fromEnvironment(System.getenv(), authentication,
                 runnerConfiguration, runnerJobs, runnerControl);
-        // The durable operator authority the packaged process was missing under the relevant contract. It is a
-        // local SQLite file opened here and nowhere else, and provision/revoke reach it only through
-        // the operator CLI's reference monitor -- there is no HTTP administration route. Default-off:
-        // with the embed disabled this opens
-        // nothing and registers no route. The supportability of the configuration was already decided
-        // by EmbedStartupCheck at the top of run(), so reaching this line with the embed enabled means
-        // the directory is set, the replica count is one and the acknowledgement is present.
+        // The optional durable legacy authority is a local SQLite file opened here and nowhere else;
+        // provision/revoke reach it only through the operator CLI's reference monitor. Dynamic-only
+        // embedding deliberately opens no registration store. EmbedStartupCheck has already required
+        // one replica, the acknowledgement, and at least one configured authority mode.
         // Effectively final, and null when the embed is off, so the shutdown hook below can close it
         // on the same line userCredentials is closed on. Both are their own database with their own
         // lifecycle, neither is a table in the execution store, and neither closes inside its scope.
-        final var embedRegistrations = ai.ravenroot.server.embed.EmbedBrowserConfiguration
-                .enabledFromEnvironment(System.getenv())
-                ? openEmbedRegistrationStore()
-                : null;
-        var embedConfiguration = embedRegistrations == null
+        boolean embedEnabled = ai.ravenroot.server.embed.EmbedBrowserConfiguration
+                .enabledFromEnvironment(System.getenv());
+        String embedDirectory = System.getenv(ai.ravenroot.server.embed.EmbedStartupCheck.DIRECTORY_VARIABLE);
+        final var embedRegistrations = embedEnabled && embedDirectory != null && !embedDirectory.isBlank()
+                ? openEmbedRegistrationStore() : null;
+        var embedConfiguration = !embedEnabled
                 ? ai.ravenroot.server.embed.EmbedBrowserConfiguration.disabled()
                 : ai.ravenroot.server.embed.EmbedBrowserConfiguration.fromEnvironment(
                         System.getenv(),
-                        new ai.ravenroot.api.embed.AuthorizedEmbedSessionCreation(authorization,
-                                embedRegistrations),
+                        embedRegistrations == null ? null
+                                : new ai.ravenroot.api.embed.AuthorizedEmbedSessionCreation(authorization,
+                                        embedRegistrations),
                         embedRegistrations,
-                        new ai.ravenroot.api.embed.AuthorizedEmbedGraphProjection(authorization,
-                                embedRegistrations),
+                        embedRegistrations == null ? null
+                                : new ai.ravenroot.api.embed.AuthorizedEmbedGraphProjection(authorization,
+                                        embedRegistrations),
                         new ai.ravenroot.server.audit.AuditTrailEmbedSecuritySink(auditTrail),
                         java.time.Clock.systemUTC());
         if (embedRegistrations != null) {
@@ -488,6 +488,9 @@ public final class RavenrootServerMain {
             // embed must be able to confirm which file the authority is reading.
             System.out.println("{\"event\":\"embed-browser\",\"enabled\":true,\"registrationStore\":\""
                     + embedRegistrations.databaseFile() + "\"}");
+        } else if (embedEnabled) {
+            System.out.println("{\"event\":\"embed-browser\",\"enabled\":true,"
+                    + "\"authority\":\"dynamic-read-only\"}");
         }
         // The assistant's real stores, chosen here and nowhere else. Before this line every
         // path reached AssistantService.fromEnvironment(System.getenv()), whose one-argument overload
@@ -747,11 +750,12 @@ public final class RavenrootServerMain {
     }
 
     /**
-     * Opens the durable embed registration authority, or refuses startup before the listener binds.
+     * Opens the durable embed registration authority when legacy registrations are configured.
      *
-     * <p>{@link ai.ravenroot.server.embed.EmbedStartupCheck} has already decided that the directory
-     * is configured, the replica count is one and the single-process limit is acknowledged, so the
-     * only failure left here is the filesystem or the database itself. The store's own exception
+     * <p>{@link ai.ravenroot.server.embed.EmbedStartupCheck} has already decided that the replica
+     * count is one, the single-process limit is acknowledged, and either this directory or dynamic
+     * policy is configured. When this method is called, the only failure left is the filesystem or
+     * database itself. The store's own exception
      * carries the path — which is operator-supplied configuration, not a secret — but the cause chain
      * is not propagated into the diagnostic: what an operator can act on is which stage failed.</p>
      */

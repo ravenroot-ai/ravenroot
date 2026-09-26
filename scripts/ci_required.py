@@ -74,6 +74,7 @@ PRODUCT_JOBS = {
     "full-ui-e2e-shard": "full-ui-e2e-shard",
     "full-ui-e2e": "full-ui-e2e",
     "backend-build": "full-backend-build",
+    "minio-fixture-preflight": "full-minio-fixture-preflight",
     "full-backend-tests": "full-backend-tests",
     "backend-test": "full-support-modules",
     "full-plugin-boundary": "full-plugin-boundary",

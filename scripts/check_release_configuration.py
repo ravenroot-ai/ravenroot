@@ -187,6 +187,7 @@ def check_workflows() -> None:
         "python3 -m unittest scripts.tests.test_release_registries -v",
         "SOURCE_DATE_EPOCH",
         "image_digest",
+        "docker login ghcr.io",
         "push-to-registry: true",
         "image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8",
         'test "$version" = v0.32.2',

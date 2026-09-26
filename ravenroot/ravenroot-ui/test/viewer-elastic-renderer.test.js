@@ -323,6 +323,64 @@ describe('shared D3 Elastic renderer', () => {
     expect(body).not.toMatch(/alpha\(\s*[\d.]/);
   });
 
+  it('clears a previous run in place without reheating, moving a settled graph or resetting the viewport', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const svg = document.querySelector('#elastic');
+    const { nodes, links } = monitoringSettleGraph();
+    const baseRadius = nodes.map(node => node.r);
+    const renderer = mountD3ElasticRenderer({ svg, nodes, links, width: 900, height: 500,
+      palette: {}, initialTransform: { k: 1.4, x: 33, y: -12 } });
+    renderer.simulation.stop().alpha(0);
+
+    // Paint a run: one node grows and goes active, one edge pulses.
+    renderer.updateNode('n0', { r: 25, instances: 5, arrivals: 7, runtimeState: 'active',
+      runtimeObserved: true, stroke: '#ff0000', strokeWidth: 5, lastEventType: 'NODE_STARTED' });
+    renderer.nodeSelection.filter(node => node.id === 'n0').attr('r', 25)
+      .attr('stroke', '#ff0000').attr('stroke-width', 5);
+    renderer.updateEdgeFlow('e0', { recent: 4, count: 4 }, { reducedMotion: true });
+    expect(Number(svg.querySelector('.d3-edges path').getAttribute('stroke-width'))).toBeGreaterThan(1.8);
+
+    const coordinates = renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }));
+    const transform = svg.querySelector('.d3-zoom-group').getAttribute('transform');
+    const simulationNodes = renderer.simulation.nodes();
+    // Spy only now, so painting the run cannot mask a reheat caused by the reset itself.
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const alpha = vi.spyOn(renderer.simulation, 'alpha');
+
+    renderer.resetRuntime({ idleStroke: '#8c959f' });
+
+    // The node returns to its mount-time silhouette and idle datum (a reset is not a re-layout).
+    const node = renderer.nodes[0];
+    expect(node.r).toBe(baseRadius[0]);
+    expect(node.runtimeState).toBe('idle');
+    expect(node.runtimeObserved).toBe(false);
+    expect(node.instances).toBe(0);
+    expect(node.arrivals).toBe(0);
+    expect(node.stroke).toBe('#8c959f');
+    expect(node.strokeWidth).toBe(1.5);
+    const circle = svg.querySelectorAll('.d3-nodes circle')[0];
+    expect(Number(circle.getAttribute('r'))).toBe(baseRadius[0]);
+    expect(circle.getAttribute('stroke')).toBe('#8c959f');
+    expect(Number(circle.getAttribute('stroke-width'))).toBe(1.5);
+    // The edge flow, its dash, its active class and its pulse timer are all cleared in place.
+    const edge = svg.querySelector('.d3-edges path');
+    expect(renderer.links[0].flow.recent).toBe(0);
+    expect(Number(edge.getAttribute('stroke-width'))).toBe(1.8);
+    expect(edge.getAttribute('stroke-dasharray')).toBeNull();
+    expect(edge.classList.contains('d3-edge--active')).toBe(false);
+    // Coordinates, viewport, simulation and SVG survive unchanged: no remount and no new simulation.
+    expect(renderer.nodes.map(item => ({ id: item.id, x: item.x, y: item.y }))).toEqual(coordinates);
+    expect(svg.querySelector('.d3-zoom-group').getAttribute('transform')).toBe(transform);
+    expect(renderer.simulation.nodes()).toBe(simulationNodes);
+    // The reset itself never reheats or stops the simulation (#469 preserved, #494 fixed).
+    expect(restart).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(alpha).not.toHaveBeenCalled();
+    expect(renderer.simulation.alpha()).toBe(0);
+    renderer.destroy();
+  });
+
   it('is the one Elastic implementation imported by editor and embed entry', () => {
     const root = resolvePath(import.meta.dirname, '..', 'src');
     for (const file of ['app.js', 'embed-viewer-entry.js']) {

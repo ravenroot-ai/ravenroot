@@ -12422,6 +12422,23 @@ function flushRuntimeNodePaint(owner, queue) {
   }
 }
 
+// Launching a Test or Run clears the previous run's painting. On the elastic (Monitoring) renderer
+// that used to mean tearing the renderer down and mounting a new one, which re-laid-out the graph
+// and reset the viewport because a fresh force simulation starts at full alpha (#494). A reset is a
+// paint operation, so it happens on the renderer already on the canvas: the run state is cleared in
+// place, node coordinates and zoom/pan are preserved, and the simulation is never restarted. Only
+// the genuine mount/reheat entry points -- setRenderMode, renderActiveMode, the explicit elastic
+// layout job and reconcileActiveRenderModeRenderer -- still call startD3Elastic, so the reheats #469
+// allows (a node drag, an explicit layout arrangement, the force controls) remain the only ones. The
+// idle labels and their human-task attention classes are a document projection, so they are
+// re-projected from the now-idle model exactly as a mount would have done.
+function resetElasticRuntimePaint(owner) {
+  const renderer = elasticRendererFor(owner);
+  if (!renderer?.resetRuntime || !rendererSessions.isLive(renderer.token)) return;
+  renderer.resetRuntime({ idleStroke: runtimeColor('idle') });
+  applyHumanTaskProjection(owner);
+}
+
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
@@ -12444,7 +12461,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   });
   if (targetLayoutMode === 'elastic') {
-    startD3Elastic(owner, targetCy, owner.layoutSessionToken);
+    resetElasticRuntimePaint(owner);
   } else if (isN8nFamilyLayout(targetVisualStyle)) {
     applyN8nNodeStyle(targetCy, owner);
   }

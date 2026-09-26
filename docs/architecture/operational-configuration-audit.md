@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24050 |
+| Atomic operational candidates discovered | 24051 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24050 |
+| Reviewed | 24051 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10002 |
+| Retained protocol or format invariants | 10003 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 677 |
 | Retained derived values | 1074 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 101.
+Checked source reconciliations: 102.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24050 candidates.
+zero-count or unclassified rows as needed and sums to 24051 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24050 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22389 |
+| retained | 22390 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 24050 candidates.
 | derived | 1074 |
 | operator-configurable | 1661 |
 | presentation-text | 677 |
-| protocol-or-format-invariant | 10002 |
+| protocol-or-format-invariant | 10003 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
 | test-fixture | 8146 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 24050 candidates.
 |---|---:|
 | deployment | 2865 |
 | deployment-example | 20 |
-| java | 7281 |
+| java | 7282 |
 | script | 2328 |
 | test-fixture | 8146 |
 | ui | 3410 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8516 |
-| Retained; no remediation required | 13514 |
+| Retained; no remediation required | 13515 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 24050 |
-| Unchanged identities | 24049 |
-| Approved identity migrations | 1 |
+| Unchanged identities | 24050 |
+| Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 24050 |
+| Semantically classified additions | 1 |
+| Current candidates | 24051 |
 
 ## Final semantic review
 
@@ -10743,6 +10743,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-bea610928a55e1bda2e4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/BrowserOriginPolicy.java:97` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-4c005613d2809866a72c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/BrowserOriginPolicy.java:168` `reject` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-8bd5183f73b590fe24f4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/BrowserOriginPolicy.java:168` `reject` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-a4d69410d4cb6c2e25d4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/DisabledLoopbackAuthenticator.java:13` `DisabledLoopbackAuthenticator` | java | retained | protocol-or-format-invariant | Fixed HTTP header name used by the local disabled-mode embed workload protocol; it is not an operator setting. |
 | `oc-26b2b81d0e92e45613e2` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/HttpSecurityConfiguration.java:14` `HttpSecurityConfiguration` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-c90c7e84fa3408d3261c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/HttpSecurityConfiguration.java:14` `HttpSecurityConfiguration` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-735831f938ada2974a52` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/HttpSecurityConfiguration.java:15` `compareTo` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |

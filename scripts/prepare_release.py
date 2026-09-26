@@ -184,15 +184,14 @@ def release_notes(previous: str, target: str, by_kind: dict[str, list[tuple[Path
     return "\n".join(lines).rstrip() + "\n"
 
 
-def link_notes(root: Path, target: str) -> None:
+def navigation_with_notes(root: Path, target: str) -> str:
+    """Render the navigation insertion and reject a missing anchor before release writes."""
     navigation = (root / NAVIGATION).read_text(encoding="utf-8")
     match = re.search(r"(?m)^    - title: Ravenroot \S+ release notes$", navigation)
     if not match:
         raise ReleaseContractError(f"{NAVIGATION}: no release notes entry to place the new one before")
     entry = f"    - title: Ravenroot {target} release notes\n      url: /releases/v{target}.html\n"
-    (root / NAVIGATION).write_text(
-        navigation[: match.start()] + entry + navigation[match.start() :], encoding="utf-8"
-    )
+    return navigation[: match.start()] + entry + navigation[match.start() :]
 
 
 def prepare(root: Path, intent: str) -> dict[str, object]:
@@ -214,10 +213,11 @@ def prepare(root: Path, intent: str) -> dict[str, object]:
     # Everything that can refuse runs before the first write, so a refusal leaves the tree untouched.
     by_kind = collect_fragments(root)
     rendered = release_notes(str(previous), target, by_kind)
+    updated_navigation = navigation_with_notes(root, target)
     bump_surfaces(root, str(previous), target)
     notes.parent.mkdir(parents=True, exist_ok=True)
     notes.write_text(rendered, encoding="utf-8")
-    link_notes(root, target)
+    (root / NAVIGATION).write_text(updated_navigation, encoding="utf-8")
     for fragments in by_kind.values():
         for path, _ in fragments:
             path.unlink()

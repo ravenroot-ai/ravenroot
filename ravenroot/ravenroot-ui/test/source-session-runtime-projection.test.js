@@ -114,6 +114,10 @@ describe('runtime events are attributed to a listening source graph', () => {
 
     expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
     expect(documentForRuntimeEvent(workspace, {
+      ...admitted, executionId: 'traversal-wrong-deployment',
+      traversalId: 'traversal-wrong-deployment', deploymentId: 'session-b',
+    })).toBeNull();
+    expect(documentForRuntimeEvent(workspace, {
       ...admitted, executionId: 'traversal-after-human-task', traversalId: 'traversal-after-human-task',
       deploymentId: null,
     })).toBe(listening);

@@ -392,7 +392,11 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
   // process bridge is weaker than the deployment fact that taught it and stronger than the pending
   // fallback below: it is accepted only under the same tenant, graph version, document incarnation,
   // deployment, session id and session generation. Graph version by itself is never a route.
-  const resumed = documentsForRememberedSourceProcess(workspace, event, streamTenant);
+  // Remembered process ownership is a compatibility bridge only for continuations that lost their
+  // deployment identity. An explicit, non-matching deployment is contradictory evidence and must
+  // not be overridden by the weaker process association.
+  const resumed = deploymentId === null
+    ? documentsForRememberedSourceProcess(workspace, event, streamTenant) : [];
   if (resumed.length === 1) return resumed[0];
   if (resumed.length > 1) return null;
 

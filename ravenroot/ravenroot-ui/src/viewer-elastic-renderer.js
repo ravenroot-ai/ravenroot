@@ -68,14 +68,14 @@ export function mountD3ElasticRenderer({
     throw new TypeError('Elastic lifecycle callbacks are required.');
   }
 
-  // A node's mount-time silhouette is its idle look. `resetRuntime` restores it so a cleared
-  // Monitoring graph cannot be mistaken for a stale run (#494), and on a graph that was idle when
-  // the renderer mounted this is exactly the size the viewer last saw settled. Captured once, before
-  // any runtime update can mutate `r`.
-  nodes.forEach(node => { if (!Number.isFinite(node.baseR)) node.baseR = node.r; });
-
   const viewportWidth = Math.max(1, finite(width, 800));
   const viewportHeight = Math.max(1, finite(height, 600));
+  // A node's mount-time silhouette is its idle look. `resetRuntime` restores it so a cleared
+  // Monitoring graph cannot be mistaken for a stale run (#494), and on a graph that was idle when
+  // the renderer mounted this is exactly the size the viewer last saw settled. Captured once here,
+  // before any runtime update can mutate `r`.
+  nodes.forEach(node => { if (!Number.isFinite(node.baseR)) node.baseR = node.r; });
+
   const nodeText = palette?.nodeText ?? '#e6edf3';
   const edgeLabel = palette?.edgeLabel ?? '#b1bac4';
   let destroyed = false;

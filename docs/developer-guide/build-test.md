@@ -88,7 +88,10 @@ counts, failed descriptor and throwable classification. A valid candidate CPU sa
 tests started, ten succeeded, exactly one failed, and the direct CPU assertion reports actual
 `COMPLETED`. Timeouts, wrong causes, invalid load overlap, skipped samples, and workflow reruns are not
 successes. Also retain the ordinary clean reactor result, the load-interleaved 10/10 result and all
-three load-wrapper guards.
+three load-wrapper guards. The load-interleaved test permits its first complete nested Maven reactor
+iteration five minutes to accommodate cold startup, slower CI workers, and the full upstream `-am`
+workload; it still rejects a completed nonzero exit immediately, checks every iteration across the
+measurement window, and has a separate ten-minute outer safety limit.
 
 ## Boundary
 

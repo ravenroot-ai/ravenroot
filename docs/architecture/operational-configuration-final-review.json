@@ -8509,7 +8509,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/test/source-session-runtime-projection.test.js",
-          "digest": "c994eb651f41fe9a20ee07fac48129febec7941778c75243df6c25b1303ef62d",
+          "digest": "048b2b41276a1b70321ebfd5db909916a3f58890479c1e6ced5346c4e3676579",
           "assertion": "Test pins retention, duplicate rejection, eviction, and replay after eviction."
         }
       ],

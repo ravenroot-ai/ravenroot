@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 100.
+Checked source reconciliations: 101.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 24050 candidates.
@@ -128,8 +128,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 24050 |
-| Unchanged identities | 24050 |
-| Approved identity migrations | 0 |
+| Unchanged identities | 24049 |
+| Approved identity migrations | 1 |
 | Approved retirements | 0 |
 | Semantically classified additions | 0 |
 | Current candidates | 24050 |
@@ -14952,14 +14952,14 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-7b2b7b4f486cdcfa8fe3` | `ravenroot/ravenroot-ui/src/workspace.js:27` `module` | ui | retained | protocol-or-format-invariant | This source-session state is protocol vocabulary that defines when a deployment may own runtime events. |
 | `oc-bbb320abc7fc15234b5a` | `ravenroot/ravenroot-ui/src/workspace.js:27` `module` | ui | retained | protocol-or-format-invariant | This source-session state is protocol vocabulary that defines when a deployment may own runtime events. |
 | `oc-fc132db960899aad3d99` | `ravenroot/ravenroot-ui/src/workspace.js:27` `module` | ui | retained | protocol-or-format-invariant | This source-session state is protocol vocabulary that defines when a deployment may own runtime events. |
-| `oc-6c2733d9e812926123c0` | `ravenroot/ravenroot-ui/src/workspace.js:223` `documentIsEditable` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-c2ace26030b5fdb4c84b` | `ravenroot/ravenroot-ui/src/workspace.js:248` `createDocumentIncarnation` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-e9168c7996772ffae1ac` | `ravenroot/ravenroot-ui/src/workspace.js:248` `createDocumentIncarnation` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-2e275201760c6ae2e2b4` | `ravenroot/ravenroot-ui/src/workspace.js:297` `close` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-3ecf94a4bb84dd804b0a` | `ravenroot/ravenroot-ui/src/workspace.js:300` `close` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-2eb397e0663cc633a849` | `ravenroot/ravenroot-ui/src/workspace.js:372` `documentForRuntimeEvent` | ui | retained | protocol-or-format-invariant | This value is a transport framing or runtime-event type token consumed at a defined parser boundary. |
-| `oc-979de945a1a7deeda769` | `ravenroot/ravenroot-ui/src/workspace.js:439` `rememberSourceProcessOwner` | ui | retained | protocol-or-format-invariant | This token is an exact runtime-event type guard used by verified source-process routing. |
-| `oc-04e019a5cf282acf377e` | `ravenroot/ravenroot-ui/src/workspace.js:466` `documentsForRememberedSourceProcess` | ui | retained | protocol-or-format-invariant | This token is an exact runtime-event type guard used by verified source-process routing. |
+| `oc-6c2733d9e812926123c0` | `ravenroot/ravenroot-ui/src/workspace.js:227` `documentIsEditable` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-c2ace26030b5fdb4c84b` | `ravenroot/ravenroot-ui/src/workspace.js:252` `createDocumentIncarnation` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-e9168c7996772ffae1ac` | `ravenroot/ravenroot-ui/src/workspace.js:252` `createDocumentIncarnation` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-2e275201760c6ae2e2b4` | `ravenroot/ravenroot-ui/src/workspace.js:301` `close` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-3ecf94a4bb84dd804b0a` | `ravenroot/ravenroot-ui/src/workspace.js:304` `close` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-2eb397e0663cc633a849` | `ravenroot/ravenroot-ui/src/workspace.js:376` `documentForRuntimeEvent` | ui | retained | protocol-or-format-invariant | This value is a transport framing or runtime-event type token consumed at a defined parser boundary. |
+| `oc-979de945a1a7deeda769` | `ravenroot/ravenroot-ui/src/workspace.js:446` `rememberSourceProcessOwner` | ui | retained | protocol-or-format-invariant | This token is an exact runtime-event type guard used by verified source-process routing. |
+| `oc-8c72ea48ef3381842e5c` | `ravenroot/ravenroot-ui/src/workspace.js:488` `rememberedSourceProcessDecision` | ui | retained | protocol-or-format-invariant | This token is an exact runtime-event type guard used by verified source-process routing. |
 | `oc-2f858b93b6c87676edbd` | `ravenroot/scripts/build-release.sh:4` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-8bb7e92b058065c3635c` | `ravenroot/scripts/build-release.sh:4` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-e5028b630065231ed52e` | `ravenroot/scripts/build-release.sh:4` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |

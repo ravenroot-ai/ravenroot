@@ -17,7 +17,7 @@ import java.util.Set;
  */
 public final class BrowserOriginPolicy {
     private static final Set<String> REQUEST_HEADERS =
-            Set.of("authorization", "content-type", "last-event-id");
+            Set.of("authorization", "content-type", "last-event-id", "x-ravenroot-provider-signature");
     private final Set<String> allowedOrigins;
 
     public BrowserOriginPolicy(Set<String> allowedOrigins) {
@@ -36,6 +36,11 @@ public final class BrowserOriginPolicy {
                     .map(String::trim).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new)));
         }
         return new BrowserOriginPolicy(Set.of("http://127.0.0.1:" + port, "http://localhost:" + port));
+    }
+
+    /** Canonical immutable origins for composing a more narrowly scoped public capability surface. */
+    public Set<String> allowedOrigins() {
+        return allowedOrigins;
     }
 
     public boolean acceptActual(HttpExchange exchange) throws IOException {

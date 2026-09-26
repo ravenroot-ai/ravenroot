@@ -60,6 +60,22 @@ class EmbedSnapshotProjectorTest {
     }
 
     @Test
+    void deploymentProjectionCarriesOnlyTheClosedSemanticDesignArrangement() {
+        var definition = new GraphDefinition(List.of(GraphNode.start("start"), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "end")),
+                Map.of("ravenroot.designArrangement", "flow", "ravenroot.layoutMode", "dagre"));
+        var projection = EmbedSnapshotProjector.projectDefinition(definition, "deployment", "version",
+                "digest", EmbedProjectionBudget.DEFAULTS);
+        assertEquals("flow", projection.designArrangement());
+        assertEquals(projection, ai.ravenroot.api.embed.EmbedGraphProjectionCodec.decode(projection.toJson()));
+        assertTrue(!projection.toJson().contains("layoutMode"));
+        assertEquals(null, EmbedSnapshotProjector.projectDefinition(
+                new GraphDefinition(definition.nodes(), definition.edges(),
+                        Map.of("ravenroot.designArrangement", "elastic")),
+                "deployment", "version", "digest", EmbedProjectionBudget.DEFAULTS).designArrangement());
+    }
+
+    @Test
     void legacySnapshotProjectionRetainsItsExactOriginalJsonShape() {
         var definition = new GraphDefinition(List.of(
                 new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null,

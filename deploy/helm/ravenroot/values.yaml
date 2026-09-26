@@ -130,6 +130,10 @@ ai:
 # string makes the server resolve the documented Java-owned default, while an overlay may set a
 # bounded integer.
 humanTask:
+  responderEnforcementEnabled: false
+  # Name of a Secret whose config.json key contains the complete presentation/provider registry.
+  # Empty disables registered custom and external presentations.
+  interactionConfigSecret: ""
   defaultResponseBytes: ""
   maxResponseBytes: ""
   defaultEscalationSeconds: ""

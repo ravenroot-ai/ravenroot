@@ -70,6 +70,35 @@ async function deliveredEventCount(page) {
   });
 }
 
+test('one refused start produces one actionable row and focuses its node property', async ({ page }) => {
+  requireHarnessEnvironment();
+  const graph = (await readFile(GRAPH_PATH, 'utf8'))
+    .replace('<data key="intervalMs">700</data>', '<data key="intervalMs">not-an-integer</data>');
+  const sourceStarts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/v1/source-sessions')) {
+      sourceStarts.push(request.url());
+    }
+  });
+
+  await page.goto(`${ORIGIN}/`);
+  await expect(page.locator('#runtime-connection')).toHaveClass(/connected/, { timeout: 30_000 });
+  await page.locator('#file-inp').setInputFiles({
+    name: 'inadmissible-source.graphml', mimeType: 'application/xml', buffer: Buffer.from(graph),
+  });
+  await expect(page.locator('#btn-run')).toBeEnabled();
+  await page.locator('#btn-run').click();
+
+  const refusal = page.locator('#activity-log .activity-entry.failed')
+    .filter({ has: page.locator('.activity-title', { hasText: 'Graph admission refused' }) });
+  await expect(refusal).toHaveCount(1);
+  await expect(refusal.locator('.activity-detail')).toContainText('PROPERTY_TYPE_INVALID');
+  await expect(refusal.locator('.activity-detail')).toContainText('property intervalMs');
+  await expect.poll(() => page.evaluate(() => window.cy.getElementById('consume').selected())).toBe(true);
+  await expect(page.locator('[data-catalog-property="intervalMs"]')).toBeFocused();
+  expect(sourceStarts, 'inspection must refuse before any listener-start request').toEqual([]);
+});
+
 test('a listening source graph lights up in the editor while it admits real traffic', async ({ page }) => {
   requireHarnessEnvironment();
   const consoleErrors = [];
@@ -129,7 +158,7 @@ test('a listening source graph lights up in the editor while it admits real traf
 
   // Fit before the evidence is captured: the screenshot is the artifact a reader looks at first, and
   // a graph zoomed to one node proves nothing about the other four.
-  await page.locator('[data-command-id="view.fit"]').first().click();
+  await page.locator('[data-command-id="view.fit"]:visible').click();
   await page.waitForTimeout(800);
   const report = await canvasReport(page);
   const published = await deliveredEventCount(page);
@@ -161,10 +190,16 @@ test('a listening source graph lights up in the editor while it admits real traf
 
   // 3. The log node's output reaches the panel. The issue predicted this needs no separate work --
   // the output was always produced, published and delivered, and only ever dropped at routing.
-  const activity = page.locator('#activity-log .activity-entry', { hasText: `NODE_COMPLETED · ${LOG_NODE}` });
+  //
+  // Since #458 the panel opens at the Output observance level, where a `log` node's emission is
+  // presented as concise workflow output: the emitted value IS the row, and the generic
+  // `NODE_COMPLETED · <node-id>` title with its process/traversal/invocation/attempt identifiers is
+  // deliberately not something a reader has to see past to find it. Trace still renders the technical
+  // form; `e2e/activity-visibility-modes.spec.js` and `test/activity-visibility.test.js` pin both, so
+  // what is asserted here is the level a freshly loaded editor actually presents.
+  const activity = page.locator('#activity-log .activity-entry.output-value');
   await expect(activity.last(), `published log completion: ${JSON.stringify(published.logCompletion)}`)
-    .toContainText(/output=/, { timeout: 10_000 });
-  await expect(activity.last()).toContainText(/admitted message-\d+/);
+    .toContainText(/admitted message-\d+/, { timeout: 10_000 });
 
   // 4. Stop ends it cleanly, and the pill says so rather than the canvas quietly freezing.
   await page.locator('#btn-stop').click();

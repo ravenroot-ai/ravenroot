@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.amqp091;
 
 import ai.ravenroot.api.deployment.InboundSource;
+import ai.ravenroot.api.deployment.SourceStartException;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.IngressReceipt;
 import ai.ravenroot.api.deployment.IngressTarget;
@@ -134,21 +135,22 @@ final class AmqpConsumerSource implements InboundSource {
             probeDurability(context, profile.timeoutMs());
             leaseKey = policy.tenant() + "\0" + policy.profile() + "\0" + policy.queue();
             lease = new Object();
-            if (LEASES.putIfAbsent(leaseKey, lease) != null) throw new SourceFailure("amqp-consumer-already-active");
+            if (LEASES.putIfAbsent(leaseKey, lease) != null) throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_ALREADY_ACTIVE);
             Optional<SecretValue> resolved = credentials.resolve(profile.credentialRef());
-            if (resolved == null || resolved.isEmpty()) throw new SourceFailure("credential-unavailable");
+            if (resolved == null || resolved.isEmpty()) throw sourceFailure(AmqpSourceStartFailure.CREDENTIAL_UNAVAILABLE);
             secret = resolved.get(); password = secret.copy();
             while (!stopRequested) {
                 long sessionGeneration = nextGeneration();
                 try {
                     AmqpConsumerProtocol.Owner opened = protocol.open(profile, policy, password, settings.prefetch);
-                    if (opened == null) throw new SourceFailure("amqp-consumer-unavailable");
+                    if (opened == null) throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_UNAVAILABLE);
                     owner = opened;
                     claimReady(context, ready);
                     consume(context, policy, settings, attempts, reconnectFailures, sessionGeneration);
                 } catch (AmqpConsumerProtocol.Failure failure) {
                     if (stopRequested) break;
-                    if (failure.permanent() || !ready.isDone()) throw new SourceFailure(failure.getMessage());
+                    if (failure.permanent() || !ready.isDone())
+                        throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_FAILED, failure);
                     degrade(context, "amqp-consumer-reconnecting", State.RECONNECTING);
                     closeOwner(settings.drainTimeoutMs);
                     awaitReconnectBackoff(jitteredReconnectBackoff(settings, reconnectFailures.failed()));
@@ -156,10 +158,10 @@ final class AmqpConsumerSource implements InboundSource {
                     closeOwner(settings.drainTimeoutMs);
                 }
             }
-        } catch (SourceFailure failure) {
-            fail(context, ready, failure.safeReason);
+        } catch (SourceStartException failure) {
+            fail(context, ready, failure);
         } catch (RuntimeException failure) {
-            fail(context, ready, "amqp-consumer-failed");
+            fail(context, ready, failure);
         } finally {
             synchronized (lifecycle) { generation++; owner = null; }
             if (password != null) java.util.Arrays.fill(password, '\0');
@@ -213,7 +215,7 @@ final class AmqpConsumerSource implements InboundSource {
             return;
         }
         if (receipt instanceof IngressReceipt.VolatileCustody)
-            throw new SourceFailure("durable-ingress-lost");
+            throw sourceFailure(AmqpSourceStartFailure.DURABLE_INGRESS_LOST);
         if (attempt >= settings.poisonAttempts) {
             context.reportDegraded("amqp-delivery-dead-lettered");
             if (nackIfCurrent(sessionGeneration, delivery.deliveryTag(), false))
@@ -230,7 +232,7 @@ final class AmqpConsumerSource implements InboundSource {
 
     private void claimReady(InboundSourceContext context, CompletableFuture<Void> ready) {
         synchronized (lifecycle) {
-            if (stopRequested || state == State.STOPPING) throw new SourceFailure("startup-cancelled");
+            if (stopRequested || state == State.STOPPING) throw sourceFailure(AmqpSourceStartFailure.STARTUP_CANCELLED);
             state = State.READY; context.reportHealthy(); ready.complete(null);
         }
     }
@@ -248,11 +250,13 @@ final class AmqpConsumerSource implements InboundSource {
         }
     }
 
-    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, String reason) {
+    private void fail(InboundSourceContext context, CompletableFuture<Void> ready, RuntimeException failure) {
         synchronized (lifecycle) {
             if (stopRequested || state == State.STOPPING) return;
-            state = State.FAILED; context.reportDegraded(reason);
-            ready.completeExceptionally(new IllegalStateException(reason));
+            state = State.FAILED;
+            if (failure instanceof SourceStartException classified) context.reportDegraded(classified.code());
+            else if (ready.isDone()) context.reportDegraded("amqp-consumer-failed");
+            ready.completeExceptionally(failure);
         }
     }
 
@@ -317,75 +321,83 @@ final class AmqpConsumerSource implements InboundSource {
     private AmqpProfile resolveProfile(String tenant, String name) {
         try {
             AmqpProfile profile = profiles.resolve(tenant, name)
-                    .orElseThrow(() -> new SourceFailure("amqp-profile-unavailable"));
+                    .orElseThrow(() -> sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE));
             if (!profile.tenant().equals(tenant) || !profile.name().equals(name))
-                throw new SourceFailure("amqp-profile-unavailable");
+                throw sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE);
             destinationPolicy.requireAllowedLiteral(profile.host());
             return profile;
         }
-        catch (SourceFailure failure) { throw failure; }
-        catch (RuntimeException failure) { throw new SourceFailure("amqp-profile-unavailable"); }
+        catch (SourceStartException failure) { throw failure; }
+        catch (RuntimeException failure) {
+            throw sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE, failure);
+        }
     }
 
     private AmqpConsumerPolicy resolvePolicy(String tenant, String name) {
         try {
             AmqpConsumerPolicy policy = policies.resolve(tenant, name)
-                    .orElseThrow(() -> new SourceFailure("amqp-consumer-policy-unavailable"));
+                    .orElseThrow(() -> sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_POLICY_UNAVAILABLE));
             if (!policy.tenant().equals(tenant) || !policy.profile().equals(name))
-                throw new SourceFailure("amqp-consumer-policy-unavailable");
+                throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_POLICY_UNAVAILABLE);
             return policy;
         }
-        catch (SourceFailure failure) { throw failure; }
-        catch (RuntimeException failure) { throw new SourceFailure("amqp-consumer-policy-unavailable"); }
+        catch (SourceStartException failure) { throw failure; }
+        catch (RuntimeException failure) {
+            throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_POLICY_UNAVAILABLE, failure);
+        }
     }
 
     private static void probeDurability(InboundSourceContext context, int timeoutMs) {
         try { context.ingress().sourceCheckpoint(context.identity(), context.nodeId()).toCompletableFuture()
                 .get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS); }
-        catch (Exception failure) { throw new SourceFailure("durable-ingress-required"); }
+        catch (Exception failure) {
+            throw sourceFailure(AmqpSourceStartFailure.DURABLE_INGRESS_REQUIRED, failure);
+        }
     }
 
     private record Settings(int prefetch, int retryBackoffMs, int maxRetryBackoffMs,
                             int poisonAttempts, int drainTimeoutMs) {
         static Settings resolve(NodeConfiguration c, AmqpConsumerPolicy policy) {
             if (!AmqpConsumeNodeBehavior.knownConfiguration().containsAll(c.properties().keySet()))
-                throw new SourceFailure("unknown-graph-property");
+                throw sourceFailure(AmqpSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
             String queue = c.property("queue", "");
-            if (!queue.isEmpty() && !queue.equals(policy.queue())) throw new SourceFailure("queue-not-authorized");
-            int prefetch = tighten(c.property("prefetch", ""), policy.prefetch(), 1, "invalid-prefetch");
+            if (!queue.isEmpty() && !queue.equals(policy.queue())) throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
+            int prefetch = tighten(c.property("prefetch", ""), policy.prefetch(), 1,
+                    AmqpSourceStartFailure.INVALID_PREFETCH);
             prefetch = Math.min(prefetch,
-                    tighten(c.property("maxInFlight", ""), policy.prefetch(), 1, "invalid-max-in-flight"));
+                    tighten(c.property("maxInFlight", ""), policy.prefetch(), 1,
+                            AmqpSourceStartFailure.INVALID_MAX_IN_FLIGHT));
             int retry = tighten(c.property("retryBackoffMs", ""), policy.retryBackoffMs(),
                     AmqpConsumerPolicy.MIN_RETRY_BACKOFF_MS,
-                    "invalid-retry-backoff");
+                    AmqpSourceStartFailure.INVALID_RETRY_BACKOFF);
             int maximum = tighten(c.property("maxRetryBackoffMs", ""), policy.maxRetryBackoffMs(),
                     AmqpConsumerPolicy.MIN_MAX_RETRY_BACKOFF_MS,
-                    "invalid-max-retry-backoff");
-            if (maximum < retry) throw new SourceFailure("invalid-max-retry-backoff");
+                    AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);
+            if (maximum < retry) throw sourceFailure(AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);
             int poison = tighten(c.property("poisonAttempts", ""), policy.poisonAttempts(), 1,
-                    "invalid-poison-attempts");
+                    AmqpSourceStartFailure.INVALID_POISON_ATTEMPTS);
             int drain = tighten(c.property("drainTimeoutMs", ""), policy.drainTimeoutMs(), 0,
-                    "invalid-drain-timeout");
+                    AmqpSourceStartFailure.INVALID_DRAIN_TIMEOUT);
             String poisonPolicy = c.property("poisonPolicy", "profile");
             if (!poisonPolicy.equals("profile") && !poisonPolicy.equals("dead-letter"))
-                throw new SourceFailure("invalid-poison-policy");
+                throw sourceFailure(AmqpSourceStartFailure.INVALID_POISON_POLICY);
             String effectivePoison = poisonPolicy.equals("profile") ? policy.poisonPolicy() : poisonPolicy;
-            if (!effectivePoison.equals(policy.poisonPolicy())) throw new SourceFailure("poison-policy-forbidden");
+            if (!effectivePoison.equals(policy.poisonPolicy())) throw sourceFailure(AmqpSourceStartFailure.POISON_POLICY_FORBIDDEN);
             // Hidden properties are deliberately not read unless their condition holds.
             if (poisonPolicy.equals("dead-letter") && !c.requiredProperty("deadLetterMode").equals("broker-dlx"))
-                throw new SourceFailure("invalid-dead-letter-mode");
+                throw sourceFailure(AmqpSourceStartFailure.INVALID_DEAD_LETTER_MODE);
             if (!c.property("checkpointPolicy", "require-durable").equals("require-durable"))
-                throw new SourceFailure("invalid-checkpoint-policy");
+                throw sourceFailure(AmqpSourceStartFailure.INVALID_CHECKPOINT_POLICY);
             return new Settings(prefetch, retry, maximum, poison, drain);
         }
 
-        private static int tighten(String raw, int ceiling, int minimum, String reason) {
+        private static int tighten(String raw, int ceiling, int minimum, AmqpSourceStartFailure reason) {
             if (raw == null || raw.isBlank()) return ceiling;
             try {
                 int value = Integer.parseInt(raw);
                 if (value > ceiling || value < minimum) throw new NumberFormatException();
                 return value;
-            } catch (RuntimeException invalid) { throw new SourceFailure(reason); }
+            } catch (RuntimeException invalid) { throw sourceFailure(reason); }
         }
     }
 
@@ -395,8 +407,11 @@ final class AmqpConsumerSource implements InboundSource {
         void reset() { attempts = 0; }
     }
 
-    private static final class SourceFailure extends RuntimeException {
-        private final String safeReason;
-        SourceFailure(String safeReason) { super(safeReason); this.safeReason = safeReason; }
+    private static SourceStartException sourceFailure(AmqpSourceStartFailure code) {
+        return new SourceStartException(code);
+    }
+
+    private static SourceStartException sourceFailure(AmqpSourceStartFailure code, Throwable cause) {
+        return new SourceStartException(code, cause);
     }
 }

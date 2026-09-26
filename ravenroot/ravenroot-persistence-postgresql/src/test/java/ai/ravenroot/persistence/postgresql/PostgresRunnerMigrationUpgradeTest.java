@@ -18,8 +18,10 @@ class PostgresRunnerMigrationUpgradeTest {
             assertEquals(7, SchemaRunner.migrate(connection, lifecycle, Clock.systemUTC()));
             statement.execute("CREATE TABLE migration_sentinel (value TEXT NOT NULL)");
             statement.execute("INSERT INTO migration_sentinel VALUES ('preserved')");
-            assertEquals(10, SchemaRunner.migrate(connection, PostgresSchema.migrations(), Clock.systemUTC()));
-            assertEquals(10, SchemaRunner.migrate(connection, PostgresSchema.migrations(), Clock.systemUTC()));
+            assertEquals(PostgresSchema.currentVersion(),
+                    SchemaRunner.migrate(connection, PostgresSchema.migrations(), Clock.systemUTC()));
+            assertEquals(PostgresSchema.currentVersion(),
+                    SchemaRunner.migrate(connection, PostgresSchema.migrations(), Clock.systemUTC()));
             for (String table : new String[] {"human_task", "session_memory", "session_memory_command",
                     "runner_workspace", "runner_catalog", "runner_catalog_tenant", "runner_availability"}) {
                 try (var rows = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {

@@ -157,6 +157,10 @@ Detailed contract: [Embedded viewer](embed-extension-contracts.md).
 | Variable or family | Applicability and default boundary |
 |---|---|
 | `RAVENROOT_EMBED_BEARER_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_ALLOWED_ORIGINS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_GRANT_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_ENABLED` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_EXCHANGE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EMBED_PROOF_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
@@ -227,6 +231,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | See the linked contract for exact type, default, and applicability. |
@@ -242,6 +247,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | See the linked contract for exact type, default, and applicability. |

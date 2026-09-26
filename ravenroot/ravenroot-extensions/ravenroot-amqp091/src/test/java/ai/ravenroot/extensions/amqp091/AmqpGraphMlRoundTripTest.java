@@ -1,5 +1,7 @@
 package ai.ravenroot.extensions.amqp091;
 
+import ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty;
+import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
@@ -16,6 +18,31 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class AmqpGraphMlRoundTripTest {
+    @Test
+    void graphMlRecoveryDeclarationReachesTheRuntimePublisher() throws Exception {
+        Map<String, Object> properties = Map.of(
+                "brokerProfile", AmqpTestSupport.PROFILE,
+                RecoveryRepeatabilityProperty.NAME, RecoveryRepeatabilityProperty.NOT_REPEATABLE);
+        var definition = new GraphDefinition(List.of(GraphNode.start("start"),
+                new GraphNode("publish", NodeKind.BEHAVIOR, AmqpPublishNodeBehavior.BEHAVIOR, properties),
+                GraphNode.error("error"), GraphNode.end("end")), List.of());
+        byte[] xml;
+        try (var graph = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {
+            graph.writeGraphMl(output);
+            xml = output.toByteArray();
+        }
+        var protocol = new AmqpTestSupport.FakeProtocol(AmqpTestSupport.Event.CONFIRM);
+        try (var reread = GraphManager.readGraphMl(new ByteArrayInputStream(xml))) {
+            GraphNode node = reread.definition().node("publish");
+            var configuration = new NodeConfiguration(node.id(), node.behavior(), node.properties());
+            Map<String, Object> output = AmqpTestSupport.output(
+                    AmqpTestSupport.behavior(protocol).create(configuration), AmqpTestSupport.payload());
+
+            assertEquals("CONFIRMED", output.get("status"));
+            assertEquals(1, protocol.publishes.get());
+        }
+    }
+
     @Test
     void roundTripsOnlyOpaqueProfileAuthorizedDefaultsAndTightening() throws Exception {
         Map<String, Object> properties = Map.ofEntries(

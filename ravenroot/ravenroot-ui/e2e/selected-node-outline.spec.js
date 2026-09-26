@@ -11,6 +11,7 @@ async function open(page) {
 
 async function selectDesign(page) {
   await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   await expect(page.locator('.doc-pane--active')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', {
     timeout: 10_000,

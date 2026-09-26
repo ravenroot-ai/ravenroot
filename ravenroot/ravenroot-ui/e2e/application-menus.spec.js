@@ -164,7 +164,9 @@ test.describe('application command menus', () => {
         await expect(page.locator('.layout-mirrors')).toBeVisible();
         await page.locator('#btn-monitoring').click();
         await expect(page.locator('#btn-monitoring')).toHaveAttribute('aria-checked', 'true');
-        await expect(page.locator('#elastic-ctrl')).toBeHidden();
+        await expect(page.locator('#elastic-ctrl')).toBeVisible();
+        await expect(page.locator('#rep-slider')).toBeInViewport();
+        await expect(page.locator('#attr-slider')).toBeInViewport();
         await expect.poll(() => page.evaluate(() => {
           const topbar = document.getElementById('topbar');
           return topbar.scrollWidth <= topbar.clientWidth;

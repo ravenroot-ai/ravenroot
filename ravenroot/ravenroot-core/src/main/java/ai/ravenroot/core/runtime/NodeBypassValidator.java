@@ -54,7 +54,7 @@ public final class NodeBypassValidator {
      */
     public void validate(GraphDefinition graph) {
         Objects.requireNonNull(graph, "graph");
-        for (GraphNode node : graph.nodes()) {
+        for (GraphNode node : graph.nodes().stream().sorted(java.util.Comparator.comparing(GraphNode::id)).toList()) {
             validateNode(node);
         }
     }

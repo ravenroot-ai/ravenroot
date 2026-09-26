@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
 import { logSummary, scanForViolations, summarizeViolations } from './accessibility-helpers.mjs';
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 const condition = (property, value) => ({ contract: 'ravenroot.property-condition/1', property,
@@ -80,6 +81,7 @@ function json(response, status, body, headers) {
 
 function startService() {
   service = createServer(async (request, response) => {
+    if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
     const headers = { 'Access-Control-Allow-Origin': UI_ORIGIN, Vary: 'Origin',
       'Access-Control-Allow-Headers': 'authorization,content-type',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
@@ -119,9 +121,13 @@ function startService() {
         nodeCounts: nodeId || exactTask ? [] : live.length ? [{ nodeId: 'human-confirmation',
           pending: live.length, escalated: live.filter(entry => entry.status === 'ESCALATED').length }] : [] }, headers);
     }
-    const match = url.pathname.match(/^\/v1\/human-tasks\/([^/]+)\/confirmation\/(resolve|deny|cancel)$/);
+    const match = url.pathname.match(/^\/v1\/human-tasks\/([^/]+)\/settle$/);
     if (match) {
       const selected = tasks.find(entry => entry.taskId === decodeURIComponent(match[1]));
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const settlement = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const action = String(settlement.action || '').toLowerCase();
       if (decisionMode === 'unauthorized') return json(response, 404, { error: 'not found' }, headers);
       if (decisionMode === 'network') { request.socket.destroy(); return; }
       if (decisionMode === 'stale') {
@@ -132,9 +138,11 @@ function startService() {
         selected.status = 'EXPIRED'; selected.availableActions = [];
         return json(response, 409, { error: 'Human Task is no longer actionable' }, headers);
       }
-      selected.status = match[2] === 'resolve' ? 'RESOLVED' : match[2] === 'deny' ? 'DENIED' : 'CANCELLED';
+      selected.status = action === 'resolve' ? 'RESOLVED' : action === 'deny' ? 'DENIED' : 'CANCELLED';
       selected.availableActions = [];
-      return json(response, 200, { schemaVersion: 1, outcome: 'APPLIED', task: selected }, headers);
+      return json(response, 200, { schemaVersion: 1, outcome: selected.status,
+        taskId: selected.taskId, generation: selected.generation + 1,
+        resumeTraversalId: selected.traversalId }, headers);
     }
     json(response, 404, { error: 'not found' }, headers);
   });

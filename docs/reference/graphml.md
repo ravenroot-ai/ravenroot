@@ -96,6 +96,17 @@ repair command. The runtime treats the property as scalar graph metadata.
 
 `ravenroot validate graph.graphml` exits 0 for acceptance, 1 for a refused or invalid document, and 2 for CLI misuse. The HTTP inspection surface is `POST /v1/graphs/inspect`.
 
+Inspection and every execution, local-deployment, and source-session start share one admission
+validator. Pass `purpose=EXECUTION`, `LOCAL_DEPLOYMENT`, or `SOURCE_SESSION` when inspection must
+match a specific start path; a source-session inspection additionally requires an effective trusted
+SOURCE. Starts always revalidate the exact submitted bytes, so an editor's local checks are advisory.
+
+Actionable findings use `ravenroot.graph-admission/1`: `phase`, a closed platform `reason`, an
+incident handle, and—when relevant—a bounded escaped `nodeId`, opaque fixed-size `nodeRef`, and
+bounded `propertyName`. Values and arbitrary exception text are excluded. `nodeRef` is the
+authoritative graph-local locator when a long or control-containing ID cannot be displayed exactly;
+the original GraphML identifier is not changed, so round trips remain lossless.
+
 `ravenroot validate --register-machine graph.graphml` performs the same ingest first, then applies
 the explicit [Register Machine Profile v1](register-machine-profile.md) static validator. Profile
 warnings do not change exit 0; profile errors return exit 1. No profile marker is added to GraphML.

@@ -58,6 +58,7 @@ public final class ManagedExecutionStore implements InvocationHandler {
             "maxHumanTaskAttentionPageSize", "maxHumanTaskAttentionNodeCounts",
             "maxHumanTaskResponsePayloadBytes", "loadHumanTask", "listHumanTasks",
             "listHumanTaskAttention", "findHumanTaskAttention", "loadExecutionPause", "executionPauses",
+            "revokeHumanTaskInteraction", "isHumanTaskInteractionRevoked",
             "findHeldExecutionPause", "journalRetention", "readJournal", "journalRetainedFrom",
             "openSourceCheckpointStore", "outboxCursor", "advanceOutboxCursor", "recordInboxDelivery", "inboxRecordCount",
             "compactJournal", "maxInventoryPageSize", "terminalRetention", "listProcessInstances",
@@ -106,6 +107,12 @@ public final class ManagedExecutionStore implements InvocationHandler {
         if (name.equals("claimDueTimers") && method.getParameterCount() == 4) {
             return claimAmong((String) arguments[0], (String) arguments[1], (int) arguments[2],
                     (Duration) arguments[3], true);
+        }
+        if (name.equals("readProcessJournal") && method.getParameterCount() == 3) {
+            return invokeDelegate(method, arguments);
+        }
+        if (name.equals("readProcessJournalPage") && method.getParameterCount() == 3) {
+            return invokeDelegate(method, arguments);
         }
         if (name.equals("applyManaged") || name.equals("claimManaged")
                 || name.equals("claimPendingWorkAmong") || name.equals("claimDueTimersAmong")

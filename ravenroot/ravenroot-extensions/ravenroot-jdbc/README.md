@@ -7,12 +7,12 @@ the operator is responsible for its license and provenance.
 
 Build the closed bundle by supplying at least one regular driver jar, immediately followed by its
 independently obtained lowercase SHA-256. Repeat the pair for every driver. This example pins the
-PostgreSQL JDBC 42.7.7 and MySQL Connector/J 9.5.0 artifacts published by their vendors:
+PostgreSQL JDBC 42.7.12 and MySQL Connector/J 9.5.0 artifacts published by their vendors:
 
 ```sh
 ./plugin.sh build jdbc \
-  --driver-jar /operator/artifacts/postgresql-42.7.7.jar \
-  --driver-sha256 157963d60ae66d607e09466e8c0cdf8087e9cb20d0159899ffca96bca2528460 \
+  --driver-jar /operator/artifacts/postgresql-42.7.12.jar \
+  --driver-sha256 31fbf6f06b2217fb51d5100cee51b22625cc81640da0679b47914e54c1e6377c \
   --driver-jar /operator/artifacts/mysql-connector-j-9.5.0.jar \
   --driver-sha256 f2ca3dfaf00d4aa311470db7ea3051962944ba0cb60005a2f75467549c39f425
 ./plugin.sh validate ravenroot/ravenroot-extensions/ravenroot-jdbc/target/plugin-bundle
@@ -41,9 +41,9 @@ with exactly these fields (`schema` is the only optional field):
 
 ```json
 {
-  "driverId": "postgresql-42.7.7",
+  "driverId": "postgresql-42.7.12",
   "driverClass": "org.postgresql.Driver",
-  "driverSha256": "157963d60ae66d607e09466e8c0cdf8087e9cb20d0159899ffca96bca2528460",
+  "driverSha256": "31fbf6f06b2217fb51d5100cee51b22625cc81640da0679b47914e54c1e6377c",
   "url": "jdbc:postgresql://database.internal:5432/application",
   "username": "application",
   "credentialRef": "application-db-password",
@@ -85,10 +85,27 @@ bounded immutable in-memory image. A private platform-parent classloader dedicat
 defines and initializes it only from that image, so drivers in the same bundle cannot see one
 another and replacement of the installed path after verification cannot alter any class byte.
 Expanded entries are also
-bounded before retention. The class must implement `java.sql.Driver`. The extension
-rejects multi-release jars (a `Multi-Release` manifest attribute or any versioned-entry namespace)
-before class initialization; operators must supply one flat Java-21-compatible driver image. This
-narrow contract avoids silently selecting different class bytes from the pinned image. Driver
+bounded before retention. The class must implement `java.sql.Driver`. Multi-release driver jars, the
+packaging current vendors publish, are accepted: before class initialization the verified copy is
+resolved once into one flat image for the release Ravenroot targets (currently Java 21), taking for
+each name the entry under the highest `META-INF/versions/<release>/` not above that release,
+otherwise the base entry. The release of the JVM running Ravenroot plays no part, so the class bytes
+a driver is defined from are fixed by its pinned SHA-256 alone, and the versioned namespace is
+consumed by the resolution rather than left reachable as resources. That trade is deliberate and has
+a cost worth stating: a driver that ships a variant for a release above the one Ravenroot targets is
+defined from the variant at or below it, so a driver that needs the newer variant to run on a newer
+JVM fails visibly instead of silently running class bytes the pinned digest did not determine.
+
+A jar that admits more than one reading of what its image contains is refused before class
+initialization as `JDBC_DRIVER_AMBIGUOUS`: versioned entries without a leading manifest that declares
+`Multi-Release: true`, a second or misplaced manifest, a release directory that is not a canonical
+decimal of at least 9, the namespace spelled in another case or with backslashes, a versioned name with
+empty, `.` or `..` segments, and a versioned `META-INF/` entry. The last two are refused for the same
+reason as the rest rather than as a packaging preference: the JDK discards them and other tooling does
+not, so what the image contains would depend on who read the jar. A jar that carries no versioned
+entries is already one flat image and loads exactly as it did before. Bytes that differ from the
+pinned SHA-256 stay a refusal rather than an ambiguity, including a jar where only a versioned entry
+differs: substituted bytes are tampering, not a second reading. Driver
 initialization, its private dependencies/resources/services, every JDBC operation, and asynchronous
 cancel/abort/close callbacks run with that private loader as TCCL, with the caller context restored
 on every exit. The extension calls that exact driver directly; it does not use `DriverManager`, a
@@ -142,7 +159,9 @@ read-only rollback, one-shot commit and ambiguous commit, generated-key projecti
 incremental result limits, deadline/cancellation cleanup with a blocking `Statement.cancel`, credential
 rotation, tenant/profile isolation, mixed PostgreSQL/MySQL concurrency, admission and package
 contract. A generated hostile-driver fixture proves that mismatch and tampering are rejected before
-its static initializer. Test-scoped PostgreSQL 42.7.7 and MySQL Connector/J 9.5.0 artifacts exercise
-deterministic driver selection and same-name dependency isolation end to end without opening a
-database connection. Both are absent from runtime and default-distribution dependency graphs. No live
-database is required by the build.
+its static initializer. Test-scoped PostgreSQL JDBC 42.7.12 and MySQL Connector/J 9.5.0 artifacts,
+both checksum-pinned as their vendors publish them, exercise deterministic driver selection and
+same-name dependency isolation end to end without opening a database connection. The PostgreSQL jar
+is multi-release and proves that its Java 11 class variant is the one defined; the MySQL jar carries
+no versioned entries and covers the flat path. Neither is in the runtime or default-distribution
+dependency graphs. No live database is required by the build.

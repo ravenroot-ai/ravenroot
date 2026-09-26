@@ -1,6 +1,7 @@
 # Embedded projection security model
 
-Embedding is a separate read-only delivery plane governed by a registered deployment, seven attestations, and short-lived session exchange.
+Embedding is a separate read-only delivery plane governed by either a legacy registration or an
+explicit dynamic origin policy, plus short-lived session exchange.
 
 ## Invariants
 
@@ -19,12 +20,15 @@ Embedding is a separate read-only delivery plane governed by a registered deploy
 - Bounded reconnect may resume inside the process-local replay window. Gap, replacement, undeploy,
   or authority invalidation is terminal and clears runtime-derived state.
 - Takedown is effective through registration or session revocation and leaves audit evidence.
+- Dynamic selection discovers only the authenticated tenant's READY deployments on the current
+  server. Session creation revalidates and pins the exact incarnation/version; a later replacement
+  cannot inherit the grant. Dynamic grants never carry deployment execution capability.
 
 ## Architectural consequence
 
-The embed plane derives only a scoped viewing session from an operator registration and never inherits
-author, runner, or administrative capability. Live observation changes presentation state, not the
-graph, deployment lifecycle, or authority boundary.
+The embed plane derives only a scoped viewing session from a legacy registration or bounded dynamic
+grant and never inherits author, runner, or administrative capability. Live observation changes
+presentation state, not the graph, deployment lifecycle, or authority boundary.
 
 ## Related reading
 

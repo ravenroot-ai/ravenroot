@@ -205,7 +205,9 @@ class HumanTaskRouteTest {
             var oldTask = reopened.loadHumanTask("tenant-a", taskId).toCompletableFuture().join()
                     .orElseThrow();
             assertEquals(1_700_000, service.authorizedResponseBodyLimit(approver, taskId).orElseThrow());
-            assertTrue(service.authorizedResponseBodyLimit(unauthorized, taskId).isEmpty());
+            assertEquals(1_700_000,
+                    service.authorizedResponseBodyLimit(unauthorized, taskId).orElseThrow(),
+                    "default-off responder enforcement permits tenant-local settlement");
             assertTrue(service.authorizedResponseBodyLimit(new RequestContext("request", "approver",
                     PrincipalType.USER, "urn:ravenroot:test", "other", Set.of(Role.APPROVER),
                     Set.of()), taskId).isEmpty());
@@ -344,12 +346,93 @@ class HumanTaskRouteTest {
                 assertEquals(400, confirmation(server, resolveOnly, "tenant-a", "approver", true,
                         "deny", 1, "{\"schemaVersion\":1,\"comment\":\"No\"}").statusCode(),
                         "an authorized caller receives a rule refusal without task internals");
-                assertEquals(404, confirmation(server, required, "tenant-a", "viewer", false,
-                        "resolve", 1, "not-json").statusCode(),
-                        "authorization must precede task-dependent body parsing");
+                assertEquals(400, confirmation(server, required, "tenant-a", "viewer", false,
+                        "cancel", 1, "not-json").statusCode(),
+                        "default-off enforcement admits any same-tenant principal before strict parsing");
                 assertEquals(404, confirmation(server, new Fixture(resolve.service(), UUID.randomUUID(),
                                 resolve.processInstanceId()), "tenant-a", "approver", true,
                         "resolve", 1, "not-json").statusCode());
+            }
+        }
+    }
+
+    @Test
+    void enforcedRequesterCancelDoesNotDiscloseReviewAndExplicitOverrideDoes() throws Exception {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        HumanTaskPolicy enforced = withResponderEnforcement(HumanTaskPolicy.DEFAULTS, true);
+        try (var store = new SqliteExecutionStore(directory.resolve("human-task-review-auth.db"), clock,
+                enforced); var engine = new PekkoExecutionEngine("human-task-review-auth")) {
+            Fixture fixture = requestEmbedded(store, clock, HumanTaskCommentRequirement.OPTIONAL, enforced);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
+                    new TenantApproverAuthenticator())) {
+                server.installHumanTasks(fixture.service(), ignored -> { }, enforced);
+                server.start();
+                String locator = "/v1/human-tasks/attention?taskId=" + fixture.taskId()
+                        + "&generation=1&limit=20";
+                HttpResponse<String> requester = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + locator))
+                                .header("X-Test-Tenant", "tenant-a")
+                                .header("X-Test-Subject", "requester")
+                                .header("X-Test-Approver", "false").GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, requester.statusCode(), requester.body());
+                assertTrue(requester.body().contains("\"availableActions\":[\"CANCEL\"]"),
+                        requester.body());
+                assertFalse(requester.body().contains("reviewPresentation"), requester.body());
+                assertFalse(requester.body().contains("private-input"), requester.body());
+
+                HttpResponse<String> override = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + locator
+                                        + "&override=true&reason=incident-42"))
+                                .header("X-Test-Tenant", "tenant-a")
+                                .header("X-Test-Subject", "administrator")
+                                .header("X-Test-Admin", "true").GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, override.statusCode(), override.body());
+                assertTrue(override.body().contains("reviewPresentation"), override.body());
+                assertTrue(override.body().contains("private-input"), override.body());
+
+                HttpResponse<String> adminDetail = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                                        + "/v1/admin/human-tasks/" + fixture.taskId()
+                                        + "/attention?tenant=tenant-a&generation=1&reason=incident-43"))
+                                .header("X-Test-Tenant", "tenant-a")
+                                .header("X-Test-Subject", "administrator")
+                                .header("X-Test-Admin", "true").GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, adminDetail.statusCode(), adminDetail.body());
+                assertTrue(adminDetail.body().contains("private-input"), adminDetail.body());
+
+                HttpResponse<String> tenantAdminCrossTenant = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                                        + "/v1/admin/human-tasks/" + fixture.taskId()
+                                        + "/attention?tenant=tenant-a&generation=1&reason=incident-44"))
+                                .header("X-Test-Tenant", "other")
+                                .header("X-Test-Admin", "true").GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(403, tenantAdminCrossTenant.statusCode(), tenantAdminCrossTenant.body());
+
+                HttpResponse<String> crossTenantSettlement = confirmationOverride(server, fixture,
+                        "other", "administrator", "resolve", 1, "incident-45");
+                assertEquals(404, crossTenantSettlement.statusCode(), crossTenantSettlement.body());
+
+                HttpResponse<String> applied = confirmationOverride(server, fixture,
+                        "tenant-a", "administrator", "resolve", 1, "incident-45");
+                assertEquals(200, applied.statusCode(), applied.body());
+                assertTrue(applied.body().contains("\"outcome\":\"APPLIED\""), applied.body());
+                assertTrue(applied.body().contains("\"status\":\"RESOLVED\""), applied.body());
+                assertFalse(applied.body().contains("private-input"), applied.body());
+                assertFalse(applied.body().contains("reviewPresentation"), applied.body());
+
+                // The first response may be lost after the durable CAS. The exact administrative
+                // retry must still project the safe terminal row through current override authority.
+                HttpResponse<String> replay = confirmationOverride(server, fixture,
+                        "tenant-a", "administrator", "resolve", 1, "incident-45");
+                assertEquals(200, replay.statusCode(), replay.body());
+                assertTrue(replay.body().contains("\"outcome\":\"ALREADY_APPLIED\""), replay.body());
+                assertFalse(replay.body().contains("private-input"), replay.body());
             }
         }
     }
@@ -565,6 +648,21 @@ class HumanTaskRouteTest {
                 HttpResponse.BodyHandlers.ofString());
     }
 
+    private static HttpResponse<String> confirmationOverride(
+            RavenrootServer server, Fixture fixture, String tenant, String subject,
+            String action, long generation, String reason) throws Exception {
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                        + server.port() + "/v1/human-tasks/" + fixture.taskId()
+                        + "/confirmation/" + action + "?generation=" + generation
+                        + "&override=true&reason=" + reason))
+                        .header("X-Test-Tenant", tenant).header("X-Test-Subject", subject)
+                        .header("X-Test-Approver", "false").header("X-Test-Admin", "true")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .POST(HttpRequest.BodyPublishers.ofString(
+                                "{\"schemaVersion\":1,\"comment\":\"override reviewed\"}"))
+                        .build(), HttpResponse.BodyHandlers.ofString());
+    }
+
     private record Fixture(HumanTaskService service, UUID taskId, UUID processInstanceId) { }
 
     private static HumanTaskPolicy policy(int maxResponse, int decisionBody, int depth,
@@ -604,6 +702,18 @@ class HumanTaskRouteTest {
                 d.inboxDefaultPageSize(), d.inboxMaxPageSize(), d.responseMaxDepth(),
                 d.responseMaxCollectionSize(), d.responseMaxValueCount(), d.responseMaxTextLength(),
                 d.responseMaxKeyLength(), d.writeAttempts(), confirmation);
+    }
+
+    private static HumanTaskPolicy withResponderEnforcement(HumanTaskPolicy policy, boolean enabled) {
+        return new HumanTaskPolicy(policy.defaultResponseBytes(), policy.maxResponseBytes(),
+                policy.defaultEscalationSeconds(), policy.maxEscalationSeconds(),
+                policy.defaultExpirySeconds(), policy.maxExpirySeconds(), policy.maxTitleUtf8Bytes(),
+                policy.maxDescriptionUtf8Bytes(), policy.maxResponseSchemaUtf8Bytes(),
+                policy.maxAuthorizationTokens(), policy.maxAuthorizationTokenUtf8Bytes(),
+                policy.decisionBodyMaxBytes(), policy.inboxDefaultPageSize(), policy.inboxMaxPageSize(),
+                policy.responseMaxDepth(), policy.responseMaxCollectionSize(), policy.responseMaxValueCount(),
+                policy.responseMaxTextLength(), policy.responseMaxKeyLength(), policy.writeAttempts(),
+                policy.confirmation(), enabled);
     }
 
     private static final class TenantApproverAuthenticator implements RequestAuthenticator {

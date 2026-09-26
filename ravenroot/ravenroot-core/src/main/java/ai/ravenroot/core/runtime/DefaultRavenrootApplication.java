@@ -4,10 +4,12 @@ import ai.ravenroot.api.application.ApplicationStatus;
 import ai.ravenroot.api.application.DurableExecutionEvent;
 import ai.ravenroot.api.application.DeploymentEventBatch;
 import ai.ravenroot.api.application.DeploymentViewerView;
+import ai.ravenroot.api.application.EmbedDeploymentStart;
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.DurableProcessEventPage;
 import ai.ravenroot.api.application.ExecutionSubmission;
 import ai.ravenroot.api.application.GraphSummary;
 import ai.ravenroot.api.application.LiveExecution;
@@ -1363,12 +1365,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     @Override
     public GraphSummary inspectGraphMl(InputStream graphMl) {
-        try (var manager = GraphManager.readGraphMl(graphMl, graphExecutionLimits.graphMl())) {
-            long starts = manager.query(g -> g.V().has(GraphManager.KIND, NodeKind.START.name()).count().next());
-            long ends = manager.query(g -> g.V().has(GraphManager.KIND, NodeKind.END.name()).count().next());
-            return new GraphSummary(Math.toIntExact(manager.nodeCount()), Math.toIntExact(manager.edgeCount()),
-                    Math.toIntExact(starts), Math.toIntExact(ends), manager.semanticViolations());
-        }
+        return inspectGraphMl(graphMl, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);
+    }
+
+    @Override
+    public GraphSummary inspectGraphMl(InputStream graphMl,
+            ai.ravenroot.api.application.GraphAdmissionPurpose purpose) {
+        byte[] bytes = readGraphMlBytes(graphMl);
+        return new GraphAdmissionValidator(behaviors, graphExecutionLimits).inspect(bytes, purpose);
     }
 
     @Override
@@ -1392,6 +1396,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(policy, "policy");
         var document = GraphManager.readGraphMlDocument(graphMl, graphExecutionLimits.graphMl());
         byte[] graphBytes = document.bytes();
+        // The exact bytes consumed by the mutation cross the same admission boundary exposed by
+        // inspection. This precedes every definition read, reservation, manifest lookup, and spawn.
+        try {
+            new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+                    .require(graphBytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);
+        } catch (RuntimeException | Error refusal) {
+            document.close();
+            throw refusal;
+        }
         String graphVersion = sha256(graphBytes);
         var manager = document.manager();
         var behaviorNodes = manager.definition().nodes().stream()
@@ -2361,6 +2374,35 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return List.copyOf(events);
     }
 
+    @Override
+    public List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
+                                                               long afterSequence, int limit) {
+        return durableEventPageForProcess(tenantId, processInstanceId, afterSequence, limit).events();
+    }
+
+    @Override
+    public DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
+                                                               long afterSequence, int limit) {
+        if (!durableEventJournalAvailable()) return new DurableProcessEventPage(List.of(), 1, 1);
+        var key = new ExecutionKey(requireTenant(tenantId), java.util.Objects.requireNonNull(processInstanceId));
+        var page = await(executionStore.readProcessJournalPage(key, afterSequence, limit));
+        var nodeNames = loadInvocationNodeNames(key);
+        var events = new ArrayList<DurableExecutionEvent>(page.records().size());
+        for (JournalRecord record : page.records()) {
+            EventEnvelope envelope = record.envelope();
+            String nodeId = envelope.invocation().map(nodeNames::get).orElse(null);
+            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
+                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
+                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
+                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
+                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
+                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
+                            .orElse(null) : null));
+        }
+        return new DurableProcessEventPage(events, page.retainedFromSequence(), page.nextSequence());
+    }
+
     /**
      * The invocation-to-node binding {@code InvocationAdded} recorded as structure, in the same
      * transaction as the events themselves. The envelope deliberately carries no node id; see
@@ -2417,6 +2459,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             throw new IllegalStateException("Ravenroot application is closed");
         }
         byte[] graphMlBytes = readGraphMlBytes(graphMl);
+        new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+                .require(graphMlBytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
         // start() must run INSIDE this critical section, not after it. A freshly
         // registered deployment is COLD until start() flips it, and COLD does not count as active
         // (countsAsActive's own contract) -- so releasing the lock between registration and start()
@@ -2505,7 +2549,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // bind is refused here rather than at start, where the caller would already believe it owns a
         // working registration. A count of zero is not an error on this surface, which admits
         // source-less graphs; it is only an error for a source session.
-        int sourceCount = inspectEffectiveSources(graphBytes);
+        int sourceCount = inspectEffectiveSources(graphBytes,
+                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
         Registration registration = register(key, graphBytes, sourceCount,
                 DeploymentId.of(key.deploymentId()));
         bindLifecycleIdentity(registration.record(), security);
@@ -2529,7 +2574,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var key = new LocalDeploymentKey(requireTenant(security.tenantId()),
                 requireLocalDeploymentId(deploymentId));
         byte[] graphBytes = readGraphMlBytes(graphMl);
-        int sourceCount = inspectEffectiveSources(graphBytes);
+        int sourceCount = inspectEffectiveSources(graphBytes,
+                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
         Registration registration = register(key, graphBytes, sourceCount, lifecycleId);
         bindLifecycleIdentity(registration.record(), security);
         return localDeploymentStatus(key.deploymentId(), registration.record());
@@ -2621,6 +2667,54 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (RuntimeException unprojectable) {
             return java.util.Optional.empty();
         }
+    }
+
+    @Override
+    public java.util.List<DeploymentViewerView> localDeploymentViews(String tenantId) {
+        String tenant = requireTenant(tenantId);
+        return localDeployments.keySet().stream()
+                .filter(key -> key.tenantId().equals(tenant))
+                .map(LocalDeploymentKey::deploymentId)
+                .sorted()
+                .map(id -> localDeploymentView(tenant, id))
+                .flatMap(java.util.Optional::stream)
+                .toList();
+    }
+
+    @Override
+    public EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
+                                                               String deploymentId,
+                                                               String incarnationId,
+                                                               String graphVersion,
+                                                               String requestId) {
+        java.util.Objects.requireNonNull(security, "security");
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) {
+            throw new IllegalArgumentException("invalid embed execution request id");
+        }
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()),
+                requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        }
+        var receipt = record.deployment().ingress().offerDurably(security,
+                ai.ravenroot.api.deployment.IngressTarget.start(), java.util.Map.of(),
+                "embed-viewer", requestId);
+        var outcome = switch (receipt) {
+            case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored ->
+                    EmbedDeploymentStart.Outcome.ACCEPTED;
+            case ai.ravenroot.api.deployment.IngressReceipt.Duplicate ignored ->
+                    EmbedDeploymentStart.Outcome.DUPLICATE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Ambiguous ignored ->
+                    EmbedDeploymentStart.Outcome.RECONCILE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Refused ignored ->
+                    EmbedDeploymentStart.Outcome.REFUSED;
+            case ai.ravenroot.api.deployment.IngressReceipt.VolatileCustody ignored ->
+                    EmbedDeploymentStart.Outcome.REFUSED;
+        };
+        return new EmbedDeploymentStart(outcome, requestId);
     }
 
     @Override
@@ -2846,8 +2940,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             case DEGRADED -> LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.DEGRADED,
                     record.sourceCount(), record.graphHash(),
                     "one or more inbound sources reported degraded health");
-            case FAILED -> LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.FAILED,
-                    record.sourceCount(), record.graphHash(), "deployment startup failed in this process");
+            case FAILED -> deployment.status().failure()
+                    .map(failure -> LocalDeploymentStatus.failed(deploymentId, record.sourceCount(),
+                            record.graphHash(), failure))
+                    .orElseGet(() -> LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.FAILED,
+                            record.sourceCount(), record.graphHash(), "deployment startup failed in this process"));
             case STOPPING -> LocalDeploymentStatus.withGraph(
                     deploymentId, LocalDeploymentState.STOPPING, record.sourceCount(), record.graphHash());
             case STOPPED -> LocalDeploymentStatus.withGraph(
@@ -2873,7 +2970,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         byte[] graphBytes = readGraphMlBytes(graphMl);
         int sourceCount;
         try {
-            sourceCount = inspectEffectiveSources(graphBytes);
+            sourceCount = inspectEffectiveSources(graphBytes,
+                    ai.ravenroot.api.application.GraphAdmissionPurpose.SOURCE_SESSION);
+        } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
+            if (refusal.findings().getFirst().reason()
+                    == ai.ravenroot.api.application.GraphAdmissionReason.SOURCE_REQUIRED) {
+                throw new SourceSessionException(SourceSessionException.Reason.NO_EFFECTIVE_SOURCE,
+                        refusal.findings().getFirst());
+            }
+            throw refusal;
         } catch (LocalDeploymentException refusal) {
             throw asSourceSessionRefusal(refusal);
         }
@@ -2958,31 +3063,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * <p>Returns the count and judges nothing about it. Whether zero is acceptable belongs to the
      * caller: it is fatal for a source session and legitimate for a deployment.</p>
      */
-    private int inspectEffectiveSources(byte[] graphBytes) {
-        try (GraphManager manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graphBytes),
-                graphExecutionLimits.graphMl())) {
-            var definition = manager.definition();
-            new BehaviorPropertySchema(behaviors).validate(definition);
-            new BehaviorCapabilityPreflight(behaviors).validate(definition);
-            new NodeRuntimeNatureValidator(behaviors).validate(definition);
-            int count = 0;
-            for (var node : definition.nodes()) {
-                var descriptor = node.kind() == NodeKind.BEHAVIOR
-                        ? behaviors.descriptor(node.behavior()).orElse(null) : null;
-                if (NodeRuntimeNatureProperty.effectiveNature(descriptor, node.properties())
-                        != NodeRuntimeNature.SOURCE) {
-                    continue;
-                }
-                if (node.kind() != NodeKind.BEHAVIOR
-                        || behaviors.sourceCapableFactory(node.behavior()).isEmpty()) {
-                    throw new LocalDeploymentException(
-                            LocalDeploymentException.Reason.SOURCE_CAPABILITY_MISMATCH,
-                            java.util.Map.of("nodeId", node.id()));
-                }
-                count++;
-            }
-            return count;
-        }
+    private int inspectEffectiveSources(byte[] graphBytes,
+            ai.ravenroot.api.application.GraphAdmissionPurpose purpose) {
+        return new GraphAdmissionValidator(behaviors, graphExecutionLimits).require(graphBytes, purpose);
     }
 
     /** Keeps the source session's published refusal taxonomy over the shared registration path's own. */
@@ -3023,8 +3106,10 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     sessionId, SourceSessionState.LISTENING, record.sourceCount());
             case DEGRADED -> SourceSessionStatus.of(sessionId, SourceSessionState.DEGRADED,
                     record.sourceCount(), "one or more inbound sources reported degraded health");
-            case FAILED -> SourceSessionStatus.of(sessionId, SourceSessionState.FAILED,
-                    record.sourceCount(), "source session startup failed in this process");
+            case FAILED -> deployment.failure()
+                    .map(failure -> SourceSessionStatus.failed(sessionId, sessionId, record.sourceCount(), failure))
+                    .orElseGet(() -> SourceSessionStatus.of(sessionId, SourceSessionState.FAILED,
+                            record.sourceCount(), "source session startup failed in this process"));
             case STOPPING -> SourceSessionStatus.of(
                     sessionId, SourceSessionState.STOPPING, record.sourceCount());
         };

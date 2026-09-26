@@ -81,6 +81,25 @@ readable and cancellable. Separately, pre-existing tasks with response schema la
 satisfy the payload-envelope rule can still be listed, read, and cancelled; resolving one is refused
 because Ravenroot cannot create a compatible response envelope.
 
+### Typed forms and registered presentations
+
+`presentationKind` is an immutable discriminator: `CLASSIC`, `CONFIRMATION`, `FORM`, `CUSTOM`, or
+`EXTERNAL`. A version-one `FORM` carries a closed, non-recursive JSON `formSchema` with one to 64
+uniquely named fields. Each field has exactly `name`, `label`, `help`, `type`, `required`,
+`maxUtf8Bytes`, `allowedValues`, `minimum`, and `maximum`; persisted version-one documents written
+before numeric bounds decode with both bounds absent. The closed types are `TEXT`, `MULTILINE_TEXT`,
+`BOOLEAN`, `INTEGER`, `DECIMAL`, `ENUM`, `DATE`, and `DATE_TIME`; only `ENUM` may declare allowed
+values and only numeric types may declare inclusive finite bounds. Ravenroot renders inert
+native controls, enforces required and unknown fields and exact value types on the server, and emits
+the typed map as a `ravenroot.payload/1` envelope with schema `ravenroot.human-task.form`, version
+`1`, and kind `MAP`. Action and comment remain outside that response.
+
+`CUSTOM` and `EXTERNAL` graph content carries only `presentationProfileId` and
+`presentationProfileVersion`. The graph cannot supply HTML, JavaScript, a URL, origin, redirect,
+credential, or signing key. Admission pins the kind, profile version, response schema, task
+generation, and presentation digest. Rows written before this discriminator existed decode as
+`CLASSIC` version zero with no invented form schema or review content.
+
 `expiresAfterSeconds` creates a durable expiry timer. A non-zero `escalateAfterSeconds` creates a
 second durable timer that moves the task to `ESCALATED` while leaving it resolvable. Both delays are
 bounded by the deployment's operator policy and escalation must precede expiry. The four terminal
@@ -98,6 +117,19 @@ pinned raw-envelope decision-body cap, parser budgets, and write-retry budget. S
 and deployment defaults](configuration.html#human-task-operational-policy) for every setting, default,
 range, precedence rule, and deployment mapping. Text and object-key parser budgets count UTF-16 code
 units; all `*-bytes` settings remain UTF-8 byte budgets.
+
+Responder enforcement is deliberately disabled on a fresh installation. Tenant resolution,
+authentication, exact-task lookup, generation fencing, and review-content boundaries still apply;
+only graph-authored responder roles and scopes are ignored. Set
+`RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED=true` (or the matching JVM property) to require
+every task-authored role and scope for resolve and deny; in that enforced mode Cancel remains
+requester-only and does not by itself disclose review content. With enforcement disabled, every
+admitted same-tenant principal may inspect and perform every pinned action, including Cancel. An explicit
+override is a distinct action requiring `ravenroot.human-task.override` and either `TENANT_ADMIN` in
+the task tenant or `PLATFORM_ADMIN`; it requires a bounded nonblank reason. Audit records the actor,
+task, generation, action, and reason digest, not review or response content. Ravenroot consumes roles,
+scopes, subject, and tenant from the configured authentication boundary; it does not create users,
+assign roles, or manage identity.
 
 Correlation and deduplication are deliberately fixed. The task and handler share a deterministic
 task ID derived from the original tenant, process, traversal, invocation, and attempt. The attempt
@@ -117,8 +149,20 @@ unauthorized principal, late timer, and cross-tenant or unknown ID each produce 
 result. Unknown and cross-tenant IDs are indistinguishable. Only `resolve` accepts a body, using the
 task's declared media type and bounded payload envelope.
 
+The canonical transport-neutral operation is
+`POST /v1/human-tasks/{taskId}/settle?generation=N` with strict `application/json`:
+
+```json
+{"schemaVersion":1,"action":"RESOLVE","comment":"checked","response":{"contentType":"application/vnd.ravenroot.payload+json","payloadBase64":"..."}}
+```
+
+`response` is required only for `RESOLVE`. An administrator intentionally bypassing responder
+requirements adds `"override":{"version":1,"reason":"incident change 42"}`. Legacy decision and
+confirmation routes, the interaction WebSocket, Workbench, and `ravenroot human-tasks settle` all
+call the same settlement service and return the same deterministic task outcomes.
+
 Embedded confirmations have a separate attention projection. `GET /v1/configuration` advertises it
-as `humanTasks` schema version `1`, including supported presentation versions, current authoring
+as `humanTasks` schema version `2`, including supported presentation versions, current authoring
 limits, polling bounds, and the effective default and maximum attention page sizes. These values
 remain present while the durable store can query and decide already pinned confirmations, even when
 the current admission policy is too narrow to create another one. In that state the behavior catalog
@@ -203,6 +247,47 @@ ID, generation, disposition, schema metadata, and—only for `RESOLVED`—the va
 The traversal retains the original requester's execution identity; the responder is audit identity,
 not replacement execution authority.
 
+## Registered custom and external interaction
+
+Registered presentations are disabled unless `RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG` names a
+read-only operator-owned JSON file. It is a closed version-one document with
+`capabilityTtlSeconds` (1–1,800), `maxCompletionBytes` (1,024–1,048,576), a base64 capability signing
+secret of at least 32 bytes, and one to 64 profiles. Each profile fixes an opaque `id`, positive
+`version`, `kind` (`CUSTOM` or `EXTERNAL`), safe `launchUri`, and exact scheme/host/port `origin`.
+Only HTTPS is accepted, except loopback HTTP for local development. External profiles additionally
+require their own base64 completion signing secret; custom profiles forbid provider credentials.
+The server's effective Workbench CSP emits `frame-src 'none'` when this registry is absent and otherwise
+emits only the registry's exact origin set; neither GraphML nor an incoming `Origin` header contributes a
+frame source.
+
+`POST /v1/human-tasks/{taskId}/interaction?generation=N` authenticates the responder and returns a
+short-lived single-task launch capability plus only the exact authorized review presentation, pinned
+response schema, actions, task/generation, expiry, registered launch URI/origin, and protocol version.
+The capability binds tenant, task, generation, profile and schema versions, allowed actions, and
+return origin. It contains no subject, issuer, roles, scopes, Ravenroot bearer, or provider credential.
+`DELETE` on the same route accepts `{"schemaVersion":1,"capability":"..."}` and durably revokes the
+capability across restart and replicas.
+
+The Workbench host is a sandboxed iframe with forms/scripts only: no popup, top-navigation, ambient
+credentials, or bearer. A custom frame also omits `allow-same-origin`, so the browser assigns it an
+opaque origin even if it navigates; it cannot become same-origin with or escape into the parent DOM.
+An external frame retains `allow-same-origin` because its message and callback protocol uses the exact
+registered provider origin, but both server issuance and the Workbench refuse an external provider
+origin equal to the Workbench return origin. The server separately validates that the launch URI has
+the exact registered scheme/host/port, while
+the version-one `postMessage` exchange requires the exact frame source and opaque sandbox origin plus
+the task, generation, opaque capability ID, schema, action, lifecycle, and message-size fences. A
+custom component never receives the signed capability. Custom
+completion returns to the parent and uses the canonical authenticated settlement route, which
+rechecks the caller's current authorization. Only external providers call
+`POST /v1/human-task-interactions/complete`; they sign the exact body in
+`X-Ravenroot-Provider-Signature`. The server rechecks origin, signature, expiry, durable revocation,
+current task/generation, configured profile, action, and schema without reconstructing identity claims.
+Completion is compare-and-set, replay-safe and idempotent: after a lost success response, retrying the
+same capability reconciles to the recorded outcome. Stale, expired, revoked, malformed, wrong-origin,
+or incorrectly signed calls cannot settle the task. Closing, timing out, losing authorization, or
+failing a presentation revokes or lets the bounded capability expire and leaves the task recoverable.
+
 ## Administrative inventory and reconciliation
 
 `GET /v1/admin/human-tasks` is separate from the responder inbox. It requires the
@@ -215,6 +300,12 @@ administrator may select another tenant. Rows classify work as `ACTIONABLE`, `TE
 timer disposition. They never include request or response payloads, continuation bytes, credentials,
 responder requirements, or comments.
 
+Exact override review is available at `GET /v1/admin/human-tasks/{taskId}/attention` with required
+`tenant`, `generation`, and bounded `reason` parameters. Cross-tenant access is platform-admin only;
+tenant admins remain tenant-local. The matching `/settle` surface requires the same explicit tenant
+locator and the canonical override document. Review and settlement each emit bounded audit evidence
+containing identities, reason digest, and outcome but never review, response, or comment content.
+
 `POST /v1/admin/human-tasks/purge` accepts those selectors plus `dryRun` (default `true`) and `mode`.
 It requires an `Idempotency-Key` header and refuses an unfiltered operation. `CANCEL` uses ordinary
 task cancellation and re-entry semantics. `FORCE_ABANDON` is for inconsistent or orphaned work: it
@@ -222,6 +313,12 @@ atomically closes the task and handler, cancels both task timers, terminally can
 owning traversal/process work, publishes `HUMAN_TASK_ABANDONED`, and creates no re-entry. Both modes
 return a per-item outcome; dry run returns the exact bounded candidate set and planned transition
 without changing state. Terminal retained history is not deleted by either mode.
+
+The same bounded inventory and atomic reconciliation contract runs over the in-memory, SQLite, and
+PostgreSQL-capable stores. SQLite and PostgreSQL add presentation pins and the payload-free capability
+revocation ledger additively; pre-feature rows remain readable. Reconciliation changes only the
+selected task and its handler, timers, traversal/process state, pending continuation, and audit event.
+It neither deletes retained task history nor touches unrelated work.
 
 ## What this is not
 

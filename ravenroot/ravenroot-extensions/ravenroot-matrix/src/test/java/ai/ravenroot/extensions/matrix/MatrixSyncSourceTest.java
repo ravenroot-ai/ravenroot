@@ -6,6 +6,7 @@ import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.IngressDisposition;
 import ai.ravenroot.api.deployment.IngressReceipt;
 import ai.ravenroot.api.deployment.IngressTarget;
+import ai.ravenroot.api.deployment.SourceStartException;
 import ai.ravenroot.api.deployment.TrustedIngress;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.security.PrincipalType;
@@ -28,6 +29,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MatrixSyncSourceTest {
     @TempDir Path directory;
+
+    @Test void declaresEveryPublicStartupCodeAsOneClosedSet() {
+        MatrixConfiguration configuration = MatrixTestSupport.configuration(directory.resolve("codes.db"),
+                MatrixProfile.InitialSyncMode.SKIP, "");
+        var nodePackage = new MatrixNodePackage(configuration,
+                new SqliteMatrixSyncStore(configuration.store(), MatrixTestSupport.fixedClock()),
+                MatrixTestSupport.fixedClock());
+        InboundSourceCapable capable = (InboundSourceCapable) MatrixTestSupport.behavior(
+                nodePackage, MatrixBehaviorDescriptors.SYNC);
+        Set<String> expected = Set.of("matrix-durable-ingress-required", "matrix-ingress-ambiguous",
+                "matrix-ingress-refused", "matrix-sync-authentication", "matrix-sync-cancelled",
+                "matrix-sync-capacity", "matrix-sync-event-limit", "matrix-sync-gap",
+                "matrix-sync-provider-status", "matrix-sync-rate-limit", "matrix-sync-transport");
+        assertEquals(expected, MatrixSourceStartFailure.codes());
+        assertEquals(MatrixSourceStartFailure.codes(), capable.sourceStartFailureCodes());
+    }
 
     @Test void pollsWithManagedCredentialAndAdvancesOnlyAfterDurableReceipt() {
         Path database = directory.resolve("sync.db"); MatrixTestSupport.HttpHarness http = new MatrixTestSupport.HttpHarness();
@@ -189,7 +206,7 @@ class MatrixSyncSourceTest {
                 secondContext, secondHttp);
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> second.start(secondContext).toCompletableFuture().join());
-        assertTrue(failure.getCause().getMessage().contains("matrix-sync-capacity"));
+        assertEquals("matrix-sync-capacity", ((SourceStartException) failure.getCause()).code());
         assertTrue(secondHttp.requests.isEmpty());
         first.stop().toCompletableFuture().join(); assertTrue(firstReady.isCompletedExceptionally());
     }

@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1344,7 +1344,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d",
+          "digest": "bc818fa4a5992cbfd798be2aa71927dac2f87e4977635e2cff754376728d1e12",
           "assertion": "Empty values deliberately select application defaults for declared carriers."
         }
       ],
@@ -1447,12 +1447,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7",
+          "digest": "19fad875999c810bfa27a788cb4dd156b8953b2827e372181359867ab0b3ca92",
           "assertion": "Compose carries supported environment key identities."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d",
+          "digest": "bc818fa4a5992cbfd798be2aa71927dac2f87e4977635e2cff754376728d1e12",
           "assertion": "Kubernetes carries supported environment key identities."
         }
       ],
@@ -1704,12 +1704,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7",
+          "digest": "19fad875999c810bfa27a788cb4dd156b8953b2827e372181359867ab0b3ca92",
           "assertion": "Compose declares explicit local runtime defaults and external carriers."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d",
+          "digest": "bc818fa4a5992cbfd798be2aa71927dac2f87e4977635e2cff754376728d1e12",
           "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes."
         }
       ],
@@ -1778,17 +1778,17 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java",
-          "digest": "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
+          "digest": "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
           "assertion": "The typed enabled field and enabledFromEnvironment method own the exact false default and strict parser."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java",
-          "digest": "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
+          "digest": "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
           "assertion": "Packaged startup translates parser refusal to one sanitized diagnostic before composition."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1798,12 +1798,12 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/embed/EmbedBrowserConfigurationTest.java",
-          "digest": "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
+          "digest": "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
           "assertion": "Runnable tests prove absence, exact true, and refusal of blank, whitespace, uppercase, and other malformed values."
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerMainLifecycleTest.java",
-          "digest": "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
+          "digest": "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
           "assertion": "Runnable lifecycle tests prove disabled startup, supported enablement, and sanitized malformed refusal before bind."
         },
         {
@@ -1813,8 +1813,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "4440d24e386db02d5cd8941a33c9ef0c0674efe6f1b189fe9b75ec69c10b31e6",
-          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
+          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
       "candidateCount": 5,
@@ -2484,7 +2484,7 @@
         },
         {
           "path": "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/RemoteBackend.java",
-          "digest": "25e11372c7b304f0cf14db71e8258e18c18203ffca6c04c93285e68a58ffffcd",
+          "digest": "d0e7063076c91493578ea2fbc04079490bcc0047c49a1a8adf3e8b3ec34eed2b",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -4730,7 +4730,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "0bf466469dcfffd3c991d0393957f879f30a42fdb9fa0bae9c05ae101126c071",
+          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5201,7 +5201,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "0bf466469dcfffd3c991d0393957f879f30a42fdb9fa0bae9c05ae101126c071",
+          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5472,8 +5472,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "4440d24e386db02d5cd8941a33c9ef0c0674efe6f1b189fe9b75ec69c10b31e6",
-          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
+          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
       "candidateCount": 44,
@@ -5538,7 +5538,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "0bf466469dcfffd3c991d0393957f879f30a42fdb9fa0bae9c05ae101126c071",
+          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5658,12 +5658,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "3f2f00ce46e88e4c07b858461ce5a9faa5809416f58699fe6521e9e0557939c9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -5688,8 +5688,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "3f2f00ce46e88e4c07b858461ce5a9faa5809416f58699fe6521e9e0557939c9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/provider/AssistantOutputLimit.java",
@@ -5724,7 +5724,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java",
-          "digest": "2b7ca6413af7c78fbca8d40eaf585d21186691bd11c50baaf8aa712d5bea5f6b",
+          "digest": "41ca72d4c04828ba84c09894a3b2b9b5f7795a3e99e4d6bc1d8c18bc650651ec",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5761,13 +5761,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "3f2f00ce46e88e4c07b858461ce5a9faa5809416f58699fe6521e9e0557939c9",
-          "assertion": "Server composition consumes exact process environment keys."
+          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "4440d24e386db02d5cd8941a33c9ef0c0674efe6f1b189fe9b75ec69c10b31e6",
-          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
+          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
       "candidateCount": 95,
@@ -5888,7 +5888,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java",
-          "digest": "2b7ca6413af7c78fbca8d40eaf585d21186691bd11c50baaf8aa712d5bea5f6b",
+          "digest": "41ca72d4c04828ba84c09894a3b2b9b5f7795a3e99e4d6bc1d8c18bc650651ec",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -6223,8 +6223,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "3f2f00ce46e88e4c07b858461ce5a9faa5809416f58699fe6521e9e0557939c9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
@@ -6359,13 +6359,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java",
-          "digest": "2b7ca6413af7c78fbca8d40eaf585d21186691bd11c50baaf8aa712d5bea5f6b",
+          "digest": "41ca72d4c04828ba84c09894a3b2b9b5f7795a3e99e4d6bc1d8c18bc650651ec",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "3f2f00ce46e88e4c07b858461ce5a9faa5809416f58699fe6521e9e0557939c9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
       "candidateCount": 29,
@@ -8383,7 +8383,7 @@
         },
         {
           "path": "scripts/check_release_configuration.py",
-          "digest": "5421c181fb275a40357b54020c645d40234801787d9b58e33f8c94c9159259f2",
+          "digest": "410e11578f4e01097b457242d99e66bfc6b93847f32d80ed3ba70a9a737f9e3f",
           "assertion": "Release checker consumes external tool configuration names."
         }
       ],
@@ -8509,7 +8509,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/test/source-session-runtime-projection.test.js",
-          "digest": "299a96fc4ded1043f3b844d348fe703b64e17d30f3432ed3e478c9dca1afda94",
+          "digest": "048b2b41276a1b70321ebfd5db909916a3f58890479c1e6ced5346c4e3676579",
           "assertion": "Test pins retention, duplicate rejection, eviction, and replay after eviction."
         }
       ],
@@ -8533,8 +8533,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
+          "digest": "c0b292f9e2fe4a7aebc803a3801e653244539215ec509ce72e1642e3cd731ec9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
@@ -8669,7 +8669,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "f389204bd391d28cdac73cc5f1c2d328f2cbfbf13e6811236e90fb89cbe593fc",
+          "digest": "221ef8003b6bb863abb17a5dd49e54c57804fca68ecf9b4a391dffe46ae33470",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         }
       ],
@@ -8824,13 +8824,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "f389204bd391d28cdac73cc5f1c2d328f2cbfbf13e6811236e90fb89cbe593fc",
+          "digest": "221ef8003b6bb863abb17a5dd49e54c57804fca68ecf9b4a391dffe46ae33470",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
-          "assertion": "UI resolves catalog entries through stable lookup tokens. Issue #448 preserves this authority while adding transparent register-machine authoring."
+          "digest": "c0b292f9e2fe4a7aebc803a3801e653244539215ec509ce72e1642e3cd731ec9",
+          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating."
         }
       ],
       "candidateCount": 131,
@@ -8982,13 +8982,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "5b90bfc6d595c6bff0600a4f3c7faad1fdd8fe61bfe900522dd16dfdf2ba9279",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
+          "digest": "c0b292f9e2fe4a7aebc803a3801e653244539215ec509ce72e1642e3cd731ec9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating."
         }
       ],
       "candidateCount": 43,
@@ -9052,7 +9052,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "5b90bfc6d595c6bff0600a4f3c7faad1fdd8fe61bfe900522dd16dfdf2ba9279",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -10766,8 +10766,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
+          "digest": "c0b292f9e2fe4a7aebc803a3801e653244539215ec509ce72e1642e3cd731ec9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
@@ -10901,7 +10901,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "5b90bfc6d595c6bff0600a4f3c7faad1fdd8fe61bfe900522dd16dfdf2ba9279",
+          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,12 +11429,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
+          "digest": "c0b292f9e2fe4a7aebc803a3801e653244539215ec509ce72e1642e3cd731ec9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "d92ae9d3b82cd4ce84285567af724ea431ddccfaf989bcb14deecda1930e8d4f",
+          "digest": "d56501bf95f759b50519b9eed75e4fcfd7c39c1f52835ef8f7c3807552901554",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -11498,12 +11498,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "4440d24e386db02d5cd8941a33c9ef0c0674efe6f1b189fe9b75ec69c10b31e6",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "ef62b8f7c2c709d796d56026f51878822a3ccaaa833eabc8871f975de1a73bfc",
+          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],
@@ -11572,12 +11572,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "4440d24e386db02d5cd8941a33c9ef0c0674efe6f1b189fe9b75ec69c10b31e6",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "ef62b8f7c2c709d796d56026f51878822a3ccaaa833eabc8871f975de1a73bfc",
+          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],
@@ -11643,12 +11643,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "4440d24e386db02d5cd8941a33c9ef0c0674efe6f1b189fe9b75ec69c10b31e6",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "ef62b8f7c2c709d796d56026f51878822a3ccaaa833eabc8871f975de1a73bfc",
+          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],

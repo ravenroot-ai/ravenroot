@@ -78,6 +78,10 @@ services:
       # Human Task policy is read once at server startup. Empty values deliberately reach the
       # centralized configuration parser, where they select its documented defaults; deployment
       # overlays may set any supported value without editing this local-only descriptor.
+      RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED: ${RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED:-false}
+      # Disabled when blank. A Compose override that enables registered presentations must mount
+      # the operator-owned JSON file read-only and set this to its container path.
+      RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG: ${RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG:-}
       RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES: ${RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES:-}
       RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES: ${RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES:-}
       RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS: ${RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS:-}

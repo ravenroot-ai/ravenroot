@@ -3,6 +3,7 @@ package ai.ravenroot.persistence.postgresql;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
+import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.testkit.persistence.MutableClock;
 import org.junit.jupiter.api.Test;
 
@@ -76,6 +77,39 @@ class PostgresDeploymentRegistryRetentionTest {
                     "alice", START);
             assertEquals(foreign, registry.create(content, sameCommand).toCompletableFuture().join(),
                     "the other tenant's ledger row still replays, so the purge did not reach it");
+        }
+    }
+
+    @Test
+    void retainedIdentitySurvivesLedgerPurgeAndReturnsTheCurrentAggregateAfterReopen() {
+        var clock = new MutableClock(START);
+        Duration retention = Duration.ofMinutes(5);
+        String storeId = "deployment-retained-identity-" + UUID.randomUUID();
+        var content = new GraphVersion.Content(1, "graph".getBytes(StandardCharsets.UTF_8), "alice",
+                clock.instant());
+        var create = new DeploymentRegistry.CreateCommand(
+                "acme", "local-deployment:orders", "a".repeat(64), true);
+        DeploymentId original;
+
+        try (var registry = new PostgresDeploymentRegistry(PostgresTestDatabase.dataSourceFor(storeId), clock,
+                tenant -> DeploymentId.of("dep-original"), retention)) {
+            DeploymentRegistry.Record made = registry.create(content, create).toCompletableFuture().join();
+            original = made.deploymentId();
+            var running = new DeploymentRegistry.Desired(DeploymentRegistry.DesiredKind.RUNNING, 1L,
+                    DeploymentRegistry.UpdateStrategy.STOP_FIRST, made.generation());
+            registry.command(running, new DeploymentRegistry.Command("acme", original, "start",
+                    "b".repeat(64), RevisionExpectation.exactly(made.revision())))
+                    .toCompletableFuture().join();
+        }
+
+        clock.advance(retention.plusSeconds(1));
+        try (var registry = new PostgresDeploymentRegistry(PostgresTestDatabase.dataSourceFor(storeId), clock,
+                tenant -> DeploymentId.of("dep-must-not-be-minted"), retention)) {
+            assertEquals(2, registry.purgeExpiredCommandRecords("acme").toCompletableFuture().join());
+            DeploymentRegistry.Record recovered = registry.create(content, create).toCompletableFuture().join();
+            assertEquals(original, recovered.deploymentId());
+            assertEquals(1, recovered.generation());
+            assertEquals(DeploymentRegistry.DesiredKind.RUNNING, recovered.desired().kind());
         }
     }
 

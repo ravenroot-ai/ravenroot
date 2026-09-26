@@ -68,7 +68,7 @@ describe('catalogNodeIcon', () => {
     expect(catalogNodeIcon({ visualType: 'actor' }, NODE_ICONS)).toBe('◉ ');
   });
 
-  it('falls back to the bullet placeholder for an unmapped type', () => {
-    expect(catalogNodeIcon({ visualType: 'unknown-future-type' }, NODE_ICONS)).toBe('•');
+  it('falls back to a stable visible initial for an unmapped type', () => {
+    expect(catalogNodeIcon({ visualType: 'unknown-future-type' }, NODE_ICONS)).toBe('U');
   });
 });

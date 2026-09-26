@@ -12,6 +12,7 @@ Understand the invariants connecting graph semantics, actor execution, durabilit
 - [AI, programs, and extension boundaries](ai-extension-boundaries.md) — Distinguish declarative graph intent from privileged adapters, tools, credentials, and code execution.
 - [Native Kubernetes execution](../operator-guide/kubernetes-runners.md) — Separate manager authority, Pod/PVC ownership, attestation and report-only recovery from graph intent.
 - [Embedded projection security model](embed-security-model.md) — Trace operator attestations and short-lived sessions into a restricted read-only projection.
+- [Finite automata v1](finite-automata-v1.md) — Accepted optional-node contract and bounded program evidence; production implementation deferred.
 
 ## Authority boundary
 

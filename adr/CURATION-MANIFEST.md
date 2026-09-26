@@ -50,6 +50,7 @@ without presenting the same choice as two independent contracts.
 | 2026-09-14 | [0041](0041-governed-workspace-agent-runner-plane.md) | Superseded by 0042 | Historical generic workspace-agent contract; fenced recovery foundations retained. |
 | 2026-09-16 | [0042](0042-explicit-workspaces-and-runner-coordinators.md) | Accepted | Explicit Workspace lifecycles, named Agents, independent runtime reuse, fleet capacity and runner-only shared-authority scaling. |
 | 2026-09-18 | [0043](0043-kubernetes-native-governed-runner.md) | Accepted | Native Pod/PVC materialization, positive enforcement attestation, credential separation and report-only Kubernetes recovery. |
+| 2026-09-26 | [0044](0044-encapsulated-finite-automata.md) | Accepted contract | Defines the five-kind declarative automata format, bounded encapsulated execution and deferred authoring/SDK boundary; production bundle not implemented. |
 
 ## Publication rules
 

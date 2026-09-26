@@ -335,8 +335,11 @@ export function createWorkspace() {
 // keeping the same processInstanceId. For a source session, the first event already proved its
 // document through deployment identity, so this module remembers that process ownership and uses it
 // for later re-entry events. The remembered route is intentionally narrower than deployment routing:
-// exact tenant/version plus the same document and session incarnation, bounded and transient.
-export function documentForRuntimeEvent(workspace, event) {
+// exact trusted stream tenant/version plus the same document and session incarnation, bounded and
+// transient. The stream tenant is deliberately separate from the event: the browser wire does not
+// disclose tenant naming, while the authenticated runtime configuration already establishes which
+// tenant (or verified session-only scope) owns the stream.
+export function documentForRuntimeEvent(workspace, event, streamScope) {
   const executionId = event?.executionId;
   if (!executionId) return null;
 
@@ -368,17 +371,19 @@ export function documentForRuntimeEvent(workspace, event) {
   // deployment id is per session and per tenant, so it identifies exactly one open document.
   const deploymentId = typeof event?.deploymentId === 'string' && event.deploymentId
     ? event.deploymentId : null;
+  const streamTenant = trustedStreamTenant(streamScope);
   if (deploymentId) {
     // Deliberately not fenced on graphVersion. For a run, the version proves the event belongs to
     // the snapshot the document submitted; for a session, the deployment id already does, and it
     // keeps proving it after the author edits the document the session is not running.
-    const listening = workspace.documents.filter(doc => sourceSessionOwnsDeployment(doc, deploymentId)
-      && tenantCompatible(doc.tenantId, event.tenantId));
+    const listening = streamTenant !== undefined ? workspace.documents.filter(
+      doc => sourceSessionOwnsDeployment(doc, deploymentId) && doc.tenantId === streamTenant,
+    ) : [];
     // A deployment claim is useful only while it is unique in this workspace. Two open documents
     // claiming the same deployment are an ambiguity, not a reason to choose whichever was opened
     // first.
     if (listening.length === 1) {
-      rememberSourceProcessOwner(listening[0], event);
+      rememberSourceProcessOwner(listening[0], event, streamTenant);
       return listening[0];
     }
   }
@@ -387,7 +392,7 @@ export function documentForRuntimeEvent(workspace, event) {
   // process bridge is weaker than the deployment fact that taught it and stronger than the pending
   // fallback below: it is accepted only under the same tenant, graph version, document incarnation,
   // deployment, session id and session generation. Graph version by itself is never a route.
-  const resumed = documentsForRememberedSourceProcess(workspace, event);
+  const resumed = documentsForRememberedSourceProcess(workspace, event, streamTenant);
   if (resumed.length === 1) return resumed[0];
   if (resumed.length > 1) return null;
 
@@ -417,32 +422,29 @@ function sourceSessionOwnsDeployment(document_, deploymentId) {
     && ACTIVE_SOURCE_SESSION_STATES.has(session.state));
 }
 
-function tenantCompatible(documentTenant, eventTenant) {
-  const documentHasTenant = typeof documentTenant === 'string' && documentTenant.length > 0;
-  const eventHasTenant = typeof eventTenant === 'string' && eventTenant.length > 0;
-  if (documentHasTenant || eventHasTenant) return documentHasTenant && eventHasTenant
-    && documentTenant === eventTenant;
-  // Preserve old in-process adapters that expose neither tenant. Such an event can still use the
-  // deployment route and its remembered ownership remains fenced to that same legacy-null scope.
-  return true;
+function trustedStreamTenant(streamScope) {
+  if (!streamScope || !Object.hasOwn(streamScope, 'tenantId')) return undefined;
+  if (streamScope.tenantId === null) return null;
+  return typeof streamScope.tenantId === 'string' && streamScope.tenantId.length > 0
+    ? streamScope.tenantId : undefined;
 }
 
-function rememberSourceProcessOwner(document_, event) {
+function rememberSourceProcessOwner(document_, event, streamTenant) {
   const processInstanceId = typeof event?.processInstanceId === 'string' && event.processInstanceId
     ? event.processInstanceId : null;
   const graphVersion = typeof event?.graphVersion === 'string' && event.graphVersion
     ? event.graphVersion : null;
-  const eventTenant = typeof event?.tenantId === 'string' && event.tenantId ? event.tenantId : null;
   const session = document_?.sourceSession;
   // Learning requires complete positive evidence for process, graph and deployment. Tenant is an
-  // exact scope too: modern authenticated documents carry the same non-null value; legacy adapters
-  // that omit it on both sides remain isolated in the null scope and can never match a named tenant.
-  if (!processInstanceId || !graphVersion || document_?.tenantId !== eventTenant
+  // exact trusted stream scope too: authenticated documents carry the same non-null value, while a
+  // verified session-only stream remains isolated in the null scope and can never match a tenant.
+  if (!processInstanceId || !graphVersion || streamTenant === undefined
+      || document_?.tenantId !== streamTenant
       || !sourceSessionOwnsDeployment(document_, event.deploymentId)) return;
   const owners = session.processOwners;
   owners.delete(processInstanceId);
   owners.set(processInstanceId, Object.freeze({
-    tenantId: eventTenant,
+    tenantId: streamTenant,
     graphVersion,
     documentIncarnation: document_.incarnation,
     deploymentId: session.deploymentId,
@@ -454,13 +456,12 @@ function rememberSourceProcessOwner(document_, event) {
   }
 }
 
-function documentsForRememberedSourceProcess(workspace, event) {
+function documentsForRememberedSourceProcess(workspace, event, streamTenant) {
   const processInstanceId = typeof event?.processInstanceId === 'string' && event.processInstanceId
     ? event.processInstanceId : null;
   const graphVersion = typeof event?.graphVersion === 'string' && event.graphVersion
     ? event.graphVersion : null;
-  const tenantId = typeof event?.tenantId === 'string' && event.tenantId ? event.tenantId : null;
-  if (!processInstanceId || !graphVersion) return [];
+  if (!processInstanceId || !graphVersion || streamTenant === undefined) return [];
   const matches = [];
   for (const document_ of workspace.documents) {
     const session = document_.sourceSession;
@@ -475,7 +476,7 @@ function documentsForRememberedSourceProcess(workspace, event) {
       session.processOwners.delete(processInstanceId);
       continue;
     }
-    if (owner.tenantId === tenantId && owner.graphVersion === graphVersion) matches.push(document_);
+    if (owner.tenantId === streamTenant && owner.graphVersion === graphVersion) matches.push(document_);
   }
   return matches;
 }

@@ -781,6 +781,7 @@ let workspacePersistenceRevision = 0;
 let workspacePersistedRevision = 0;
 let workspaceSnapshotReader = readWorkspaceSnapshot;
 let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scope: null, generation: 0 });
+const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
   workspaceAuthority = Object.freeze({ state, client, scope: null,
@@ -823,6 +824,12 @@ function tenantAuthorityAllows(owner, client = runtimeClient) {
   if (owner.tenantId === null) return workspaceAuthority.scope === null;
   return workspaceAuthority.scope?.key === activeWorkspaceScope?.key
     && owner.tenantId === workspaceAuthority.scope?.tenantId;
+}
+
+function runtimeEventScope(client) {
+  if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
+      || workspaceAuthority.client !== client) return null;
+  return workspaceAuthority.scope || SESSION_ONLY_RUNTIME_EVENT_SCOPE;
 }
 
 function normalizedWorkspaceServiceUrl(client) {
@@ -11464,10 +11471,11 @@ async function connectRuntime(atBoot = false) {
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
-    runtimeDisconnect = runtimeClient.connect(handleRuntimeEvent, (status, message) => {
-      setRuntimeConnectionState(status, message);
-      if (status === 'connected') void configureHumanTasks();
-    });
+    runtimeDisconnect = runtimeClient.connect(event => handleRuntimeEvent(event, connectedClient),
+      (status, message) => {
+        setRuntimeConnectionState(status, message);
+        if (status === 'connected') void configureHumanTasks();
+      });
     connectedClient.nodeTypes().then(async catalog => {
       await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
@@ -12250,9 +12258,11 @@ async function playGraph(mode = 'test') {
 // One stream serves every open document, so the first question is which document the event is
 // about. An event that matches no open document is dropped: painting it on whichever graph happens
 // to be in front of the user is how a run in one document used to light up another.
-function handleRuntimeEvent(event) {
-  const target = documentForRuntimeEvent(workspace, event);
-  if (!target || !tenantAuthorityAllows(target)) return;
+function handleRuntimeEvent(event, client = runtimeClient) {
+  const streamScope = runtimeEventScope(client);
+  if (!streamScope) return;
+  const target = documentForRuntimeEvent(workspace, event, streamScope);
+  if (!target || !tenantAuthorityAllows(target, client)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;

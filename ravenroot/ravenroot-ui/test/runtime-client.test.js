@@ -166,6 +166,7 @@ function versionedRingEvent(overrides = {}) {
     traversalId: '20000000-0000-0000-0000-000000000002',
     sequence: 1, engineId: 'pekko', graphVersion: 'graph-v1',
     executionId: '20000000-0000-0000-0000-000000000002', type: 'EXECUTION_STARTED',
+    deploymentId: null, workloadId: null,
     invocationId: null, attemptId: null, nodeId: null, edgeId: null,
     activeInstances: 0, inFlightArrivals: 0, fallback: false,
     description: 'Execution started.', publicReason: null,
@@ -219,6 +220,15 @@ describe('versioned execution stream normalization', () => {
     expect(normalized).not.toHaveProperty('detail');
     expect(normalizeRuntimeEvent(versionedDurableEvent({ eventType: 'FUTURE_JOURNAL_EVENT', future })))
       .toMatchObject({ type: 'FUTURE_JOURNAL_EVENT', future });
+  });
+
+  it('preserves the restored deployment and workload origin on a live re-entry event', () => {
+    expect(normalizeRuntimeEvent(versionedRingEvent({
+      eventType: 'NODE_STARTED', type: 'NODE_STARTED',
+      deploymentId: 'source-deployment', workloadId: 'source-workload',
+    }))).toMatchObject({
+      deploymentId: 'source-deployment', workloadId: 'source-workload',
+    });
   });
 
   it.each(['schemaVersion', 'source', 'id', 'eventType', 'occurredAt', 'processInstanceId', 'traversalId'])
@@ -288,6 +298,7 @@ describe('versioned execution stream normalization', () => {
     { messageTruncated: 'false' }, { processingDuration: -1 }, { processingDuration: Infinity },
     { publicReason: 'raw exception prose' }, { outputRedacted: 'yes' }, { edgeId: 4 },
     { invocationId: 'not-a-uuid' }, { graphVersion: null },
+    { deploymentId: 4 }, { deploymentId: '' }, { workloadId: {} }, { workloadId: '' },
   ])('rejects malformed known live fields %j', fields => {
     expect(() => normalizeRuntimeEvent(versionedRingEvent(fields))).toThrow();
   });

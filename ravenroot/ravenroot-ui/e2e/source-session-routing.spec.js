@@ -35,8 +35,10 @@ function sourceEventStream(deploymentId, nodeIds, admissions) {
       for (const [type, arrivals] of [['NODE_STARTED', 1], ['NODE_COMPLETED', 0]]) {
         sequence += 1;
         frames.push(`id: ${sequence}\nevent: execution\ndata: ${JSON.stringify({
+          schemaVersion: 1, source: 'RING', id: String(sequence), eventType: type,
           sequence, occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub', graphVersion: 'v1',
           processInstanceId, traversalId: executionId, executionId, deploymentId,
+          workloadId: executionId,
           type, nodeId, activeInstances: arrivals, inFlightArrivals: arrivals, fallback: false,
           description: 'stub', publicReason: null, message: null,
           messageRedacted: false, messageTruncated: false, processingDuration: null,
@@ -55,19 +57,24 @@ function durableHumanTaskReentryStream(deploymentId) {
   const secondTraversal = '20000000-0000-4000-8000-000000000003';
   const frames = [
     { processInstanceId: firstProcess, executionId: firstTraversal, traversalId: firstTraversal,
-      deploymentId, type: 'NODE_COMPLETED', nodeId: 'source', output: 'amqp-message-1' },
+      deploymentId, workloadId: 'source-workload-1', type: 'NODE_COMPLETED', nodeId: 'source',
+      output: 'amqp-message-1' },
     { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
-      deploymentId: null, type: 'HANDLER_RESOLVED', nodeId: 'human-task' },
+      deploymentId: null, workloadId: 'source-workload-1', type: 'HANDLER_RESOLVED',
+      nodeId: 'human-task' },
     { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
-      deploymentId: null, type: 'NODE_COMPLETED', nodeId: 'post-task-log', output: 'resolved-message-1' },
+      deploymentId: null, workloadId: 'source-workload-1', type: 'NODE_COMPLETED',
+      nodeId: 'post-task-log', output: 'resolved-message-1' },
     { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
-      deploymentId: null, type: 'NODE_COMPLETED', nodeId: 'publish' },
+      deploymentId: null, workloadId: 'source-workload-1', type: 'NODE_COMPLETED', nodeId: 'publish' },
     { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
-      deploymentId: null, type: 'EXECUTION_COMPLETED', nodeId: null },
+      deploymentId: null, workloadId: 'source-workload-1', type: 'EXECUTION_COMPLETED', nodeId: null },
     { processInstanceId: secondProcess, executionId: secondTraversal, traversalId: secondTraversal,
-      deploymentId, type: 'NODE_COMPLETED', nodeId: 'source', output: 'amqp-message-2' },
+      deploymentId, workloadId: 'source-workload-2', type: 'NODE_COMPLETED', nodeId: 'source',
+      output: 'amqp-message-2' },
   ];
   return frames.map((event, index) => `id: ${index + 1}\nevent: execution\ndata: ${JSON.stringify({
+    schemaVersion: 1, source: 'RING', id: String(index + 1), eventType: event.type,
     sequence: index + 1, occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub',
     graphVersion: 'v1', activeInstances: 0, inFlightArrivals: 0, fallback: false,
     description: 'stub', publicReason: null, message: null, messageRedacted: false,
@@ -75,7 +82,7 @@ function durableHumanTaskReentryStream(deploymentId) {
   })}\n\n`).join('');
 }
 
-async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
+async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = null } = {}) {
   const sourceCalls = [];
   const executionCalls = [];
   // The editor connects its stream at boot, before any session exists, so the frames cannot be
@@ -84,6 +91,14 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
   // the real server publishes in.
   let announceSession = () => {};
   const startedSession = new Promise(resolve => { announceSession = resolve; });
+  if (workspaceTenant) {
+    await page.route('**/v1/configuration', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
+        workspace: { tenantId: workspaceTenant } }),
+    }));
+  }
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json', body: SOURCE_CATALOG,
   }));
@@ -173,7 +188,9 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
 });
 
 test('source Human Task re-entry and a second AMQP message stay in one listening timeline', async ({ page }) => {
-  await stubRuntime(page, { sourceTraffic: { body: durableHumanTaskReentryStream } });
+  await stubRuntime(page, {
+    sourceTraffic: { body: durableHumanTaskReentryStream }, workspaceTenant: 'tenant-authenticated',
+  });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'source-human-task.graphml');
 
@@ -186,6 +203,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
   const timeline = await page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
     return {
+      tenantId: document_.tenantId,
       state: document_.sourceSession.state,
       processOwners: [...document_.sourceSession.processOwners.keys()],
       events: document_.execution.events.map(event => ({
@@ -194,6 +212,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
       })),
     };
   });
+  expect(timeline.tenantId).toBe('tenant-authenticated');
   expect(timeline.state).toBe('LISTENING');
   expect(timeline.processOwners).toEqual(expect.arrayContaining([
     '10000000-0000-4000-8000-000000000001',

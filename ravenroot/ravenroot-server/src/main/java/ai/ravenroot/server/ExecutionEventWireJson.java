@@ -61,8 +61,9 @@ public final class ExecutionEventWireJson {
      * The process-local projection used by the legacy recent-events endpoint and embedded in
      * {@link #live(ExecutionEvent)}.
      *
-     * <p>Additive only: {@code deploymentId} joined the existing fields and no field was renamed,
-     * retyped or removed, so a reader that already understood this object still does.</p>
+     * <p>Additive only: {@code deploymentId} and {@code workloadId} joined the existing fields and
+     * no field was renamed, retyped or removed, so a reader that already understood this object
+     * still does.</p>
      */
     static String legacyLive(ExecutionEvent event) {
         String description = PublicExecutionDescription.forType(event.type(), event.publicReason());
@@ -81,6 +82,10 @@ public final class ExecutionEventWireJson {
                 // `null` for a one-shot submission that opened no deployment domain, exactly as
                 // ExecutionEvent#deploymentId documents.
                 + ",\"deploymentId\":" + nullableEscaped(event.deploymentId())
+                // The deployment-scoped unit of work is the other half of the restored execution
+                // origin. Keeping both here preserves durable re-entry identity across the live SSE
+                // and the ring recent-event endpoint, which share this projection.
+                + ",\"workloadId\":" + nullableEscaped(event.workloadId())
                 + ",\"invocationId\":" + nullableUuid(event.invocationId())
                 + ",\"attemptId\":" + nullableUuid(event.attemptId())
                 + ",\"type\":\"" + event.type() + "\""

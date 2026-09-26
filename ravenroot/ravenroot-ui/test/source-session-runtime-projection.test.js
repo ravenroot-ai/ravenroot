@@ -9,7 +9,8 @@ import {
   observeNodeActivity,
   resetMonitoringRuntimeState,
 } from '../src/monitoring-runtime-state.js';
-import { createDocumentRecord, documentForRuntimeEvent, createWorkspace, bindExecution, PENDING_EXECUTION,
+import { createDocumentRecord, documentForRuntimeEvent as routeRuntimeEvent, createWorkspace,
+  bindExecution, PENDING_EXECUTION,
   retireSourceSessionProcessBindings }
   from '../src/workspace.js';
 import { validateSourceSessionStatus } from '../src/runtime-client.js';
@@ -17,6 +18,10 @@ import { validateSourceSessionStatus } from '../src/runtime-client.js';
 // A source produces one traversal per admitted message, so every fixture here changes traversalId and
 // processInstanceId while keeping the deployment: that is the shape the editor could not attribute.
 let traversalCounter = 0;
+const AUTHENTICATED_STREAM = Object.freeze({ tenantId: 'tenant-a' });
+const SESSION_ONLY_STREAM = Object.freeze({ tenantId: null });
+const documentForRuntimeEvent = (workspace, event, scope = AUTHENTICATED_STREAM) =>
+  routeRuntimeEvent(workspace, event, scope);
 const admission = (overrides = {}) => {
   traversalCounter += 1;
   return {
@@ -24,15 +29,14 @@ const admission = (overrides = {}) => {
     processInstanceId: `process-${traversalCounter}`,
     graphVersion: 'graph-1',
     deploymentId: 'session-a',
-    tenantId: 'tenant-a',
     occurredAt: '2026-09-09T10:00:00Z',
     sequence: traversalCounter,
     ...overrides,
   };
 };
 
-const document_ = (id, sourceSession = {}) => {
-  const record = createDocumentRecord({ id, tenantId: 'tenant-a' });
+const document_ = (id, sourceSession = {}, tenantId = 'tenant-a') => {
+  const record = createDocumentRecord({ id, tenantId });
   Object.assign(record.sourceSession, sourceSession);
   if (sourceSession.deploymentId && !sourceSession.state) record.sourceSession.state = 'LISTENING';
   return record;
@@ -106,6 +110,8 @@ describe('runtime events are attributed to a listening source graph', () => {
     const workspace = workspaceWith(listening);
     const admitted = admission({ processInstanceId: 'process-waiting' });
 
+    expect(admitted).not.toHaveProperty('tenantId');
+
     expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
     expect(documentForRuntimeEvent(workspace, {
       ...admitted, executionId: 'traversal-after-human-task', traversalId: 'traversal-after-human-task',
@@ -133,14 +139,49 @@ describe('runtime events are attributed to a listening source graph', () => {
     expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
 
     expect(documentForRuntimeEvent(workspace, {
-      ...admitted, deploymentId: null, executionId: 'wrong-tenant', tenantId: 'tenant-b',
-    })).toBeNull();
+      ...admitted, deploymentId: null, executionId: 'wrong-tenant',
+    }, { tenantId: 'tenant-b' })).toBeNull();
     expect(documentForRuntimeEvent(workspace, {
       ...admitted, deploymentId: null, executionId: 'wrong-version', graphVersion: 'graph-2',
     })).toBeNull();
     expect(documentForRuntimeEvent(workspace, {
       ...admitted, deploymentId: null, executionId: 'right-owner',
     })).toBe(listening);
+  });
+
+  it('uses authenticated stream scope to fence identical deployment ids across tenants', () => {
+    const tenantA = document_('doc-a', {
+      sessionId: 'shared', deploymentId: 'shared', state: 'LISTENING',
+    });
+    const tenantB = document_('doc-b', {
+      sessionId: 'shared', deploymentId: 'shared', state: 'LISTENING',
+    }, 'tenant-b');
+    const workspace = workspaceWith(tenantA, tenantB);
+    const event = admission({ deploymentId: 'shared', processInstanceId: 'tenant-fenced-process' });
+
+    expect(documentForRuntimeEvent(workspace, event, { tenantId: 'tenant-a' })).toBe(tenantA);
+    expect(documentForRuntimeEvent(workspace, { ...event, executionId: 'tenant-b-traversal' },
+      { tenantId: 'tenant-b' })).toBe(tenantB);
+    expect(documentForRuntimeEvent(workspace, { ...event, deploymentId: null,
+      executionId: 'tenant-a-resumed' }, { tenantId: 'tenant-a' })).toBe(tenantA);
+    expect(documentForRuntimeEvent(workspace, { ...event, deploymentId: null,
+      executionId: 'tenant-b-resumed' }, { tenantId: 'tenant-b' })).toBe(tenantB);
+  });
+
+  it('preserves a verified session-only stream without admitting it to a named tenant', () => {
+    const sessionOnly = document_('doc-session', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING',
+    }, null);
+    const tenant = document_('doc-tenant', {
+      sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING',
+    });
+    const workspace = workspaceWith(sessionOnly, tenant);
+    const admitted = admission({ processInstanceId: 'session-only-process' });
+
+    expect(documentForRuntimeEvent(workspace, admitted, SESSION_ONLY_STREAM)).toBe(sessionOnly);
+    expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null },
+      SESSION_ONLY_STREAM)).toBe(sessionOnly);
+    expect(documentForRuntimeEvent(workspace, admitted, {})).toBeNull();
   });
 
   it('fails closed when the same process was verified for two live documents', () => {

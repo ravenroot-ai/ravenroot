@@ -1662,6 +1662,11 @@ function validateVersionedRuntimeEvent(value) {
   for (const field of ['nodeId', 'edgeId']) {
     if (Object.hasOwn(value, field) && value[field] !== null && typeof value[field] !== 'string') invalid();
   }
+  for (const field of ['deploymentId', 'workloadId']) {
+    if (Object.hasOwn(value, field)
+        && value[field] !== null
+        && (typeof value[field] !== 'string' || value[field].length === 0)) invalid();
+  }
   const nativeCursor = value.source === 'RING' ? value.sequence : value.journalOffset;
   // JSON.parse rounds unsafe native numbers. This checks their representable value only; the
   // bounded decimal id remains the exact identity. Adjacent unsafe integers cannot be distinguished

@@ -35,8 +35,10 @@ function sourceEventStream(deploymentId, nodeIds, admissions) {
       for (const [type, arrivals] of [['NODE_STARTED', 1], ['NODE_COMPLETED', 0]]) {
         sequence += 1;
         frames.push(`id: ${sequence}\nevent: execution\ndata: ${JSON.stringify({
+          schemaVersion: 1, source: 'RING', id: String(sequence), eventType: type,
           sequence, occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub', graphVersion: 'v1',
           processInstanceId, traversalId: executionId, executionId, deploymentId,
+          workloadId: executionId,
           type, nodeId, activeInstances: arrivals, inFlightArrivals: arrivals, fallback: false,
           description: 'stub', publicReason: null, message: null,
           messageRedacted: false, messageTruncated: false, processingDuration: null,
@@ -47,19 +49,75 @@ function sourceEventStream(deploymentId, nodeIds, admissions) {
   return frames.join('');
 }
 
-async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
+function durableHumanTaskReentryStream(deploymentId) {
+  const firstProcess = '10000000-0000-4000-8000-000000000001';
+  const firstTraversal = '20000000-0000-4000-8000-000000000001';
+  const resumedTraversal = '20000000-0000-4000-8000-000000000002';
+  const secondProcess = '10000000-0000-4000-8000-000000000002';
+  const secondTraversal = '20000000-0000-4000-8000-000000000003';
+  const frames = [
+    { processInstanceId: firstProcess, executionId: firstTraversal, traversalId: firstTraversal,
+      deploymentId, workloadId: 'source-workload-1', type: 'NODE_COMPLETED', nodeId: 'source',
+      output: 'amqp-message-1' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, workloadId: 'source-workload-1', type: 'HANDLER_RESOLVED',
+      nodeId: 'human-task' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, workloadId: 'source-workload-1', type: 'NODE_COMPLETED',
+      nodeId: 'post-task-log', output: 'resolved-message-1' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, workloadId: 'source-workload-1', type: 'NODE_COMPLETED', nodeId: 'publish' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, workloadId: 'source-workload-1', type: 'EXECUTION_COMPLETED', nodeId: null },
+    { processInstanceId: secondProcess, executionId: secondTraversal, traversalId: secondTraversal,
+      deploymentId, workloadId: 'source-workload-2', type: 'NODE_COMPLETED', nodeId: 'source',
+      output: 'amqp-message-2' },
+  ];
+  return frames.map((event, index) => `id: ${index + 1}\nevent: execution\ndata: ${JSON.stringify({
+    schemaVersion: 1, source: 'RING', id: String(index + 1), eventType: event.type,
+    sequence: index + 1, occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub',
+    graphVersion: 'v1', activeInstances: 0, inFlightArrivals: 0, fallback: false,
+    description: 'stub', publicReason: null, message: null, messageRedacted: false,
+    messageTruncated: false, processingDuration: null, ...event,
+  })}\n\n`).join('');
+}
+
+async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = null,
+  configurationResponder, eventResponder } = {}) {
   const sourceCalls = [];
   const executionCalls = [];
+  const configurationCalls = [];
+  const eventCalls = [];
   // The editor connects its stream at boot, before any session exists, so the frames cannot be
   // composed up front: their deployment id is the one the browser invents when Run is pressed. The
   // stream therefore waits for the start request and is composed from it, which is also the order
   // the real server publishes in.
   let announceSession = () => {};
   const startedSession = new Promise(resolve => { announceSession = resolve; });
+  if (workspaceTenant || configurationResponder) {
+    await page.route('**/v1/configuration', async route => {
+      configurationCalls.push({ headers: route.request().headers() });
+      if (configurationResponder) {
+        await configurationResponder({ route, configurationCalls });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
+          workspace: { tenantId: workspaceTenant } }),
+      });
+    });
+  }
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json', body: SOURCE_CATALOG,
   }));
   await page.route('**/v1/events**', async route => {
+    eventCalls.push({ headers: route.request().headers() });
+    if (eventResponder) {
+      await eventResponder({ route, eventCalls, startedSession });
+      return;
+    }
     if (!sourceTraffic) {
       await route.fulfill({ status: 204, body: '' });
       return;
@@ -68,7 +126,9 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: sourceEventStream(deploymentId, sourceTraffic.nodeIds, sourceTraffic.admissions),
+      body: sourceTraffic.body
+        ? sourceTraffic.body(deploymentId)
+        : sourceEventStream(deploymentId, sourceTraffic.nodeIds, sourceTraffic.admissions),
     });
   });
   await page.route('**/v1/source-sessions**', async route => {
@@ -99,7 +159,7 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
       body: JSON.stringify({ executionId: 'one-shot', graphVersion: 'v1', executionPolicy: 'STANDARD' }),
     });
   });
-  return { sourceCalls, executionCalls };
+  return { sourceCalls, executionCalls, configurationCalls, eventCalls };
 }
 
 async function openGraph(page, xml, name) {
@@ -140,6 +200,145 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
   await expect.poll(() => calls.executionCalls.filter(call => call.method === 'POST').length).toBe(1);
   expect(calls.sourceCalls.filter(call => call.method === 'POST')).toHaveLength(1);
   expect(calls.executionCalls.find(call => call.method === 'POST').url).not.toContain('mode=run');
+});
+
+test('source Human Task re-entry and a second AMQP message stay in one listening timeline', async ({ page }) => {
+  await stubRuntime(page, {
+    sourceTraffic: { body: durableHumanTaskReentryStream }, workspaceTenant: 'tenant-authenticated',
+  });
+  await page.goto('/');
+  await openGraph(page, sourceGraph('external.consume'), 'source-human-task.graphml');
+
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect(page.locator('#activity-log')).toContainText('resolved-message-1');
+  await expect(page.locator('#activity-log')).toContainText('amqp-message-2');
+
+  const timeline = await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      tenantId: document_.tenantId,
+      state: document_.sourceSession.state,
+      processOwners: [...document_.sourceSession.processOwners.keys()],
+      events: document_.execution.events.map(event => ({
+        type: event.type, executionId: event.executionId,
+        processInstanceId: event.processInstanceId, nodeId: event.nodeId,
+      })),
+    };
+  });
+  expect(timeline.tenantId).toBe('tenant-authenticated');
+  expect(timeline.state).toBe('LISTENING');
+  expect(timeline.processOwners).toEqual(expect.arrayContaining([
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+  ]));
+  expect(timeline.events).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'HANDLER_RESOLVED',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'post-task-log',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'publish',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'EXECUTION_COMPLETED',
+      executionId: '20000000-0000-4000-8000-000000000002' }),
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'source',
+      executionId: '20000000-0000-4000-8000-000000000003' }),
+  ]));
+});
+
+test('re-authentication holds a source frame until workspace authority can deliver it', async ({ page }) => {
+  let releaseInitialTraffic;
+  const initialTrafficGate = new Promise(resolve => { releaseInitialTraffic = resolve; });
+  let releaseReauthentication;
+  const reauthenticationGate = new Promise(resolve => { releaseReauthentication = resolve; });
+  let announceReauthentication;
+  const reauthenticationStarted = new Promise(resolve => { announceReauthentication = resolve; });
+  const configurationBody = JSON.stringify({
+    schemaVersion: 1,
+    graphDocumentMaxBytes: 10 * 1024 * 1024,
+    workspace: { tenantId: 'tenant-authenticated' },
+  });
+  let deploymentId;
+  const calls = await stubRuntime(page, {
+    configurationResponder: async ({ route, configurationCalls }) => {
+      if (configurationCalls.length === 2) {
+        announceReauthentication();
+        await reauthenticationGate;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: configurationBody });
+    },
+    eventResponder: async ({ route, eventCalls, startedSession }) => {
+      if (eventCalls.length === 1) {
+        deploymentId = await startedSession;
+        await initialTrafficGate;
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: `retry: 30000\n${sourceEventStream(deploymentId, ['source'], 1)}`,
+        });
+        return;
+      }
+      if (eventCalls.length === 2) {
+        const event = {
+          schemaVersion: 1, source: 'RING', id: '7', eventType: 'NODE_COMPLETED', sequence: 7,
+          occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub', graphVersion: 'v1',
+          processInstanceId: '30000000-0000-4000-8000-000000000001',
+          traversalId: '40000000-0000-4000-8000-000000000001',
+          executionId: '40000000-0000-4000-8000-000000000001', deploymentId,
+          workloadId: 'source-workload-before-authority', type: 'NODE_COMPLETED', nodeId: 'source',
+          activeInstances: 0, inFlightArrivals: 0, fallback: false, description: 'stub',
+          publicReason: null, message: null, messageRedacted: false, messageTruncated: false,
+          processingDuration: null, output: 'arrived-before-authority',
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: `retry: 250\nid: 7\nevent: execution\ndata: ${JSON.stringify(event)}\n\n`,
+        });
+        return;
+      }
+      await route.fulfill({ status: 403, body: '' });
+    },
+  });
+  await page.goto('/');
+  await openGraph(page, sourceGraph('external.consume'), 'source-authority-race.graphml');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  releaseInitialTraffic();
+  await expect.poll(() => page.evaluate(
+    () => window.ravenroot.activeDocument().execution.events.length)).toBe(2);
+
+  await page.locator('#access-token').fill('replacement-token');
+  await page.locator('#access-token').press('Enter');
+  await reauthenticationStarted;
+  await expect.poll(() => calls.eventCalls.length).toBe(2);
+  expect(calls.eventCalls[1].headers).not.toHaveProperty('last-event-id');
+
+  // If the pending callback were treated as delivered, the 250 ms retry would already acknowledge
+  // frame 7 here. The exact client authority is still blocked, so neither routing nor reconnect may
+  // advance beyond this request.
+  await page.waitForTimeout(500);
+  expect(calls.eventCalls).toHaveLength(2);
+  expect(await page.locator('#activity-log').textContent()).not.toContain('arrived-before-authority');
+
+  releaseReauthentication();
+  await expect(page.locator('#activity-log')).toContainText('arrived-before-authority');
+  await expect.poll(() => calls.eventCalls.length).toBe(3);
+  expect(calls.eventCalls[2].headers['last-event-id']).toBe('7');
+  const timeline = await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      processOwners: [...document_.sourceSession.processOwners.keys()],
+      events: document_.execution.events,
+    };
+  });
+  expect(timeline.processOwners).toContain('30000000-0000-4000-8000-000000000001');
+  expect(timeline.events).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'source',
+      executionId: '40000000-0000-4000-8000-000000000001' }),
+  ]));
 });
 
 test('Run preserves the one-shot route when the graph has no effective SOURCE', async ({ page }) => {

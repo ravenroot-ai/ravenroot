@@ -7,6 +7,7 @@ import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
 import ai.ravenroot.api.persistence.ExecutionPauseTransition;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
@@ -20,6 +21,7 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
 import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocationStatus;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
@@ -597,6 +599,27 @@ public final class ExecutionRecorder implements AutoCloseable {
     public synchronized ai.ravenroot.api.application.ProcessInstance storedState() {
         requireFence();
         return await(store.load(key)).state();
+    }
+
+    /**
+     * The persisted source identity of the process this recorder has fenced.
+     *
+     * <p>Durable continuation checkpoints intentionally carry graph state, not deployment
+     * observability metadata. The inventory row is the authority for that metadata across every
+     * process boundary, just as it is for recovery classification. Reading it through the recorder
+     * keeps the tenant/process key inseparable from the live fence and gives every continuation path
+     * one engine-neutral way to restore the identity used by live events.</p>
+     *
+     * <p>An absent row returns {@link ExecutionOrigin#none()} for compatibility with store adapters
+     * whose aggregate can still be loaded but whose historical row predates origin annotations.
+     * Transient executions never open a recorder and therefore retain their existing null origin.</p>
+     *
+     * @return the current persisted origin, or an empty origin when none was recorded
+     */
+    public synchronized ExecutionOrigin origin() {
+        requireFence();
+        return await(store.findProcessInstance(key)).map(ProcessInventoryEntry::origin)
+                .orElse(ExecutionOrigin.none());
     }
 
     private void loseFence(ExecutionStoreFailure because) {

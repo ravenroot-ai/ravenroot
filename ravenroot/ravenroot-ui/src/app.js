@@ -251,6 +251,7 @@ import {
   documentForRuntimeEvent,
   forkDocumentRecord,
   hasUnsavedWork,
+  retireSourceSessionProcessBindings,
 } from './workspace.js';
 import {
   canonicalGraphSnapshot,
@@ -780,6 +781,7 @@ let workspacePersistenceRevision = 0;
 let workspacePersistedRevision = 0;
 let workspaceSnapshotReader = readWorkspaceSnapshot;
 let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scope: null, generation: 0 });
+const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
   workspaceAuthority = Object.freeze({ state, client, scope: null,
@@ -822,6 +824,25 @@ function tenantAuthorityAllows(owner, client = runtimeClient) {
   if (owner.tenantId === null) return workspaceAuthority.scope === null;
   return workspaceAuthority.scope?.key === activeWorkspaceScope?.key
     && owner.tenantId === workspaceAuthority.scope?.tenantId;
+}
+
+function runtimeEventScope(client) {
+  if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
+      || workspaceAuthority.client !== client) return null;
+  return workspaceAuthority.scope || SESSION_ONLY_RUNTIME_EVENT_SCOPE;
+}
+
+async function deliverRuntimeEventAfterAuthority(event, client, authorityRequest) {
+  // The transport advances Last-Event-ID only after this promise resolves. A frame can arrive while
+  // configuration is still proving the exact client's workspace tenant or restoring its documents;
+  // hold that frame here so it is neither routed without authority nor silently acknowledged. A
+  // failed or superseded authority rejects delivery, leaving the cursor at the last accepted frame.
+  await authorityRequest;
+  if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
+      || workspaceAuthority.client !== client) {
+    throw new Error('Runtime event authority is unavailable');
+  }
+  handleRuntimeEvent(event, client);
 }
 
 function normalizedWorkspaceServiceUrl(client) {
@@ -3628,6 +3649,7 @@ function teardownDocument(target) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
+  retireSourceSessionProcessBindings(target);
   target.deploymentView?.disconnect?.();
   target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
@@ -11462,10 +11484,12 @@ async function connectRuntime(atBoot = false) {
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
-    runtimeDisconnect = runtimeClient.connect(handleRuntimeEvent, (status, message) => {
-      setRuntimeConnectionState(status, message);
-      if (status === 'connected') void configureHumanTasks();
-    });
+    runtimeDisconnect = runtimeClient.connect(
+      event => deliverRuntimeEventAfterAuthority(event, connectedClient, connectedConfigurationRequest),
+      (status, message) => {
+        setRuntimeConnectionState(status, message);
+        if (status === 'connected') void configureHumanTasks();
+      });
     connectedClient.nodeTypes().then(async catalog => {
       await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
@@ -11667,6 +11691,7 @@ function updateSourceSession(owner, status, token = null,
   // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
   // the recovery states above) carry no deploymentId and must not erase the one the server gave.
   if (typeof status.deploymentId === 'string' && status.deploymentId) {
+    if (session.deploymentId !== status.deploymentId) retireSourceSessionProcessBindings(owner);
     session.deploymentId = status.deploymentId;
     // The projection accumulates across every traversal this deployment produces, instead of being
     // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
@@ -11691,6 +11716,9 @@ function updateSourceSession(owner, status, token = null,
     }
   }
   session.state = status.state;
+  if (status.state === 'STOPPED' || status.state === 'FAILED') {
+    retireSourceSessionProcessBindings(owner);
+  }
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
   session.failure = status.failure || null;
@@ -11765,6 +11793,7 @@ function nextSourceSessionId(owner) {
 
 async function startSourceSession(owner, client, graphMl, sourceCount) {
   const session = owner.sourceSession;
+  retireSourceSessionProcessBindings(owner);
   session.pollController?.abort();
   if (!session.sessionId || session.state === 'STOPPED' || session.state === 'FAILED') {
     session.sessionId = nextSourceSessionId(owner);
@@ -12243,9 +12272,11 @@ async function playGraph(mode = 'test') {
 // One stream serves every open document, so the first question is which document the event is
 // about. An event that matches no open document is dropped: painting it on whichever graph happens
 // to be in front of the user is how a run in one document used to light up another.
-function handleRuntimeEvent(event) {
-  const target = documentForRuntimeEvent(workspace, event);
-  if (!target || !tenantAuthorityAllows(target)) return;
+function handleRuntimeEvent(event, client = runtimeClient) {
+  const streamScope = runtimeEventScope(client);
+  if (!streamScope) return;
+  const target = documentForRuntimeEvent(workspace, event, streamScope);
+  if (!target || !tenantAuthorityAllows(target, client)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;

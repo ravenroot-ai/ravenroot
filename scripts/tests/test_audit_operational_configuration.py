@@ -153,21 +153,29 @@ def external_io_reviewed_entries(
 class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_prepared_release_tree_uses_source_derived_chart_release_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as location:
-            root = Path(location) / "release"
-            subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(root)], check=True)
-            prepared = prepare(root, "minor")
-            self.assertEqual("0.5.0-alpha.1", prepared["version"])
-            self.assertEqual(
-                [],
-                audit.check(
-                    root,
-                    root / "scripts/operational-configuration-inventory.json",
-                    root / "docs/architecture/operational-configuration-audit.md",
-                ),
-            )
+            def prepared_tree(intent: str) -> Path:
+                root = Path(location) / intent
+                subprocess.run(
+                    ["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(root)], check=True)
+                prepared = prepare(root, intent)
+                expected = {"patch": "0.4.2-alpha.1", "minor": "0.5.0-alpha.1"}[intent]
+                self.assertEqual(expected, prepared["version"])
+                self.assertEqual(
+                    [],
+                    audit.check(
+                        root,
+                        root / "scripts/operational-configuration-inventory.json",
+                        root / "docs/architecture/operational-configuration-audit.md",
+                    ),
+                )
+                return root
+
+            prepared_tree("patch")
+            root = prepared_tree("minor")
             chart = root / audit.HELM_CHART_PATH
+            source = chart.read_text(encoding="utf-8")
             chart.write_text(
-                chart.read_text(encoding="utf-8").replace(
+                source.replace(
                     'appVersion: "0.5.0-alpha.1"', 'appVersion: "0.5.0-alpha.2"', 1),
                 encoding="utf-8",
             )
@@ -177,6 +185,21 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 root / "docs/architecture/operational-configuration-audit.md",
             )
             self.assertTrue(any("Helm values, schema, templates, runtime, or executable tests" in error
+                                for error in errors), errors)
+            chart.write_text(
+                source.replace(
+                    "Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+                    "Changed deployment metadata.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = audit.check(
+                root,
+                root / "scripts/operational-configuration-inventory.json",
+                root / "docs/architecture/operational-configuration-audit.md",
+            )
+            self.assertTrue(any("Helm settings require the exact source-derived closed values authority" in error
                                 for error in errors), errors)
 
     def test_final_review_authority_applies_one_exact_source_anchored_partition(self) -> None:

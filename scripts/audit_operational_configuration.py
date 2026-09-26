@@ -2562,11 +2562,7 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
                 return None
         except (OSError, ValueError, subprocess.CalledProcessError):
             return None
-    release_normalized = re.sub(
-        r'(?m)^(version|appVersion):\s*(?:"[^"\n]+"|\'[^\'\n]+\'|[^\s#]+)\s*$',
-        r"\1: <release-version>",
-        source,
-    )
+    release_normalized = release_normalized_chart_source(source)
     return {
         "path": HELM_CHART_PATH,
         "apiVersion": fields["apiVersion"],
@@ -2576,6 +2572,15 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
         "kubeVersion": fields["kubeVersion"],
         "releaseNormalizedDigest": hashlib.sha256(release_normalized.encode("utf-8")).hexdigest(),
     }
+
+
+def release_normalized_chart_source(source: str) -> str:
+    """Remove the two product-version mirrors while retaining every other chart byte."""
+    return re.sub(
+        r'(?m)^(version|appVersion):\s*(?:"[^"\n]+"|\'[^\'\n]+\'|[^\s#]+)\s*$',
+        r"\1: <release-version>",
+        source,
+    )
 
 
 def program_github_sealed_file(root: Path, key: str) -> str | None:
@@ -2991,6 +2996,17 @@ def candidate_set_digest(identifiers: Iterable[str]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def release_chart_version_change_only(root: Path, target_revision: str) -> bool:
+    """Accept an in-progress release only when every non-version chart byte is still pinned."""
+    before = committed_source(root, target_revision, HELM_CHART_PATH)
+    try:
+        current = (root / HELM_CHART_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return before is not None and helm_chart_metadata(root) is not None \
+        and release_normalized_chart_source(before) == release_normalized_chart_source(current)
+
+
 def reconciliation_target_tree_errors(root: Path, target_revision: str) -> list[str]:
     """Require the scanned worktree to be exactly the committed reconciliation target."""
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True)
@@ -3014,6 +3030,9 @@ def reconciliation_target_tree_errors(root: Path, target_revision: str) -> list[
         return surface(relative) is not None and (
             relative.suffix in SOURCE_SUFFIXES or relative.name.startswith("Dockerfile"))
 
+    def is_allowed_release_change(raw: str) -> bool:
+        return raw == HELM_CHART_PATH and release_chart_version_change_only(root, target_revision)
+
     committed_changes = subprocess.run(
         ["git", "diff", "--name-only", f"{target_revision}..{head.stdout.strip()}"],
         cwd=root, capture_output=True, text=True,
@@ -3021,14 +3040,15 @@ def reconciliation_target_tree_errors(root: Path, target_revision: str) -> list[
     if committed_changes.returncode != 0:
         return ["reconciliation target commit range cannot be verified"]
     for raw in committed_changes.stdout.splitlines():
-        if (root / raw).resolve() not in allowed and is_reconciliation_source(raw):
+        if (root / raw).resolve() not in allowed and is_reconciliation_source(raw) \
+                and not is_allowed_release_change(raw):
             changed.append(raw)
     for row in status.stdout.splitlines():
         raw = row[3:]
         if " -> " in raw:
             raw = raw.split(" -> ", 1)[1]
         path = (root / raw).resolve()
-        if path not in allowed and is_reconciliation_source(raw):
+        if path not in allowed and is_reconciliation_source(raw) and not is_allowed_release_change(raw):
             changed.append(raw)
     return (["reconciliation target has uncommitted source changes: " + ", ".join(changed[:5])]
             if changed else [])

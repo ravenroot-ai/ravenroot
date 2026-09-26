@@ -107,7 +107,7 @@ class MinioFixtureContractTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], token)
         self.assertNotIn(token, arguments)
 
-    def test_build_command_is_pinned_reproducible_and_repository_linked(self) -> None:
+    def test_build_command_is_pinned_reproducible_and_repository_controlled(self) -> None:
         fixture = finalized_fixtures()[0]
         command = minio_fixture.build_command(fixture, Path("metadata.json"), push=True)
         joined = " ".join(command)
@@ -147,7 +147,7 @@ class MinioFixtureContractTest(unittest.TestCase):
     def test_publication_is_manual_pinned_and_has_only_scoped_package_write(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish-minio-fixtures.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
-        self.assertIn("push:\n    branches: [feature/issue_480]", workflow)
+        self.assertNotIn("\n  push:", workflow)
         self.assertIn("permissions: {}", workflow)
         self.assertIn("contents: read\n      packages: write", workflow)
         self.assertIn("moby/buildkit@sha256:", workflow)
@@ -155,6 +155,14 @@ class MinioFixtureContractTest(unittest.TestCase):
         self.assertIn("build --role server --push", workflow)
         self.assertIn("build --role client --push", workflow)
         self.assertNotIn("secrets.", workflow)
+
+    def test_private_package_access_documentation_does_not_claim_repository_inheritance(self) -> None:
+        readme = (ROOT / "scripts" / "fixtures" / "minio" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Manage Actions access", readme)
+        self.assertIn("repository: null", readme)
+        self.assertIn("does not imply a GitHub package-to-repository association", readme)
+        self.assertNotIn("repository-linked", readme)
+        self.assertNotIn("access is inherited", readme)
 
 
 if __name__ == "__main__":

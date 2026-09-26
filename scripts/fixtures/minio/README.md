@@ -1,10 +1,16 @@
 # MinIO acceptance fixtures
 
-The object-storage acceptance test consumes the two repository-linked, immutable image indexes recorded in
-[`minio-fixtures.properties`](minio-fixtures.properties). The `project.repository` namespace is
-owned by the Ravenroot GitHub organization and linked to this source repository through OCI source
-metadata. Neither Java nor CI pulls the archival upstream repositories directly. GitHub Actions
-reads the package with its built-in token and only `packages: read`; no private credential is needed.
+The object-storage acceptance test consumes the two repository-controlled, immutable image indexes
+recorded in [`minio-fixtures.properties`](minio-fixtures.properties). The `project.repository`
+namespace is owned by the Ravenroot GitHub organization. Each image records this public source
+repository in its OCI metadata; that provenance label does not imply a GitHub
+package-to-repository association.
+Neither Java nor CI pulls the archival upstream repositories directly.
+
+The package is private and explicitly grants `ravenroot-ai/ravenroot` Read under **Manage Actions
+access**. CI reads it with the repository's built-in token and only `packages: read`; the publication
+workflow uses the same built-in token with job-scoped `packages: write`. No personal access token or
+other private registry credential is stored in the repository, workflow inputs, logs, or artifacts.
 
 ## Recorded provenance
 
@@ -16,9 +22,10 @@ reads the package with its built-in token and only `packages: read`; no private 
 The Bitnami images embed the corresponding AGPL source offer and full license text under each
 application's `/opt/bitnami/<application>/licenses/` directory. The server reports the recorded
 source commit from `minio --version`; the client reports its commit from `mc --version`. The
-project-owned images add only deterministic OCI provenance metadata to the exact digest-pinned base.
-That wrapper metadata links the GHCR package to this repository, so the project digest intentionally
-differs from the original upstream digest.
+project-owned images add only deterministic OCI provenance metadata to the exact digest-pinned base,
+so the project digest intentionally differs from the original upstream digest. GitHub's package API
+may still report `repository: null`; access is the explicit Actions grant described above, not
+repository-inherited package permission.
 
 ## Verified rotation
 
@@ -50,8 +57,9 @@ differs from the original upstream digest.
    ```
 
    Dispatch the full CI workflow on the exact candidate commit only after this clean-cache proof.
-   A public package can be read without the two environment variables; private packages remain
-   supported because Actions access is inherited from the repository link.
+   A public package can be read without the two environment variables. For this private package,
+   verify the explicit repository Read grant under **Manage Actions access** before dispatching CI;
+   do not describe OCI source metadata as inherited package access.
 
 Do not delete an older digest while a reachable Ravenroot commit still references it. Rotation adds
 new immutable content first, verifies it, changes the manifest, and retires old content only after

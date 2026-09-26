@@ -2,9 +2,6 @@ name: Publish MinIO acceptance fixtures
 
 on:
   workflow_dispatch:
-  # Bootstrap proof only: remove after this branch's scoped GITHUB_TOKEN publication run.
-  push:
-    branches: [feature/issue_480]
 
 permissions: {}
 
@@ -14,7 +11,7 @@ concurrency:
 
 jobs:
   build:
-    name: build-repository-linked-minio-fixtures
+    name: build-repository-controlled-minio-fixtures
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -31,7 +28,7 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
-      - name: Build and publish deterministic repository-linked indexes
+      - name: Build and publish deterministic repository-controlled indexes
         id: fixtures
         env:
           RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}

@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24177 |
+| Atomic operational candidates discovered | 24189 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24177 |
+| Reviewed | 24189 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10013 |
+| Retained protocol or format invariants | 10016 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 678 |
 | Retained derived values | 1074 |
-| Test fixtures | 8261 |
+| Test fixtures | 8270 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2147.
+Retired source candidates preserved in inventory history: 2152.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 107.
+Checked source reconciliations: 108.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24177 candidates.
+zero-count or unclassified rows as needed and sums to 24189 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24177 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22516 |
+| retained | 22528 |
 
 ### Classification counts
 
@@ -86,10 +86,10 @@ zero-count or unclassified rows as needed and sums to 24177 candidates.
 | derived | 1074 |
 | operator-configurable | 1661 |
 | presentation-text | 678 |
-| protocol-or-format-invariant | 10013 |
+| protocol-or-format-invariant | 10016 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
-| test-fixture | 8261 |
+| test-fixture | 8270 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 24177 candidates.
 | deployment | 2864 |
 | deployment-example | 20 |
 | java | 7282 |
-| script | 2340 |
-| test-fixture | 8261 |
+| script | 2343 |
+| test-fixture | 8270 |
 | ui | 3410 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8516 |
-| Retained; no remediation required | 13641 |
+| Retained; no remediation required | 13653 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24158 |
-| Unchanged identities | 24148 |
+| Source inventory candidates | 24177 |
+| Unchanged identities | 24172 |
 | Approved identity migrations | 0 |
-| Approved retirements | 10 |
-| Semantically classified additions | 29 |
-| Current candidates | 24177 |
+| Approved retirements | 5 |
+| Semantically classified additions | 17 |
+| Current candidates | 24189 |
 
 ## Final semantic review
 
@@ -15856,14 +15856,17 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-3d1a04a2d80f29299ceb` | `scripts/prepare_release.py:157` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-bfd0ec7663d1118ea89f` | `scripts/prepare_release.py:160` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-a8817feaf47a77a7f640` | `scripts/prepare_release.py:170` `release_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-41201e00ed768fb3ab61` | `scripts/prepare_release.py:189` `link_notes` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-4d477e21c2d84644b967` | `scripts/prepare_release.py:191` `link_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-6c845ec952377e464900` | `scripts/prepare_release.py:192` `link_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-67b402be2360e0a841f9` | `scripts/prepare_release.py:200` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-35b6c5c2268c667a3e2c` | `scripts/prepare_release.py:205` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-45ab28c3b763138528c0` | `scripts/prepare_release.py:208` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-0eef4d4b76486e245278` | `scripts/prepare_release.py:210` `prepare` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-9ed5d872922ac1e6e3a0` | `scripts/prepare_release.py:212` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-56f40f697b7635beddf1` | `scripts/prepare_release.py:188` `navigation_with_notes` | script | retained | presentation-text | This docstring describes the release validation behavior and does not configure runtime operation. |
+| `oc-6b519495c8cc203d85f5` | `scripts/prepare_release.py:188` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or validation structure rather than an operator setting. |
+| `oc-ecc8d99c8280ecdc4643` | `scripts/prepare_release.py:188` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or validation structure rather than an operator setting. |
+| `oc-7bb9fa791f94055f8e22` | `scripts/prepare_release.py:190` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or validation structure rather than an operator setting. |
+| `oc-ac3b08a3958dd7878e25` | `scripts/prepare_release.py:192` `navigation_with_notes` | script | retained | presentation-text | This is human-readable release validation output, not an operator setting or protocol token. |
+| `oc-cdcdf70cfaaff1398077` | `scripts/prepare_release.py:193` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or version metadata rather than an operator setting. |
+| `oc-67b402be2360e0a841f9` | `scripts/prepare_release.py:199` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-35b6c5c2268c667a3e2c` | `scripts/prepare_release.py:204` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-45ab28c3b763138528c0` | `scripts/prepare_release.py:207` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-0eef4d4b76486e245278` | `scripts/prepare_release.py:209` `prepare` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-9ed5d872922ac1e6e3a0` | `scripts/prepare_release.py:211` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-cd4998646aaad65b7d0c` | `scripts/prepare_release.py:236` `main` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
 | `oc-2b36de18f2a182684682` | `scripts/prepare_release.py:243` `main` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
 | `oc-b9b42f027f37e236ee18` | `scripts/prepare_release.py:245` `main` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |

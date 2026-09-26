@@ -1,0 +1,956 @@
+[
+  {
+    "name": "binary parity",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "dfa",
+      "states": [
+        "even",
+        "odd"
+      ],
+      "alphabet": [
+        "0",
+        "1"
+      ],
+      "initialStates": [
+        "even"
+      ],
+      "acceptingStates": [
+        "even"
+      ],
+      "transitions": [
+        {
+          "from": "even",
+          "on": "0",
+          "to": "even"
+        },
+        {
+          "from": "even",
+          "on": "1",
+          "to": "odd"
+        },
+        {
+          "from": "odd",
+          "on": "0",
+          "to": "odd"
+        },
+        {
+          "from": "odd",
+          "on": "1",
+          "to": "even"
+        }
+      ],
+      "transitionPolicy": "total"
+    },
+    "input": [
+      "1",
+      "0",
+      "1"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "even"
+      ],
+      "consumed": 3,
+      "output": [],
+      "steps": 6
+    }
+  },
+  {
+    "name": "empty DFA",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "dfa",
+      "states": [
+        "even",
+        "odd"
+      ],
+      "alphabet": [
+        "0",
+        "1"
+      ],
+      "initialStates": [
+        "even"
+      ],
+      "acceptingStates": [
+        "even"
+      ],
+      "transitions": [
+        {
+          "from": "even",
+          "on": "0",
+          "to": "even"
+        },
+        {
+          "from": "even",
+          "on": "1",
+          "to": "odd"
+        },
+        {
+          "from": "odd",
+          "on": "0",
+          "to": "odd"
+        },
+        {
+          "from": "odd",
+          "on": "1",
+          "to": "even"
+        }
+      ],
+      "transitionPolicy": "total"
+    },
+    "input": [],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "even"
+      ],
+      "consumed": 0,
+      "output": [],
+      "steps": 0
+    }
+  },
+  {
+    "name": "rejected total DFA",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "dfa",
+      "states": [
+        "even",
+        "odd"
+      ],
+      "alphabet": [
+        "0",
+        "1"
+      ],
+      "initialStates": [
+        "even"
+      ],
+      "acceptingStates": [
+        "even"
+      ],
+      "transitions": [
+        {
+          "from": "even",
+          "on": "0",
+          "to": "even"
+        },
+        {
+          "from": "even",
+          "on": "1",
+          "to": "odd"
+        },
+        {
+          "from": "odd",
+          "on": "0",
+          "to": "odd"
+        },
+        {
+          "from": "odd",
+          "on": "1",
+          "to": "even"
+        }
+      ],
+      "transitionPolicy": "total"
+    },
+    "input": [
+      "1"
+    ],
+    "expected": {
+      "accepted": false,
+      "finalStates": [
+        "odd"
+      ],
+      "consumed": 1,
+      "output": [],
+      "steps": 2
+    }
+  },
+  {
+    "name": "partial DFA dead frontier",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "dfa",
+      "states": [
+        "even",
+        "odd"
+      ],
+      "alphabet": [
+        "0",
+        "1"
+      ],
+      "initialStates": [
+        "even"
+      ],
+      "acceptingStates": [
+        "even"
+      ],
+      "transitions": [
+        {
+          "from": "even",
+          "on": "0",
+          "to": "even"
+        }
+      ],
+      "transitionPolicy": "partial"
+    },
+    "input": [
+      "1",
+      "0"
+    ],
+    "expected": {
+      "accepted": false,
+      "finalStates": [],
+      "consumed": 2,
+      "output": [],
+      "steps": 2
+    }
+  },
+  {
+    "name": "substring NFA",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "nfa",
+      "states": [
+        "q0",
+        "q1",
+        "q2"
+      ],
+      "alphabet": [
+        "a",
+        "b"
+      ],
+      "initialStates": [
+        "q0"
+      ],
+      "acceptingStates": [
+        "q2"
+      ],
+      "transitions": [
+        {
+          "from": "q0",
+          "on": "a",
+          "to": "q0"
+        },
+        {
+          "from": "q0",
+          "on": "a",
+          "to": "q1"
+        },
+        {
+          "from": "q0",
+          "on": "b",
+          "to": "q0"
+        },
+        {
+          "from": "q1",
+          "on": "b",
+          "to": "q2"
+        },
+        {
+          "from": "q2",
+          "on": "a",
+          "to": "q2"
+        },
+        {
+          "from": "q2",
+          "on": "b",
+          "to": "q2"
+        }
+      ]
+    },
+    "input": [
+      "b",
+      "a",
+      "b",
+      "a"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "q0",
+        "q1",
+        "q2"
+      ],
+      "consumed": 4,
+      "output": [],
+      "steps": 12
+    }
+  },
+  {
+    "name": "epsilon cycle",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "enfa",
+      "states": [
+        "q0",
+        "q1",
+        "q2"
+      ],
+      "alphabet": [
+        "a"
+      ],
+      "initialStates": [
+        "q0"
+      ],
+      "acceptingStates": [
+        "q2"
+      ],
+      "transitions": [
+        {
+          "from": "q0",
+          "on": null,
+          "to": "q1"
+        },
+        {
+          "from": "q1",
+          "on": null,
+          "to": "q0"
+        },
+        {
+          "from": "q1",
+          "on": "a",
+          "to": "q2"
+        }
+      ]
+    },
+    "input": [
+      "a"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "q2"
+      ],
+      "consumed": 1,
+      "output": [],
+      "steps": 4
+    }
+  },
+  {
+    "name": "empty epsilon closure",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "enfa",
+      "states": [
+        "q0",
+        "q1",
+        "q2"
+      ],
+      "alphabet": [
+        "a"
+      ],
+      "initialStates": [
+        "q0"
+      ],
+      "acceptingStates": [
+        "q1"
+      ],
+      "transitions": [
+        {
+          "from": "q0",
+          "on": null,
+          "to": "q1"
+        },
+        {
+          "from": "q1",
+          "on": null,
+          "to": "q0"
+        },
+        {
+          "from": "q1",
+          "on": "a",
+          "to": "q2"
+        }
+      ]
+    },
+    "input": [],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "q0",
+        "q1"
+      ],
+      "consumed": 0,
+      "output": [],
+      "steps": 2
+    }
+  },
+  {
+    "name": "deduplicated frontiers",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "nfa",
+      "states": [
+        "q0",
+        "q1",
+        "q2"
+      ],
+      "alphabet": [
+        "a"
+      ],
+      "initialStates": [
+        "q0",
+        "q1"
+      ],
+      "acceptingStates": [
+        "q2"
+      ],
+      "transitions": [
+        {
+          "from": "q0",
+          "on": "a",
+          "to": "q2"
+        },
+        {
+          "from": "q1",
+          "on": "a",
+          "to": "q2"
+        },
+        {
+          "from": "q2",
+          "on": "a",
+          "to": "q2"
+        }
+      ]
+    },
+    "input": [
+      "a",
+      "a"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "q2"
+      ],
+      "consumed": 2,
+      "output": [],
+      "steps": 5
+    }
+  },
+  {
+    "name": "serial adder final carry",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "mealy",
+      "states": [
+        "c0",
+        "c1",
+        "done"
+      ],
+      "alphabet": [
+        "00",
+        "01",
+        "10",
+        "11",
+        "end"
+      ],
+      "initialStates": [
+        "c0"
+      ],
+      "acceptingStates": [
+        "done"
+      ],
+      "transitions": [
+        {
+          "from": "c0",
+          "on": "00",
+          "to": "c0",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "01",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "10",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "11",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "end",
+          "to": "done",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "00",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "01",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "10",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "11",
+          "to": "c1",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "end",
+          "to": "done",
+          "emit": [
+            "1"
+          ]
+        }
+      ],
+      "transitionPolicy": "partial"
+    },
+    "input": [
+      "11",
+      "11",
+      "end"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "done"
+      ],
+      "consumed": 3,
+      "output": [
+        "0",
+        "1",
+        "1"
+      ],
+      "steps": 6
+    }
+  },
+  {
+    "name": "serial adder requires end",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "mealy",
+      "states": [
+        "c0",
+        "c1",
+        "done"
+      ],
+      "alphabet": [
+        "00",
+        "01",
+        "10",
+        "11",
+        "end"
+      ],
+      "initialStates": [
+        "c0"
+      ],
+      "acceptingStates": [
+        "done"
+      ],
+      "transitions": [
+        {
+          "from": "c0",
+          "on": "00",
+          "to": "c0",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "01",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "10",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "11",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "end",
+          "to": "done",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "00",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "01",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "10",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "11",
+          "to": "c1",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "end",
+          "to": "done",
+          "emit": [
+            "1"
+          ]
+        }
+      ],
+      "transitionPolicy": "partial"
+    },
+    "input": [
+      "11"
+    ],
+    "expected": {
+      "accepted": false,
+      "finalStates": [
+        "c1"
+      ],
+      "consumed": 1,
+      "output": [
+        "0"
+      ],
+      "steps": 2
+    }
+  },
+  {
+    "name": "empty Mealy",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "mealy",
+      "states": [
+        "c0",
+        "c1",
+        "done"
+      ],
+      "alphabet": [
+        "00",
+        "01",
+        "10",
+        "11",
+        "end"
+      ],
+      "initialStates": [
+        "c0"
+      ],
+      "acceptingStates": [
+        "done"
+      ],
+      "transitions": [
+        {
+          "from": "c0",
+          "on": "00",
+          "to": "c0",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "01",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "10",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "11",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c0",
+          "on": "end",
+          "to": "done",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "00",
+          "to": "c0",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "01",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "10",
+          "to": "c1",
+          "emit": [
+            "0"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "11",
+          "to": "c1",
+          "emit": [
+            "1"
+          ]
+        },
+        {
+          "from": "c1",
+          "on": "end",
+          "to": "done",
+          "emit": [
+            "1"
+          ]
+        }
+      ],
+      "transitionPolicy": "partial"
+    },
+    "input": [],
+    "expected": {
+      "accepted": false,
+      "finalStates": [
+        "c0"
+      ],
+      "consumed": 0,
+      "output": [],
+      "steps": 0
+    }
+  },
+  {
+    "name": "Moore initial output",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "moore",
+      "states": [
+        "off",
+        "on"
+      ],
+      "alphabet": [
+        "a"
+      ],
+      "initialStates": [
+        "off"
+      ],
+      "acceptingStates": [
+        "on"
+      ],
+      "transitions": [
+        {
+          "from": "off",
+          "on": "a",
+          "to": "on"
+        },
+        {
+          "from": "on",
+          "on": "a",
+          "to": "off"
+        }
+      ],
+      "transitionPolicy": "total",
+      "stateOutputs": {
+        "off": [
+          "0"
+        ],
+        "on": [
+          "1"
+        ]
+      }
+    },
+    "input": [
+      "a"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "on"
+      ],
+      "consumed": 1,
+      "output": [
+        "0",
+        "1"
+      ],
+      "steps": 2
+    }
+  },
+  {
+    "name": "empty Moore",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "moore",
+      "states": [
+        "off",
+        "on"
+      ],
+      "alphabet": [
+        "a"
+      ],
+      "initialStates": [
+        "off"
+      ],
+      "acceptingStates": [
+        "on"
+      ],
+      "transitions": [
+        {
+          "from": "off",
+          "on": "a",
+          "to": "on"
+        },
+        {
+          "from": "on",
+          "on": "a",
+          "to": "off"
+        }
+      ],
+      "transitionPolicy": "total",
+      "stateOutputs": {
+        "off": [
+          "0"
+        ],
+        "on": [
+          "1"
+        ]
+      }
+    },
+    "input": [],
+    "expected": {
+      "accepted": false,
+      "finalStates": [
+        "off"
+      ],
+      "consumed": 0,
+      "output": [
+        "0"
+      ],
+      "steps": 0
+    }
+  },
+  {
+    "name": "Unicode tokens",
+    "definition": {
+      "schema": "ravenroot.finite-automaton/v1",
+      "kind": "dfa",
+      "states": [
+        "start",
+        "done"
+      ],
+      "alphabet": [
+        "👩‍💻",
+        "ab",
+        "é",
+        "é"
+      ],
+      "initialStates": [
+        "start"
+      ],
+      "acceptingStates": [
+        "done"
+      ],
+      "transitions": [
+        {
+          "from": "start",
+          "on": "👩‍💻",
+          "to": "start"
+        },
+        {
+          "from": "start",
+          "on": "ab",
+          "to": "done"
+        }
+      ],
+      "transitionPolicy": "partial"
+    },
+    "input": [
+      "👩‍💻",
+      "ab"
+    ],
+    "expected": {
+      "accepted": true,
+      "finalStates": [
+        "done"
+      ],
+      "consumed": 2,
+      "output": [],
+      "steps": 4
+    }
+  }
+]

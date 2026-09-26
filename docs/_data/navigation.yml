@@ -100,6 +100,10 @@
       url: /architecture/execution-results.html
     - title: AI, programs, and extensions
       url: /architecture/ai-extension-boundaries.html
+    - title: Finite automata v1 contract
+      url: /architecture/finite-automata-v1.html
+    - title: Finite-automata program evidence
+      url: /examples/finite-automata/
     - title: Embedded projection security model
       url: /architecture/embed-security-model.html
     - title: Security guide

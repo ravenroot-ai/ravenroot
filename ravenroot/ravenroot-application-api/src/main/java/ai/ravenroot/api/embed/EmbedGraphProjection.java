@@ -13,6 +13,7 @@ import java.util.Objects;
  * @param nodes allowlisted render-only nodes in the projection
  * @param edges render-only edges between the listed nodes
  * @param designArrangement optional persisted semantic Design arrangement
+ * @param groups allowlisted flat, disjoint visual presentation groups
  */
 public record EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
                                    String canonicalDigest, List<Node> nodes, List<Edge> edges,
@@ -37,7 +38,16 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
         this(viewerContractVersion, graphId, graphVersionId, canonicalDigest, nodes, edges, null, List.of());
     }
 
-    /** Compatibility shape for projections captured before visual groups were projected. */
+    /**
+     * Compatibility shape for projections captured before visual groups were projected.
+     * @param viewerContractVersion browser-viewer contract version used to interpret this DTO
+     * @param graphId stable identifier of the captured graph
+     * @param graphVersionId stable identifier of the captured graph version
+     * @param canonicalDigest digest binding this projection to captured graph content
+     * @param nodes allowlisted render-only nodes
+     * @param edges render-only edges between the listed nodes
+     * @param designArrangement optional persisted semantic Design arrangement
+     */
     public EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
                                 String canonicalDigest, List<Node> nodes, List<Edge> edges,
                                 String designArrangement) {
@@ -71,9 +81,17 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
         }
     }
 
-    /** Allowlisted visual presentation group. Groups never become executable nodes. */
+    /**
+     * Allowlisted visual presentation group. Groups never become executable nodes.
+     * @param id stable visual group identifier
+     * @param name author-facing visual group name
+     * @param memberNodeIds identifiers of the projected nodes contained by this group
+     * @param anchorNodeId member node that anchors the collapsed group representation
+     * @param collapsed whether the group is initially shown as a collapsed representative
+     */
     public record Group(String id, String name, List<String> memberNodeIds,
                         String anchorNodeId, boolean collapsed) {
+        /** Validates that the group has unique members and that its anchor is a member. */
         public Group {
             id = requireText(id, "group.id");
             name = requireText(name, "group.name");

@@ -47,10 +47,23 @@ public final class SecurityHeadersPolicy {
     }
 
     public void apply(Headers headers) {
+        apply(headers, Set.of());
+    }
+
+    /**
+     * Applies the common policy plus the immutable operator-registered frame origins.
+     * @param headers response headers to replace with the effective policy
+     * @param frameOrigins exact operator-registered presentation origins
+     */
+    public void apply(Headers headers, Set<URI> frameOrigins) {
         String connectSources = uiConnectOrigins.stream().sorted()
                 .collect(java.util.stream.Collectors.joining(" "));
+        String frameSources = java.util.Objects.requireNonNull(frameOrigins, "frameOrigins").stream()
+                .map(SecurityHeadersPolicy::canonicalFrameOrigin).sorted()
+                .collect(java.util.stream.Collectors.joining(" "));
         headers.set("Content-Security-Policy", CSP_PREFIX
-                + (connectSources.isEmpty() ? "" : " " + connectSources));
+                + (connectSources.isEmpty() ? "" : " " + connectSources)
+                + "; frame-src " + (frameSources.isEmpty() ? "'none'" : frameSources));
         headers.set("X-Frame-Options", "DENY");
         headers.set("X-Content-Type-Options", "nosniff");
         headers.set("Referrer-Policy", "no-referrer");
@@ -59,6 +72,29 @@ public final class SecurityHeadersPolicy {
         if (hsts) {
             headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         }
+    }
+
+    private static String canonicalFrameOrigin(URI uri) {
+        java.util.Objects.requireNonNull(uri, "frame origin");
+        String scheme = uri.getScheme();
+        String host = uri.getHost();
+        if (scheme == null || host == null || uri.getUserInfo() != null || uri.getRawQuery() != null
+                || uri.getRawFragment() != null
+                || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())) {
+            throw new IllegalArgumentException("frame origin must contain only scheme and authority");
+        }
+        scheme = scheme.toLowerCase(Locale.ROOT);
+        String normalizedHost = host.toLowerCase(Locale.ROOT);
+        if (normalizedHost.startsWith("[") && normalizedHost.endsWith("]")) {
+            normalizedHost = normalizedHost.substring(1, normalizedHost.length() - 1);
+        }
+        boolean loopback = "localhost".equals(normalizedHost) || "127.0.0.1".equals(normalizedHost)
+                || "::1".equals(normalizedHost);
+        if (!"https".equals(scheme) && !("http".equals(scheme) && loopback)) {
+            throw new IllegalArgumentException("frame origins require HTTPS (HTTP is loopback-only)");
+        }
+        String renderedHost = normalizedHost.indexOf(':') >= 0 ? "[" + normalizedHost + "]" : normalizedHost;
+        return scheme + "://" + renderedHost + (uri.getPort() == -1 ? "" : ":" + uri.getPort());
     }
 
     private static Set<String> uiConnectOrigins(String configured) {

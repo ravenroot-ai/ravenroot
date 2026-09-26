@@ -108,35 +108,129 @@ class JdbcDriverLoaderTest {
     }
 
     @Test
-    void rejectsEveryMultiReleaseFormBeforeInitializationWhileAcceptingFlatJava21Jar(@TempDir Path workspace)
+    void resolvesMultiReleaseJarOnceForTheTargetReleaseNotForTheRunningJvm(@TempDir Path workspace)
             throws Exception {
-        Path base = compileDriver(workspace.resolve("base"), "base.jar", "base");
-        byte[] driverClass = jarEntry(base, "fixture/PinnedDriver.class");
-
-        Path java21 = writeJar(workspace.resolve("java21/pinned-driver.jar"), true, Map.of(
-                "fixture/PinnedDriver.class", driverClass,
-                "META-INF/versions/21/fixture/PinnedDriver.class", driverClass));
-        Path malformed = writeJar(workspace.resolve("malformed/pinned-driver.jar"), false, Map.of(
-                "fixture/PinnedDriver.class", driverClass,
-                "META-INF/versions/twenty-one/fixture/PinnedDriver.class", driverClass));
-        Path versionConflict = writeJar(workspace.resolve("conflict/pinned-driver.jar"), true, Map.of(
-                "fixture/PinnedDriver.class", driverClass,
-                "META-INF/versions/9/fixture/PinnedDriver.class", driverClass,
-                "META-INF/versions/21/fixture/PinnedDriver.class", driverClass));
-
+        Map<String, byte[]> entries = new java.util.LinkedHashMap<>();
+        entries.put("fixture/PinnedDriver.class", variant(workspace, "base"));
+        entries.put("META-INF/versions/9/fixture/PinnedDriver.class", variant(workspace, "release-9"));
+        entries.put("META-INF/versions/21/fixture/PinnedDriver.class", variant(workspace, "release-21"));
+        entries.put("META-INF/versions/22/fixture/PinnedDriver.class", variant(workspace, "release-22"));
+        Path jar = writeJar(workspace.resolve("resolved/pinned-driver.jar"), manifest("true"), entries);
+        try (JarFile release22 = new JarFile(jar.toFile(), true, java.util.zip.ZipFile.OPEN_READ,
+                Runtime.Version.parse("22"))) {
+            org.junit.jupiter.api.Assertions.assertArrayEquals(
+                    entries.get("META-INF/versions/22/fixture/PinnedDriver.class"),
+                    release22.getInputStream(release22.getJarEntry("fixture/PinnedDriver.class")).readAllBytes(),
+                    "a release-22 runtime would select the release-22 variant");
+        }
         try {
-            assertMultiReleaseRefused(java21);
-            assertMultiReleaseRefused(malformed);
-            assertMultiReleaseRefused(versionConflict);
+            assertEquals("release-21", loadedMarker(jar),
+                    "the image is resolved for the product's release, whatever the JVM running it");
+
+            Path flatWithAttribute = writeJar(workspace.resolve("flat-attribute/pinned-driver.jar"), manifest("true"),
+                    Map.of("fixture/PinnedDriver.class", entries.get("fixture/PinnedDriver.class")));
+            assertEquals("base", loadedMarker(flatWithAttribute), "no versioned entry leaves one flat image");
 
             Path flat = workspace.resolve("flat/pinned-driver.jar");
             Files.createDirectories(flat.getParent());
-            Files.copy(base, flat);
-            try (var loader = new URLClassLoader(new java.net.URL[]{flat.toUri().toURL()},
+            Files.copy(compileDriver(workspace.resolve("flat-source"), "base.jar", "flat"), flat);
+            assertEquals("flat", loadedMarker(flat));
+        } finally {
+            System.clearProperty(INITIALIZED);
+        }
+    }
+
+    @Test
+    void refusesEveryVersionedLayoutThatAdmitsMoreThanOneReadingAsAmbiguous(@TempDir Path workspace)
+            throws Exception {
+        byte[] base = variant(workspace, "base");
+        byte[] versioned = variant(workspace, "versioned");
+        String entry = "fixture/PinnedDriver.class";
+        byte[] manifestBytes = "Manifest-Version: 1.0\r\nMulti-Release: true\r\n\r\n".getBytes(StandardCharsets.UTF_8);
+        record Layout(String name, Manifest manifest, Map<String, byte[]> entries) { }
+        Map<String, byte[]> lateManifest = new java.util.LinkedHashMap<>();
+        lateManifest.put(entry, base);
+        lateManifest.put("META-INF/MANIFEST.MF", manifestBytes);
+        lateManifest.put("META-INF/versions/21/" + entry, versioned);
+        List<Layout> layouts = List.of(
+                new Layout("no Multi-Release attribute", manifest(null),
+                        Map.of(entry, base, "META-INF/versions/21/" + entry, versioned)),
+                new Layout("Multi-Release false", manifest("false"),
+                        Map.of(entry, base, "META-INF/versions/21/" + entry, versioned)),
+                new Layout("non-numeric release", manifest("true"),
+                        Map.of(entry, base, "META-INF/versions/twenty-one/" + entry, versioned)),
+                new Layout("non-canonical release", manifest("true"),
+                        Map.of(entry, base, "META-INF/versions/021/" + entry, versioned)),
+                new Layout("release below 9", manifest("true"),
+                        Map.of(entry, base, "META-INF/versions/8/" + entry, versioned)),
+                new Layout("namespace in another case", manifest("true"),
+                        Map.of(entry, base, "meta-inf/versions/21/" + entry, versioned)),
+                new Layout("namespace with backslashes", manifest("true"),
+                        Map.of(entry, base, "META-INF\\versions\\21\\fixture\\PinnedDriver.class", versioned)),
+                new Layout("dot segments", manifest("true"),
+                        Map.of(entry, base, "META-INF/versions/21/fixture/../" + entry, versioned)),
+                new Layout("versioned META-INF", manifest("true"), Map.of(entry, base,
+                        "META-INF/versions/21/META-INF/services/java.sql.Driver",
+                        "fixture.PinnedDriver\n".getBytes(StandardCharsets.UTF_8))),
+                new Layout("second manifest", manifest("true"), Map.of(entry, base,
+                        "meta-inf/manifest.mf", "Manifest-Version: 1.0\r\n\r\n".getBytes(StandardCharsets.UTF_8),
+                        "META-INF/versions/21/" + entry, versioned)),
+                new Layout("manifest a streaming reader does not see", null, lateManifest));
+
+        for (int index = 0; index < layouts.size(); index++) {
+            Layout layout = layouts.get(index);
+            Path jar = writeJar(workspace.resolve("layout-" + index + "/pinned-driver.jar"), layout.manifest(),
+                    layout.entries());
+            System.clearProperty(INITIALIZED);
+            try (var loader = new URLClassLoader(new java.net.URL[]{jar.toUri().toURL()},
                     ClassLoader.getPlatformClassLoader())) {
-                Driver accepted = JdbcDriverLoader.verified(loader).load(profile("pinned-driver", sha256(flat)));
-                assertInstanceOf(Driver.class, accepted);
-                assertEquals("base", System.getProperty(INITIALIZED));
+                JdbcFailure refused = assertThrows(JdbcFailure.class,
+                        () -> JdbcDriverLoader.verified(loader).load(profile("pinned-driver", sha256(jar))),
+                        layout.name());
+                assertEquals(JdbcFailure.Code.DRIVER_AMBIGUOUS, refused.code(), layout.name());
+                assertEquals("JDBC_DRIVER_AMBIGUOUS", refused.getMessage(), layout.name());
+                assertNull(System.getProperty(INITIALIZED), layout.name() + ": no initializer may run");
+            }
+        }
+    }
+
+    @Test
+    void versionedBytesOutsideTheVerifiedCopyCanNeitherLoadNorReplaceIt(@TempDir Path workspace)
+            throws Exception {
+        byte[] base = variant(workspace, "base");
+        Path installed = writeJar(workspace.resolve("installed/pinned-driver.jar"), manifest("true"), Map.of(
+                "fixture/PinnedDriver.class", base,
+                "META-INF/versions/21/fixture/PinnedDriver.class", variant(workspace, "original")));
+        Path alternate = writeJar(workspace.resolve("alternate/alternate.jar"), manifest("true"), Map.of(
+                "fixture/PinnedDriver.class", base,
+                "META-INF/versions/21/fixture/PinnedDriver.class", variant(workspace, "alternate")));
+        String pinned = sha256(installed);
+        try {
+            // Identical base entries: only the versioned entry differs from what the digest covers.
+            Path swapped = workspace.resolve("swapped/pinned-driver.jar");
+            Files.createDirectories(swapped.getParent());
+            Files.copy(alternate, swapped);
+            try (var loader = new URLClassLoader(new java.net.URL[]{swapped.toUri().toURL()},
+                    ClassLoader.getPlatformClassLoader())) {
+                System.clearProperty(INITIALIZED);
+                JdbcFailure refused = assertThrows(JdbcFailure.class,
+                        () -> JdbcDriverLoader.verified(loader).load(profile("pinned-driver", pinned)));
+                assertEquals(JdbcFailure.Code.DRIVER_REFUSED, refused.code());
+                assertNull(System.getProperty(INITIALIZED));
+            }
+
+            try (var loader = new URLClassLoader(new java.net.URL[]{installed.toUri().toURL()},
+                    ClassLoader.getPlatformClassLoader())) {
+                JdbcDriverLoader verified = JdbcDriverLoader.verified(loader, () -> {
+                    try {
+                        Files.copy(alternate, installed, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (java.io.IOException failure) {
+                        throw new java.io.UncheckedIOException(failure);
+                    }
+                });
+                assertInstanceOf(Driver.class, verified.load(profile("pinned-driver", pinned)));
+                assertEquals("original", System.getProperty(INITIALIZED),
+                        "the versioned variant is resolved from the verified copy, not the replaced path");
             }
         } finally {
             System.clearProperty(INITIALIZED);
@@ -324,11 +418,14 @@ class JdbcDriverLoaderTest {
     }
 
     private static Path writeJar(Path jar, boolean multiRelease, Map<String, byte[]> entries) throws Exception {
+        return writeJar(jar, manifest(multiRelease ? "true" : null), entries);
+    }
+
+    /** A leading manifest with the given Multi-Release value (none when null); a null manifest writes none. */
+    private static Path writeJar(Path jar, Manifest manifest, Map<String, byte[]> entries) throws Exception {
         Files.createDirectories(jar.getParent());
-        Manifest manifest = new Manifest();
-        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
-        if (multiRelease) manifest.getMainAttributes().put(Attributes.Name.MULTI_RELEASE, "true");
-        try (OutputStream file = Files.newOutputStream(jar); var zip = new JarOutputStream(file, manifest)) {
+        try (OutputStream file = Files.newOutputStream(jar);
+             var zip = manifest == null ? new JarOutputStream(file) : new JarOutputStream(file, manifest)) {
             for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
                 zip.putNextEntry(new JarEntry(entry.getKey()));
                 zip.write(entry.getValue());
@@ -345,14 +442,26 @@ class JdbcDriverLoaderTest {
         }
     }
 
-    private static void assertMultiReleaseRefused(Path jar) throws Exception {
+    private static Manifest manifest(String multiRelease) {
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        if (multiRelease != null) manifest.getMainAttributes().put(Attributes.Name.MULTI_RELEASE, multiRelease);
+        return manifest;
+    }
+
+    /** Bytecode of fixture.PinnedDriver whose static initializer records {@code marker}. */
+    private static byte[] variant(Path workspace, String marker) throws Exception {
+        Path jar = compileDriver(workspace.resolve("variant-" + marker), "variant.jar", marker);
+        return jarEntry(jar, "fixture/PinnedDriver.class");
+    }
+
+    private static String loadedMarker(Path jar) throws Exception {
         System.clearProperty(INITIALIZED);
         try (var loader = new URLClassLoader(new java.net.URL[]{jar.toUri().toURL()},
                 ClassLoader.getPlatformClassLoader())) {
-            JdbcFailure refused = assertThrows(JdbcFailure.class,
-                    () -> JdbcDriverLoader.verified(loader).load(profile("pinned-driver", sha256(jar))));
-            assertEquals(JdbcFailure.Code.DRIVER_REFUSED, refused.code());
-            assertNull(System.getProperty(INITIALIZED), "an MR image must execute no initializer");
+            Driver driver = JdbcDriverLoader.verified(loader).load(profile("pinned-driver", sha256(jar)));
+            assertInstanceOf(JdbcDriverLoader.PrivateDriverClassLoader.class, driver.getClass().getClassLoader());
+            return System.getProperty(INITIALIZED);
         }
     }
 

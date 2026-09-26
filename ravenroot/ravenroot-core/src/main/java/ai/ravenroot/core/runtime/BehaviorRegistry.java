@@ -45,6 +45,7 @@ public final class BehaviorRegistry {
      */
     private final Map<String, NodeTypeDescriptor> resolvedDescriptors = new ConcurrentHashMap<>();
     private final Map<String, NodeCatalogSource> catalogSources = new ConcurrentHashMap<>();
+    private final Map<String, java.util.Set<String>> sourceStartFailureCodes = new ConcurrentHashMap<>();
     /**
      * The full identity of every node package that registered a behavior here, keyed by package id.
      *
@@ -189,6 +190,7 @@ public final class BehaviorRegistry {
         // Resolved before insertion, so a contradiction refuses registration rather than
         // landing a catalog entry whose declaration disagrees with its own code.
         NodeTypeDescriptor resolved = resolveNature(factory);
+        java.util.Set<String> declaredSourceFailures = declaredSourceFailures(factory);
         // The same anchor, the same reasoning -- see this method's own Javadoc.
         NodeBehaviorFactory existing = factories.putIfAbsent(name, factory);
         if (existing != null) {
@@ -199,7 +201,21 @@ public final class BehaviorRegistry {
         }
         resolvedDescriptors.put(name, resolved);
         catalogSources.put(name, source);
+        sourceStartFailureCodes.put(name, declaredSourceFailures);
         return this;
+    }
+
+    private static java.util.Set<String> declaredSourceFailures(NodeBehaviorFactory factory) {
+        if (!(factory instanceof NodePackages.SdkNodeBehaviorFactory sdk)
+                || !(sdk.behavior() instanceof InboundSourceCapable capable)) return java.util.Set.of();
+        java.util.Set<String> declared = java.util.Objects.requireNonNull(
+                capable.sourceStartFailureCodes(), "sourceStartFailureCodes");
+        var validated = new java.util.TreeSet<String>();
+        for (String code : declared) {
+            String safe = ai.ravenroot.api.deployment.SourceStartFailureCode.requireValid(code);
+            if (!validated.add(safe)) throw new IllegalArgumentException("Duplicate source-start failure code");
+        }
+        return java.util.Set.copyOf(validated);
     }
 
     /**
@@ -618,6 +634,11 @@ public final class BehaviorRegistry {
             return Optional.of(sdk);
         }
         return Optional.empty();
+    }
+
+    /** Trusted codes registered for one source-capable behavior. */
+    public java.util.Set<String> sourceStartFailureCodes(String behaviorName) {
+        return sourceStartFailureCodes.getOrDefault(behaviorName, java.util.Set.of());
     }
 
     public List<NodeTypeDescriptor> descriptors() {

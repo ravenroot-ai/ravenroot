@@ -40,6 +40,24 @@ this interaction. Choose a capable deployment before authoring or running it; Ra
 missing capability in the catalog and preflight rather than starting a graph that cannot present the
 task.
 
+For a multi-field response, select `FORM` and author the closed version-one form schema from the
+catalog controls. The Workbench uses native labelled single- and multiline text, checkbox, bounded
+number, select, date, and
+date-time controls, preserves keyboard/focus behavior and reduced-motion preferences, and sends a
+typed map only after browser and server validation. A required checkbox is a present Boolean member,
+so unchecked submits `false`; it is not a requirement to choose `true`. Text and multiline controls
+enforce the pinned UTF-8 byte limit locally (including non-ASCII input) before transport. Unknown fields, markup, nested schemas, and
+executable content are not accepted.
+
+`CUSTOM` and `EXTERNAL` are available only when the configuration response says
+`registeredPresentationsEnabled: true`. Choose an opaque operator-provided profile ID and version;
+do not paste a URL or credential into the graph. The dialog loads that registered host in an
+isolated sandbox and supplies the exact task, schema, allowed actions, bounded review content, theme,
+and accessibility settings through the versioned host protocol. The host receives no Ravenroot
+bearer. Custom frames have an opaque origin. External frames retain their configured provider origin
+for the exact-origin protocol, so that origin must differ from the Workbench and a same-origin launch
+is refused. Closing or timing out leaves the task open for recovery.
+
 ## Choose the active execution context
 
 A Run binds attention to the graph version and process returned by the service. For a registered
@@ -74,8 +92,10 @@ available without a pointer.
 
 Ravenroot polls at the interval and bounded backoff advertised by the server. A connection error
 keeps the task undecided and shows a reconnect state. Refresh the authoritative list after the
-connection returns. If a decision request loses its response, Ravenroot does not submit it again:
-the same request may already have committed, so the client refetches state first.
+connection returns. If a normal decision request loses its response, the client refetches state
+before deciding whether anything remains actionable. Registered capabilities are replay-safe: a
+host may retry the same bounded callback and receives the already-recorded outcome when the first
+request committed.
 
 Stale generation, expiry, takeover, cancellation, and authorization changes also reconcile from the
 server. A stale or terminal task is replaced or removed from the list; an authorization failure
@@ -90,9 +110,9 @@ node again to refresh the authoritative task list for that context. A browser re
 exact selected task from the opaque locator, but a broader task list still requires a deployment or
 run context selected from the service; Ravenroot does not infer one from the recovered row.
 
-This release provides the confirmation inside the main workbench connected to the embedded or
-single-server runtime, including SQLite-backed restart recovery. External approval pages, redirects,
-callbacks, CAPTCHAs, arbitrary URLs, and third-party signing flows are outside this interaction.
+Ravenroot supports built-in confirmation and forms plus operator-registered custom hosts and external
+providers. Graph-authored executable pages, arbitrary URLs/redirects, graph credentials, CAPTCHA,
+and identity management remain outside the interaction.
 
 - [Durable Human Task contract](../reference/human-tasks.md)
 - [Test, Run, and execution control](test-run-observe.md)

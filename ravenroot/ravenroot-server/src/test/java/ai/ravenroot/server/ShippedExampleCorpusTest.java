@@ -65,14 +65,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       actually matters -- {@link #ravenrootMinimalProducesObservableOutput()}'s own Javadoc records
  *       the run that proves this empirically.</li>
  *   <li>{@link #shippedExamplesAreAdmittedForExecution()} -- each corpus member is submitted to a
- *       real, in-process server exactly as a browser would, and the submission itself (not merely
- *       {@code /inspect}) must be admitted (202). This is the only check that can catch the "generic
- *       invalid-request refusal" defect: a node missing a required property, or missing the
- *       conditional {@code recovery.repeatable} a state-changing {@code http-request} node needs, is
- *       accepted by {@code /v1/graphs/inspect} and refused only at {@code POST /v1/executions} (see
- *       the agent-cycle fixture by bisection). Neither check substitutes for the other; each is a control for a distinct one of
- *       the two defects; mutation evidence shows each check failing for its own reason and passing
- *       for the other's.</li>
+ *       real, in-process server exactly as a browser would. It first requires a valid inspection
+ *       verdict and then requires the mutation itself to be admitted (202), proving parity over the
+ *       complete discovered corpus rather than sampling one graph. This catches missing required or
+ *       conditional properties at both public boundaries and prevents either path from silently
+ *       drifting away from the shared validator.</li>
  * </ol>
  *
  * <p>Whether a corpus member is additionally asserted to reach {@code COMPLETED} is derived from the
@@ -168,6 +165,18 @@ class ShippedExampleCorpusTest {
                          new DisabledLoopbackAuthenticator())) {
                 server.start();
                 var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+                var inspection = client.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + server.port()
+                                        + "/v1/graphs/inspect?purpose=EXECUTION"))
+                        .header("Content-Type", "application/graphml+xml")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(source)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, inspection.statusCode(),
+                        () -> display(path) + " could not be inspected: " + inspection.body());
+                assertTrue(inspection.body().contains("\"valid\":true"),
+                        () -> display(path) + " was not admitted by inspection: " + inspection.body());
+                assertTrue(inspection.body().contains("\"findings\":[]"),
+                        () -> display(path) + " produced an inspection finding: " + inspection.body());
                 var response = client.send(HttpRequest.newBuilder(
                                 URI.create("http://localhost:" + server.port() + "/v1/executions?payload=hello"))
                         .header("Content-Type", "application/graphml+xml")

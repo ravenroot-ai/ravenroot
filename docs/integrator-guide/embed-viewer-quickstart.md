@@ -28,10 +28,13 @@ Read these before you write anything. Each one fails silently or confusingly if 
    launch URL in a browser tab returns an error document, not a broken viewer. The viewer's own
    bootstrap enforces the same rule a second time from inside the page, refusing to start when
    `window.parent === window`. Neither refusal explains itself, so recognise the shape.
-2. **Both origins must be canonical HTTPS origins, and they must differ.** The viewer's origin and
-   your page's origin are `https://host` or `https://host:port` — scheme, host, optional port,
-   nothing else. No `http`, not even on loopback; no trailing slash, no path, no explicit `:443`,
-   no `*`. The two must also be distinct: your page cannot be served from the viewer's own origin.
+2. **Origins must be canonical, and they must differ.** The viewer origin is always HTTPS. A durable
+   registration's parent origin is also `https://host` or `https://host:port`. Authenticated dynamic
+   policy additionally permits a parent served by canonical HTTP loopback: `http://localhost`,
+   `http://127.0.0.1`, `http://[::1]`, or `http://[0:0:0:0:0:0:0:1]`, each optionally followed by a
+   non-default port. That exception never permits non-loopback HTTP or an HTTP viewer origin. Origins
+   have no trailing slash, path, default port (`:443` for HTTPS or `:80` for loopback HTTP), or `*`.
+   The two must also be distinct: your page cannot be served from the viewer's own origin.
 
    **This is checked when a session is created, not when the registration is written.** The deployment's
    own viewer origin is validated at startup, so a bad one stops the server. Your parent origin is
@@ -40,8 +43,8 @@ Read these before you write anything. Each one fails silently or confusingly if 
    session with `403 EMBED_SESSION_UNAVAILABLE`. Nothing reports the origin as the cause. If a brand
    new registration never produces a launch, compare its origin string against this rule character by
    character before you look anywhere else.
-3. **Two of the six endpoints are server-only, by construction.** `/v1/embed/sessions` and
-   `/v1/embed/acknowledgements` refuse any request that carries a `Cookie`, an `Origin` header, or
+3. **The discovery, session, acknowledgement, and revocation endpoints are server-only, by
+   construction.** They refuse any request that carries a `Cookie`, an `Origin` header, or
    any `Sec-Fetch-*` header. A browser always sends those, so these calls cannot be made from your
    page even if you tried. They belong to your server, which holds the workload token. The token
    never reaches the browser.
@@ -110,15 +113,50 @@ the viewer ignores any message that does not.
 
 | Endpoint | Method | Called by | Purpose |
 |---|---|---|---|
-| `/v1/embed/sessions` | POST | **Your server** | Mints a one-use launch URL from a registration id |
+| `/v1/embed/deployments` | GET | **Your server** | Discovers bounded READY deployment coordinates when dynamic policy is enabled |
+| `/v1/embed/sessions` | POST | **Your server** | Mints a one-use launch URL from a registration or exact dynamic selection |
+| `/v1/embed/grants/{id}` | DELETE | **Your server** | Idempotently revokes a dynamic grant |
 | `/v1/embed/launch` | GET | The browser, as an iframe navigation | Consumes the ticket, returns the viewer bootstrap |
 | `/v1/embed/acknowledgements` | POST | **Your server** | Vouches for the exact viewer channel before the exchange |
 | `/v1/embed/exchange` | POST | The viewer, by itself | Trades the bootstrap challenge for a short-lived bearer |
 | `/v1/embed/projection` | POST | The viewer, by itself | Retrieves the read-only projection |
 | `/v1/embed/observation` | POST | The viewer, by itself | Streams lifecycle and allowlisted execution state for a live-deployment source |
+| `/v1/embed/runs` | POST | The v2 viewer, by itself | Reconciles authorized runs for the exact deployment/version/incarnation |
+| `/v1/embed/executions` | POST | The v2 viewer, by itself | Optionally requests one separately-authorized idempotent server-side traversal |
 
-You implement the first and third. The viewer does the rest on its own; you never call `exchange` or
-`projection` or `observation`, and you never see the bearer, projection, or observation stream.
+Your server implements session creation and acknowledgement, plus discovery and revocation when it
+uses dynamic policy. The viewer does the rest on its own; you never call `exchange`, `projection`,
+or `observation`, and you never see the bearer, projection, or observation stream.
+
+## Dynamic selection alternative
+
+When the operator enables dynamic policy, your server may replace the registration-id lookup with
+two calls. First, call `GET /v1/embed/deployments?limit=50` using a workload token that has
+`ravenroot.embed.deployment.discover`. The response contains `scope: "LOCAL_PROCESS"`, a bounded
+`deployments` array, and a `nextCursor`. Each row is a tenant-owned READY selection with
+`deploymentId`, `incarnationId`, `graphVersion`, and `canonicalDigest`.
+
+Then send the exact selected tuple and parent origin to the existing session route:
+
+```json
+{
+  "deploymentId": "orders",
+  "incarnationId": "...",
+  "graphVersion": "...",
+  "parentOrigin": "https://app.example.com"
+}
+```
+
+In authenticated dynamic mode, `parentOrigin` may use the canonical HTTP loopback forms listed in
+constraint 2 for local integration. HTTPS remains mandatory for non-loopback parents, and the
+restricted mode accepts only the exact canonical origins configured by the operator.
+
+A successful response also includes `grantId`. Use that id in the acknowledgement body instead of
+`registrationId`, and retain it only on your server so you can call
+`DELETE /v1/embed/grants/{grantId}`. Selection and acknowledgement require
+`ravenroot.embed.session.create`. The server re-resolves readiness and the exact source tuple; a stale
+selection receives the same non-disclosing session-unavailable response as an absent one. Dynamic
+grants expire, are fixed read-only, and never enable the Start execution action.
 
 ## Choose the registration source
 
@@ -129,6 +167,11 @@ The operator chooses exactly one source when provisioning the registration:
 - A **deployment source** names one local deployment. Each viewer session resolves that deployment to
   an immutable `(deploymentId, graphVersion, incarnationId)` binding, renders its safe projection,
   and observes lifecycle and execution state only while that binding remains current.
+- A **v2 deployment source** adds an authoritative run selector whose identity is
+  `(tenant, deploymentId, graphVersion, incarnationId, processInstanceId)`. It may request that a
+  Start execution control be shown. That presentation option grants no authority; use the explicitly
+  named execution-capability provisioning path separately when the action should be authorized. V1
+  behavior is unchanged.
 
 The two forms do not fall back to each other. A live registration never reads a GraphML snapshot if
 its deployment disappears or changes version, and a snapshot registration never starts observing a
@@ -458,9 +501,17 @@ If you need the viewer to match your product's theme rather than the reader's sy
 a request to your operator to pin the theme on the registration. Falling back to `dark` is what the
 viewer does when it cannot read a preference at all.
 
-The Cyto, N8N, and Elastic presentation modes share the same read-only node identity, labels,
-bypass treatment, edge meaning, theme tokens, and runtime-state vocabulary. Changing modes or themes
-changes presentation, not the source, authority, or observed deployment binding.
+The v2 **Design** and **Monitoring** presentation modes share the same read-only node identity,
+dimensions, labels, bypass treatment, edge meaning, packaged symbols, theme tokens, and runtime-state
+vocabulary. Switching modes restores each mode's prior view without running layout, fit, or
+simulation. The separate **Render** command recomputes only the selected mode. These preferences do
+not change the source, authority, or selected run binding.
+
+The v2 Run select is disabled with an announced empty state when there are no authorized rows. One
+row is selected deterministically; multiple rows require an explicit choice. A switch clears old
+runtime decoration before attaching the new stream. Refresh preserves the exact process only while
+it remains authorized; completion may retain a bounded recent terminal row, while revocation,
+replacement, undeploy, or disappearance clears the selection.
 
 ## Live-deployment continuity
 
@@ -473,7 +524,7 @@ The host still receives only `READY`, `PONG`, or the non-sensitive terminal `FAI
 | `LIVE` | Lifecycle or execution events are current for the bound graph version and incarnation | None |
 | `RECONNECTING` | The transport ended before a terminal frame | Wait for bounded retry |
 | `STOPPED` or `UNAVAILABLE` | The bound deployment lifecycle is not producing live execution activity | An operator may start or restart the deployment; the viewer remains read-only |
-| `GAP` | The opaque cursor fell outside the process-local replay window | Terminal; create a fresh viewer session |
+| `GAP` | V1 fell outside the process-local replay window, or v2 could not obtain a complete selected-run durable replay | Terminal; create a fresh viewer session. A recoverable v2 gap is cleared and replayed without entering this state |
 | `VERSION_MISMATCH` | The deployment now resolves to a different graph version or incarnation | Terminal; review the replacement, then create a new registration or session as policy requires |
 | `DETACHED` | The deployment was undeployed or viewing authority changed | Terminal; do not reuse the attachment |
 

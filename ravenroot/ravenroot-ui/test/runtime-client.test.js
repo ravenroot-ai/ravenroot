@@ -12,10 +12,130 @@ import {
   parseEventFrame,
   validateDeploymentViewEnvelope,
   validateDeploymentViewFrame,
+  validateDeploymentCommandOutcome,
+  validateDiagnosticFinding,
+  validateLifecycleCapabilities,
   validateLocalDeploymentStatus,
+  validateProcessInventoryPage,
   validateRuntimeConfiguration,
   validateSourceSessionStatus,
+  validateStartupFailure,
 } from '../src/runtime-client.js';
+
+describe('bounded startup diagnostics', () => {
+  const incidentId = 'incident:0123456789abcdef';
+  const nodeRef = 'sha256:0123456789abcdef0123456789abcdef';
+
+  it('accepts the versioned closed admission and startup shapes', () => {
+    expect(validateDiagnosticFinding({
+      contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'mail\\u{000A}source', nodeRef,
+      propertyName: 'pollIntervalMs', incidentId,
+    })).toMatchObject({ reason: 'PROPERTY_TYPE_INVALID', nodeRef });
+    expect(validateStartupFailure({
+      contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START',
+      reason: 'imap-folder-not-authorized', nodeId: 'mail', nodeRef, incidentId,
+    })).toMatchObject({ reason: 'imap-folder-not-authorized', incidentId });
+  });
+
+  it.each([
+    { contract: 'ravenroot.graph-admission/2', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'adapter-supplied-text', incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'x', incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'secret='.repeat(30), nodeRef, incidentId },
+    { contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId: 'node\nspoof\u202e', nodeRef, incidentId },
+  ])('rejects malformed admission metadata %#', finding => {
+    expect(() => validateDiagnosticFinding(finding)).toThrow(/malformed/);
+  });
+
+  it.each(['password=hunter2', 'Authorization: Bearer secret-token',
+    'eyJabcdefgh.abcdefgh.abcdefgh', 'host=private.example', 'profile=production',
+    'https://operator:pw@internal.example/a',
+    'node-url=x://operator:pw@private.example/path',
+    `node-url=a${'1'.repeat(35)}://operator:pw@private.example/path`])(
+    'rejects sensitive diagnostic display text', nodeId => {
+    expect(() => validateDiagnosticFinding({
+      contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+      reason: 'PROPERTY_TYPE_INVALID', nodeId, nodeRef, incidentId,
+    })).toThrow(/malformed/);
+  });
+
+  it.each(['bad/name', 'bad=name', 'bad|delimiter', 'profile=production', `x${'y'.repeat(80)}`])(
+    'rejects non-token property metadata %s', propertyName => {
+      expect(() => validateDiagnosticFinding({
+        contract: 'ravenroot.graph-admission/1', phase: 'PROPERTY_SCHEMA',
+        reason: 'PROPERTY_TYPE_INVALID', nodeId: 'node', nodeRef, propertyName, incidentId,
+      })).toThrow(/malformed/);
+    });
+
+  it.each([
+    { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'UPPER_CASE', incidentId },
+    { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'known',
+      nodeId: 'node', nodeRef: 'sha256:not-a-digest', incidentId },
+    { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START', reason: 'known',
+      nodeId: 'node', incidentId },
+  ])('rejects malformed startup metadata %#', failure => {
+    expect(() => validateStartupFailure(failure)).toThrow(/malformed/);
+  });
+
+  it('keeps older source-session status compatible while validating structured failure when present', () => {
+    expect(validateSourceSessionStatus({ sessionId: 's', deploymentId: 's', state: 'FAILED',
+      sourceCount: 1, scope: 'LOCAL_PROCESS', diagnostic: 'startup failed' })).not.toHaveProperty('failure');
+    expect(() => validateSourceSessionStatus({ sessionId: 's', deploymentId: 's', state: 'FAILED',
+      sourceCount: 1, scope: 'LOCAL_PROCESS', diagnostic: 'startup failed',
+      failure: { contract: 'ravenroot.startup-failure/1', phase: 'SOURCE_START',
+        reason: 'host=private', incidentId } })).toThrow(/not a valid/);
+  });
+
+  it('accepts an N-1 valid inspection response without structured findings', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      nodes: 3, edges: 2, startNodes: 1, endNodes: 1, valid: true, violations: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl });
+
+    const inspection = await client.inspectGraph('<graphml/>');
+
+    expect(inspection).toMatchObject({ valid: true, violations: [] });
+    expect(inspection.findings).toEqual([]);
+    expect(Object.isFrozen(inspection.findings)).toBe(true);
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { valid: 'true', violations: [] },
+    { valid: true },
+    { valid: true, violations: 'none' },
+    { valid: true, violations: [], findings: {} },
+    { valid: true, violations: [], findings: [{
+      contract: 'ravenroot.graph-admission/1', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }, {
+      contract: 'ravenroot.graph-admission/1', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }] },
+    { valid: false, violations: ['invalid structure'], findings: [{
+      contract: 'ravenroot.graph-admission/2', phase: 'SEMANTIC_STRUCTURE',
+      reason: 'INVALID_STRUCTURE', incidentId,
+    }] },
+  ])('rejects malformed inspection response %#', async response => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(response), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl });
+
+    await expect(client.inspectGraph('<graphml/>')).rejects.toThrow(/malformed|not valid JSON/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://runtime.example/v1/graphs/inspect?purpose=EXECUTION');
+  });
+});
 import {
   applyDeploymentViewFrame,
   applyDeploymentViewStateToRenderer,
@@ -46,6 +166,7 @@ function versionedRingEvent(overrides = {}) {
     traversalId: '20000000-0000-0000-0000-000000000002',
     sequence: 1, engineId: 'pekko', graphVersion: 'graph-v1',
     executionId: '20000000-0000-0000-0000-000000000002', type: 'EXECUTION_STARTED',
+    deploymentId: null, workloadId: null,
     invocationId: null, attemptId: null, nodeId: null, edgeId: null,
     activeInstances: 0, inFlightArrivals: 0, fallback: false,
     description: 'Execution started.', publicReason: null,
@@ -99,6 +220,15 @@ describe('versioned execution stream normalization', () => {
     expect(normalized).not.toHaveProperty('detail');
     expect(normalizeRuntimeEvent(versionedDurableEvent({ eventType: 'FUTURE_JOURNAL_EVENT', future })))
       .toMatchObject({ type: 'FUTURE_JOURNAL_EVENT', future });
+  });
+
+  it('preserves the restored deployment and workload origin on a live re-entry event', () => {
+    expect(normalizeRuntimeEvent(versionedRingEvent({
+      eventType: 'NODE_STARTED', type: 'NODE_STARTED',
+      deploymentId: 'source-deployment', workloadId: 'source-workload',
+    }))).toMatchObject({
+      deploymentId: 'source-deployment', workloadId: 'source-workload',
+    });
   });
 
   it.each(['schemaVersion', 'source', 'id', 'eventType', 'occurredAt', 'processInstanceId', 'traversalId'])
@@ -168,6 +298,7 @@ describe('versioned execution stream normalization', () => {
     { messageTruncated: 'false' }, { processingDuration: -1 }, { processingDuration: Infinity },
     { publicReason: 'raw exception prose' }, { outputRedacted: 'yes' }, { edgeId: 4 },
     { invocationId: 'not-a-uuid' }, { graphVersion: null },
+    { deploymentId: 4 }, { deploymentId: '' }, { workloadId: {} }, { workloadId: '' },
   ])('rejects malformed known live fields %j', fields => {
     expect(() => normalizeRuntimeEvent(versionedRingEvent(fields))).toThrow();
   });
@@ -375,6 +506,32 @@ describe('embedded Human Task runtime client', () => {
     await expect(unknownClient.confirmHumanTask('task-1', 2, 'resolve', 'Reviewed', { capability }))
       .rejects.toThrow(/confirmation response is invalid/);
   });
+
+  it('issues a registered capability with bearer auth but completes and replays without it', async () => {
+    const registeredTask = { ...task, interactionPresentation: { kind: 'CUSTOM', version: 1,
+      profileId: 'registered', profileVersion: 1 } };
+    const launch = { schemaVersion: 1, capability: 'signed', capabilityId: 'cap-1',
+      expiresAt: '2026-09-07T08:00:00Z', launchUri: 'https://forms.example/task',
+      origin: 'https://forms.example', kind: 'CUSTOM', taskId: task.taskId,
+      generation: task.generation, actions: ['RESOLVE'], review: null,
+      responseSchema: { contentType: 'application/vnd.ravenroot.payload+json', schema: 'test',
+        schemaVersion: '1', kind: 'MAP', maxBytes: 4096 } };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(launch) })
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ schemaVersion: 1,
+        outcome: 'ALREADY_APPLIED', taskId: task.taskId, generation: task.generation + 1 }) });
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'bearer' });
+    const issued = await client.issueHumanTaskInteraction(registeredTask, { capability });
+    const encoded = { contentType: launch.responseSchema.contentType, payloadBase64: 'e30=' };
+    await client.completeHumanTaskInteraction(issued, 'RESOLVE', '', encoded);
+    await client.completeHumanTaskInteraction(issued, 'RESOLVE', '', encoded);
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer bearer');
+    for (const [, request] of fetchImpl.mock.calls.slice(1)) {
+      expect(request.credentials).toBe('omit');
+      expect(request.headers).not.toHaveProperty('Authorization');
+      expect(JSON.parse(request.body).capability).toBe('signed');
+    }
+  });
 });
 
 describe('process-local source session client', () => {
@@ -482,13 +639,35 @@ describe('process lifecycle client', () => {
       }) }),
     );
   });
+
+  it('validates the versioned capability contract without inferring unavailable commands', () => {
+    const capabilities = { contractVersion: 1, scope: 'PROCESS',
+      drainBound: 'UNTIL_ACCEPTED_WORK_SETTLES', commands: [
+        { command: 'PAUSE', available: true, reasonRequired: true, unavailableReason: null },
+        { command: 'RESUME', available: false, reasonRequired: false,
+          unavailableReason: 'INCOMPATIBLE_STATE' },
+      ] };
+    expect(validateLifecycleCapabilities(capabilities, 'PROCESS')).toMatchObject(capabilities);
+    expect(() => validateLifecycleCapabilities({ ...capabilities, scope: 'DEPLOYMENT' }, 'PROCESS'))
+      .toThrow(/versioned contract/);
+    expect(() => validateLifecycleCapabilities({ ...capabilities, commands: [
+      capabilities.commands[0], capabilities.commands[0],
+    ] }, 'PROCESS')).toThrow(/invalid command/);
+    expect(() => validateLifecycleCapabilities({ ...capabilities, commands: [{
+      ...capabilities.commands[1], available: true,
+    }] }, 'PROCESS')).toThrow(/invalid command/);
+  });
 });
 
 describe('process-local deployment client', () => {
   const ready = {
     deploymentId: 'deployment-1', state: 'READY', sourceCount: 0,
     graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null,
+    tenantId: 'tenant-a', continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+    desiredState: null, observedState: null, recoveryFailure: null,
   };
+  const durable = (overrides = {}) => ({ ...ready, continuity: 'DURABLE', deploymentGeneration: 7,
+    deploymentRevision: 7, desiredState: 'RUNNING', observedState: 'READY', ...overrides });
 
   it('uses the dedicated authenticated register, observe, start, and stop routes', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
@@ -521,6 +700,131 @@ describe('process-local deployment client', () => {
   it('accepts sourceCount 0, unlike a source session', () => {
     expect(validateLocalDeploymentStatus(ready, 'deployment-1')).toEqual(ready);
     expect(validateLocalDeploymentStatus({ ...ready, sourceCount: 3 }, 'deployment-1').sourceCount).toBe(3);
+  });
+
+  it('accepts a safe authoritative generation and refuses one JavaScript would round', () => {
+    expect(validateLocalDeploymentStatus(durable()).deploymentGeneration).toBe(7);
+    expect(() => validateLocalDeploymentStatus(durable({
+      deploymentGeneration: Number.MAX_SAFE_INTEGER + 1 }))).toThrow(/process-local status/);
+  });
+
+  it('sends one durable Stop intent, parses its outcome, and reconciles authoritative state', async () => {
+    const accepted = { outcome: 'ACCEPTED', commandId: 'command-1', fromGeneration: 7, generation: 8 };
+    const stopped = durable({ state: 'STOPPED', deploymentGeneration: 8, deploymentRevision: 8,
+      desiredState: 'STOPPED', observedState: 'STOPPED' });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(accepted) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(stopped) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    const result = await client.stopDeployment('deployment-1', {
+      expectedGeneration: 7, idempotencyKey: 'intent-7', reason: 'maintenance',
+    });
+
+    expect(result).toEqual({ outcome: accepted, status: stopped });
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual(expect.objectContaining({
+      'Idempotency-Key': 'intent-7',
+      'X-Ravenroot-Expected-Generation': '7',
+      'X-Ravenroot-Reason': 'maintenance',
+    }));
+    expect(fetchImpl.mock.calls[1][0]).toBe('/v1/deployments/deployment-1');
+  });
+
+  it('retries an ambiguous durable delivery once with identical intent metadata', async () => {
+    const converged = { outcome: 'CONVERGED', commandId: 'command-2', generation: 4, observed: 'RUNNING' };
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection reset'))
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(converged) })
+      .mockResolvedValueOnce({ ok: true, status: 200,
+        text: async () => JSON.stringify(durable({ deploymentGeneration: 4, deploymentRevision: 4 })) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await client.startDeployment('deployment-1', {
+      expectedGeneration: 4, idempotencyKey: 'same-intent',
+    });
+
+    expect(fetchImpl.mock.calls[0][1].headers['Idempotency-Key']).toBe('same-intent');
+    expect(fetchImpl.mock.calls[1][1].headers['Idempotency-Key']).toBe('same-intent');
+    expect(fetchImpl.mock.calls[1][1].headers['X-Ravenroot-Expected-Generation']).toBe('4');
+  });
+
+  it('reconciles authoritative state after both durable delivery responses are lost', async () => {
+    const observed = durable({ state: 'STOPPED', deploymentGeneration: 8, deploymentRevision: 8,
+      desiredState: 'STOPPED', observedState: 'STOPPED' });
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('first response lost'))
+      .mockRejectedValueOnce(new TypeError('second response lost'))
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(observed) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.stopDeployment('deployment-1', {
+      expectedGeneration: 7, idempotencyKey: 'one-intent', reason: 'maintenance',
+    })).resolves.toEqual({
+      outcome: null, status: observed,
+      reconciliation: { delivery: 'AMBIGUOUS', authoritative: 'STATE' },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls.slice(0, 2).map(([, request]) =>
+      request.headers['Idempotency-Key'])).toEqual(['one-intent', 'one-intent']);
+    expect(fetchImpl.mock.calls.filter(([, request]) => request.method === 'POST')).toHaveLength(2);
+    expect(fetchImpl.mock.calls[2][1].method).toBe('GET');
+  });
+
+  it('reconciles terminal Undeploy 404 after both delivery responses are lost', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('first response lost'))
+      .mockRejectedValueOnce(new TypeError('second response lost'))
+      .mockResolvedValueOnce({ ok: false, status: 404,
+        text: async () => JSON.stringify({ error: 'deployment not found' }) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.undeployDeployment('deployment-1', {
+      expectedGeneration: 8, idempotencyKey: 'remove-once',
+      disposition: 'CANCEL_IN_FLIGHT', reason: 'retired',
+    })).resolves.toEqual({
+      outcome: null, status: null,
+      reconciliation: { delivery: 'AMBIGUOUS', authoritative: 'NOT_FOUND' },
+    });
+    expect(fetchImpl.mock.calls.filter(([, request]) => request.method === 'DELETE')).toHaveLength(2);
+    expect(fetchImpl.mock.calls[2][1].method).toBe('GET');
+  });
+
+  it('refreshes stale state without automatically resubmitting the command', async () => {
+    const stale = { outcome: 'STALE_GENERATION', expected: 3, generation: 4 };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(stale) })
+      .mockResolvedValueOnce({ ok: true, status: 200,
+        text: async () => JSON.stringify(durable({ deploymentGeneration: 4, deploymentRevision: 4 })) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    const result = await client.restartDeployment('deployment-1', {
+      expectedGeneration: 3, idempotencyKey: 'stale-intent',
+    });
+
+    expect(result.outcome).toEqual(stale);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.filter(([, request]) => request.method === 'POST')).toHaveLength(1);
+  });
+
+  it('parses every durable outcome and requires explicit undeploy metadata', async () => {
+    const outcomes = [
+      { outcome: 'ACCEPTED', commandId: 'c', fromGeneration: 0, generation: 1 },
+      { outcome: 'CONVERGED', commandId: 'c', generation: 1, observed: 'RUNNING' },
+      { outcome: 'REPLAYED', original: { outcome: 'TERMINAL', commandId: 'c', generation: 2 } },
+      { outcome: 'IDEMPOTENCY_CONFLICT', key: 'k' },
+      { outcome: 'STALE_GENERATION', expected: 1, generation: 2 },
+      { outcome: 'SUPERSEDED', by: 'g2/STOPPED', generation: 2 },
+      { outcome: 'REFUSED', reason: 'Tombstoned' },
+      { outcome: 'FAILED', cause: 'RuntimeFailure' },
+      { outcome: 'TERMINAL', commandId: 'c', generation: 2 },
+    ];
+    for (const outcome of outcomes) expect(validateDeploymentCommandOutcome(outcome)).toBe(outcome);
+
+    const client = new RavenrootRuntimeClient('', { fetchImpl: vi.fn(), accessToken: 'token' });
+    await expect(client.undeployDeployment('deployment-1', {
+      expectedGeneration: 1, reason: 'retire',
+    })).rejects.toThrow(/explicit supported disposition/);
   });
 
   it('accepts every LocalDeploymentState value, including REGISTERED which no source session has', () => {
@@ -597,7 +901,8 @@ describe('durable process inventory client (issue 154)', () => {
   const page = {
     items: [{
       tenantId: 'tenant-a', processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000001',
-      status: 'RUNNING', disposition: 'ACTIVE', revision: 3, lifecycleGeneration: 2,
+      status: 'RUNNING', terminationReason: null, cancelled: false, disposition: 'ACTIVE',
+      revision: 3, lifecycleGeneration: 2,
       graphVersion: 'sha256:deadbeef', deploymentId: null, workloadId: null, correlationId: null,
       ownerWorkerId: 'worker-1', fencingToken: 7, leaseExpiresAt: '2026-01-01T00:00:30Z',
       traversalCount: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:05Z',
@@ -617,6 +922,18 @@ describe('durable process inventory client (issue 154)', () => {
     expect(fetchImpl.mock.calls[0][0]).toBe('/v1/executions/inventory');
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
     expect(result).toEqual(page);
+  });
+
+  it('accepts an authoritative control state and process capabilities and rejects a scope mismatch', () => {
+    const capabilities = { contractVersion: 1, scope: 'PROCESS', commands: [
+      { command: 'PAUSE', available: true, reasonRequired: true, unavailableReason: null },
+    ] };
+    const authoritative = { ...page, items: [{ ...page.items[0], controlState: 'RUNNING',
+      lifecycleCapabilities: capabilities }] };
+    expect(validateProcessInventoryPage(authoritative)).toBe(authoritative);
+    expect(() => validateProcessInventoryPage({ ...authoritative, items: [{ ...authoritative.items[0],
+      lifecycleCapabilities: { ...capabilities, scope: 'DEPLOYMENT' } }] }))
+      .toThrow(/versioned contract/);
   });
 
   it('sends only the filters the caller actually supplies, as GET /v1/executions/inventory query parameters', async () => {
@@ -1878,7 +2195,8 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(error.status).toBe(405);
     expect(error.method).toBe('POST');
     expect(error.path).toBe('/v1/executions?payload=hello');
-    expect(error.message).toContain('FIXTURE: verb not permitted on this route');
+    expect(error.message).toContain('Service request failed');
+    expect(error.message).not.toContain('FIXTURE: verb not permitted on this route');
     expect(error.message).toContain('HTTP 405');
     expect(error.message).toContain('POST');
     expect(error.message).toContain('/v1/executions');
@@ -1928,7 +2246,8 @@ describe('Ravenroot runtime client security boundary', () => {
 
     expect(error).toBeInstanceOf(RuntimeRequestError);
     expect(error.status).toBeNull();
-    expect(error.message).toContain('Failed to fetch');
+    expect(error.message).toContain('Service request failed');
+    expect(error.message).not.toContain('Failed to fetch');
     expect(error.message).toMatch(/check the runtime service address/i);
     // The forbidden assertion: a rejected promise is not proof the request never reached the
     // service, so the message must not say so.
@@ -1958,8 +2277,8 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(error.message).toContain('HTTP 404');
     expect(error.message).toContain('GET');
     expect(error.message).toContain('/v1/node-types');
-    // The raw body text is usable diagnostic content, not swallowed.
-    expect(error.message).toContain('404 Not Found');
+    // An unversioned proxy body is arbitrary text, so it is not presented as runtime detail.
+    expect(error.message).not.toContain('404 Not Found');
   });
 
   it('turns a non-JSON body on an otherwise-ok response into a typed error rather than throwing raw', async () => {

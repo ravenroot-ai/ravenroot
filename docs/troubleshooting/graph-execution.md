@@ -6,9 +6,26 @@ Start from validator output or terminal execution evidence; change only the docu
 
 **Diagnosis:** The document violates the GraphML envelope, key rules, node identity, terminal cardinality, edge references, or behavior resolution.
 
-**Action:** Run `ravenroot inspect FILE`; correct the first structural refusal without deleting unknown extension data. Keep one directed top-level graph, one START, one END, and at most one ERROR.
+**Action:** Inspect with the purpose that matches the intended start. Correct the first structured
+finding's node/property and closed reason without deleting unknown extension data. The Workbench
+selects that node and property when it can resolve the finding's opaque `nodeRef`. Keep one directed
+top-level graph, one START, one END, and at most one ERROR.
 
 **Verify:** Run `ravenroot validate FILE` and require exit 0 before submission.
+
+## A listener or deployment reaches FAILED during startup
+
+**Diagnosis:** Read the `ravenroot.startup-failure/1` status object. A lower-kebab reason is a code
+declared by the trusted source package; `STARTUP_FAILED` means the underlying failure was unknown or
+undeclared and is intentionally not public. `DEGRADED` is ongoing health and is not a startup failure.
+
+**Action:** Correct the named source/node when a declared reason is present. For `STARTUP_FAILED`,
+give the incident handle to an operator; do not infer a cause from the legacy diagnostic string.
+Operators can correlate that handle with the one privileged startup-failure record containing the
+original throwable.
+
+**Verify:** Retry through the existing lifecycle command and confirm all deployment and source-session
+status projections converge on READY/LISTENING. A refused start produces one Workbench activity row.
 
 ## Execution is accepted but behavior is bypassed
 

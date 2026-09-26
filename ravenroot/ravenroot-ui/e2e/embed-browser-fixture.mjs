@@ -89,9 +89,11 @@ const acknowledgeAtBackend = (hello, registrationId) => new Promise((resolve, re
 });
 
 const observations = [];
+let dropNextStartResponse = false;
 const proxy = (request, response) => {
   const isEmbedPost = request.method === 'POST'
-    && ['/v1/embed/exchange', '/v1/embed/projection', '/v1/embed/observation'].includes(request.url);
+    && ['/v1/embed/exchange', '/v1/embed/projection', '/v1/embed/observation',
+      '/v1/embed/runs', '/v1/embed/executions'].includes(request.url);
   if (isEmbedPost) {
     observations.push({
       path: request.url,
@@ -99,7 +101,8 @@ const proxy = (request, response) => {
       refererPresent: request.headers.referer !== undefined,
       originExact: request.headers.origin === viewerOrigin.origin,
       secFetchSite: request.headers['sec-fetch-site'] ?? null,
-      bearerPresent: ['/v1/embed/projection', '/v1/embed/observation'].includes(request.url)
+      bearerPresent: ['/v1/embed/projection', '/v1/embed/observation', '/v1/embed/runs',
+        '/v1/embed/executions'].includes(request.url)
         && /^Bearer [A-Za-z0-9_-]+$/u.test(request.headers.authorization ?? ''),
     });
   }
@@ -112,6 +115,12 @@ const proxy = (request, response) => {
     path: request.url,
     headers,
   }, (upstreamResponse) => {
+    if (dropNextStartResponse && request.url === '/v1/embed/executions') {
+      dropNextStartResponse = false;
+      upstreamResponse.resume();
+      upstreamResponse.on('end', () => response.destroy());
+      return;
+    }
     if (invalidLaunchPaths.delete(request.url)) {
       const chunks = [];
       upstreamResponse.on('data', chunk => chunks.push(chunk));
@@ -298,6 +307,12 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
     response.end(JSON.stringify(observations));
     return;
   }
+  if (request.url === '/__drop-next-start' && request.method === 'POST') {
+    dropNextStartResponse = true;
+    response.writeHead(204, { 'Cache-Control': 'no-store' });
+    response.end();
+    return;
+  }
   if ((request.url === '/__embed-ack' || request.url?.startsWith('/__embed-ack/'))
       && request.method === 'POST') {
     const chunks = [];
@@ -344,6 +359,7 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
     ['/theme-light', 'theme-light'], ['/theme-dark', 'theme-dark'],
     ['/theme-auto-light', 'theme-auto-light'], ['/theme-auto-dark', 'theme-auto-dark'],
     ['/theme-invalid', 'theme-invalid'], ['/deployment', 'live-registration'],
+    ['/deployment-stale', 'live-stale-registration'],
   ]).get(request.url) ?? 'browser-registration';
   try {
     const freshLaunchUrl = await createSession(registration);

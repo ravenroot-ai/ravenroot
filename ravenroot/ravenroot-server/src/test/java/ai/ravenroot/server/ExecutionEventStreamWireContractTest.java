@@ -58,6 +58,28 @@ class ExecutionEventStreamWireContractTest {
     }
 
     @Test
+    void restoredReentryOriginCrossesLiveAndRecentProjectionsWithoutPrivateScopeOrDiagnostics() {
+        var event = new ExecutionEvent(17, Instant.MAX, "private-tenant", "private-request",
+                "engine", "graph", PROCESS, TRAVERSAL, INVOCATION, ATTEMPT,
+                ExecutionEventType.NODE_STARTED, "post-task", 1, false, "private-detail",
+                null, null, null, "source-deployment", "source-workload");
+
+        String recent = RavenrootServer.executionEventJson(event);
+        String live = ExecutionEventWireJson.live(event);
+
+        for (String projection : new String[] { recent, live }) {
+            assertTrue(projection.contains("\"deploymentId\":\"source-deployment\""), projection);
+            assertTrue(projection.contains("\"workloadId\":\"source-workload\""), projection);
+            assertFalse(projection.contains("private-tenant"), projection);
+            assertFalse(projection.contains("private-request"), projection);
+            assertFalse(projection.contains("private-detail"), projection);
+            assertFalse(projection.contains("\"tenantId\""), projection);
+            assertFalse(projection.contains("\"requestId\""), projection);
+            assertFalse(projection.contains("\"detail\""), projection);
+        }
+    }
+
+    @Test
     void durableEnvelopeUsesTheJournalCursorAndPersistedEventIdentityWithoutLiveDiagnostics() {
         var event = new DurableExecutionEvent(EVENT, Long.MAX_VALUE, 73, "private-tenant",
                 "FUTURE_EVENT", PROCESS, TRAVERSAL, INVOCATION, ATTEMPT, CAUSE,

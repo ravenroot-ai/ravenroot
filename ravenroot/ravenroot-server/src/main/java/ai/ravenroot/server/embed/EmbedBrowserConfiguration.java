@@ -18,7 +18,27 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
                                         Clock clock, Duration ticketTtl, Duration exchangeTtl,
                                         Duration bearerTtl, Duration proofTtl,
                                         int ticketCapacity, int sessionCapacity, int replayCapacity,
-                                        int replicaCount, boolean singleProcessAcknowledged) {
+                                        int replicaCount, boolean singleProcessAcknowledged,
+                                        DynamicEmbedAuthorizationPolicy dynamicPolicy,
+                                        Duration dynamicGrantTtl, int dynamicGrantCapacity) {
+
+    /** Compatibility constructor for registration-only compositions. */
+    public EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewerOrigin,
+                                     AuthorizedEmbedSessionCreation sessionCreation,
+                                     EmbedRegistrationAuthority registrations,
+                                     AuthorizedEmbedGraphProjection projections,
+                                     EmbedSecurityAuditSink audit,
+                                     Clock clock, Duration ticketTtl, Duration exchangeTtl,
+                                     Duration bearerTtl, Duration proofTtl,
+                                     int ticketCapacity, int sessionCapacity, int replayCapacity,
+                                     int replicaCount, boolean singleProcessAcknowledged) {
+        this(enabled, viewerOrigin, sessionCreation, registrations, projections, audit, clock,
+                ticketTtl, exchangeTtl, bearerTtl, proofTtl, ticketCapacity, sessionCapacity,
+                replayCapacity, replicaCount, singleProcessAcknowledged,
+                new DynamicEmbedAuthorizationPolicy(DynamicEmbedAuthorizationPolicy.Mode.DISABLED,
+                        java.util.Set.of(), "dynamic-origin-v1:disabled"),
+                Duration.ofMinutes(5), 4_096);
+    }
 
     /**
      * The variable every Ravenroot deployment actually sets.
@@ -36,21 +56,30 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
     public EmbedBrowserConfiguration {
         if (enabled) {
             Objects.requireNonNull(viewerOrigin, "viewerOrigin");
-            Objects.requireNonNull(sessionCreation, "sessionCreation");
-            Objects.requireNonNull(registrations, "registrations");
-            Objects.requireNonNull(projections, "projections");
             Objects.requireNonNull(audit, "audit");
             Objects.requireNonNull(clock, "clock");
+            Objects.requireNonNull(dynamicPolicy, "dynamicPolicy");
+            boolean legacy = sessionCreation != null || registrations != null || projections != null;
+            if (legacy && (sessionCreation == null || registrations == null || projections == null)) {
+                throw new IllegalArgumentException("legacy embed authority must be complete");
+            }
+            if (!legacy && !dynamicPolicy.enabled()) {
+                throw new IllegalArgumentException("embed browser requires a legacy or dynamic authority");
+            }
             EmbedLaunchTicketAuthority.boundedTtl(ticketTtl, "ticket");
             EmbedLaunchTicketAuthority.boundedTtl(exchangeTtl, "exchange");
             EmbedLaunchTicketAuthority.boundedTtl(bearerTtl, "bearer");
             EmbedLaunchTicketAuthority.boundedTtl(proofTtl, "proof");
+            EmbedLaunchTicketAuthority.boundedTtl(dynamicGrantTtl, "dynamic grant");
             if (ticketCapacity < 1 || sessionCapacity < 1 || replayCapacity < 1) {
                 throw new IllegalArgumentException("embed capacities must be positive");
             }
-            // SQLite is a local file, so the durable registration authority is single-host. Until a
-            // shared adapter exists, more than one replica means two authorities that cannot see each
-            // other's revocations, and the answer is to refuse rather than to route stickily.
+            if (dynamicGrantCapacity < 1 || dynamicGrantCapacity > 100_000) {
+                throw new IllegalArgumentException("dynamic embed grant capacity must be positive and bounded");
+            }
+            // Both the SQLite registration authority and the bounded dynamic grant/session stores
+            // are process-local. Until shared adapters exist, replicas cannot see each other's
+            // revocations, so refuse rather than silently require sticky routing.
             if (replicaCount != 1 || !singleProcessAcknowledged) {
                 throw new IllegalArgumentException(
                         "embed browser requires an acknowledged single-process deployment; "
@@ -58,11 +87,16 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
                                 + "RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED must be true");
             }
         }
+        if (!enabled && dynamicPolicy == null) {
+            dynamicPolicy = new DynamicEmbedAuthorizationPolicy(
+                    DynamicEmbedAuthorizationPolicy.Mode.DISABLED, java.util.Set.of(),
+                    "dynamic-origin-v1:disabled");
+        }
     }
 
     public static EmbedBrowserConfiguration disabled() {
         return new EmbedBrowserConfiguration(false, null, null, null, null, null, null,
-                null, null, null, null, 0, 0, 0, 0, false);
+                null, null, null, null, 0, 0, 0, 0, false, null, null, 0);
     }
 
     public static EmbedBrowserConfiguration fromEnvironment(
@@ -71,8 +105,10 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
             EmbedSecurityAuditSink audit, Clock clock) {
         Objects.requireNonNull(environment, "environment");
         if (!enabledFromEnvironment(environment)) return disabled();
+        var viewer = new EmbedViewerOrigin(required(environment, "RAVENROOT_EMBED_VIEWER_ORIGIN"));
+        var dynamic = DynamicEmbedAuthorizationPolicy.fromEnvironment(environment, viewer);
         return new EmbedBrowserConfiguration(true,
-                new EmbedViewerOrigin(required(environment, "RAVENROOT_EMBED_VIEWER_ORIGIN")),
+                viewer,
                 sessionCreation, registrations, projections, audit, clock,
                 seconds(environment, "RAVENROOT_EMBED_TICKET_TTL_SECONDS", 60),
                 seconds(environment, "RAVENROOT_EMBED_EXCHANGE_TTL_SECONDS", 60),
@@ -82,7 +118,10 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
                 integer(environment, "RAVENROOT_EMBED_SESSION_CAPACITY", 4_096),
                 integer(environment, "RAVENROOT_EMBED_REPLAY_CAPACITY", 16_384),
                 ai.ravenroot.server.ReplicaCount.fromEnvironment(environment),
-                strictBoolean(environment, "RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED", false));
+                strictBoolean(environment, "RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED", false),
+                dynamic,
+                seconds(environment, "RAVENROOT_EMBED_DYNAMIC_GRANT_TTL_SECONDS", 300),
+                integer(environment, "RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY", 4_096));
     }
 
     public boolean active() { return enabled; }

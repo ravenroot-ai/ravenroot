@@ -53,6 +53,7 @@ their architecture status and wording are ready for publication.
 | 2026-09-14 | 0041 | Superseded by 0042 | [Governed workspace-agent runner plane](0041-governed-workspace-agent-runner-plane.md) |
 | 2026-09-16 | 0042 | Accepted | [Explicit Workspaces and independently scalable runner coordinators](0042-explicit-workspaces-and-runner-coordinators.md) |
 | 2026-09-18 | 0043 | Accepted | [Kubernetes-native governed runner](0043-kubernetes-native-governed-runner.md) |
+| 2026-09-26 | 0044 | Accepted contract | [Encapsulated finite automata](0044-encapsulated-finite-automata.md) |
 
 ## Status vocabulary
 

@@ -121,8 +121,7 @@ class RavenrootServerMainLifecycleTest {
     }
 
     /**
-     * With no operator authority configured, the packaged process refuses
-     * before the listener binds, and still says {@code EMBED_OPERATOR_AUTHORITY_UNAVAILABLE}.
+     * With no operator authority configured, the packaged process refuses before the listener binds.
      *
      * <p>The refusal is conditional on the embed being enabled, so it answers «the
      * embed is on and nothing says where its durable authority lives», and the detail names the
@@ -138,7 +137,9 @@ class RavenrootServerMainLifecycleTest {
             System.setErr(captured);
             RavenrootServerMain.launch(() -> {
                 RavenrootServerMain.refuseUnsupportablePackagedEmbed(
-                        Map.of("RAVENROOT_EMBED_ENABLED", "true"));
+                        Map.of("RAVENROOT_EMBED_ENABLED", "true",
+                                "RAVENROOT_EMBED_VIEWER_ORIGIN", "https://viewer.example",
+                                "RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED", "true"));
                 bound.set(true);
             }, exitStatus::set);
         } finally {
@@ -148,10 +149,28 @@ class RavenrootServerMainLifecycleTest {
         assertEquals(false, bound.get());
         assertEquals("{\"event\":\"startup_refused\","
                         + "\"code\":\"EMBED_OPERATOR_AUTHORITY_UNAVAILABLE\","
-                        + "\"detail\":\"packaged embed requires a durable operator provision-revoke "
-                        + "authority; set RAVENROOT_EMBED_REGISTRATION_DIR\"}"
+                        + "\"detail\":\"packaged embed requires either a durable registration authority "
+                        + "or an explicit dynamic origin policy; set RAVENROOT_EMBED_REGISTRATION_DIR or "
+                        + "RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY\"}"
                         + System.lineSeparator(),
                 output.toString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void packagedEmbedWithDynamicAuthorityAndNoRegistrationDirectoryProceedsToBind() throws Exception {
+        var bound = new AtomicBoolean();
+        var exitStatus = new AtomicInteger(-1);
+        RavenrootServerMain.launch(() -> {
+            RavenrootServerMain.refuseUnsupportablePackagedEmbed(Map.of(
+                    "RAVENROOT_EMBED_ENABLED", "true",
+                    "RAVENROOT_EMBED_VIEWER_ORIGIN", "https://viewer.example",
+                    "RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED", "true",
+                    "RAVENROOT_REPLICAS", "1",
+                    "RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY", "authenticated"));
+            bound.set(true);
+        }, exitStatus::set);
+        assertEquals(-1, exitStatus.get());
+        assertEquals(true, bound.get());
     }
 
     /**

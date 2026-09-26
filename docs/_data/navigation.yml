@@ -46,6 +46,8 @@
       url: /operator-guide/identity-browser.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
+    - title: Global lifecycle console
+      url: /operator-guide/lifecycle-console.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle
@@ -54,6 +56,8 @@
       url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations
       url: /operator-guide/embed-operations.html
+    - title: Human Task operations
+      url: /operator-guide/human-tasks.html
 
 - title: Integrator guide
   items:
@@ -96,6 +100,10 @@
       url: /architecture/execution-results.html
     - title: AI, programs, and extensions
       url: /architecture/ai-extension-boundaries.html
+    - title: Finite automata v1 contract
+      url: /architecture/finite-automata-v1.html
+    - title: Finite-automata program evidence
+      url: /examples/finite-automata/
     - title: Embedded projection security model
       url: /architecture/embed-security-model.html
     - title: Security guide
@@ -213,6 +221,8 @@
       url: /troubleshooting/ai-extensions.html
     - title: Embed access, backup, and recovery
       url: /troubleshooting/embed-backup.html
+    - title: Human Tasks
+      url: /troubleshooting/human-tasks.html
 
 - title: Contributing and governance
   items:

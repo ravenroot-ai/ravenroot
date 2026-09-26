@@ -90,7 +90,8 @@ export class RuntimeAuthorizationError extends Error {
 // apart from here, so the message must not assert which one happened -- it names the possibilities
 // instead of picking one.
 export class RuntimeRequestError extends Error {
-  constructor(reason, { status = null, method, path } = {}) {
+  constructor(reason, { status = null, method, path, code = null, correlationId = null,
+    incidentId = null, finding = null } = {}) {
     const route = String(path || '').split('?')[0];
     const where = status == null ? `${method} ${route}` : `HTTP ${status} ${method} ${route}`;
     const hint = status == null
@@ -103,7 +104,90 @@ export class RuntimeRequestError extends Error {
     this.status = status;
     this.method = method;
     this.path = path;
+    this.code = code;
+    this.correlationId = correlationId;
+    this.incidentId = incidentId;
+    this.finding = finding;
   }
+}
+
+const ADMISSION_PHASES = new Set([
+  'GRAPHML_PARSE', 'SEMANTIC_STRUCTURE', 'PROPERTY_SCHEMA', 'CAPABILITY', 'RUNTIME_NATURE',
+  'BYPASS', 'RUNTIME_CONCURRENCY', 'RESOURCE_LIMIT', 'SOURCE_REQUIREMENT',
+  'SOURCE_CONSTRUCTION', 'SOURCE_START', 'MANAGED_INGRESS', 'STARTUP',
+]);
+const ADMISSION_REASONS = new Set([
+  'GRAPHML_REJECTED', 'INVALID_STRUCTURE', 'DUPLICATE_ELEMENT', 'MISSING_START', 'MISSING_END',
+  'INVALID_TERMINAL_COUNT', 'DANGLING_EDGE', 'INVALID_PROPERTY', 'REQUIRED_PROPERTY_MISSING',
+  'PROPERTY_TYPE_INVALID', 'PROPERTY_VALUE_NOT_ALLOWED', 'PROPERTY_OUT_OF_RANGE',
+  'PROPERTY_TOO_LARGE', 'PROPERTY_COLLECTION_INVALID', 'PROPERTY_NAME_NEAR_MISS',
+  'RESERVED_PROPERTY', 'WORKSPACE_REFERENCE_INVALID', 'REMOVED_BEHAVIOR',
+  'CAPABILITY_UNAVAILABLE', 'RUNTIME_NATURE_INVALID', 'RUNTIME_NATURE_NOT_ALLOWED',
+  'RUNTIME_NATURE_UNSUPPORTED', 'BYPASS_INVALID', 'RUNTIME_CONCURRENCY_INVALID',
+  'GRAPH_LIMIT_EXCEEDED', 'SOURCE_CAPABILITY_MISMATCH', 'SOURCE_REQUIRED',
+  'SOURCE_START_REFUSED', 'STARTUP_FAILED',
+]);
+const SAFE_HANDLE = /^[A-Za-z0-9._:-]{1,128}$/;
+const NODE_REF = /^sha256:[0-9a-f]{32}$/;
+const SOURCE_REASON = /^[a-z][a-z0-9-]{0,63}$/;
+const UNSAFE_DIAGNOSTIC_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+const UNREDACTED_CREDENTIAL = /(?:\b(?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer|basic)\s+|\bbearer\s+|\b(?:api[-_.]?key|access[-_.]?token|refresh[-_.]?token|id[-_.]?token|password|passwd|client[-_.]?secret|private[-_.]?key|credential|secret|token)\s*[:=]\s*)(?!\[ravenroot:redacted:credential\])\S+/iu;
+const JWT_CREDENTIAL = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/u;
+const UNREDACTED_LOCATION_ASSIGNMENT = /(?:^|[^A-Za-z0-9_])(?:host(?:name)?|profile)\s*[:=]\s*(?!\[ravenroot:redacted:(?:host|profile)\])[^\s,;|?&#]+/iu;
+const UNREDACTED_URI_AUTHORITY = /[a-z][a-z0-9+.-]*:\/\/(?!\[ravenroot:redacted:host\])[^\s/?#]+/iu;
+const PROPERTY_TOKEN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u;
+
+function safeDiagnosticToken(value, maximumBytes) {
+  return typeof value === 'string' && value.length > 0
+    && new TextEncoder().encode(value).length <= maximumBytes
+    && !UNSAFE_DIAGNOSTIC_TEXT.test(value)
+    && value === value.normalize('NFC') && !UNREDACTED_CREDENTIAL.test(value)
+    && !JWT_CREDENTIAL.test(value) && !UNREDACTED_LOCATION_ASSIGNMENT.test(value)
+    && !UNREDACTED_URI_AUTHORITY.test(value);
+}
+
+export function validateDiagnosticFinding(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contract !== 'ravenroot.graph-admission/1'
+      || !ADMISSION_PHASES.has(value.phase) || !ADMISSION_REASONS.has(value.reason)
+      || !SAFE_HANDLE.test(value.incidentId || '')
+      || (value.nodeId !== undefined && !safeDiagnosticToken(value.nodeId, 128))
+      || (value.nodeRef !== undefined && !NODE_REF.test(value.nodeRef))
+      || ((value.nodeId === undefined) !== (value.nodeRef === undefined))
+      || (value.propertyName !== undefined && (!PROPERTY_TOKEN.test(value.propertyName)
+        || !safeDiagnosticToken(value.propertyName, 64)))) {
+    throw new Error('Graph admission finding is malformed');
+  }
+  return Object.freeze({ ...value });
+}
+
+export function validateStartupFailure(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contract !== 'ravenroot.startup-failure/1' || !ADMISSION_PHASES.has(value.phase)
+      || !(value.reason === 'STARTUP_FAILED' || SOURCE_REASON.test(value.reason || ''))
+      || !SAFE_HANDLE.test(value.incidentId || '')
+      || (value.nodeId !== undefined && !safeDiagnosticToken(value.nodeId, 128))
+      || (value.nodeRef !== undefined && !NODE_REF.test(value.nodeRef))
+      || ((value.nodeId === undefined) !== (value.nodeRef === undefined))) {
+    throw new Error('Startup failure is malformed');
+  }
+  return Object.freeze({ ...value });
+}
+
+function validatedErrorEnvelope(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contract !== 'ravenroot.error/1'
+      || typeof value.code !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(value.code)
+      || !safeDiagnosticToken(value.message, 512)
+      || (value.error !== undefined && value.error !== value.message)
+      || !SAFE_HANDLE.test(value.correlationId || '')
+      || (value.incidentId !== undefined && !SAFE_HANDLE.test(value.incidentId))) return null;
+  let finding = null;
+  try { if (value.finding !== undefined) finding = validateDiagnosticFinding(value.finding); }
+  catch { return null; }
+  if (finding && value.incidentId !== finding.incidentId) return null;
+  return Object.freeze({ code: value.code, message: value.message, correlationId: value.correlationId,
+    incidentId: value.incidentId || null, finding });
 }
 
 // The runtime refused to compile the artifact's source, and said why. Distinct from
@@ -157,7 +241,12 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
       || (value.deploymentId !== null && value.deploymentId !== undefined
         && (typeof value.deploymentId !== 'string' || !value.deploymentId))
       || (value.diagnostic !== null && value.diagnostic !== undefined
-        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
+        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192
+          || !safeDiagnosticToken(value.diagnostic, 768)))
+      || (value.failure !== null && value.failure !== undefined && (() => {
+        try { validateStartupFailure(value.failure); return false; } catch { return true; }
+      })())
+      || (value.failure !== null && value.failure !== undefined && value.state !== 'FAILED')) {
     throw new Error('Source session response is not a valid process-local status');
   }
   if (expectedSessionId && value.sessionId !== expectedSessionId) {
@@ -173,6 +262,89 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
 const LOCAL_DEPLOYMENT_STATES = new Set([
   'REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING', 'STOPPED', 'FAILED',
 ]);
+const DEPLOYMENT_COMMAND_OUTCOMES = new Set([
+  'ACCEPTED', 'CONVERGED', 'REPLAYED', 'IDEMPOTENCY_CONFLICT', 'STALE_GENERATION',
+  'SUPERSEDED', 'REFUSED', 'FAILED', 'TERMINAL',
+]);
+const LIFECYCLE_COMMANDS = new Set([
+  'START', 'PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP', 'RESTART', 'UNDEPLOY',
+]);
+const LIFECYCLE_COMMANDS_BY_SCOPE = Object.freeze({
+  DEPLOYMENT: LIFECYCLE_COMMANDS,
+  PROCESS: new Set(['PAUSE', 'RESUME', 'CANCEL', 'DRAIN', 'STOP']),
+});
+
+export function validateLifecycleCapabilities(value, expectedScope) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.contractVersion !== 1 || value.scope !== expectedScope
+      || !Array.isArray(value.commands) || value.commands.length === 0
+      || (value.drainBound !== undefined && (typeof value.drainBound !== 'string' || !value.drainBound))) {
+    throw new Error('Lifecycle capabilities are not a supported versioned contract');
+  }
+  const seen = new Set();
+  const allowed = LIFECYCLE_COMMANDS_BY_SCOPE[expectedScope];
+  const commands = value.commands.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+        || !allowed?.has(item.command) || seen.has(item.command)
+        || typeof item.available !== 'boolean' || typeof item.reasonRequired !== 'boolean'
+        || (item.unavailableReason !== null && typeof item.unavailableReason !== 'string')
+        || (item.available && item.unavailableReason !== null)
+        || (!item.available && !item.unavailableReason)) {
+      throw new Error('Lifecycle capabilities contain an invalid command');
+    }
+    seen.add(item.command);
+    return Object.freeze({ ...item });
+  });
+  return Object.freeze({ ...value, commands: Object.freeze(commands) });
+}
+
+function safeGeneration(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function ambiguousDeploymentDelivery(error) {
+  return error instanceof RuntimeRequestError
+    && (error.status == null || (error.status === 200
+      && /could not be read|not valid JSON/i.test(error.message)));
+}
+
+export function validateDeploymentCommandOutcome(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !DEPLOYMENT_COMMAND_OUTCOMES.has(value.outcome)) {
+    throw new Error('Deployment command response is not a valid durable outcome');
+  }
+  const valid = (() => {
+    switch (value.outcome) {
+      case 'ACCEPTED':
+        return typeof value.commandId === 'string' && value.commandId
+          && safeGeneration(value.fromGeneration) && safeGeneration(value.generation)
+          && value.generation === value.fromGeneration + 1;
+      case 'CONVERGED':
+        return typeof value.commandId === 'string' && value.commandId
+          && safeGeneration(value.generation) && typeof value.observed === 'string' && value.observed;
+      case 'REPLAYED':
+        return value.original?.outcome !== 'REPLAYED'
+          && Boolean(validateDeploymentCommandOutcome(value.original));
+      case 'IDEMPOTENCY_CONFLICT':
+        return typeof value.key === 'string' && value.key;
+      case 'STALE_GENERATION':
+        return safeGeneration(value.expected) && safeGeneration(value.generation)
+          && value.expected !== value.generation;
+      case 'SUPERSEDED':
+        return typeof value.by === 'string' && value.by && safeGeneration(value.generation);
+      case 'REFUSED':
+        return typeof value.reason === 'string' && value.reason;
+      case 'FAILED':
+        return typeof value.cause === 'string' && value.cause;
+      case 'TERMINAL':
+        return typeof value.commandId === 'string' && value.commandId && safeGeneration(value.generation);
+      default:
+        return false;
+    }
+  })();
+  if (!valid) throw new Error('Deployment command response is not a valid durable outcome');
+  return value;
+}
 
 const EXECUTION_CONTROL_OUTCOMES = Object.freeze({
   pause: new Set(['PAUSED', 'ALREADY_PAUSED', 'NOT_ACTIVE']),
@@ -193,17 +365,73 @@ function validateExecutionControlResult(value, expectedExecutionId, operation) {
 export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || typeof value.deploymentId !== 'string' || !value.deploymentId
+      || typeof value.tenantId !== 'string' || !value.tenantId
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
+      || (value.deploymentGeneration !== null && value.deploymentGeneration !== undefined
+        && !safeGeneration(value.deploymentGeneration))
       || (value.graphVersion !== null && value.graphVersion !== undefined
         && (typeof value.graphVersion !== 'string' || !value.graphVersion))
+      || !['PROCESS_LOCAL', 'DURABLE'].includes(value.continuity)
+      || (value.deploymentRevision !== null && (!safeGeneration(value.deploymentRevision)
+        || value.deploymentRevision < 1))
+      || (value.desiredState !== null && (typeof value.desiredState !== 'string' || !value.desiredState))
+      || (value.observedState !== null && (typeof value.observedState !== 'string' || !value.observedState))
+      || (value.recoveryFailure !== null
+        && (typeof value.recoveryFailure !== 'string' || !value.recoveryFailure))
       || (value.diagnostic !== null && value.diagnostic !== undefined
-        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
+        && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192
+          || !safeDiagnosticToken(value.diagnostic, 768)))
+      || (value.failure !== null && value.failure !== undefined && (() => {
+        try { validateStartupFailure(value.failure); return false; } catch { return true; }
+      })())
+      || (value.failure !== null && value.failure !== undefined && value.state !== 'FAILED')) {
     throw new Error('Deployment response is not a valid process-local status');
   }
   if (expectedDeploymentId && value.deploymentId !== expectedDeploymentId) {
     throw new Error(`Deployment response id ${value.deploymentId} does not match ${expectedDeploymentId}`);
+  }
+  const durable = value.deploymentGeneration !== null && value.deploymentGeneration !== undefined;
+  if (durable !== (value.continuity === 'DURABLE')
+      || durable !== (value.deploymentRevision !== null)
+      || durable !== (value.desiredState !== null)
+      || durable !== (value.observedState !== null)) {
+    throw new Error('Deployment response carries inconsistent continuity metadata');
+  }
+  if (value.lifecycleCapabilities !== undefined) {
+    validateLifecycleCapabilities(value.lifecycleCapabilities, 'DEPLOYMENT');
+  }
+  return value;
+}
+
+export function validateProcessInventoryPage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.items)
+      || !Number.isSafeInteger(value.maxPageSize) || value.maxPageSize < 1
+      || typeof value.retainedFrom !== 'string'
+      || (value.nextCursor !== null && (typeof value.nextCursor !== 'string' || !value.nextCursor))) {
+    throw new Error('Process inventory response is not a valid authoritative page');
+  }
+  for (const item of value.items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+        || typeof item.tenantId !== 'string' || !item.tenantId
+        || typeof item.processInstanceId !== 'string' || !item.processInstanceId
+        || typeof item.status !== 'string' || !item.status
+        || (item.terminationReason !== null
+          && (typeof item.terminationReason !== 'string' || !item.terminationReason))
+        || typeof item.cancelled !== 'boolean'
+        || typeof item.disposition !== 'string' || !item.disposition
+        || typeof item.graphVersion !== 'string' || !item.graphVersion
+        || !Number.isSafeInteger(item.revision) || item.revision < 1
+        || !Number.isSafeInteger(item.lifecycleGeneration) || item.lifecycleGeneration < 0
+        || !Number.isSafeInteger(item.fencingToken) || item.fencingToken < 0
+        || (item.controlState !== null && item.controlState !== undefined
+          && (typeof item.controlState !== 'string' || !item.controlState))) {
+      throw new Error('Process inventory contains an invalid authoritative target');
+    }
+    if (item.lifecycleCapabilities !== undefined) {
+      validateLifecycleCapabilities(item.lifecycleCapabilities, 'PROCESS');
+    }
   }
   return value;
 }
@@ -352,6 +580,31 @@ export class RavenrootRuntimeClient {
       headers: { 'Content-Type': 'application/graphml+xml; charset=utf-8' },
       body: graphMl,
     });
+  }
+
+  async inspectGraph(graphMl, purpose = 'EXECUTION') {
+    if (!['EXECUTION', 'LOCAL_DEPLOYMENT', 'SOURCE_SESSION'].includes(purpose)) {
+      throw new Error('Unsupported graph admission purpose');
+    }
+    const result = await this.#json(`/v1/graphs/inspect?purpose=${encodeURIComponent(purpose)}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/graphml+xml; charset=utf-8' },
+      body: graphMl,
+    });
+    if (!result || typeof result !== 'object' || Array.isArray(result)
+        || typeof result.valid !== 'boolean') throw new Error('Graph inspection response is malformed');
+    // `findings` was added after the inspection endpoint. An N-1 runtime still returns the
+    // authoritative `valid` flag plus its legacy `violations` array; absence of the new field is
+    // not itself a refusal and must not make optional preflight a dependency of start.
+    if (result.findings === undefined) {
+      if (!Array.isArray(result.violations)) throw new Error('Graph inspection response is malformed');
+      return Object.freeze({ ...result, findings: Object.freeze([]) });
+    }
+    if (!Array.isArray(result.findings) || result.findings.length > 1) {
+      throw new Error('Graph inspection response is malformed');
+    }
+    return Object.freeze({ ...result,
+      findings: Object.freeze(result.findings.map(validateDiagnosticFinding)) });
   }
 
   async run(graphMl, payload = '') {
@@ -563,48 +816,133 @@ export class RavenrootRuntimeClient {
 
   /** Starts a registered deployment; the call answers only once it has reached READY, or the
    * truthful FAILED state if startup rolled back -- never merely "accepted". */
-  async startDeployment(deploymentId) {
-    const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment start requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/start`, {
-      method: 'POST', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+  async startDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'start', options);
   }
 
   /** Stops a deployment and leaves it registered and re-startable -- distinct from
    * {@link #undeployDeployment}, which stops it and then removes the registration. */
-  async stopDeployment(deploymentId) {
-    const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment stop requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/stop`, {
-      method: 'POST', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+  async stopDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'stop', options);
   }
 
   /** A completed stop followed by a start, never the two overlapping (server-side
    * guarantee; see RouteTable's own note on `/v1/deployments/{id}/restart`). */
-  async restartDeployment(deploymentId) {
-    const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment restart requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/restart`, {
-      method: 'POST', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+  async restartDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'restart', options);
   }
 
-  /** Stops the deployment and then removes its registration -- the operation that turns
-   * "registered and controlled as a local deployment" back into nothing, so an abandoned registration
-   * does not outlive the editor session that created it. The response is the STOPPED status captured
-   * at the moment of removal, not a fresh GET (the id no longer resolves after this call). */
-  async undeployDeployment(deploymentId) {
+  async pauseDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'pause', options);
+  }
+
+  async resumeDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'resume', options);
+  }
+
+  async cancelDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'cancel', options);
+  }
+
+  async drainDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'drain', options);
+  }
+
+  /** Stops the deployment and then removes its registration. Legacy servers return the STOPPED
+   * status captured at removal; durable servers return a typed terminal outcome and retain a tombstone
+   * for exact replay even though the id no longer resolves through GET. */
+  async undeployDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'undeploy', options);
+  }
+
+  async #deploymentCommand(deploymentId, action,
+    { expectedGeneration, idempotencyKey, reason, disposition } = {}) {
     const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment undeploy requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+    if (!id) throw new Error(`Deployment ${action} requires an id`);
+    const path = action === 'undeploy' ? `/v1/deployments/${encodeURIComponent(id)}`
+      : `/v1/deployments/${encodeURIComponent(id)}/${action}`;
+    const method = action === 'undeploy' ? 'DELETE' : 'POST';
+
+    // Absence means a compatibility deployment. Presence switches the entire command onto the
+    // durable contract; unsafe int64 values are refused rather than rounded into another fence.
+    if (expectedGeneration === undefined || expectedGeneration === null) {
+      const result = await this.#json(path, { method, headers: { Accept: 'application/json' } });
+      return validateLocalDeploymentStatus(result, id);
+    }
+    if (!safeGeneration(expectedGeneration)) {
+      throw new Error('Deployment generation is outside JavaScript’s safe integer range');
+    }
+    if ((['pause', 'cancel', 'stop', 'undeploy'].includes(action))
+        && (typeof reason !== 'string' || !reason.trim() || reason.length > 256)) {
+      throw new Error(`Deployment ${action} requires a reason of at most 256 characters`);
+    }
+    if (action === 'undeploy'
+        && !['DRAIN_FIRST', 'CANCEL_IN_FLIGHT', 'REFUSE_IF_BUSY'].includes(disposition)) {
+      throw new Error('Deployment undeploy requires an explicit supported disposition');
+    }
+    const key = idempotencyKey || globalThis.crypto?.randomUUID?.();
+    if (typeof key !== 'string' || !key) {
+      throw new Error('Secure deployment idempotency key generation is unavailable');
+    }
+    const headers = {
+      Accept: 'application/json',
+      'Idempotency-Key': key,
+      'X-Ravenroot-Expected-Generation': String(expectedGeneration),
+      ...((['pause', 'cancel', 'stop', 'undeploy'].includes(action))
+        ? { 'X-Ravenroot-Reason': reason.trim() } : {}),
+      ...(action === 'undeploy' ? { 'X-Ravenroot-Undeploy-Disposition': disposition } : {}),
+    };
+    let result;
+    try {
+      result = await this.#json(path, { method, headers });
+    } catch (error) {
+      if (!ambiguousDeploymentDelivery(error)) throw error;
+      // A single transport retry is the only automatic resubmission, and it reuses the exact intent.
+      try {
+        result = await this.#json(path, { method, headers });
+      } catch (secondError) {
+        if (!ambiguousDeploymentDelivery(secondError)) throw secondError;
+        try {
+          const status = await this.deployment(id);
+          return { outcome: null, status, reconciliation: {
+            delivery: 'AMBIGUOUS', authoritative: 'STATE',
+          } };
+        } catch (readError) {
+          if (action === 'undeploy' && readError instanceof RuntimeRequestError
+              && readError.status === 404) {
+            return { outcome: null, status: null, reconciliation: {
+              delivery: 'AMBIGUOUS', authoritative: 'NOT_FOUND',
+            } };
+          }
+          throw readError;
+        }
+      }
+    }
+    const outcome = validateDeploymentCommandOutcome(result);
+    const terminal = outcome.outcome === 'TERMINAL'
+      || (outcome.outcome === 'REPLAYED' && outcome.original.outcome === 'TERMINAL');
+    const refreshOnly = ['STALE_GENERATION', 'SUPERSEDED', 'REFUSED', 'FAILED',
+      'IDEMPOTENCY_CONFLICT'].includes(outcome.outcome);
+    let status = null;
+    const attempts = refreshOnly || terminal ? 1 : 40;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        status = await this.deployment(id);
+      } catch (error) {
+        if (error instanceof RuntimeRequestError && error.status === 404 && action === 'undeploy') {
+          status = null;
+          break;
+        }
+        throw error;
+      }
+      const settled = action === 'stop' ? ['STOPPED', 'FAILED'].includes(status.state)
+        : action === 'undeploy' ? false
+          : ['pause', 'resume', 'cancel', 'drain'].includes(action) ? true
+          : ['READY', 'DEGRADED', 'FAILED'].includes(status.state);
+      if (settled || refreshOnly) break;
+      await this.sleep(250);
+    }
+    return { outcome, status };
   }
 
   async execution(executionId, { signal } = {}) {
@@ -685,11 +1023,12 @@ export class RavenrootRuntimeClient {
       params.set(key, String(value));
     }
     const query = params.toString();
-    return this.#json(`/v1/executions/inventory${query ? `?${query}` : ''}`, {
+    const result = await this.#json(`/v1/executions/inventory${query ? `?${query}` : ''}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal,
     });
+    return validateProcessInventoryPage(result);
   }
 
   /**
@@ -773,6 +1112,117 @@ export class RavenrootRuntimeClient {
       task: validateHumanTaskRow(result.task, policy) });
   }
 
+  /** Applies the canonical settlement document for confirmation, form, custom, or provider UI. */
+  async settleHumanTask(task, action, comment = '', response = null,
+    { signal, capability, overrideReason = null } = {}) {
+    validateHumanTaskCapability(capability);
+    const id = String(task?.taskId || '');
+    const normalizedAction = String(action || '').toUpperCase();
+    if (!id || !Number.isSafeInteger(task?.generation) || task.generation < 1
+        || !['RESOLVE', 'DENY', 'CANCEL'].includes(normalizedAction)) {
+      throw new Error('Human Task settlement requires task id, generation, and a permitted action');
+    }
+    const document = { schemaVersion: 1, action: normalizedAction, comment: String(comment ?? '') };
+    if (normalizedAction === 'RESOLVE') {
+      let envelope = response;
+      if (!envelope && task.interactionPresentation?.kind === 'CONFIRMATION') {
+        envelope = { contract: 'ravenroot.payload/1', schema: 'ravenroot.human-task.confirmation',
+          schemaVersion: '1', kind: 'SCALAR', value: true };
+      }
+      if (!envelope) throw new Error('Resolve requires a typed Human Task response');
+      const bytes = new TextEncoder().encode(JSON.stringify(envelope));
+      let binary = '';
+      bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+      document.response = { contentType: task.interactionPresentation?.kind === 'CONFIRMATION'
+        ? 'application/json' : 'application/vnd.ravenroot.payload+json', payloadBase64: btoa(binary) };
+    }
+    if (overrideReason) document.override = { version: 1, reason: String(overrideReason) };
+    const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/settle?generation=${task.generation}`, {
+      method: 'POST', headers: { Accept: 'application/json',
+        'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(document), signal,
+    });
+    if (!result || result.schemaVersion !== 1 || typeof result.outcome !== 'string'
+        || result.taskId !== id || !Number.isSafeInteger(result.generation)) {
+      throw new Error('Human Task settlement response is invalid');
+    }
+    return Object.freeze(result);
+  }
+
+  /** Issues a short-lived registered-presentation capability for one exact task generation. */
+  async issueHumanTaskInteraction(task, { signal, capability } = {}) {
+    validateHumanTaskCapability(capability);
+    const id = String(task?.taskId || '');
+    if (!id || !Number.isSafeInteger(task?.generation) || task.generation < 1
+        || !['CUSTOM', 'EXTERNAL'].includes(task?.interactionPresentation?.kind)) {
+      throw new Error('Registered Human Task interaction requires an exact custom or external task');
+    }
+    const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/interaction`
+      + `?generation=${task.generation}`, {
+      method: 'POST', headers: { Accept: 'application/json' }, signal,
+    });
+    if (!result || result.schemaVersion !== 1 || typeof result.capability !== 'string'
+        || typeof result.capabilityId !== 'string' || typeof result.launchUri !== 'string'
+        || typeof result.origin !== 'string' || result.taskId !== id
+        || result.generation !== task.generation || !Array.isArray(result.actions)
+        || !result.responseSchema || typeof result.responseSchema.maxBytes !== 'number') {
+      throw new Error('Human Task interaction launch response is invalid');
+    }
+    const launch = new URL(result.launchUri);
+    if (launch.origin !== result.origin || !['http:', 'https:'].includes(launch.protocol)) {
+      throw new Error('Human Task interaction launch origin is invalid');
+    }
+    return Object.freeze({ ...result, launchUri: launch.href });
+  }
+
+  /** Completes through the capability-only endpoint; no bearer or browser credentials are sent. */
+  async completeHumanTaskInteraction(launch, action, comment = '', response = null, { signal } = {}) {
+    if (!this.fetchImpl || !launch?.capability || !launch?.taskId) {
+      throw new Error('Human Task interaction capability is unavailable');
+    }
+    const normalizedAction = String(action || '').toUpperCase();
+    const document = { schemaVersion: 1, capability: launch.capability,
+      action: normalizedAction, comment: String(comment ?? '') };
+    if (normalizedAction === 'RESOLVE') {
+      if (!response || typeof response.contentType !== 'string'
+          || typeof response.payloadBase64 !== 'string') {
+        throw new Error('Registered Human Task resolve requires a bounded encoded response');
+      }
+      document.response = { contentType: response.contentType, payloadBase64: response.payloadBase64 };
+    }
+    const path = '/v1/human-task-interactions/complete';
+    let responseMessage;
+    try {
+      responseMessage = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: 'POST', headers: { Accept: 'application/json',
+          'Content-Type': 'application/json; charset=utf-8' },
+        credentials: 'omit', cache: 'no-store', body: JSON.stringify(document), signal,
+      });
+    } catch (failure) {
+      throw new RuntimeRequestError(failure?.message || 'Human Task interaction request failed',
+        { method: 'POST', path });
+    }
+    const parsed = await responseMessage.json().catch(() => null);
+    if (!responseMessage.ok) {
+      throw new RuntimeRequestError(parsed?.message || parsed?.error || 'Human Task interaction was refused',
+        { status: responseMessage.status, method: 'POST', path });
+    }
+    if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.outcome !== 'string'
+        || parsed.taskId !== launch.taskId || !Number.isSafeInteger(parsed.generation)) {
+      throw new Error('Human Task interaction completion response is invalid');
+    }
+    return Object.freeze(parsed);
+  }
+
+  async revokeHumanTaskInteraction(task, launch, { signal } = {}) {
+    if (!task?.taskId || !Number.isSafeInteger(task.generation) || !launch?.capability) return;
+    await this.#json(`/v1/human-tasks/${encodeURIComponent(task.taskId)}/interaction`
+      + `?generation=${task.generation}`, {
+      method: 'DELETE', headers: { Accept: 'application/json',
+        'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ schemaVersion: 1, capability: launch.capability }), signal,
+    });
+  }
+
   async nodeTypes() {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
     if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');
@@ -828,7 +1278,7 @@ export class RavenrootRuntimeClient {
     const id = String(buildId ?? '');
     if (!id) throw new Error('Program build observation requires a build id');
     const result = await this.#json(`/v1/program-artifacts/builds/${encodeURIComponent(id)}`, {
-      method: 'GET', headers: { Accept: 'application/json' }, signal,
+      method: 'GET', headers: { Accept: "application/json" }, signal,
     });
     return validateProgramBuildSnapshot(result, id);
   }
@@ -1009,8 +1459,8 @@ export class RavenrootRuntimeClient {
         cache: 'no-store',
         headers: this.#headers(options.headers, credential.accessToken),
       });
-    } catch (error) {
-      throw new RuntimeRequestError(error.message || 'the request failed', { method, path });
+    } catch {
+      throw new RuntimeRequestError('Service request failed', { method, path });
     }
     if (response.status === 401 || response.status === 403) {
       await this.#clearAccessTokenIfCurrent(credential);
@@ -1042,11 +1492,15 @@ export class RavenrootRuntimeClient {
       }
     }
     if (!response.ok) {
-      const reason = readFailed
-        ? 'Service response could not be read'
-        : (body && typeof body.error === 'string' && body.error)
-          || (raw.trim() ? raw.trim().slice(0, 200) : 'Service request failed');
-      throw new RuntimeRequestError(reason, { status: response.status, method, path });
+      const envelope = readFailed ? null : validatedErrorEnvelope(body);
+      const legacyCode = !envelope && body && typeof body === 'object' && !Array.isArray(body)
+        && typeof body.error === 'string' && /^[A-Z][A-Z0-9_]{0,127}$/.test(body.error)
+        ? body.error : null;
+      const reason = readFailed ? 'Service response could not be read'
+        : envelope?.message || legacyCode || 'Service request failed';
+      throw new RuntimeRequestError(reason, { status: response.status, method, path,
+        code: envelope?.code || legacyCode, correlationId: envelope?.correlationId || null,
+        incidentId: envelope?.incidentId || null, finding: envelope?.finding || null });
     }
     if (readFailed) {
       throw new RuntimeRequestError('Service response could not be read', { status: response.status, method, path });
@@ -1207,6 +1661,11 @@ function validateVersionedRuntimeEvent(value) {
   }
   for (const field of ['nodeId', 'edgeId']) {
     if (Object.hasOwn(value, field) && value[field] !== null && typeof value[field] !== 'string') invalid();
+  }
+  for (const field of ['deploymentId', 'workloadId']) {
+    if (Object.hasOwn(value, field)
+        && value[field] !== null
+        && (typeof value[field] !== 'string' || value[field].length === 0)) invalid();
   }
   const nativeCursor = value.source === 'RING' ? value.sequence : value.journalOffset;
   // JSON.parse rounds unsafe native numbers. This checks their representable value only; the

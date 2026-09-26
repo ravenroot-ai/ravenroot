@@ -59,7 +59,13 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes,
     }
 
     String json(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy, String tenantId) {
-        return limitsJson() + workspaceJson(tenantId) + humanTasksJson(humanTaskPolicy) + "}";
+        return json(humanTaskPolicy, tenantId, false);
+    }
+
+    String json(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy, String tenantId,
+                boolean registeredPresentationsEnabled) {
+        return limitsJson() + workspaceJson(tenantId)
+                + humanTasksJson(humanTaskPolicy, registeredPresentationsEnabled) + "}";
     }
 
     private String limitsJson() {
@@ -76,9 +82,20 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes,
     }
 
     private static String humanTasksJson(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        return humanTasksJson(humanTaskPolicy, false);
+    }
+
+    private static String humanTasksJson(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                         boolean registeredPresentationsEnabled) {
         Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         var confirmation = humanTaskPolicy.confirmation();
-        return ",\"humanTasks\":{\"schemaVersion\":1"
+        return ",\"humanTasks\":{\"schemaVersion\":2"
+                + ",\"responderEnforcementEnabled\":" + humanTaskPolicy.responderEnforcementEnabled()
+                + ",\"overrideScope\":\"ravenroot.human-task.override\""
+                + ",\"formSchemaVersions\":[1]"
+                + ",\"registeredPresentationProtocolVersions\":[1]"
+                + ",\"registeredPresentationsEnabled\":" + registeredPresentationsEnabled
+                + ",\"capabilityCompletionPath\":\"/v1/human-task-interactions/complete\""
                 + ",\"confirmationPresentationVersions\":[1]"
                 + ",\"reviewPresentationVersions\":[1]"
                 + ",\"confirmationPromptMaxUtf8Bytes\":" + confirmation.maxPromptUtf8Bytes()

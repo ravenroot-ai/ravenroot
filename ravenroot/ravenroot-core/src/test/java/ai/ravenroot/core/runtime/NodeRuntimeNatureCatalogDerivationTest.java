@@ -48,14 +48,15 @@ class NodeRuntimeNatureCatalogDerivationTest {
     }
 
     @Test
-    void anOrdinaryBehaviorThatDeclaresNothingStaysAWorker() {
+    void anOrdinaryBehaviorThatDeclaresNothingDefaultsToWorkerAndAllowsTraversal() {
         // The matching negative. Derivation must reach source-capable behaviors and nothing else, or
         // it is not a derivation but a blanket rewrite.
         BehaviorRegistry registry = registryWith(ordinary("kafka.produce", null, Set.of()));
 
         NodeTypeDescriptor published = registry.descriptor("kafka.produce").orElseThrow();
         assertEquals(NodeRuntimeNature.WORKER, published.effectiveDefaultNature());
-        assertEquals(Set.of(NodeRuntimeNature.WORKER), published.effectiveAllowedNatures());
+        assertEquals(Set.of(NodeRuntimeNature.WORKER, NodeRuntimeNature.TRAVERSAL),
+                published.effectiveAllowedNatures());
         assertFalse(published.declaresNature(), "the descriptor's own declaration must be left alone");
     }
 

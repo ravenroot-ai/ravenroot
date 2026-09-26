@@ -11,4 +11,13 @@
     <dependency><groupId>ai.ravenroot</groupId><artifactId>ravenroot-persistence-sqlite</artifactId><version>${project.version}</version><scope>test</scope></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
+  <build>
+    <testResources>
+      <testResource><directory>src/test/resources</directory></testResource>
+      <testResource>
+        <directory>${project.basedir}/../../../scripts/fixtures/minio</directory>
+        <includes><include>minio-fixtures.properties</include></includes>
+      </testResource>
+    </testResources>
+  </build>
 </project>

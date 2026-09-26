@@ -112,3 +112,18 @@ export function projectVisualGroups({ graph, groups = [], state = {}, positions 
     originalEdgeIdsByVisibleId, syntheticIds, hiddenNodeIds, hiddenEdgeIds, groupByNodeId,
     identities, valid };
 }
+
+/** The sole topology contract consumed by Design arrangements. */
+export function visualGroupLayoutInput(projection) {
+  if (!projection) return { nodeIds: [], edgeIds: [], collapsedGroups: [] };
+  return {
+    // Expanded headers describe presentation and never receive a rank or force of their own.
+    nodeIds: projection.nodes.filter(node => node.role !== 'header').map(node => node.id),
+    edgeIds: projection.edges.map(edge => edge.id),
+    collapsedGroups: projection.groups.filter(group => group.collapsed).map(group => ({
+      id: group.id,
+      summaryId: group.summaryId,
+      memberNodeIds: [...group.memberNodeIds],
+    })),
+  };
+}

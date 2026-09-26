@@ -103,5 +103,9 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
         return new AmqpConsumerSource(configuration, credentials, profiles, policies, protocol, executor, clock);
     }
 
+    @Override public Set<String> sourceStartFailureCodes() {
+        return AmqpSourceStartFailure.codes();
+    }
+
     static Set<String> knownConfiguration() { return CONFIGURATION; }
 }

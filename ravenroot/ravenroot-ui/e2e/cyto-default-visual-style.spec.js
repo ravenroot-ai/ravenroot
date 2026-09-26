@@ -190,17 +190,34 @@ test('GraphML coordinates remain exact until explicit Design performs its comple
   const exported = readFileSync(await download.path(), 'utf8');
   expect(coordinatePayload(exported)).toEqual(coordinatePayload(graphMl));
 
-  await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   await expect(page.locator('.doc-pane--active')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', {
     timeout: 10_000,
   });
   await expect.poll(async () => (await activeView(page)).positions).not.toEqual(before.positions);
-  expect(await activeView(page)).toMatchObject({
-    modelPositions: before.modelPositions,
-    history: before.history,
+  const rendered = await activeView(page);
+  expect(rendered).toMatchObject({
+    modelPositions: rendered.positions,
+    history: {
+      depth: before.history.depth + 1,
+      dirty: true,
+      canUndo: true,
+      undoLabel: 'Render graph',
+    },
     style: 'cyto',
     layout: 'cyto',
+  });
+
+  await page.locator('#btn-undo').click();
+  await expect.poll(async () => (await activeView(page)).positions).toEqual(before.positions);
+  expect(await activeView(page)).toMatchObject({
+    modelPositions: before.modelPositions,
+    history: {
+      depth: before.history.depth,
+      dirty: before.history.dirty,
+      canUndo: before.history.canUndo,
+    },
   });
 });
 
@@ -248,7 +265,7 @@ test('replace retires Monitoring and restores the incoming graph with Design ren
     window.__replaceRetiredCy = owner.cy;
     window.__replaceRetiredRenderer = owner.renderer;
     return {
-      layoutGeneration: owner.layoutSessionToken.generation,
+      layoutGeneration: owner.layoutSessionToken?.generation ?? null,
       rendererGeneration: owner.renderer.token.generation,
     };
   }, target);
@@ -271,7 +288,9 @@ test('replace retires Monitoring and restores the incoming graph with Design ren
       oldCyDestroyed: window.__replaceRetiredCy.destroyed(),
       oldRendererRetired: window.__replaceRetiredRenderer.token.generation
         === previous.rendererGeneration && owner.renderer.token.generation !== previous.rendererGeneration,
-      oldLayoutRetired: owner.layoutSessionToken?.generation !== previous.layoutGeneration,
+      oldLayoutRetired: previous.layoutGeneration == null
+        ? owner.layoutSessionToken == null
+        : owner.layoutSessionToken?.generation !== previous.layoutGeneration,
     };
   }, [target, retired])).toEqual({
     hosts: 0,

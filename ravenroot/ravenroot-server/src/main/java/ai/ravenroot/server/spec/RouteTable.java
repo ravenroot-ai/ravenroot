@@ -242,13 +242,24 @@ public final class RouteTable {
             // contexts and their exact-origin protocol. NEVER excludes both the S2S grant exchange
             // and the child viewer's proof-bound surface from the authoring assistant.
             new RouteDescriptor(Set.of("POST"), "/v1/embed/sessions",
-                    "Creates a one-use embedded-viewer launch ticket from an opaque, pre-registered "
-                            + "registration id. Requires a WORKLOAD bearer and accepts no graph coordinates.",
+                    "Creates a one-use embedded-viewer launch ticket from either an opaque legacy "
+                            + "registration or an exact READY deployment selection under dynamic policy.",
                     true, false, 201,
                     List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
                             WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
                             WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
                             WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/embed/deployments",
+                    "Lists a bounded page of the workload tenant's READY process-local deployment selections.",
+                    true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE), NEVER, false),
+            new RouteDescriptor(Set.of("DELETE"), "/v1/embed/grants/{id}",
+                    "Idempotently revokes one dynamic embed grant owned by the authenticated workload.",
+                    true, false, 204,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/embed/acknowledgements",
                     "Records the integrating BFF's authenticated, one-use acknowledgement of the "
                             + "exact viewer channel before child exchange is permitted.",
@@ -285,6 +296,20 @@ public final class RouteTable {
                     "Streams bounded execution observations for the exact deployment incarnation pinned "
                             + "by an opt-in embed registration and browser proof-of-possession session.",
                     true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
+                            WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/embed/runs",
+                    "Reads a bounded, server-filtered run list for one exact v2 embed deployment binding.",
+                    true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
+                            WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/embed/executions",
+                    "Requests one idempotent traversal under a separately authorized exact v2 embed binding.",
+                    true, false, Set.of(200, 202),
                     List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
                             WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
                             WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
@@ -341,7 +366,8 @@ public final class RouteTable {
                             + "Re-registering the same id with the same graph returns the current "
                             + "status unchanged; with a different graph it is a 409. An explicit ?scope= other than "
                             + "LOCAL_PROCESS is refused rather than degraded. The response scope is always "
-                            + "LOCAL_PROCESS: no durability, lease, fencing, failover or cluster claim.",
+                            + "LOCAL_PROCESS. A deploymentGeneration field identifies durable lifecycle intent; "
+                            + "the runtime remains process-local and makes no cluster ownership claim.",
                     true, true, 200,
                     concat(STANDARD_ERRORS, ErrorCode.GRAPHML_DOCUMENT_TOO_LARGE.code(),
                             ErrorCode.GRAPHML_RESOURCE_LIMIT.code(), ErrorCode.GRAPHML_UNSAFE_XML.code(),
@@ -353,8 +379,11 @@ public final class RouteTable {
                     "GET inspects and DELETE undeploys exactly one authenticated tenant's process-local "
                             + "deployment. Undeploy stops first and only then removes the registration, so "
                             + "it is strictly distinct from POST .../stop, which leaves the deployment "
-                            + "registered and re-startable. Unknown ids, sibling-tenant ids and an id "
-                            + "already undeployed are the identical nondisclosing 404.",
+                            + "registered and re-startable. GET gives unknown ids, sibling-tenant ids and removed "
+                            + "ids the identical nondisclosing 404. Legacy repeated DELETE does likewise; durable "
+                            + "DELETE retains a tenant-scoped tombstone for typed replay or refusal. Durable Undeploy requires "
+                            + "Idempotency-Key, X-Ravenroot-Expected-Generation, X-Ravenroot-Reason and an explicit "
+                            + "X-Ravenroot-Undeploy-Disposition.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
@@ -377,7 +406,8 @@ public final class RouteTable {
                             + "starting a READY deployment answers immediately with its current status. "
                             + "Subject to this pod's active-deployment cap, which counts deployments a "
                             + "graceful shutdown would owe time to and so is checked here rather than at "
-                            + "registration; exceeding it is a 429.",
+                            + "registration; exceeding it is a 429. Durable targets require Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code(),
@@ -386,13 +416,15 @@ public final class RouteTable {
                     "Stops one process-local deployment and leaves it registered and re-startable. Closes "
                             + "admission and inbound sources first, then releases only that deployment's own "
                             + "domain -- never a sibling deployment and never the shared ActorSystem. "
-                            + "Idempotent: stopping a stopped deployment answers STOPPED.",
+                            + "Idempotent: stopping a stopped deployment answers STOPPED. Durable targets also "
+                            + "require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/restart",
                     "A completed stop followed by a start, never the two overlapping, so no source "
-                            + "subscription is duplicated across the restart.",
+                            + "subscription is duplicated across the restart. Durable targets require "
+                            + "Idempotency-Key and X-Ravenroot-Expected-Generation; Restart has no reason header.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
@@ -744,12 +776,51 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-tasks/{taskId}/settle",
+                    "Applies the canonical generation-fenced Human Task settlement document used by HTTP, "
+                            + "the interaction WebSocket, Workbench, and CLI. Typed response bytes remain "
+                            + "separate from action and comment; an explicit override carries a bounded reason "
+                            + "and requires Human Task override authority.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST", "DELETE"),
+                    "/v1/human-tasks/{taskId}/interaction",
+                    "Issues or durably revokes one expiring, task- and generation-bound capability for an "
+                            + "operator-registered custom presentation or external provider. The response "
+                            + "contains only the authorized review projection and pinned response contract.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-task-interactions/complete",
+                    "Completes one configured external-provider interaction using only its bounded signed capability. Ambient "
+                            + "Authorization and Cookie credentials are refused; origin, provider signature, "
+                            + "task generation, schema, action, expiry, and durable revocation are fenced.",
+                    false, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks",
                     "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. "
                             + "Filters cover task and execution identity, lifecycle, age, and actionable, terminal, "
                             + "orphaned, or non-resumable classification.",
                     true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks/{taskId}/attention",
+                    "Returns exact tenant-explicit Human Task review through an authorized override. "
+                            + "Tenant administrators remain tenant-local; platform administrators may select "
+                            + "another tenant. Audit evidence excludes review and response content.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/{taskId}/settle",
+                    "Applies the tenant-explicit canonical Human Task override settlement with a bounded "
+                            + "reason and payload-free audit outcome.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/purge",
                     "Dry-runs or applies a bounded, idempotent administrative reconciliation. CANCEL uses normal "
                             + "task re-entry semantics; FORCE_ABANDON atomically closes inconsistent work without "

@@ -19,7 +19,7 @@ public final class NodeRuntimeConcurrencyValidator {
 
     public void validate(GraphDefinition graph) {
         Objects.requireNonNull(graph, "graph");
-        graph.nodes().forEach(this::validateNode);
+        graph.nodes().stream().sorted(java.util.Comparator.comparing(GraphNode::id)).forEach(this::validateNode);
     }
 
     private void validateNode(GraphNode node) {

@@ -74,8 +74,47 @@ class DeploymentLifecycleHttpTest {
     @Test
     void durableLifecycleHttpCommandsExposeGenerationAndIdempotentOutcomes() throws Exception {
         try (var fixture = new Fixture(true)) {
-            assertEquals(200, fixture.request(
-                    "POST", "/v1/deployments?id=durable", NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            var registered = fixture.request(
+                    "POST", "/v1/deployments?id=durable", NO_SOURCE_GRAPH, "tenant-a");
+            assertEquals(200, registered.statusCode(), registered.body());
+            assertTrue(registered.body().contains("\"tenantId\":\"tenant-a\""), registered.body());
+            assertTrue(registered.body().contains("\"graphVersion\":"), registered.body());
+            assertTrue(registered.body().contains("\"continuity\":\"DURABLE\""), registered.body());
+            assertTrue(registered.body().contains("\"deploymentRevision\":1"), registered.body());
+            assertTrue(registered.body().contains("\"desiredState\":\"STOPPED\""), registered.body());
+            assertTrue(registered.body().contains("\"observedState\":\"COLD\""), registered.body());
+            assertTrue(registered.body().contains("\"deploymentGeneration\":0"), registered.body());
+            assertTrue(registered.body().contains("\"contractVersion\":1"), registered.body());
+            assertTrue(registered.body().contains("\"scope\":\"DEPLOYMENT\""), registered.body());
+            assertTrue(registered.body().contains("\"command\":\"PAUSE\",\"available\":true"),
+                    registered.body());
+            assertTrue(registered.body().contains("\"command\":\"DRAIN\",\"available\":true"),
+                    registered.body());
+            assertTrue(registered.body().contains("\"command\":\"RESUME\",\"available\":false,"
+                    + "\"reasonRequired\":false,\"unavailableReason\":\"INCOMPATIBLE_STATE\""),
+                    registered.body());
+            assertTrue(registered.body().contains("\"drainBound\":\"PT"), registered.body());
+            assertTrue(fixture.request("GET", "/v1/deployments", "", "tenant-a").body()
+                    .contains("\"deploymentGeneration\":0"));
+
+            var deniedListing = fixture.request("GET", "/v1/deployments", "", "tenant-a-viewer");
+            assertEquals(200, deniedListing.statusCode(), deniedListing.body());
+            assertTrue(deniedListing.body().contains("\"command\":\"START\",\"available\":false"),
+                    deniedListing.body());
+            assertTrue(deniedListing.body().contains("\"unavailableReason\":\"NOT_AUTHORIZED\""),
+                    deniedListing.body());
+            var deniedStart = fixture.command("/v1/deployments/durable/start", "tenant-a-viewer",
+                    "denied-start", 0, null);
+            assertEquals(403, deniedStart.statusCode(), deniedStart.body());
+            assertTrue(fixture.request("GET", "/v1/deployments/durable", "", "tenant-a").body()
+                    .contains("\"deploymentGeneration\":0"), "a denied command must not mutate intent");
+            assertEquals(403, fixture.request("POST", "/v1/deployments?id=denied",
+                    NO_SOURCE_GRAPH, "tenant-a-viewer").statusCode());
+
+            var legacyStop = fixture.request(
+                    "POST", "/v1/deployments/durable/stop", "", "tenant-a");
+            assertEquals(400, legacyStop.statusCode(),
+                    "the former UI request is reproducibly incomplete once persistence is enabled");
 
             var start = fixture.command("/v1/deployments/durable/start", "tenant-a",
                     "start-1", 0, null);
@@ -83,25 +122,54 @@ class DeploymentLifecycleHttpTest {
             assertTrue(start.body().contains("\"outcome\":\"ACCEPTED\""), start.body());
             assertTrue(start.body().contains("\"generation\":1"), start.body());
 
-            var pause = fixture.command("/v1/deployments/durable/pause", "tenant-a",
-                    "pause-1", 1, "maintenance");
-            assertTrue(pause.body().contains("\"generation\":2"), pause.body());
-            var replay = fixture.command("/v1/deployments/durable/pause", "tenant-a",
-                    "pause-1", 1, "maintenance");
+            assertTrue(fixture.request("GET", "/v1/deployments/durable", "", "tenant-a").body()
+                    .contains("\"deploymentGeneration\":1"));
+
+            var stop = fixture.command("/v1/deployments/durable/stop", "tenant-a",
+                    "stop-1", 1, "operator maintenance");
+            assertTrue(stop.body().contains("\"generation\":2"), stop.body());
+            var replay = fixture.command("/v1/deployments/durable/stop", "tenant-a",
+                    "stop-1", 1, "operator maintenance");
             assertTrue(replay.body().contains("\"outcome\":\"REPLAYED\""), replay.body());
 
-            var stale = fixture.command("/v1/deployments/durable/resume", "tenant-a",
-                    "resume-stale", 1, null);
+            var stale = fixture.command("/v1/deployments/durable/restart", "tenant-a",
+                    "restart-stale", 1, null);
             assertTrue(stale.body().contains("\"outcome\":\"STALE_GENERATION\""), stale.body());
-            var resume = fixture.command("/v1/deployments/durable/resume", "tenant-a",
-                    "resume-1", 2, null);
-            assertTrue(resume.body().contains("\"generation\":3"), resume.body());
-            var cancel = fixture.command("/v1/deployments/durable/cancel", "tenant-a",
-                    "cancel-1", 3, "operator request");
-            assertTrue(cancel.body().contains("\"generation\":4"), cancel.body());
-            var drain = fixture.command("/v1/deployments/durable/drain", "tenant-a",
-                    "drain-1", 4, null);
-            assertTrue(drain.body().contains("\"generation\":5"), drain.body());
+            var restartedReady = fixture.command("/v1/deployments/durable/start", "tenant-a",
+                    "start-2", 2, null);
+            assertTrue(restartedReady.body().contains("\"generation\":3"), restartedReady.body());
+            var restart = fixture.command("/v1/deployments/durable/restart", "tenant-a",
+                    "restart-1", 3, null);
+            assertTrue(restart.body().contains("\"generation\":4"), restart.body());
+
+            var removed = fixture.undeploy("/v1/deployments/durable", "tenant-a",
+                    "undeploy-1", 4, "retired", "CANCEL_IN_FLIGHT");
+            assertTrue(removed.body().contains("\"outcome\":\"TERMINAL\""), removed.body());
+            assertTrue(removed.body().contains("\"generation\":5"), removed.body());
+            assertEquals(404, fixture.request("GET", "/v1/deployments/durable", "", "tenant-a")
+                    .statusCode(), "terminal durable undeploy removes the process-local runtime");
+            assertTrue(fixture.request("GET", "/v1/deployments", "", "tenant-a").body()
+                    .contains("\"deployments\":[]"));
+
+            var removalReplay = fixture.undeploy("/v1/deployments/durable", "tenant-a",
+                    "undeploy-1", 4, "retired", "CANCEL_IN_FLIGHT");
+            assertTrue(removalReplay.body().contains("\"outcome\":\"REPLAYED\""), removalReplay.body());
+            assertTrue(removalReplay.body().contains("\"outcome\":\"TERMINAL\""), removalReplay.body());
+            assertEquals(409, fixture.request(
+                    "POST", "/v1/deployments?id=durable", NO_SOURCE_GRAPH, "tenant-a").statusCode(),
+                    "a tombstoned durable identity is never silently reused");
+        }
+    }
+
+    @Test
+    void persistenceRoutesOnlyDurableAliasesAndPreservesLegacySourceSessionCompatibility() throws Exception {
+        try (var fixture = new Fixture(true)) {
+            assertEquals(202, fixture.request(
+                    "POST", "/v1/source-sessions?id=legacy", SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/legacy/stop", "", "tenant-a"), "STOPPED",
+                    "a source-session alias must not be forced through durable headers merely because a registry exists");
+            assertFalse(fixture.request("GET", "/v1/deployments/legacy", "", "tenant-a").body()
+                    .contains("deploymentGeneration"));
         }
     }
 
@@ -582,6 +650,19 @@ class DeploymentLifecycleHttpTest {
                     HttpResponse.BodyHandlers.ofString());
         }
 
+        HttpResponse<String> undeploy(String path, String tenant, String key, long generation,
+                                      String reason, String disposition) throws Exception {
+            HttpRequest request = HttpRequest.newBuilder(
+                            URI.create("http://127.0.0.1:" + server.port() + path))
+                    .header("X-Test-Tenant", tenant)
+                    .header("Idempotency-Key", key)
+                    .header("X-Ravenroot-Expected-Generation", Long.toString(generation))
+                    .header("X-Ravenroot-Reason", reason)
+                    .header("X-Ravenroot-Undeploy-Disposition", disposition)
+                    .DELETE().build();
+            return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        }
+
         HttpResponse<String> request(String method, String path, String body, String tenant) throws Exception {
             HttpRequest.BodyPublisher publisher = body.isEmpty()
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body);
@@ -652,10 +733,14 @@ class DeploymentLifecycleHttpTest {
         public AuthenticatedPrincipal authenticate(Headers headers) throws AuthenticationException {
             String tenant = headers.getFirst("X-Test-Tenant");
             if (tenant == null || tenant.isBlank()) throw new AuthenticationException("missing tenant");
+            boolean viewer = "tenant-a-viewer".equals(tenant);
             return new AuthenticatedPrincipal(tenant, AuthenticatedPrincipal.Type.USER,
-                    "urn:ravenroot:test", tenant, Set.of(Role.OPERATOR, Role.PLATFORM_ADMIN),
+                    "urn:ravenroot:test", viewer ? "tenant-a" : tenant,
+                    viewer ? Set.of(Role.OPERATOR) : Set.of(Role.OPERATOR, Role.PLATFORM_ADMIN),
                     java.util.Arrays.stream(AuthorizationAction.values())
                             .filter(AuthorizationAction::available)
+                            .filter(action -> !viewer || action != AuthorizationAction.EXECUTION_START
+                                    && action != AuthorizationAction.EXECUTION_CONTROL)
                             .map(AuthorizationAction::requiredScope)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));
         }

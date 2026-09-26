@@ -2,7 +2,7 @@
 
 This page records the public verification surface for the native deployment viewer and the
 cross-origin embedded viewer. It is evidence for renderer and authority parity, not a pixel-perfect
-requirement: Cyto, N8N, and Elastic deliberately use different geometry.
+requirement: Design and Monitoring deliberately use different geometry.
 
 ## Automated coverage
 
@@ -11,7 +11,8 @@ binding, lifecycle transitions, bounded reconnect, cursor-gap handling, terminal
 shared style semantics. Browser coverage verifies:
 
 - the native **Open read-only view** attachment and the absence of edit or lifecycle commands;
-- dark and light rendering for Cyto, N8N, and Elastic in both native and embedded viewers;
+- dark and light rendering for the historical v1 renderer matrix and the public v2 Design and
+  Monitoring modes in both native and embedded viewers;
 - equivalent node identity, labels, bypass state, edge meaning, lifecycle, and runtime-state data;
 - cross-origin launch, acknowledgement, projection, and signed observation without cookies;
 - no bearer, proof key, cursor, topology, or runtime-event leak through URL, storage, globals, or
@@ -21,6 +22,35 @@ shared style semantics. Browser coverage verifies:
 The visual test requires exact semantic presentation equality, enforces a bounded pixel-difference
 budget that allows renderer-owned geometry, then saves the rendered native view, embedded view, and
 pixel diff for each matrix cell.
+
+The v2 unit matrix covers zero, one, and three authorized selector rows and generation-fenced runtime
+reset. The production three-origin fixture exercises zero/one/three reconciliation, a lost Start
+response retried with the same idempotency identity, selected-process observation and durable replay,
+same-id deployment replacement, and registration revocation. Store contract tests cover a fully
+compacted process stream and compaction between bounded replay pages. Mode switching preserves each
+viewport without layout, fit, or simulation; **Render** affects only the selected mode. Design Render
+uses the projected persisted arrangement (`keep`, `flow`, `organic`, `hierarchical`,
+`hierarchical-new`, or `layered-down`) and recomputes edge routes after layout completion.
+Hierarchical Render retains native east-to-west ports and rounded segments. The two layered
+arrangements retain the drawing engine's published route and label placement instead of replacing it
+with a generic curve pass.
+
+The historical image rows below retain their filenames for release continuity. The public v2 UI
+exposes only Design, Monitoring, and Render; renderer implementation names are not public choices.
+Design uses the native Workbench 80x80 card, packaged artwork, bottom label placement, and a stable
+visible initial for an unknown semantic node type. The production iframe permits only `data:` images
+for this packaged SVG artwork; it does not permit same-origin or remote image fetches. The v2 browser
+matrix covers Design and Monitoring at desktop and narrow responsive widths in both themes,
+including the run selector's zero/one/three states; the committed desktop parity captures follow.
+
+## V2 semantic viewer evidence
+
+| Theme / mode | Native | Embedded | Difference |
+|---|---|---|---|
+| Dark Design | ![Dark native Design](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-native-design.png) | ![Dark embedded Design](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-embed-design.png) | ![Dark Design difference](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-design-diff.png) |
+| Dark Monitoring | ![Dark native Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-native-monitoring.png) | ![Dark embedded Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-embed-monitoring.png) | ![Dark Monitoring difference](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-monitoring-diff.png) |
+| Light Design | ![Light native Design](../qa/evidence/embedded-deployment-viewer-v2/v2-light-native-design.png) | ![Light embedded Design](../qa/evidence/embedded-deployment-viewer-v2/v2-light-embed-design.png) | ![Light Design difference](../qa/evidence/embedded-deployment-viewer-v2/v2-light-design-diff.png) |
+| Light Monitoring | ![Light native Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-light-native-monitoring.png) | ![Light embedded Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-light-embed-monitoring.png) | ![Light Monitoring difference](../qa/evidence/embedded-deployment-viewer-v2/v2-light-monitoring-diff.png) |
 
 ## Dark theme
 
@@ -43,7 +73,7 @@ pixel diff for each matrix cell.
 From `ravenroot/ravenroot-ui`, install the locked dependencies, build the UI, and run:
 
 ```console
-$ RR_VISUAL_EVIDENCE_DIR=../../docs/qa/evidence/embedded-deployment-viewer \
+$ RR_VISUAL_EVIDENCE_DIR=../../docs/qa/evidence/embedded-deployment-viewer-v2 \
     npx playwright test e2e/viewer-visual-parity.spec.js
 ```
 

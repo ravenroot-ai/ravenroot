@@ -96,6 +96,26 @@ class EmbedBrowserConfigurationTest {
                 () -> configuration(with(enabled, "RAVENROOT_EMBED_TICKET_TTL_SECONDS", "0")));
     }
 
+    @Test
+    void dynamicOnlyCompositionIsExplicitBoundedAndRegistrationIndependent() {
+        var dynamic = Map.of(
+                "RAVENROOT_EMBED_ENABLED", "true",
+                "RAVENROOT_EMBED_VIEWER_ORIGIN", "https://viewer.example",
+                "RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED", "true",
+                "RAVENROOT_EMBED_DYNAMIC_ORIGIN_POLICY", "authenticated",
+                "RAVENROOT_EMBED_DYNAMIC_GRANT_TTL_SECONDS", "90",
+                "RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY", "17");
+        var configuration = EmbedBrowserConfiguration.fromEnvironment(dynamic,
+                null, null, null, event -> { }, Clock.systemUTC());
+        assertTrue(configuration.active());
+        assertTrue(configuration.dynamicPolicy().enabled());
+        assertEquals(java.time.Duration.ofSeconds(90), configuration.dynamicGrantTtl());
+        assertEquals(17, configuration.dynamicGrantCapacity());
+        assertThrows(IllegalArgumentException.class, () -> EmbedBrowserConfiguration.fromEnvironment(
+                with(dynamic, "RAVENROOT_EMBED_DYNAMIC_GRANT_CAPACITY", "100001"),
+                null, null, null, event -> { }, Clock.systemUTC()));
+    }
+
     private EmbedBrowserConfiguration configuration(Map<String, String> environment) {
         return EmbedBrowserConfiguration.fromEnvironment(environment,
                 new AuthorizedEmbedSessionCreation(authorization, registrations), registrations,

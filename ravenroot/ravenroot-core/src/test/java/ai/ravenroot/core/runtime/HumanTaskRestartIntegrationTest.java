@@ -1,5 +1,7 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.application.ExecutionEvent;
+import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
@@ -21,6 +23,7 @@ import ai.ravenroot.api.persistence.CanonicalGraphMl;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
@@ -71,6 +74,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -527,6 +531,11 @@ class HumanTaskRestartIntegrationTest {
                     .toCompletableFuture().join();
             pin = storedDefinition.key().contentId().value();
             long revision = createRunning(store, key, originalTraversal, pin);
+            revision = store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .recordOrigin(ExecutionOrigin.of(
+                            "source-session-a", "source-message-1", "source-correlation-1"))
+                    .build()).toCompletableFuture().join().revision();
             var tasks = new HumanTaskService(store, CLOCK);
             BehaviorRegistry behaviors = standard(tasks);
 
@@ -563,6 +572,7 @@ class HumanTaskRestartIntegrationTest {
 
         var captures = new AtomicInteger();
         var observed = new AtomicReference<Object>();
+        var continuationEvents = java.util.Collections.synchronizedList(new ArrayList<ExecutionEvent>());
         try (var store = new SqliteExecutionStore(database, CLOCK);
              var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
                      GraphDefinitionReferences.NONE);
@@ -574,23 +584,38 @@ class HumanTaskRestartIntegrationTest {
                 return java.util.concurrent.CompletableFuture.completedFuture(
                         NodeResult.continueWith(message.payload()));
             });
-            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
-                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                    "recovery-worker", TTL);
-            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-worker",
-                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
-                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+            var continuationMonitor = new ExecutionMonitor();
+            try (var subscription = continuationMonitor.subscribe(continuationEvents::add)) {
+                var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                        engine, behaviors, continuationMonitor, ExecutionIdentitySource.randomUuids(),
+                        "recovery-worker", TTL);
+                var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-worker",
+                        10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                        new HumanTaskHandlerDispatcher(store, tasks, continuation));
 
-            assertTrue(recovery.sweepOnce().stream()
-                    .anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance));
-            assertEquals(1, captures.get());
-            assertInstanceOf(Map.class, observed.get());
-            assertEquals(ProcessInstanceStatus.COMPLETED,
-                    store.load(key).toCompletableFuture().join().state().status());
-            assertEquals(1, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size(),
-                    "re-entry must route past the task node instead of registering it again");
-            recovery.sweepOnce();
-            assertEquals(1, captures.get(), "the acknowledged continuation must not replay");
+                assertTrue(recovery.sweepOnce().stream()
+                        .anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance));
+                assertEquals(1, captures.get());
+                assertInstanceOf(Map.class, observed.get());
+                assertEquals(ProcessInstanceStatus.COMPLETED,
+                        store.load(key).toCompletableFuture().join().state().status());
+                assertEquals(1, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size(),
+                        "re-entry must route past the task node instead of registering it again");
+                recovery.sweepOnce();
+                assertEquals(1, captures.get(), "the acknowledged continuation must not replay");
+            }
+            assertFalse(continuationEvents.isEmpty(), "the resumed traversal must publish events");
+            assertTrue(continuationEvents.stream().allMatch(event ->
+                            key.processInstanceId().equals(event.processInstanceId())
+                                    && "source-session-a".equals(event.deploymentId())
+                                    && "source-message-1".equals(event.workloadId())),
+                    "the SQLite-restored source identity must reach every re-entry event: "
+                            + continuationEvents);
+            assertTrue(continuationEvents.stream().anyMatch(event -> "capture".equals(event.nodeId())),
+                    "post-task work must stay in the source timeline");
+            assertTrue(continuationEvents.stream().anyMatch(event ->
+                            event.type() == ExecutionEventType.EXECUTION_COMPLETED),
+                    "the re-entry terminal event must stay in the source timeline");
         }
 
         try (var store = new SqliteExecutionStore(database, CLOCK)) {

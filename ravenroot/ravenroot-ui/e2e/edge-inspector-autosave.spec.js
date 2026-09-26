@@ -307,7 +307,9 @@ test('document switching flushes only the owning edge draft and new-edge creatio
   }
   await selectOnly(page, EDGE_ID);
   await page.locator('#edge-editor textarea[name="description"]').fill('First document edge');
+  await expect(page.locator('#document-switcher')).toHaveAttribute('aria-expanded', 'false');
   await page.locator('#document-switcher').click();
+  await expect(page.locator('#document-switcher-dialog')).toBeVisible();
   await page.locator(`[data-document-activate="${ids.second}"]`).click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().id)).toBe(ids.second);
   expect(await page.evaluate(({ first, edgeId }) =>

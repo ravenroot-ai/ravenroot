@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.amqp091;
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
@@ -552,8 +553,15 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
 
         static Settings from(NodeConfiguration configuration, AmqpProfileResolver resolver,
                              ReservedNetworkPolicy destinationPolicy, String tenant) {
-            for (String name : configuration.properties().keySet())
-                if (!CONFIGURATION_FIELDS.contains(name)) throw Refusal.rejected("UNKNOWN_GRAPH_PROPERTY");
+            for (var property : configuration.properties().entrySet()) {
+                String name = property.getKey();
+                if (CONFIGURATION_FIELDS.contains(name)) continue;
+                if (RecoveryRepeatabilityProperty.NAME.equals(name)) {
+                    if (RecoveryRepeatabilityProperty.ALLOWED_VALUES.contains(property.getValue())) continue;
+                    throw Refusal.rejected("INVALID_GRAPH_PROPERTY");
+                }
+                throw Refusal.rejected("UNKNOWN_GRAPH_PROPERTY");
+            }
             String profileName = configuration.property("brokerProfile")
                     .orElseThrow(() -> Refusal.rejected("BROKER_PROFILE_REQUIRED"));
             final AmqpProfile profile;

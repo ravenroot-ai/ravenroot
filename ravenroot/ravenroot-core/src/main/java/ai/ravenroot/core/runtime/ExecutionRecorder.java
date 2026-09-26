@@ -113,6 +113,7 @@ public final class ExecutionRecorder implements AutoCloseable {
 
     private LeaseHandle lease;
     private long revision;
+    private volatile boolean closed;
     private volatile boolean fenceLost;
     private volatile ExecutionStoreFailure fenceLostBecause;
     private ScheduledFuture<?> renewalTask;
@@ -205,7 +206,7 @@ public final class ExecutionRecorder implements AutoCloseable {
 
     /** Renews immediately. Visible for tests, which drive the clock rather than waiting on it. */
     public synchronized void renewNow() {
-        if (fenceLost) {
+        if (closed || fenceLost) {
             return;
         }
         try {
@@ -628,6 +629,10 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     private void requireFence() {
+        if (closed) {
+            throw new IllegalStateException("This worker closed the lease on " + key.processInstanceId()
+                    + " and must not write again");
+        }
         if (fenceLost) {
             throw new IllegalStateException("This worker lost the fence on " + key.processInstanceId()
                     + " (" + fenceLostBecause + ") and must not write again: another worker may be "
@@ -637,7 +642,7 @@ public final class ExecutionRecorder implements AutoCloseable {
 
     /** Whether this recorder still holds the fence. False means every further write is refused. */
     public boolean holdsFence() {
-        return !fenceLost;
+        return !closed && !fenceLost;
     }
 
     /** The revision the instance is at after the last successful write. */
@@ -698,15 +703,19 @@ public final class ExecutionRecorder implements AutoCloseable {
      * nobody experiences in production.</p>
      */
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
         if (renewalTask != null) {
             renewalTask.cancel(false);
         }
         renewals.shutdownNow();
         try {
-            if (!fenceLost) {
-                await(store.release(lease));
-            }
+            // Release is fenced by worker identity and token, and an already-lost release is a
+            // no-op by contract. Always offer the last handle: a failed renewal can mark the local
+            // fence lost while the store still retains this worker's lease, and skipping release in
+            // that case delays an orderly continuation until the full TTL expires.
+            await(store.release(lease));
         } catch (RuntimeException expiryWillHandleIt) {
             // A failed release is the crash path, which the store already handles by expiry.
         }

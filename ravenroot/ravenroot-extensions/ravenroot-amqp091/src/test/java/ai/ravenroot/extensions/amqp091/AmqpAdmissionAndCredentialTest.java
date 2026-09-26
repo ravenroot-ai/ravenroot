@@ -2,6 +2,7 @@ package ai.ravenroot.extensions.amqp091;
 
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -15,6 +16,47 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpAdmissionAndCredentialTest {
+    @Test
+    void descriptorSupportedRecoveryDeclarationsReachTheProtocol() {
+        var protocol = new AmqpTestSupport.FakeProtocol(Event.CONFIRM, Event.CONFIRM);
+        var behavior = AmqpTestSupport.behavior(protocol);
+
+        for (String declaration : RecoveryRepeatabilityProperty.ALLOWED_VALUES) {
+            Map<String, Object> output = AmqpTestSupport.output(behavior.create(
+                    AmqpTestSupport.configuration(Map.of(RecoveryRepeatabilityProperty.NAME, declaration))),
+                    AmqpTestSupport.payload());
+            assertEquals("CONFIRMED", output.get("status"));
+        }
+
+        assertEquals(2, protocol.publishes.get());
+    }
+
+    @Test
+    void unknownAndMalformedRecoveryPropertiesAreRefusedBeforeCredentialsOrNetwork() {
+        var protocol = new AmqpTestSupport.FakeProtocol(Event.CONFIRM);
+        AtomicInteger resolutions = new AtomicInteger();
+        CredentialResolver credentials = reference -> {
+            resolutions.incrementAndGet();
+            return Optional.of(new SecretValue(AmqpTestSupport.SECRET.toCharArray()));
+        };
+        var behavior = AmqpTestSupport.behavior(protocol, credentials,
+                new AmqpRuntimeControls(System::nanoTime, Runnable::run, 8, 8, 16),
+                System::nanoTime, millis -> { });
+
+        Map<String, Object> unknown = AmqpTestSupport.output(behavior.create(
+                AmqpTestSupport.configuration(Map.of("recovery.unrecognized", "repeatable"))),
+                AmqpTestSupport.payload());
+        Map<String, Object> malformed = AmqpTestSupport.output(behavior.create(
+                AmqpTestSupport.configuration(Map.of(RecoveryRepeatabilityProperty.NAME, "sometimes"))),
+                AmqpTestSupport.payload());
+
+        assertEquals("UNKNOWN_GRAPH_PROPERTY", unknown.get("reason"));
+        assertEquals("INVALID_GRAPH_PROPERTY", malformed.get("reason"));
+        assertEquals(0, resolutions.get());
+        assertEquals(0, protocol.connects.get());
+        assertEquals(0, protocol.publishes.get());
+    }
+
     @Test
     void everyAdmissionLayerSaturatesAndRecoversWithoutLeakingKeys() {
         var ticker = new AmqpTestSupport.MutableTicker();

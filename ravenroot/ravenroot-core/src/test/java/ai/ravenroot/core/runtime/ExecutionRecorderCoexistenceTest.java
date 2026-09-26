@@ -10,8 +10,12 @@ import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.ExecutionStoreException;
+import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
@@ -27,10 +31,17 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -166,6 +177,94 @@ class ExecutionRecorderCoexistenceTest {
                 () -> recorder.record(nodeStarted(key, UUID.randomUUID(), UUID.randomUUID()), List.of()));
         assertTrue(stopped.getMessage().contains("lost the fence"));
         recorder.close();
+
+        var stillOwnedByTakeover = assertThrows(java.util.concurrent.CompletionException.class,
+                () -> await(store.claim(key, "engine-c", TTL)));
+        assertInstanceOf(ExecutionStoreFailure.LeaseHeldByAnother.class,
+                ExecutionStoreException.unwrap(stillOwnedByTakeover).failure(),
+                "releasing the stale handle after fence loss must not release the new holder");
+    }
+
+    @Test
+    void orderlyCloseOffersAReleaseAfterRenewalFailureInsteadOfWaitingForLeaseExpiry() {
+        ExecutionKey key = newInstance();
+        AtomicInteger releases = new AtomicInteger();
+        ExecutionStore renewalFailsButLeaseRemains = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[] {ExecutionStore.class}, (proxy, method, arguments) -> {
+                    if ("renew".equals(method.getName())) {
+                        return CompletableFuture.failedFuture(new ExecutionStoreException(
+                                new ExecutionStoreFailure.Unavailable("renewal unavailable")));
+                    }
+                    if ("release".equals(method.getName())) releases.incrementAndGet();
+                    try {
+                        return method.invoke(store, arguments);
+                    } catch (java.lang.reflect.InvocationTargetException invoked) {
+                        throw invoked.getCause();
+                    }
+                });
+        ExecutionRecorder recorder = ExecutionRecorder.open(
+                renewalFailsButLeaseRemains, key, "live-engine", TTL, revisionOf(key));
+
+        assertThrows(ExecutionStoreException.class, recorder::renewNow);
+        assertFalse(recorder.holdsFence(), "the failed renewal still stops every later write");
+        recorder.close();
+
+        assertEquals(1, releases.get(), "a lost local fence must not suppress the fenced release attempt");
+        ExecutionRecorder next = ExecutionRecorder.open(store, key, "next-engine", TTL, revisionOf(key));
+        next.close();
+    }
+
+    @Test
+    void closeWaitsForInFlightRenewalThenReleasesTheRenewedHandle() throws Exception {
+        ExecutionKey key = newInstance();
+        var renewalStarted = new CountDownLatch(1);
+        var pendingRenewal = new AtomicReference<CompletableFuture<LeaseHandle>>();
+        var renewedHandle = new AtomicReference<LeaseHandle>();
+        ExecutionStore controlledRenewal = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[] {ExecutionStore.class}, (proxy, method, arguments) -> {
+                    if ("renew".equals(method.getName())) {
+                        var pending = new CompletableFuture<LeaseHandle>();
+                        pendingRenewal.set(pending);
+                        renewedHandle.set((LeaseHandle) arguments[0]);
+                        renewalStarted.countDown();
+                        return pending;
+                    }
+                    try {
+                        return method.invoke(store, arguments);
+                    } catch (java.lang.reflect.InvocationTargetException invoked) {
+                        throw invoked.getCause();
+                    }
+                });
+        ExecutionRecorder recorder = ExecutionRecorder.open(
+                controlledRenewal, key, "live-engine", TTL, revisionOf(key));
+        AtomicReference<Throwable> renewalFailure = new AtomicReference<>();
+        Thread renewing = Thread.startVirtualThread(() -> {
+            try {
+                recorder.renewNow();
+            } catch (Throwable failure) {
+                renewalFailure.set(failure);
+            }
+        });
+        assertTrue(renewalStarted.await(5, TimeUnit.SECONDS));
+
+        var closeStarted = new CountDownLatch(1);
+        var closeFinished = new CountDownLatch(1);
+        Thread closing = Thread.startVirtualThread(() -> {
+            closeStarted.countDown();
+            recorder.close();
+            closeFinished.countDown();
+        });
+        assertTrue(closeStarted.await(5, TimeUnit.SECONDS));
+        assertFalse(closeFinished.await(100, TimeUnit.MILLISECONDS),
+                "close must not release an older handle while renewal can still complete afterwards");
+
+        pendingRenewal.get().complete(await(store.renew(renewedHandle.get(), TTL)));
+        renewing.join();
+        closing.join();
+
+        assertNull(renewalFailure.get());
+        ExecutionRecorder next = ExecutionRecorder.open(store, key, "next-engine", TTL, revisionOf(key));
+        next.close();
     }
 
     // ------------------------------------------------------------------ fixtures

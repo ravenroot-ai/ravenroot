@@ -13,7 +13,7 @@ From the repository root, with Node.js 22 or later:
 node --test docs/examples/finite-automata/test-program.mjs
 ```
 
-The 48 tests require no external packages. They cover 14 fixed examples, invalid definitions,
+The 52 tests require no external packages. They cover 14 fixed examples, invalid definitions,
 all evidence resource limits, exact one-transition admission, canonical round trips and permutations,
 UTF-8/scalar ordering, full-run/prefix agreement and trace modes. Independent generated oracles test
 511 binary words for parity, 511 words for substring recognition and all 256 four-bit operand pairs
@@ -42,7 +42,7 @@ execution. No credentials or running server are needed.
 the checked `ProgramNodeBehaviorFactory` source, these establish the required routing boundary.
 They do not claim the separate live-worker and decision tests form a deployed end-to-end graph test.
 
-Verified locally with Node.js 23.11.0, OpenJDK 21.0.11 and Maven 3.9.9: all 48 standalone tests and
+Verified locally with Node.js 23.11.0, OpenJDK 21.0.11 and Maven 3.9.9: all 52 standalone tests and
 the targeted Maven reactor passed. Elapsed times are deliberately not performance guarantees.
 The later full CI and independent review remain separate repository gates.
 

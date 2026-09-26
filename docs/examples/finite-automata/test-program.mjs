@@ -77,7 +77,7 @@ const invalid = [
   ['nondeterministic output forbidden', d => (d.kind = 'nfa', delete d.transitionPolicy, d.transitions[0].emit = ['x'], d), 'UNKNOWN_FIELD'],
   ['Mealy requires output', d => (d.kind = 'mealy', d), 'MISSING_FIELD'],
   ['Moore requires every state output', d => (d.kind = 'moore', d.stateOutputs = {even: []}, d), 'MISSING_FIELD'],
-  ['arbitrary JSON outputs refused', d => (d.kind = 'moore', d.stateOutputs = {even: ['x'], odd: [null]}, d), 'FORMAT']
+  ['arbitrary JSON outputs refused', d => (d.kind = 'moore', d.stateOutputs = {even: ['x'], odd: [null]}, d), 'OUTPUT']
 ];
 for (const [name, change, code] of invalid) test(name, () => {
   assert.throws(() => run(change(clone(parity))), new RegExp('FA_' + code + ' path='));
@@ -145,3 +145,32 @@ test('explicit invalid trace modes cannot silently select none', () => {
   for (const traceMode of ['', null, false, 'truncated'])
     assert.throws(() => run(parity, [], {traceMode}), /FA_CONFIG path=\/traceMode/);
 });
+
+for (const field of ['initialStates', 'acceptingStates'])
+  test(`${field} unknown references retain their original unsorted source index`, () => {
+    const d = clone(parity);
+    d.kind = 'nfa'; delete d.transitionPolicy;
+    d[field] = ['even', 'absent'];
+    assert.throws(() => run(d), {message: `FA_UNKNOWN_STATE path=/${field}/1`});
+  });
+
+for (const kind of ['mealy', 'moore'])
+  test(`${kind} output diagnostics identify exact source containers and members`, () => {
+    const state = 'q~/';
+    function definition(emission) {
+      if (kind === 'moore') return {
+        schema: parity.schema, kind, states: [state], alphabet: [], initialStates: [state],
+        acceptingStates: [state], transitions: [], transitionPolicy: 'total',
+        stateOutputs: {[state]: emission}
+      };
+      const d = clone(parity); d.kind = kind;
+      d.transitions.reverse().forEach(t => { t.emit = []; });
+      d.transitions[2].emit = emission;
+      return d;
+    }
+    const path = kind === 'moore' ? '/stateOutputs/q~0~1' : '/transitions/2/emit';
+    for (const invalid of [null, '', [], {}, 7, true])
+      assert.throws(() => run(definition(['valid', invalid])), {message: `FA_OUTPUT path=${path}/1`});
+    for (const invalid of [null, '', {}, 7, true])
+      assert.throws(() => run(definition(invalid)), {message: `FA_OUTPUT path=${path}`});
+  });

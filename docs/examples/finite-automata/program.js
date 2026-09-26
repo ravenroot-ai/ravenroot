@@ -6,6 +6,7 @@ function (request) {
     outputBytes: 8192, traceEntries: 129, traceBytes: 32768, idBytes: 64, tokenBytes: 128};
   const p = request.payload;
   function fail(code, path, detail = "") { throw new Error("FA_" + code + " path=" + path + (detail ? " " + detail : "")); }
+  function pointer(path, key) { return path + "/" + key.replace(/~/g, "~0").replace(/\//g, "~1"); }
   const limits = Object.assign({}, ceilings);
   for (const key of Object.keys(p.limits || {})) {
     const n = p.limits[key];
@@ -38,7 +39,8 @@ function (request) {
       .map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}";
     return JSON.stringify(value);
   }
-  // This format contains only strings, null, arrays and objects. Reject other JSON types.
+  // Parse JSON scalars so validation can classify invalid emission types precisely.
+  // Valid definitions still contain only strings, null, arrays and objects.
   function parse(text) {
     if (typeof text !== "string") fail("FORMAT", "/definition");
     bound("definitionBytes", text.length, "/definition");
@@ -63,6 +65,8 @@ function (request) {
       bound("depth", depth, path); ws();
       if (text[at] === '"') return string(path);
       if (text.slice(at, at + 4) === "null") { at += 4; return null; }
+      const scalar = /^(?:true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(text.slice(at));
+      if (scalar) { at += scalar[0].length; return JSON.parse(scalar[0]); }
       const object = text[at] === "{", array = text[at] === "[";
       if (!object && !array) fail("FORMAT", path);
       at++; ws();
@@ -84,7 +88,7 @@ function (request) {
           if (Object.hasOwn(out, key)) fail("DUPLICATE_KEY", path);
           if (text[at++] !== ":") fail("FORMAT", path);
         }
-        const child = value(depth + 1, path + "/" + key.replace(/~/g, "~0").replace(/\//g, "~1"));
+        const child = value(depth + 1, pointer(path, key));
         if (object) out[key] = child; else out.push(child);
         ws();
         if (text[at] === end) { at++; return out; }
@@ -98,11 +102,11 @@ function (request) {
   }
   function object(v, required, optional, path) {
     if (!v || typeof v !== "object" || Array.isArray(v)) fail("FORMAT", path);
-    for (const k of required) if (!Object.hasOwn(v, k)) fail("MISSING_FIELD", path + "/" + k);
+    for (const k of required) if (!Object.hasOwn(v, k)) fail("MISSING_FIELD", pointer(path, k));
     for (const k of Object.keys(v)) if (!required.includes(k) && !optional.includes(k)) fail("UNKNOWN_FIELD", path);
   }
-  function token(v, path, key = "tokenBytes") {
-    if (typeof v !== "string" || !v.length) fail("FORMAT", path);
+  function token(v, path, key = "tokenBytes", code = "FORMAT") {
+    if (typeof v !== "string" || !v.length) fail(code, path);
     bound(key, bytes(v, path), path);
     return v;
   }
@@ -115,14 +119,14 @@ function (request) {
       if (seen.has(v[i])) fail("DUPLICATE", path + "/" + i);
       seen.add(v[i]);
     }
-    return Array.from(seen).sort(compare);
+    return Array.from(seen);
   }
   function emission(v, path) {
     if (!Array.isArray(v)) fail("OUTPUT", path);
     bound("output", v.length, path);
     let n = 0;
     for (let i = 0; i < v.length; i++) {
-      token(v[i], path + "/" + i); n += bytes(v[i], path);
+      token(v[i], path + "/" + i, "tokenBytes", "OUTPUT"); n += bytes(v[i], path + "/" + i);
       bound("outputBytes", n, path);
     }
     return v;
@@ -144,9 +148,11 @@ function (request) {
   const states = new Set(d.states), alphabet = new Set(d.alphabet);
   function state(v, path) { if (!states.has(v)) fail("UNKNOWN_STATE", path); }
   for (const name of ["initialStates", "acceptingStates"]) d[name].forEach((v, i) => state(v, "/" + name + "/" + i));
+  // Preserve source indexes until all state references have been validated.
+  for (const name of ["states", "alphabet", "initialStates", "acceptingStates"]) d[name].sort(compare);
   if (d.kind === "moore") {
     object(d.stateOutputs, d.states, [], "/stateOutputs");
-    d.states.forEach(v => emission(d.stateOutputs[v], "/stateOutputs"));
+    d.states.forEach(v => emission(d.stateOutputs[v], pointer("/stateOutputs", v)));
   } else if (Object.hasOwn(d, "stateOutputs")) fail("OUTPUT", "/stateOutputs");
   if (!Array.isArray(d.transitions)) fail("FORMAT", "/transitions");
   bound("transitions", d.transitions.length, "/transitions");

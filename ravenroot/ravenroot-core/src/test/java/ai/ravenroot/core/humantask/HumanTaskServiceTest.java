@@ -72,6 +72,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -455,6 +456,64 @@ class HumanTaskServiceTest {
             var open = new HumanTaskHandlerDispatcher(store, service, executor, task -> true);
             assertTrue(open.canDispatch(trigger));
             assertTrue(executorConsulted.get());
+        }
+    }
+
+    @Test
+    void settledTaskIsClaimedImmediatelyAfterSuspensionRecorderLosesItsLocalFence() throws Exception {
+        try (var backing = sqlite("lost-fence-release", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            ExecutionStore renewalFailsButLeaseRemains = (ExecutionStore) Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[] {ExecutionStore.class},
+                    (proxy, method, arguments) -> {
+                        if ("renew".equals(method.getName())) {
+                            return CompletableFuture.failedFuture(new ExecutionStoreException(
+                                    new ai.ravenroot.api.persistence.ExecutionStoreFailure.Unavailable(
+                                            "renewal unavailable")));
+                        }
+                        try {
+                            return method.invoke(backing, arguments);
+                        } catch (InvocationTargetException invoked) {
+                            throw invoked.getCause();
+                        }
+                    });
+            Fixture fixture = running(renewalFailsButLeaseRemains);
+            var service = new HumanTaskService(
+                    renewalFailsButLeaseRemains, Clock.fixed(NOW, ZoneOffset.UTC));
+            HumanTaskResult suspended;
+            try (var recorder = ExecutionRecorder.open(renewalFailsButLeaseRemains, fixture.key,
+                    "runtime-worker", Duration.ofSeconds(30), 1);
+                 var binding = service.bindLive(fixture.key, recorder)) {
+                suspended = service.suspend(fixture.message(), definition());
+                assertThrows(ExecutionStoreException.class, recorder::renewNow,
+                        "the regression requires local fence loss while the stored lease remains live");
+            }
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), suspended.task().request().taskId(), 1, response()).code());
+
+            AtomicInteger continuations = new AtomicInteger();
+            HumanTaskContinuationExecutor continuation = new HumanTaskContinuationExecutor() {
+                @Override public boolean supports(ai.ravenroot.api.persistence.DurableHumanTask task) {
+                    return true;
+                }
+
+                @Override public java.util.concurrent.CompletionStage<Void> execute(
+                        ai.ravenroot.api.persistence.DurableHumanTask task,
+                        ai.ravenroot.api.persistence.DurableHandler handler,
+                        PendingWork.HandlerTrigger claim) {
+                    continuations.incrementAndGet();
+                    return CompletableFuture.completedFuture(null);
+                }
+            };
+            var recovery = new ExecutionRecoveryService(renewalFailsButLeaseRemains, List.of(TENANT),
+                    "recovery-worker", 10, Duration.ofSeconds(30),
+                    RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(renewalFailsButLeaseRemains, service, continuation));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertEquals(1, continuations.get(),
+                    "terminal commit must become claimable without waiting for the abandoned TTL");
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance));
         }
     }
 

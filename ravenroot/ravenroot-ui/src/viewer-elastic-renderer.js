@@ -136,6 +136,7 @@ export function mountD3ElasticRenderer({
   const nodeSelection = nodeGroup.selectAll('circle')
     .data(nodes, node => node.id)
     .enter().append('circle')
+    .attr('data-node-id', node => node.id)
     .attr('r', node => node.r)
     .attr('fill', node => node.color)
     .attr('stroke', node => node.stroke ?? '#8c959f')
@@ -151,10 +152,11 @@ export function mountD3ElasticRenderer({
 
   if (tooltip !== null) {
     const tip = d3.select(tooltip);
-    const known = (label, value) => value == null || value === '' ? `${label}: unknown` : `${label}: ${value}`;
+    const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
     const nodeText = node => {
       const state = node.runtimeObserved ? node.runtimeState : null;
-      return [node.label, known('State', state), known('Active instances', node.runtimeObserved ? node.instances : null),
+      return [node.label, known('ID', node.id), known('State', state),
+        known('Active instances', node.runtimeObserved ? node.instances : null),
         known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
         known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
         known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
@@ -169,19 +171,24 @@ export function mountD3ElasticRenderer({
       known('Last traversal time', formatRuntimeTime(link.flow?.lastOccurredAt)),
       known('Configured weight', link.configuredWeight),
     ].join('\n');
-    const show = (event, text) => tip.text(text)
-      .style('left', `${event.offsetX + 14}px`)
-      .style('top', `${event.offsetY - 10}px`)
-      .style('display', 'block');
+    const positionTooltip = event => {
+      const bounds = tooltip.parentElement?.getBoundingClientRect?.() || { width: 0, height: 0 };
+      const tipBounds = tooltip.getBoundingClientRect();
+      const left = Math.max(8, Math.min(event.offsetX + 14, bounds.width - tipBounds.width - 8));
+      const top = Math.max(8, Math.min(event.offsetY - 10, bounds.height - tipBounds.height - 8));
+      tip.style('left', `${left}px`).style('top', `${top}px`);
+    };
+    const show = (event, text) => {
+      tip.text(text).style('display', 'block');
+      positionTooltip(event);
+    };
     nodeSelection
       .on('mouseover.tip', (event, node) => { hovered = { kind: 'node', datum: node }; show(event, nodeText(node)); })
-      .on('mousemove.tip', event => tip
-        .style('left', `${event.offsetX + 14}px`).style('top', `${event.offsetY - 10}px`))
+      .on('mousemove.tip', positionTooltip)
       .on('mouseout.tip', () => { hovered = null; tip.style('display', 'none'); });
     edgeSelection
       .on('mouseover.tip', (event, link) => { hovered = { kind: 'edge', datum: link }; show(event, edgeText(link)); })
-      .on('mousemove.tip', event => tip
-        .style('left', `${event.offsetX + 14}px`).style('top', `${event.offsetY - 10}px`))
+      .on('mousemove.tip', positionTooltip)
       .on('mouseout.tip', () => { hovered = null; tip.style('display', 'none'); });
 
     refreshTooltip = () => {
@@ -320,7 +327,8 @@ export function mountD3ElasticRenderer({
 
   visualGroups = createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
     nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection, isLive,
-    marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange });
+    marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange,
+    groupFill: palette.nodeSurface, groupText: palette.nodeText, groupBorder: palette.nodeBorder });
 
   return {
     nodes,
@@ -355,10 +363,12 @@ export function mountD3ElasticRenderer({
       simulation.force('collision', createCollisionForce());
     },
     updateEdgeFlow(edgeId, flow, { reducedMotion = false, decayMs = 1_400, onDecay = null } = {}) {
-      const link = links.find(candidate => candidate.id === edgeId);
+      const runtimeIdentity = candidate => candidate.runtimeIdentity === undefined
+        ? candidate.id : candidate.runtimeIdentity;
+      const link = links.find(candidate => runtimeIdentity(candidate) === edgeId);
       if (!link || destroyed) return;
       link.flow = flow;
-      const selection = edgeSelection.filter(candidate => candidate.id === edgeId);
+      const selection = edgeSelection.filter(candidate => runtimeIdentity(candidate) === edgeId);
       selection.interrupt('flow').attr('stroke-width', edgeFlowWidth(flow.recent))
         .attr('opacity', flow.recent > 0 ? 1 : .82)
         .classed('d3-edge--active', flow.recent > 0);
@@ -367,9 +377,9 @@ export function mountD3ElasticRenderer({
           .transition('flow').duration(Math.min(decayMs, 900)).ease(d3.easeLinear)
           .attr('stroke-dashoffset', 0);
       } else selection.attr('stroke-dasharray', null).attr('stroke-dashoffset', null);
-      clearTimeout(pulseTimers.get(edgeId));
+      clearTimeout(pulseTimers.get(link.id));
       if (flow.recent > 0 && typeof onDecay === 'function') {
-        pulseTimers.set(edgeId, setTimeout(onDecay, Math.max(0, decayMs)));
+        pulseTimers.set(link.id, setTimeout(onDecay, Math.max(0, decayMs)));
       }
       refreshTooltip();
       visualGroups.refresh();

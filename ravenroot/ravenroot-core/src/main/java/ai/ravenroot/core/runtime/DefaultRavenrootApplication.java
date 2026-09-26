@@ -2658,7 +2658,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             var definition = record.deployment().immutableDefinition().orElse(null);
             if (definition == null) return java.util.Optional.empty();
             String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
-            var projection = EmbedSnapshotProjector.projectDefinition(definition, deploymentId,
+            var projection = EmbedSnapshotProjector.projectDefinition(definition,
+                    record.deployment().visualGroupsMetadata().orElse(null), deploymentId,
                     record.deployment().graphVersion(), digest, EmbedProjectionBudget.DEFAULTS);
             return java.util.Optional.of(new DeploymentViewerView(DeploymentViewerView.CURRENT_SOURCE_VERSION,
                     DeploymentViewerView.Source.deployment(deploymentId,

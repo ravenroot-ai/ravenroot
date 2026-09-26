@@ -165,6 +165,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final byte[] graphMl;
     /** Immutable definition published only after a successful start; never parsed by a viewer read. */
     private volatile GraphDefinition definition;
+    /** Inert presentation metadata parsed only by the bounded embed projection path. */
+    private volatile String visualGroupsMetadata;
     /** Physical identity changes on every undeploy/re-register, including identical bytes. */
     private final String incarnationId;
     /**
@@ -788,6 +790,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     /** Definition captured from the successfully opened runtime manager; viewer reads never reparse input. */
     Optional<GraphDefinition> immutableDefinition() { return Optional.ofNullable(definition); }
 
+    Optional<String> visualGroupsMetadata() { return Optional.ofNullable(visualGroupsMetadata); }
+
     /** Runtime event graph version stamped on every traversal hosted by this deployment. */
     String graphVersion() { return graphVersion; }
 
@@ -1352,6 +1356,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             // readiness work, so malformed input and source-start failures preserve deferred failure
             // semantics and never publish a viewer definition.
             openedDefinition = openedManager.definition();
+            visualGroupsMetadata = openedManager.visualGroupsMetadata().orElse(null);
         } catch (RuntimeException | Error failure) {
             try {
                 rollback(builtRunner, openedManager, openedDomain);

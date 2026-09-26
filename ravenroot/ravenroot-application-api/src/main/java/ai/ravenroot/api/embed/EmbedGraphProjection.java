@@ -16,7 +16,7 @@ import java.util.Objects;
  */
 public record EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
                                    String canonicalDigest, List<Node> nodes, List<Edge> edges,
-                                   String designArrangement) {
+                                   String designArrangement, List<Group> groups) {
     public static final String CURRENT_CONTRACT_VERSION = "1.0";
     private static final java.util.Set<String> NODE_KINDS =
             java.util.Set.of("START", "PASSTHROUGH", "BEHAVIOR", "END", "ERROR");
@@ -34,7 +34,15 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
      */
     public EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
                                 String canonicalDigest, List<Node> nodes, List<Edge> edges) {
-        this(viewerContractVersion, graphId, graphVersionId, canonicalDigest, nodes, edges, null);
+        this(viewerContractVersion, graphId, graphVersionId, canonicalDigest, nodes, edges, null, List.of());
+    }
+
+    /** Compatibility shape for projections captured before visual groups were projected. */
+    public EmbedGraphProjection(String viewerContractVersion, String graphId, String graphVersionId,
+                                String canonicalDigest, List<Node> nodes, List<Edge> edges,
+                                String designArrangement) {
+        this(viewerContractVersion, graphId, graphVersionId, canonicalDigest, nodes, edges,
+                designArrangement, List.of());
     }
 
 /**
@@ -47,9 +55,35 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
         canonicalDigest = requireText(canonicalDigest, "canonicalDigest");
         nodes = List.copyOf(Objects.requireNonNull(nodes, "nodes"));
         edges = List.copyOf(Objects.requireNonNull(edges, "edges"));
+        groups = List.copyOf(Objects.requireNonNull(groups, "groups"));
+        var nodeIds = nodes.stream().map(Node::id).collect(java.util.stream.Collectors.toSet());
+        var groupIds = new java.util.HashSet<String>();
+        var groupedNodes = new java.util.HashSet<String>();
+        for (Group group : groups) {
+            if (!groupIds.add(group.id()) || !nodeIds.containsAll(group.memberNodeIds())
+                    || group.memberNodeIds().stream().anyMatch(member -> !groupedNodes.add(member))) {
+                throw new IllegalArgumentException("visual groups must be unique, disjoint, and reference projected nodes");
+            }
+        }
         designArrangement = optionalText(designArrangement, "designArrangement");
         if (designArrangement != null && !DESIGN_ARRANGEMENTS.contains(designArrangement)) {
             throw new IllegalArgumentException("designArrangement is not supported");
+        }
+    }
+
+    /** Allowlisted visual presentation group. Groups never become executable nodes. */
+    public record Group(String id, String name, List<String> memberNodeIds,
+                        String anchorNodeId, boolean collapsed) {
+        public Group {
+            id = requireText(id, "group.id");
+            name = requireText(name, "group.name");
+            memberNodeIds = List.copyOf(Objects.requireNonNull(memberNodeIds, "group.memberNodeIds"));
+            anchorNodeId = requireText(anchorNodeId, "group.anchorNodeId");
+            if (memberNodeIds.size() < 2 || memberNodeIds.stream().anyMatch(value -> value == null || value.isBlank())
+                    || memberNodeIds.stream().distinct().count() != memberNodeIds.size()
+                    || !memberNodeIds.contains(anchorNodeId)) {
+                throw new IllegalArgumentException("visual group membership is invalid");
+            }
         }
     }
 
@@ -154,11 +188,14 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
                 .collect(java.util.stream.Collectors.joining(","));
         String edgeJson = edges.stream().map(EmbedGraphProjection::edgeJson)
                 .collect(java.util.stream.Collectors.joining(","));
+        String groupJson = groups.stream().map(EmbedGraphProjection::groupJson)
+                .collect(java.util.stream.Collectors.joining(","));
         return "{\"viewerContractVersion\":\"" + escape(viewerContractVersion)
                 + "\",\"graphId\":\"" + escape(graphId) + "\",\"graphVersionId\":\""
                 + escape(graphVersionId) + "\",\"canonicalDigest\":\"" + escape(canonicalDigest)
                 + "\",\"nodes\":[" + nodeJson + "],\"edges\":[" + edgeJson + "]"
-                + optionalJson("designArrangement", designArrangement) + "}";
+                + optionalJson("designArrangement", designArrangement)
+                + (groups.isEmpty() ? "" : ",\"groups\":[" + groupJson + "]") + "}";
     }
 
 /**
@@ -184,6 +221,14 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
                 + escape(edge.target()) + "\"" + optionalJson("id", edge.id())
                 + optionalJson("label", edge.label()) + optionalJson("visualType", edge.visualType())
                 + (edge.routing() == null ? "" : ",\"routing\":\"" + edge.routing() + "\"") + "}";
+    }
+
+    private static String groupJson(Group group) {
+        String members = group.memberNodeIds().stream().map(id -> "\"" + escape(id) + "\"")
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"id\":\"" + escape(group.id()) + "\",\"name\":\"" + escape(group.name())
+                + "\",\"memberNodeIds\":[" + members + "],\"anchorNodeId\":\""
+                + escape(group.anchorNodeId()) + "\",\"collapsed\":" + group.collapsed() + "}";
     }
 
     private static String optionalJson(String name, String value) {

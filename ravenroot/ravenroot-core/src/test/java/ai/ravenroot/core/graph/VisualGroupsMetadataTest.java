@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,6 +39,8 @@ class VisualGroupsMetadataTest {
         try (var grouped = GraphManager.readGraphMl(new ByteArrayInputStream(bytes));
              var plain = GraphManager.readGraphMl(new ByteArrayInputStream(withoutPresentation))) {
             var definition = grouped.definition();
+            assertEquals(Optional.of("{\"version\":1,\"groups\":[{\"id\":\"group-work\",\"name\":\"Processing\",\"memberNodeIds\":[\"work\",\"branch\"],\"anchorNodeId\":\"work\",\"collapsed\":true}]}"),
+                    grouped.visualGroupsMetadata());
             assertEquals(List.copyOf(plain.definition().nodes()), List.copyOf(definition.nodes()));
             assertEquals(plain.definition().edges(), definition.edges());
             assertEquals("passthrough", definition.node("work").behavior());

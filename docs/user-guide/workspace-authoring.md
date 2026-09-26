@@ -24,6 +24,11 @@ Inspector saves change graph content without choosing a presentation for you. **
 valid autosaves, undo, and redo retain the active document's Design arrangement, positions, viewport, and
 compatible edge routes. Use an explicit **Arrange** command when you want to reposition the graph.
 
+Use the maximize control immediately beside a document's close control to give its graph the full window.
+The other documents and workspace chrome are hidden until you restore with the same control or **Escape**.
+Restoring returns focus to the invoking control and retains the document's size, viewport, selection, run,
+and live monitoring state.
+
 ## Governed Workspace resources and named Agents
 
 The browser's document workspace is distinct from an execution Workspace resource. When the

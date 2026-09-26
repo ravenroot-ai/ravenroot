@@ -214,6 +214,7 @@ const failureViewerHtml = `<!doctype html><html lang="en"><head><meta charset="u
 <header class="embed-viewer-header"><p data-viewer-metadata></p><nav class="embed-viewer-controls">
 <select data-viewer-mode><option value="cyto">Cyto</option><option value="n8n">N8N</option>
 <option value="elastic">Elastic</option></select><button type="button" data-viewer-command="fit">Fit</button>
+<button type="button" data-viewer-maximize aria-label="Maximize embedded graph"></button>
 </nav></header><div class="embed-viewer-canvas" data-viewer-canvas tabindex="0"></div>
 <canvas class="embed-viewer-minimap" data-viewer-minimap tabindex="0"></canvas>
 <ol class="embed-viewer-alternative" data-viewer-alternative></ol>

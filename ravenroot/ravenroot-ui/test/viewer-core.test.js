@@ -58,6 +58,38 @@ describe('shared read-only viewer core', () => {
     expect(JSON.stringify(snapshot)).not.toContain('secret');
   });
 
+  it('carries only valid flat disjoint visual groups into the immutable snapshot', () => {
+    const nodes = ['a', 'b', 'c'].map(id => ({ id, kind: 'BEHAVIOR', layout: null }));
+    const snapshot = createViewerSnapshot(projection({ nodes, groups: [{ id: 'g', name: 'Workers',
+      memberNodeIds: ['a', 'b'], anchorNodeId: 'a', collapsed: true, secret: 'no' }] }));
+    expect(snapshot.groups).toEqual([{ id: 'g', name: 'Workers', memberNodeIds: ['a', 'b'],
+      anchorNodeId: 'a', collapsed: true }]);
+    expect(JSON.stringify(snapshot)).not.toContain('secret');
+
+    expect(() => createViewerSnapshot(projection({ nodes, groups: [
+      { id: 'outer', name: 'Outer', memberNodeIds: ['a', 'b'], anchorNodeId: 'a', collapsed: true },
+      { id: 'nested', name: 'Nested', memberNodeIds: ['b', 'c'], anchorNodeId: 'b', collapsed: true },
+    ] }))).toThrow('groups');
+    expect(() => createViewerSnapshot(projection({ nodes, groups: [
+      { id: 'duplicate', name: 'Duplicate', memberNodeIds: ['a', 'a'], anchorNodeId: 'a', collapsed: true },
+    ] }))).toThrow('groups');
+  });
+
+  it('keeps synthesized edge IDs collision-safe and display-only', () => {
+    const nodes = ['a', 'b'].map(id => ({ id, kind: 'BEHAVIOR', layout: null }));
+    const snapshot = createViewerSnapshot(projection({ nodes, edges: [
+      { source: 'a', target: 'b' },
+      { id: 'rr-viewer-edge:0', source: 'b', target: 'a' },
+    ] }));
+    expect(snapshot.edges).toEqual([
+      expect.objectContaining({ id: 'rr-viewer-edge:0~1', runtimeIdentity: null }),
+      expect.objectContaining({ id: 'rr-viewer-edge:0', runtimeIdentity: 'rr-viewer-edge:0' }),
+    ]);
+    expect(snapshot.elements.slice(-2).map(element => element.data.runtimeIdentity)).toEqual([
+      null, 'rr-viewer-edge:0',
+    ]);
+  });
+
   it('unwraps the additive v2 deployment envelope without copying run metadata', () => {
     const snapshot = createViewerSnapshot({
       viewerSourceVersion: '2', source: { kind: 'deployment' }, runs: [{ secret: 'no' }],

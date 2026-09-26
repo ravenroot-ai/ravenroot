@@ -2787,6 +2787,66 @@ function documentModeLabel(document_) {
   return document_.tenantId === null ? `${label} · session only` : label;
 }
 
+let maximizedDocumentId = null;
+let maximizedReturnFocus = null;
+
+function setGraphDocumentMaximized(document_, maximized) {
+  if (!document_ || workspace.find(document_.id) !== document_) return false;
+  if (maximized && workspace.activeId !== document_.id) activateDocument(document_.id);
+  if (maximized) {
+    maximizedReturnFocus = window.document.activeElement;
+    maximizedDocumentId = document_.id;
+    document_.maximizeViewport = document_.cy ? { zoom: document_.cy.zoom(), pan: { ...document_.cy.pan() } } : null;
+  } else if (maximizedDocumentId !== document_.id) return false;
+  else maximizedDocumentId = null;
+  window.document.documentElement.classList.toggle('graph-document-maximized', maximized);
+  workspace.documents.forEach(entry => {
+    const active = maximized && entry === document_;
+    entry.pane?.classList.toggle('doc-pane--maximized', active);
+    const control = entry.pane?.querySelector('[data-pane-document-maximize]');
+    control?.setAttribute('aria-pressed', String(active));
+    control?.setAttribute('aria-label', active ? `Restore ${entry.displayName}` : `Maximize ${entry.displayName}`);
+    if (control) control.title = active ? 'Restore graph document' : 'Maximize graph document';
+  });
+  window.requestAnimationFrame(() => {
+    document_.cy?.resize();
+    if (document_.maximizeViewport) document_.cy?.viewport(document_.maximizeViewport);
+    document_.cy?.forceRender();
+    if (maximized) document_.pane?.querySelector('[data-pane-document-maximize]')?.focus({ preventScroll: true });
+    else {
+      // The workspace ResizeObserver can deliver once more after this frame. Keep the saved
+      // viewport authoritative through that delivery, then repeat it once the restored pane has
+      // its final size before releasing the guard.
+      window.requestAnimationFrame(() => {
+        document_.cy?.resize();
+        if (document_.maximizeViewport) document_.cy?.viewport(document_.maximizeViewport);
+        document_.cy?.forceRender();
+        if (document_.container?.clientWidth && document_.container?.clientHeight) {
+          paneRenderedSize.set(document_.id, {
+            width: document_.container.clientWidth,
+            height: document_.container.clientHeight,
+          });
+        }
+        const target = maximizedReturnFocus?.isConnected ? maximizedReturnFocus
+          : document_.pane?.querySelector('[data-pane-document-maximize]');
+        target?.focus?.({ preventScroll: true });
+        maximizedReturnFocus = null;
+        document_.maximizeViewport = null;
+      });
+    }
+  });
+  return true;
+}
+
+window.document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || maximizedDocumentId === null) return;
+  const document_ = workspace.find(maximizedDocumentId);
+  if (!document_) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  setGraphDocumentMaximized(document_, false);
+}, true);
+
 function documentPane(document_) {
   if (document_.pane?.isConnected) return document_.pane;
   const host = window.document.getElementById('cy');
@@ -2807,6 +2867,20 @@ function documentPane(document_) {
   state.className = 'doc-pane-state visually-hidden';
   header.append(state);
   pane.append(header);
+  const maximize = window.document.createElement('button');
+  maximize.className = 'doc-pane-maximize';
+  maximize.type = 'button';
+  maximize.dataset.paneDocumentMaximize = document_.id;
+  maximize.setAttribute('aria-pressed', 'false');
+  maximize.setAttribute('aria-label', `Maximize ${document_.displayName}`);
+  maximize.title = 'Maximize graph document';
+  maximize.append(window.document.createElement('span'));
+  maximize.addEventListener('pointerdown', event => event.stopPropagation());
+  maximize.addEventListener('click', event => {
+    event.stopPropagation();
+    setGraphDocumentMaximized(document_, maximizedDocumentId !== document_.id);
+  });
+  header.append(maximize);
   const close = window.document.createElement('button');
   close.className = 'doc-pane-close';
   close.type = 'button';
@@ -2830,7 +2904,7 @@ function documentPane(document_) {
   // presentation and has no handler of its own: if it is ever made clickable that is a separate
   // decision, and it must still arrive here rather than take a private path into the workspace.
   pane.addEventListener('focusin', event => {
-    if (event.target.closest?.('[data-pane-document-close]')) return;
+    if (event.target.closest?.('[data-pane-document-close], [data-pane-document-maximize]')) return;
     activateDocument(document_.id);
   });
   // A pointer on a background pane routes to that same handler by MOVING FOCUS rather than by
@@ -3227,6 +3301,12 @@ function syncPaneRenderer(document_) {
   paneRenderedSize.set(document_.id, { width, height });
 
   cy.resize();
+  // Maximize and restore are container changes, not new framing decisions. Preserve the exact
+  // viewport until setGraphDocumentMaximized has observed the final restored pane dimensions.
+  if (document_.maximizeViewport) {
+    cy.viewport(document_.maximizeViewport);
+    return;
+  }
   // Restoring several documents passes through temporary pane sizes. Those intermediate boxes
   // must not replace each document's saved viewport with an automatic fit or recenter.
   if (workspaceRestoreInProgress && document_.canvasState) return;
@@ -12396,6 +12476,7 @@ function flushRuntimeNodePaint(owner, queue) {
   const ownerCy = isActive ? cy : owner.cy;
   if (!ownerCy) return;
   const flow = owner.execution.monitoringFlow;
+  const affectedGroups = new Set();
   for (const nodeId of pending) {
     const node = ownerCy.getElementById(nodeId);
     if (!node.length) continue;
@@ -12419,7 +12500,41 @@ function flushRuntimeNodePaint(owner, queue) {
       processingDuration: view.processingDuration,
       fallback: view.fallback,
     });
+    const groupId = groupProjection(owner)?.groupByNodeId.get(nodeId);
+    if (groupId) affectedGroups.add(groupId);
   }
+  affectedGroups.forEach(groupId => paintVisibleGroupRuntime(owner, groupId));
+}
+
+function paintVisibleGroupRuntime(owner, groupId) {
+  const projection = groupProjection(owner);
+  const group = projection?.groups.find(item => item.id === groupId && item.collapsed);
+  if (!group) return;
+  const flow = owner.execution.monitoringFlow;
+  const snapshots = group.memberNodeIds.map(id => nodeActivitySnapshot(flow, id)).filter(item => item.observed);
+  const priority = ['failed', 'active', 'fallback', 'bypassed', 'completed'];
+  const state = priority.find(candidate => snapshots.some(item => item.state === candidate));
+  const graph = owner.graph;
+  const internalPulses = (graph?.edges || []).filter(edge => group.memberNodeIds.includes(edge.source)
+    && group.memberNodeIds.includes(edge.target)).reduce(
+    (sum, edge) => sum + edgeFlowSnapshot(flow, edge.id).recent, 0);
+  const summary = owner.cy?.getElementById(group.summaryId);
+  if (summary?.nonempty()) {
+    summary.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding');
+    if (state || internalPulses) {
+      const color = state ? runtimeColor(state) : rendererPalette.selection;
+      summary.style({
+        'border-color': color,
+        'border-width': state === 'active' || internalPulses ? 6 : 4,
+        'underlay-color': internalPulses ? rendererPalette.selection : color,
+        'underlay-opacity': internalPulses ? .3 : .12,
+        'underlay-padding': internalPulses ? 12 : 7,
+      });
+    }
+  }
+  // The elastic group layer derives its summary annotation from the real members. Re-projecting
+  // presentation only keeps the simulation, runtime maps, selection and subscriptions intact.
+  if (elasticRendererFor(owner)?.elasticMount) refreshVisualGroups(owner);
 }
 
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
@@ -12570,6 +12685,19 @@ function updateD3RuntimeEdge(owner, edgeId) {
       decayMs: remainingPulseMs || FLOW_PULSE_MS,
       onDecay: flow.recent > 0 ? paint : null,
     });
+    const projection = groupProjection(owner);
+    const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
+    const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
+    const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
+    if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
+    if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
+    const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
+    if (projected && !elasticRendererFor(owner)?.elasticMount) {
+      const visible = owner.cy?.getElementById(projected.id);
+      visible?.data('runtimeActive', flow.recent > 0);
+      visible?.data('runtimeRecent', flow.recent);
+      visible?.data('runtimeCount', flow.count);
+    }
     scheduleMinimap(owner);
   };
   paint();

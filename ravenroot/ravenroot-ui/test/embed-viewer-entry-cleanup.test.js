@@ -33,6 +33,7 @@ function shell() {
       <select data-viewer-mode><option value="cyto">Cyto</option>
         <option value="n8n">N8N</option><option value="elastic">Elastic</option></select>
       <button data-viewer-command="fit"></button>
+      <button data-viewer-maximize></button>
       <div data-viewer-canvas></div><canvas data-viewer-minimap tabindex="0"></canvas>
       <ol data-viewer-alternative></ol>
     </main>
@@ -50,6 +51,7 @@ function semanticShell() {
       <select data-viewer-run aria-label="Live run"></select>
       <p data-viewer-run-empty>No authorized runs.</p>
       <button data-viewer-command="render"></button>
+      <button data-viewer-maximize></button>
       <div data-viewer-canvas></div><canvas data-viewer-minimap tabindex="0"></canvas>
       <ol data-viewer-alternative></ol>
     </main>

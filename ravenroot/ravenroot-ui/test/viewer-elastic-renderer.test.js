@@ -75,6 +75,9 @@ describe('shared D3 Elastic renderer', () => {
     expect(document.querySelector('.d3-zoom-group').getAttribute('transform')).toBe('translate(21,-9) scale(1.3)');
     renderer.updateNode('b', { runtimeObserved: true, runtimeState: 'failed' });
     expect(document.querySelector('[data-member-observations]').getAttribute('data-member-observations')).toContain('"failed":1');
+    renderer.updateEdgeFlow('e1', { recent: 2, count: 2 }, { reducedMotion: true });
+    expect(document.querySelector('[data-member-edge-pulses]').getAttribute('data-member-edge-pulses')).toBe('2');
+    expect(document.querySelector('[data-member-edge-pulses] rect').getAttribute('stroke-width')).toBe('5');
     // A settled simulation also remains settled; toggling never calls restart or changes alpha.
     renderer.simulation.stop().alpha(0); stop.mockClear();
     renderer.setVisualGroups({ groups, state: {}, animate: false });
@@ -204,7 +207,7 @@ describe('shared D3 Elastic renderer', () => {
       links: [], width: 100, height: 100, palette: {},
     });
     svg.querySelector('circle').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    expect(tooltip.textContent).toContain('State: unknown');
+    expect(tooltip.textContent).toContain('State: Unavailable');
     expect(tooltip.textContent).not.toContain('must-not-render');
     renderer.updateNode('a', {
       runtimeObserved: true, runtimeState: 'active', instances: 2, arrivals: 3,

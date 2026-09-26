@@ -5,7 +5,8 @@ import { createVisualGroupTransition } from './visual-group-transition.js';
 /** A display layer over the original Monitoring simulation, never a replacement force graph. */
 export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
   nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection,
-  isLive, marker, nodeText, edgeLabel, onViewportChange }) {
+  isLive, marker, nodeText, edgeLabel, onViewportChange,
+  groupFill = '#edf4ff', groupText = '#24354b', groupBorder = '#526780' }) {
   const layer = zoomGroup.append('g').attr('class', 'd3-visual-groups');
   const edgeLayer = layer.append('g').attr('class', 'd3-visual-edges');
   const ghostLayer = layer.append('g').attr('class', 'd3-visual-members');
@@ -184,15 +185,36 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
       .on('keydown.group', (event, group) => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(group); }
       });
+    const groupRuntime = group => {
+      const memberIds = new Set(group.memberNodeIds);
+      const states = group.memberNodeIds.map(id => canonicalNodes.get(id)).filter(node => node?.runtimeObserved)
+        .map(node => node.runtimeState);
+      const state = ['failed', 'active', 'fallback', 'bypassed', 'completed']
+        .find(candidate => states.includes(candidate)) || null;
+      const pulses = links.filter(link => memberIds.has(endpointId(link.source))
+        && memberIds.has(endpointId(link.target))).reduce((sum, link) => sum + (link.flow?.recent || 0), 0);
+      return { state, pulses };
+    };
+    badge.attr('data-member-edge-pulses', group => String(groupRuntime(group).pulses));
     badge.select('rect').attr('x', group => group.role === 'header' ? -80 : -50)
       .attr('y', group => group.role === 'header' ? -12 : -30)
       .attr('width', group => group.role === 'header' ? 160 : 100)
       .attr('height', group => group.role === 'header' ? 24 : 60)
-      .attr('rx', 7).attr('fill', '#edf4ff')
-      .attr('stroke', group => group.groupId === selectedGroup ? '#086adb' : '#526780')
-      .attr('stroke-width', group => group.groupId === selectedGroup ? 3 : 2);
+      .attr('rx', 7).attr('fill', groupFill)
+      .attr('stroke', group => {
+        if (group.groupId === selectedGroup) return '#086adb';
+        const runtime = groupRuntime(group);
+        if (runtime.state === 'failed') return '#f85149';
+        if (runtime.state === 'active' || runtime.pulses) return '#d2a8ff';
+        if (runtime.state === 'completed') return '#3fb950';
+        return groupBorder;
+      })
+      .attr('stroke-width', group => {
+        const runtime = groupRuntime(group);
+        return group.groupId === selectedGroup ? 3 : runtime.state === 'active' || runtime.pulses ? 5 : 2;
+      });
     badge.select('text').attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
-      .attr('fill', '#24354b').attr('font-size', 12)
+      .attr('fill', groupText).attr('font-size', 12)
       .text(group => `▦ ${group.name.length > 19 ? `${group.name.slice(0, 18)}…` : group.name} · ${group.memberNodeIds.length}`);
     badge.select('title').text(group => `${group.name} — ${group.memberNodeIds.map(id => canonicalNodes.get(id)?.label || id).join(', ')}`);
     const observations = group => group.memberNodeIds.reduce((counts, id) => {

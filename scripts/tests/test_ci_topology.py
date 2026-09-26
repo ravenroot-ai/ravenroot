@@ -33,6 +33,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "full-ui-e2e-shard",
             "full-ui-e2e",
             "backend-build",
+            "minio-fixture-preflight",
             "full-backend-tests",
             "backend-test",
             "full-plugin-boundary",
@@ -60,6 +61,10 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("Refusing invalid backend scope", self.jobs["full-backend-tests"])
         backend_checkout = self.jobs["full-backend-tests"].split("- name: Set up Java", 1)[0]
         self.assertIn("fetch-depth: 0", backend_checkout)
+        self.assertEqual(
+            declared_needs(self.jobs["backend-build"]),
+            {"release-classification", "minio-fixture-preflight"},
+        )
         self.assertIn('= ravenroot-distribution ] && continue', self.jobs["backend-build"])
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])
@@ -180,6 +185,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             {
                 "release-classification", "docs-site", "full-docs-policy", "full-source-policy",
                 "full-ui-audit", "full-ui-unit-tests", "full-ui-build", "backend-build",
+                "minio-fixture-preflight",
             },
         )
         for job in (
@@ -197,7 +203,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("  schedule:\n    - cron:", self.contents)
         backend = self.jobs["full-backend-tests"]
         self.assertIn("Scheduled runs intentionally select the all-reactor regression path", backend)
-        self.assertEqual(5, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
+        self.assertEqual(6, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
 
 
 if __name__ == "__main__":

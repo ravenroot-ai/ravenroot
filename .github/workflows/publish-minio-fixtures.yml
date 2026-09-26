@@ -1,0 +1,76 @@
+name: Publish MinIO acceptance fixtures
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-minio-fixtures
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build-repository-controlled-minio-fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the requested fixture authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate reviewed fixture inputs and structural guards
+        run: |
+          python3 scripts/fixtures/minio/verify.py validate --allow-pending-project-digests
+          python3 -m unittest scripts.tests.test_minio_fixture
+      - name: Set up the pinned multi-platform builder
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - name: Build and publish deterministic repository-controlled indexes
+        id: fixtures
+        env:
+          RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}
+          RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/fixtures/minio/verify.py build --role server --push \
+            --metadata-file "$RUNNER_TEMP/minio-server-metadata.json" \
+            --github-output "$GITHUB_OUTPUT"
+          python3 scripts/fixtures/minio/verify.py build --role client --push \
+            --metadata-file "$RUNNER_TEMP/minio-client-metadata.json" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Verify published digests and declared architectures
+        env:
+          SERVER_TARGET: ${{ steps.fixtures.outputs.server_tag }}@${{ steps.fixtures.outputs.server_digest }}
+          CLIENT_TARGET: ${{ steps.fixtures.outputs.client_tag }}@${{ steps.fixtures.outputs.client_digest }}
+          SERVER_PLATFORMS: ${{ steps.fixtures.outputs.server_platforms }}
+          CLIENT_PLATFORMS: ${{ steps.fixtures.outputs.client_platforms }}
+        run: |
+          set -euo pipefail
+          for entry in "server|$SERVER_TARGET|$SERVER_PLATFORMS" "client|$CLIENT_TARGET|$CLIENT_PLATFORMS"; do
+            role=${entry%%|*}
+            remainder=${entry#*|}
+            reference=${remainder%%|*}
+            platforms=${remainder#*|}
+            inspection=$(docker buildx imagetools inspect "$reference")
+            while IFS= read -r platform; do
+              grep -F "Platform:  $platform" <<<"$inspection" >/dev/null || {
+                echo "$role fixture is missing declared platform $platform" >&2
+                exit 1
+              }
+            done < <(tr ',' '\n' <<<"$platforms")
+            echo "$role fixture published and verified at $reference"
+          done
+      - name: Report immutable digests for manifest promotion
+        env:
+          SERVER_DIGEST: ${{ steps.fixtures.outputs.server_digest }}
+          CLIENT_DIGEST: ${{ steps.fixtures.outputs.client_digest }}
+        run: |
+          {
+            echo '### MinIO fixture digests'
+            echo
+            echo "- server.project.digest=$SERVER_DIGEST"
+            echo "- client.project.digest=$CLIENT_DIGEST"
+          } >> "$GITHUB_STEP_SUMMARY"

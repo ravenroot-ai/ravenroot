@@ -22,6 +22,31 @@ the test code rather than by a workflow, so a developer and continuous integrati
 same way, and an absent daemon fails the run rather than silently skipping the assertions the adapter
 exists to prove.
 
+## MinIO object-storage acceptance
+
+The object-storage module runs its TLS and SigV4 acceptance against real MinIO server and client
+containers. Their only authority is the project-owned, digest-pinned manifest at
+[`scripts/fixtures/minio/minio-fixtures.properties`](https://github.com/ravenroot-ai/ravenroot/blob/dev/scripts/fixtures/minio/minio-fixtures.properties);
+the accompanying [fixture provenance and rotation guide](https://github.com/ravenroot-ai/ravenroot/blob/dev/scripts/fixtures/minio/README.md)
+records the upstream source commits, original digests, licenses, and verified update procedure.
+
+Before running the Maven reactor on a clean host, verify and pull the fixtures for the host
+architecture. The private package explicitly grants this repository Read under **Manage Actions
+access**; GitHub-hosted runners supply their built-in token with only `packages: read`:
+
+```sh
+python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
+mvn -f ravenroot/pom.xml -pl ravenroot-extensions/ravenroot-object-storage -am verify
+```
+
+No personal access token or private credential is stored in repository configuration. For a private
+package, local developers set `RAVENROOT_FIXTURE_REGISTRY_USER` and
+`RAVENROOT_FIXTURE_REGISTRY_TOKEN`; the verifier passes the token to `docker login` only through
+standard input and never includes it in a command or diagnostic. A public package also works without
+those variables. The preflight fails with a bounded, non-secret reference and architecture
+diagnostic. The integration test pulls both immutable indexes before creating a container, so an
+unavailable server or client image cannot leave a partially started fixture.
+
 ## Sandbox supervisor CPU red control
 
 The sandbox-supervisor testkit keeps two CPU checks separate. The required red control uses a

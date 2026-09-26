@@ -308,6 +308,7 @@ jobs:
           python3 -m unittest scripts.tests.test_ci_required
           python3 -m unittest scripts.tests.test_check_commit_attribution
           python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_minio_fixture
           python3 -m unittest scripts.tests.test_select_backend_tests
           python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
@@ -624,7 +625,7 @@ jobs:
 
   backend-build:
     name: full-backend-build
-    needs: [release-classification]
+    needs: [release-classification, minio-fixture-preflight]
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -673,6 +674,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  minio-fixture-preflight:
+    name: full-minio-fixture-preflight
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out repository-controlled fixture authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Pull immutable repository-owned fixtures and verify the runner architecture
+        env:
+          RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}
+          RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}
+        run: python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
+
   # Cheap policy, dependency, unit and build checks form a hard first phase. Nothing expensive is
   # admitted until all of them pass, so an obvious integration failure does not start the long jobs.
   full-preflight:
@@ -685,6 +706,7 @@ jobs:
       - full-ui-audit
       - full-ui-unit-tests
       - full-ui-build
+      - minio-fixture-preflight
       - backend-build
     if: always() && needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
@@ -703,6 +725,9 @@ jobs:
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -741,6 +766,12 @@ jobs:
           test -n "$base"
           test -n "$head"
           python3 scripts/select_backend_tests.py --event "$EVENT_NAME" --base "$base" --head "$head"
+      - name: Revalidate and cache MinIO fixtures before Maven needs them
+        if: steps.backend-scope.outputs.mode == 'all' || contains(steps.backend-scope.outputs.projects, 'ravenroot-extensions/ravenroot-object-storage')
+        env:
+          RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}
+          RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}
+        run: python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
       - name: Run the selected backend unit and integration suite
         working-directory: ravenroot
         env:
@@ -1101,6 +1132,7 @@ jobs:
       - full-ui-e2e-shard
       - full-ui-e2e
       - backend-build
+      - minio-fixture-preflight
       - full-preflight
       - full-backend-tests
       - backend-test

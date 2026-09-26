@@ -31,8 +31,10 @@ import java.util.Optional;
  * @param id deployment whose lifecycle is observed.
  * @param state machine-readable current lifecycle state.
  * @param cause sanitized operator summary for degraded or failed states only.
+ * @param failure structured startup refusal for {@code FAILED}, when available.
  */
-public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<String> cause) {
+public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<String> cause,
+                               Optional<StartupFailure> failure) {
 /**
  * Normalizes absent or blank causes and rejects explanations for states that cannot carry one.
  */
@@ -40,10 +42,24 @@ public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(state, "state");
         cause = cause == null ? Optional.empty() : cause.filter(text -> !text.isBlank());
+        failure = failure == null ? Optional.empty() : failure;
         if (cause.isPresent() && state != DeploymentState.DEGRADED && state != DeploymentState.FAILED) {
             throw new IllegalArgumentException(
                     "Only DEGRADED and FAILED carry a cause; " + state + " has nothing to explain");
         }
+        if (failure.isPresent() && state != DeploymentState.FAILED) {
+            throw new IllegalArgumentException("Only FAILED carries a startup failure");
+        }
+    }
+
+    /**
+     * Binary/source compatibility constructor for the pre-structured-failure shape.
+     * @param id deployment whose lifecycle is observed
+     * @param state machine-readable current lifecycle state
+     * @param cause sanitized operator summary for degraded or failed states only
+     */
+    public DeploymentStatus(DeploymentId id, DeploymentState state, Optional<String> cause) {
+        this(id, state, cause, Optional.empty());
     }
 
 /**
@@ -53,7 +69,7 @@ public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<
  * @return status that deliberately carries no cause.
  */
     public static DeploymentStatus of(DeploymentId id, DeploymentState state) {
-        return new DeploymentStatus(id, state, Optional.empty());
+        return new DeploymentStatus(id, state, Optional.empty(), Optional.empty());
     }
 
 /**
@@ -64,7 +80,18 @@ public record DeploymentStatus(DeploymentId id, DeploymentState state, Optional<
  * @return status carrying the supplied sanitized explanation.
  */
     public static DeploymentStatus of(DeploymentId id, DeploymentState state, String sanitizedCause) {
-        return new DeploymentStatus(id, state, Optional.ofNullable(sanitizedCause));
+        return new DeploymentStatus(id, state, Optional.ofNullable(sanitizedCause), Optional.empty());
+    }
+
+    /**
+     * Creates a failed state carrying the shared structured startup failure and legacy generic cause.
+     * @param id deployment whose lifecycle is observed
+     * @param failure safe structured startup failure
+     * @return failed deployment status
+     */
+    public static DeploymentStatus failed(DeploymentId id, StartupFailure failure) {
+        return new DeploymentStatus(id, DeploymentState.FAILED,
+                Optional.of("deployment startup failed"), Optional.of(failure));
     }
 
 /**

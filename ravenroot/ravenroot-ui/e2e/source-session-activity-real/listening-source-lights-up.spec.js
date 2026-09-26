@@ -70,6 +70,35 @@ async function deliveredEventCount(page) {
   });
 }
 
+test('one refused start produces one actionable row and focuses its node property', async ({ page }) => {
+  requireHarnessEnvironment();
+  const graph = (await readFile(GRAPH_PATH, 'utf8'))
+    .replace('<data key="intervalMs">700</data>', '<data key="intervalMs">not-an-integer</data>');
+  const sourceStarts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/v1/source-sessions')) {
+      sourceStarts.push(request.url());
+    }
+  });
+
+  await page.goto(`${ORIGIN}/`);
+  await expect(page.locator('#runtime-connection')).toHaveClass(/connected/, { timeout: 30_000 });
+  await page.locator('#file-inp').setInputFiles({
+    name: 'inadmissible-source.graphml', mimeType: 'application/xml', buffer: Buffer.from(graph),
+  });
+  await expect(page.locator('#btn-run')).toBeEnabled();
+  await page.locator('#btn-run').click();
+
+  const refusal = page.locator('#activity-log .activity-entry.failed')
+    .filter({ has: page.locator('.activity-title', { hasText: 'Graph admission refused' }) });
+  await expect(refusal).toHaveCount(1);
+  await expect(refusal.locator('.activity-detail')).toContainText('PROPERTY_TYPE_INVALID');
+  await expect(refusal.locator('.activity-detail')).toContainText('property intervalMs');
+  await expect.poll(() => page.evaluate(() => window.cy.getElementById('consume').selected())).toBe(true);
+  await expect(page.locator('[data-catalog-property="intervalMs"]')).toBeFocused();
+  expect(sourceStarts, 'inspection must refuse before any listener-start request').toEqual([]);
+});
+
 test('a listening source graph lights up in the editor while it admits real traffic', async ({ page }) => {
   requireHarnessEnvironment();
   const consoleErrors = [];
@@ -129,7 +158,7 @@ test('a listening source graph lights up in the editor while it admits real traf
 
   // Fit before the evidence is captured: the screenshot is the artifact a reader looks at first, and
   // a graph zoomed to one node proves nothing about the other four.
-  await page.locator('[data-command-id="view.fit"]').first().click();
+  await page.locator('[data-command-id="view.fit"]:visible').click();
   await page.waitForTimeout(800);
   const report = await canvasReport(page);
   const published = await deliveredEventCount(page);

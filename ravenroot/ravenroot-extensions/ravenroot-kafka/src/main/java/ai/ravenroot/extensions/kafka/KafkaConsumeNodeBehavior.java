@@ -34,6 +34,7 @@ public final class KafkaConsumeNodeBehavior implements NodeBehavior, InboundSour
     private final KafkaConsumerProtocol protocol;
     private final Executor executor;
     private final Clock clock;
+    private final KafkaConsumerSource.DestinationAdmission destinationAdmission;
 
     public KafkaConsumeNodeBehavior() {
         this(new EnvironmentKafkaCredentialResolver(), new EnvironmentKafkaConsumerProfileResolver());
@@ -44,9 +45,16 @@ public final class KafkaConsumeNodeBehavior implements NodeBehavior, InboundSour
     }
     KafkaConsumeNodeBehavior(CredentialResolver credentials, KafkaConsumerProfileResolver profiles,
                              KafkaConsumerProtocol protocol, Executor executor, Clock clock) {
+        this(credentials, profiles, protocol, executor, clock,
+                KafkaConsumerSource.defaultDestinationAdmission());
+    }
+    KafkaConsumeNodeBehavior(CredentialResolver credentials, KafkaConsumerProfileResolver profiles,
+                             KafkaConsumerProtocol protocol, Executor executor, Clock clock,
+                             KafkaConsumerSource.DestinationAdmission destinationAdmission) {
         this.credentials = Objects.requireNonNull(credentials); this.profiles = Objects.requireNonNull(profiles);
         this.protocol = Objects.requireNonNull(protocol); this.executor = Objects.requireNonNull(executor);
         this.clock = Objects.requireNonNull(clock);
+        this.destinationAdmission = Objects.requireNonNull(destinationAdmission);
     }
 
     @Override public NodeTypeDescriptor descriptor() {
@@ -99,7 +107,12 @@ public final class KafkaConsumeNodeBehavior implements NodeBehavior, InboundSour
     }
 
     @Override public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context) {
-        return new KafkaConsumerSource(configuration, credentials, profiles, protocol, executor, clock);
+        return new KafkaConsumerSource(configuration, credentials, profiles, protocol, executor, clock,
+                destinationAdmission);
+    }
+
+    @Override public Set<String> sourceStartFailureCodes() {
+        return KafkaSourceStartFailure.codes();
     }
 
     static Set<String> knownConfiguration() { return CONFIG; }

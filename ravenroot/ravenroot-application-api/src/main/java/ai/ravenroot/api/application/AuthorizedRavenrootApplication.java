@@ -414,6 +414,18 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
+     * Performs purpose-aware inspection after the same graph-read authorization.
+     * @param context authenticated request context used for authorization and audit attribution
+     * @param graphMl readable exact GraphML bytes; ownership remains with the caller
+     * @param purpose operation for which the graph is being admitted
+     * @return authorized policy-independent admission summary
+     */
+    public GraphSummary inspectGraphMl(RequestContext context, InputStream graphMl, GraphAdmissionPurpose purpose) {
+        require(context, AuthorizationAction.GRAPH_READ, collection("graphs", context));
+        return delegate.inspectGraphMl(graphMl, purpose);
+    }
+
+    /**
  * Starts a traversal with a structured payload.
  *
  * <p>This is the surface an adapter should prefer. The {@code Object} overload below remains for

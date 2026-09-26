@@ -182,6 +182,19 @@ public interface RavenrootApplication extends AutoCloseable {
     GraphSummary inspectGraphMl(InputStream graphMl);
 
     /**
+     * Purpose-aware admission inspection; old implementations retain execution inspection semantics.
+     * @param graphMl readable exact GraphML bytes; ownership remains with the caller
+     * @param purpose operation for which the graph is being admitted
+     * @return policy-independent admission summary for the requested purpose
+     */
+    default GraphSummary inspectGraphMl(InputStream graphMl, GraphAdmissionPurpose purpose) {
+        if (purpose != GraphAdmissionPurpose.EXECUTION) {
+            throw new UnsupportedOperationException("purpose-aware graph inspection is unavailable");
+        }
+        return inspectGraphMl(graphMl);
+    }
+
+    /**
  * Trusted start contract for adapters that must establish security state before execution events
  * can be published. Implementations must use exactly {@code executionId} or fail before starting.
  *

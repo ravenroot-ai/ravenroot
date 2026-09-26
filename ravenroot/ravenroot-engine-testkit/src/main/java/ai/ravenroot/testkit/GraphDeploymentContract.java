@@ -2,6 +2,7 @@ package ai.ravenroot.testkit;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.DeploymentStartupException;
 import ai.ravenroot.api.deployment.DeploymentState;
 import ai.ravenroot.api.deployment.IngressDisposition;
 import ai.ravenroot.api.deployment.IngressTarget;
@@ -14,7 +15,6 @@ import ai.ravenroot.api.payload.PayloadException;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
-import ai.ravenroot.core.graph.GraphMlParseException;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.DefaultGraphDeployment;
@@ -230,11 +230,12 @@ public abstract class GraphDeploymentContract {
 
         var start = deployment.start(TCK_IDENTITY).toCompletableFuture();
         var failure = assertThrows(ExecutionException.class, () -> start.get(10, TimeUnit.SECONDS));
-        assertInstanceOf(GraphMlParseException.class, rootCause(failure));
+        var publicFailure = assertInstanceOf(DeploymentStartupException.class, rootCause(failure));
 
         var status = deployment.status();
         assertEquals(DeploymentState.FAILED, status.state());
         assertTrue(status.cause().isPresent(), "a FAILED status must carry a sanitized cause");
+        assertEquals(publicFailure.failure(), status.failure().orElseThrow());
 
         // No partial residue via the contract surface: ingress must not be admitting on a deployment
         // that never actually reached readiness.
@@ -246,7 +247,7 @@ public abstract class GraphDeploymentContract {
         // rollback path is itself idempotent under retry.
         var second = deployment.start(TCK_IDENTITY).toCompletableFuture();
         var secondFailure = assertThrows(ExecutionException.class, () -> second.get(10, TimeUnit.SECONDS));
-        assertInstanceOf(GraphMlParseException.class, rootCause(secondFailure));
+        assertInstanceOf(DeploymentStartupException.class, rootCause(secondFailure));
         assertEquals(DeploymentState.FAILED, deployment.status().state());
     }
 

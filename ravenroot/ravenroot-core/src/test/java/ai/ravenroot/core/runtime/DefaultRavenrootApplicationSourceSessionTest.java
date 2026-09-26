@@ -13,6 +13,7 @@ import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.IngressDisposition;
 import ai.ravenroot.api.deployment.IngressTarget;
+import ai.ravenroot.api.deployment.SourceStartException;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
@@ -172,6 +173,9 @@ class DefaultRavenrootApplicationSourceSessionTest {
             SourceSessionStatus failed = awaitState(
                     application, TENANT_A.tenantId(), "partial", SourceSessionState.FAILED);
             assertEquals("source session startup failed in this process", failed.diagnostic().orElseThrow());
+            assertEquals("invalid-batch-size", failed.failure().orElseThrow().reason());
+            assertEquals(failed.failure(), application.localDeployment(TENANT_A.tenantId(), "partial")
+                    .orElseThrow().failure(), "session and local-deployment projections share one failure");
             assertEquals(List.of("start:a-source", "start:b-source", "rollback:b-source", "rollback:a-source"),
                     behavior.lifecycle,
                     "the failed current source is cleaned up before earlier sources roll back in deterministic node order");
@@ -211,6 +215,11 @@ class DefaultRavenrootApplicationSourceSessionTest {
         }
 
         @Override
+        public Set<String> sourceStartFailureCodes() {
+            return Set.of("invalid-batch-size");
+        }
+
+        @Override
         public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context) {
             return new InboundSource() {
                 @Override
@@ -218,7 +227,8 @@ class DefaultRavenrootApplicationSourceSessionTest {
                     lifecycle.add("start:" + context.nodeId());
                     if (context.nodeId().equals("b-source")) {
                         return CompletableFuture.failedFuture(
-                                new IllegalStateException("password=hunter2 startup detail"));
+                                new SourceStartException(() -> "invalid-batch-size",
+                                        new IllegalStateException("password=hunter2 startup detail")));
                     }
                     return CompletableFuture.completedFuture(null);
                 }

@@ -23,9 +23,11 @@ import java.util.Optional;
  * @param state current process-local lifecycle state
  * @param sourceCount number of effective SOURCE nodes validated from the submitted graph
  * @param diagnostic fixed, bounded operator-safe explanation for degraded or failed state
+ * @param failure structured startup failure, present only for failed startup when available
  */
 public record SourceSessionStatus(String sessionId, String deploymentId, SourceSessionState state,
-                                  int sourceCount, Optional<String> diagnostic) {
+                                  int sourceCount, Optional<String> diagnostic,
+                                  Optional<ai.ravenroot.api.deployment.StartupFailure> failure) {
     /** Honest ownership label returned on the wire; intentionally makes no multi-replica claim. */
     public static final String SCOPE = "LOCAL_PROCESS";
     /** Defense in depth for implementations other than the reference implementation. */
@@ -44,10 +46,27 @@ public SourceSessionStatus {
         diagnostic = diagnostic == null ? Optional.empty() : diagnostic
                 .map(String::trim).filter(text -> !text.isEmpty())
                 .map(text -> text.substring(0, Math.min(text.length(), MAX_DIAGNOSTIC_CHARACTERS)));
+        failure = failure == null ? Optional.empty() : failure;
         if (diagnostic.isPresent() && state != SourceSessionState.DEGRADED
                 && state != SourceSessionState.FAILED) {
             throw new IllegalArgumentException("only degraded and failed sessions carry diagnostics");
         }
+        if (failure.isPresent() && state != SourceSessionState.FAILED) {
+            throw new IllegalArgumentException("only failed sessions carry startup failures");
+        }
+    }
+
+    /**
+     * Compatibility constructor for the pre-structured-failure canonical shape.
+     * @param sessionId caller-supplied idempotency identity within the authenticated tenant
+     * @param deploymentId long-lived deployment identity carried on traversal events
+     * @param state current process-local lifecycle state
+     * @param sourceCount positive number of effective inbound sources
+     * @param diagnostic bounded operator-safe explanation when available
+     */
+    public SourceSessionStatus(String sessionId, String deploymentId, SourceSessionState state,
+                               int sourceCount, Optional<String> diagnostic) {
+        this(sessionId, deploymentId, state, sourceCount, diagnostic, Optional.empty());
     }
 
     /**
@@ -78,7 +97,8 @@ public static SourceSessionStatus of(String sessionId, SourceSessionState state,
  */
 public static SourceSessionStatus of(String sessionId, String deploymentId,
                                          SourceSessionState state, int sourceCount) {
-        return new SourceSessionStatus(sessionId, deploymentId, state, sourceCount, Optional.empty());
+        return new SourceSessionStatus(sessionId, deploymentId, state, sourceCount,
+                Optional.empty(), Optional.empty());
     }
 
     /**
@@ -106,6 +126,21 @@ public static SourceSessionStatus of(String sessionId, SourceSessionState state,
 public static SourceSessionStatus of(String sessionId, String deploymentId, SourceSessionState state,
                                          int sourceCount, String safeDiagnostic) {
         return new SourceSessionStatus(sessionId, deploymentId, state, sourceCount,
-                Optional.ofNullable(safeDiagnostic));
+                Optional.ofNullable(safeDiagnostic), Optional.empty());
+    }
+
+    /**
+     * Creates a failed projection retaining the engine's exact structured startup failure.
+     * @param sessionId caller-supplied idempotency identity
+     * @param deploymentId long-lived deployment identity
+     * @param sourceCount positive number of effective inbound sources
+     * @param failure safe structured startup failure
+     * @return failed source-session status
+     */
+    public static SourceSessionStatus failed(String sessionId, String deploymentId, int sourceCount,
+            ai.ravenroot.api.deployment.StartupFailure failure) {
+        return new SourceSessionStatus(sessionId, deploymentId, SourceSessionState.FAILED, sourceCount,
+                Optional.of("source session startup failed in this process"),
+                Optional.of(java.util.Objects.requireNonNull(failure, "failure")));
     }
 }

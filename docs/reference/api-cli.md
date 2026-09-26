@@ -11,7 +11,7 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/status` | Service status |
 | `GET /v1/runtime` | Selected engine and runtime capabilities |
 | `GET /v1/node-types` | Effective node catalog |
-| `POST /v1/graphs/inspect` | Validate and inspect GraphML without executing it |
+| `POST /v1/graphs/inspect?purpose=EXECUTION\|LOCAL_DEPLOYMENT\|SOURCE_SESSION` | Validate the exact GraphML bytes without executing them. A parsed but inadmissible graph remains HTTP 200 with `valid:false` and one `ravenroot.graph-admission/1` finding; malformed GraphML remains an error response carrying the same safe finding shape. |
 | `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget and the authenticated principal's exact opaque `workspace.tenantId` |
 | `POST /v1/drain` | Stop admission and drain accepted work |
 
@@ -34,6 +34,13 @@ automatic resubmission; an ambiguous transport delivery may be retried only with
 key and metadata. If that retry also loses its response, clients issue an authoritative GET without a
 third command delivery. They expose the observed state (or Undeploy's authoritative 404) separately
 from the still-unknown command outcome.
+
+Failed deployment and source-session status bodies may carry `failure` with contract
+`ravenroot.startup-failure/1`. Its phase, closed reason, bounded display node, opaque `nodeRef`, and
+incident handle are safe to show. Extension-owned lower-kebab reasons appear only when the trusted
+source package declared them at registration; unknown or undeclared failures use `STARTUP_FAILED`
+and an incident handle. Property values, adapter exception messages, profiles, hosts, and stacks are
+never part of this response. `diagnostic` remains for older consumers and stays a fixed bounded text.
 
 ## Execution and events
 

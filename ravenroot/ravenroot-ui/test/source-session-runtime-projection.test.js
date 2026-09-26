@@ -86,6 +86,107 @@ describe('runtime events are attributed to a listening source graph', () => {
     expect(documentForRuntimeEvent(workspace, admission())).toBe(listening);
   });
 
+  it('keeps rejected source evidence out of an unrelated pending execution', () => {
+    const pendingDocument = (id = 'pending', tenantId = 'tenant-a') => {
+      const pending = document_(id, {}, tenantId);
+      bindExecution(pending, PENDING_EXECUTION);
+      return pending;
+    };
+    const sourceDocument = (id = 'source', deploymentId = 'session-a', tenantId = 'tenant-a') =>
+      document_(id, {
+        sessionId: deploymentId, deploymentId, state: 'LISTENING', generation: 1,
+      }, tenantId);
+
+    {
+      const pending = pendingDocument();
+      const source = sourceDocument();
+      const workspace = workspaceWith(pending, source);
+      const admitted = admission({ processInstanceId: 'known-process' });
+      expect(documentForRuntimeEvent(workspace, admitted)).toBe(source);
+      expect(documentForRuntimeEvent(workspace, {
+        ...admitted, executionId: 'valid-resume', deploymentId: null,
+      })).toBe(source);
+      expect(documentForRuntimeEvent(workspace, {
+        ...admitted, executionId: 'contradictory-deployment', deploymentId: 'session-b',
+      })).toBeNull();
+      expect(documentForRuntimeEvent(workspace, {
+        ...admitted, executionId: 'stale-graph', deploymentId: null, graphVersion: 'graph-2',
+      })).toBeNull();
+    }
+
+    {
+      const pending = pendingDocument('pending-b', 'tenant-b');
+      const source = sourceDocument();
+      const workspace = workspaceWith(pending, source);
+      const admitted = admission({ processInstanceId: 'tenant-fenced-process' });
+      expect(documentForRuntimeEvent(workspace, admitted)).toBe(source);
+      expect(documentForRuntimeEvent(workspace, {
+        ...admitted, executionId: 'cross-tenant', deploymentId: null,
+      }, { tenantId: 'tenant-b' })).toBeNull();
+    }
+
+    {
+      const pending = pendingDocument();
+      const source = sourceDocument();
+      const workspace = workspaceWith(pending, source);
+      const admitted = admission({ processInstanceId: 'stale-generation-process' });
+      expect(documentForRuntimeEvent(workspace, admitted)).toBe(source);
+      source.sourceSession.generation += 1;
+      const stale = { ...admitted, executionId: 'stale-generation', deploymentId: null };
+      expect(documentForRuntimeEvent(workspace, stale)).toBeNull();
+      expect(source.sourceSession.processOwners.has(admitted.processInstanceId)).toBe(false);
+      expect(source.sourceSession.retiredProcessOwners.has(admitted.processInstanceId)).toBe(true);
+      expect(documentForRuntimeEvent(workspace, stale)).toBeNull();
+    }
+
+    {
+      const pending = pendingDocument();
+      const source = sourceDocument();
+      const workspace = workspaceWith(pending, source);
+      const admitted = admission({ processInstanceId: 'stopped-process' });
+      expect(documentForRuntimeEvent(workspace, admitted)).toBe(source);
+      source.sourceSession.state = 'STOPPED';
+      const stopped = { ...admitted, executionId: 'stopped-session', deploymentId: null };
+      expect(documentForRuntimeEvent(workspace, stopped)).toBeNull();
+      expect(documentForRuntimeEvent(workspace, stopped)).toBeNull();
+    }
+
+    {
+      const pending = pendingDocument();
+      const first = sourceDocument('first', 'shared');
+      const second = sourceDocument('second', 'shared');
+      const workspace = workspaceWith(pending, first, second);
+      expect(documentForRuntimeEvent(workspace, admission({
+        processInstanceId: 'ambiguous-deployment-process', deploymentId: 'shared',
+      }))).toBeNull();
+    }
+
+    {
+      const pending = pendingDocument();
+      const first = sourceDocument('first', 'session-a');
+      const second = sourceDocument('second', 'session-b');
+      const workspace = workspaceWith(pending, first, second);
+      const processInstanceId = 'ambiguous-process-owner';
+      expect(documentForRuntimeEvent(workspace, admission({
+        processInstanceId, deploymentId: 'session-a',
+      }))).toBe(first);
+      expect(documentForRuntimeEvent(workspace, admission({
+        processInstanceId, deploymentId: 'session-b',
+      }))).toBe(second);
+      expect(documentForRuntimeEvent(workspace, admission({
+        processInstanceId, deploymentId: null,
+      }))).toBeNull();
+    }
+
+    {
+      const pending = pendingDocument();
+      const workspace = workspaceWith(pending);
+      expect(documentForRuntimeEvent(workspace, admission({
+        processInstanceId: 'genuinely-unknown-process', deploymentId: null,
+      }))).toBe(pending);
+    }
+  });
+
   it('accepts a status without a deployment identity rather than refusing the session outright', () => {
     const withIdentity = validateSourceSessionStatus({
       sessionId: 'session-a', deploymentId: 'session-a', state: 'LISTENING', sourceCount: 1,
@@ -218,16 +319,22 @@ describe('runtime events are attributed to a listening source graph', () => {
 
     listening.sourceSession.state = 'STOPPED';
     expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
+    expect(listening.sourceSession.processOwners.size).toBe(0);
+    expect(listening.sourceSession.retiredProcessOwners.has(admitted.processInstanceId)).toBe(true);
     listening.sourceSession.state = 'LISTENING';
     listening.sourceSession.generation += 1;
     expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
 
     expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
+    expect(listening.sourceSession.retiredProcessOwners.size).toBe(0);
     retireSourceSessionProcessBindings(listening);
     expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
+    expect(listening.sourceSession.processOwners.size).toBe(0);
+    expect(listening.sourceSession.retiredProcessOwners.size).toBe(0);
     expect(documentForRuntimeEvent(workspace, admitted)).toBe(listening);
     workspace.close(listening.id);
     expect(listening.sourceSession.processOwners.size).toBe(0);
+    expect(listening.sourceSession.retiredProcessOwners.size).toBe(0);
     expect(documentForRuntimeEvent(workspace, { ...admitted, deploymentId: null })).toBeNull();
   });
 

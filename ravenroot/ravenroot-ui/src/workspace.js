@@ -195,6 +195,10 @@ export function createDocumentRecord({
       // routed an event here; they let a later durable re-entry with a fresh traversal id and no
       // deployment field return to the same timeline. Never serialized.
       processOwners: new Map(),
+      // A stale verified owner is removed from the routable map, but its process id remains bounded
+      // evidence that repeated frames are source traffic rather than an unrelated pending run.
+      // Explicit lifecycle retirement clears this set together with processOwners.
+      retiredProcessOwners: new Set(),
     },
     // Optional read-only deployment attachment. The graph remains an allowlisted projection;
     // closing the document detaches observation without controlling the server-side deployment.
@@ -386,6 +390,9 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
       rememberSourceProcessOwner(listening[0], event, streamTenant);
       return listening[0];
     }
+    // A deployment id is positive source evidence. An unknown or ambiguous deployment must not be
+    // weakened into the generic pending-execution guess below.
+    return null;
   }
 
   // A durable re-entry keeps processInstanceId but receives a new traversal/execution id. The
@@ -395,10 +402,9 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
   // Remembered process ownership is a compatibility bridge only for continuations that lost their
   // deployment identity. An explicit, non-matching deployment is contradictory evidence and must
   // not be overridden by the weaker process association.
-  const resumed = deploymentId === null
-    ? documentsForRememberedSourceProcess(workspace, event, streamTenant) : [];
-  if (resumed.length === 1) return resumed[0];
-  if (resumed.length > 1) return null;
+  const resumed = rememberedSourceProcessDecision(workspace, event, streamTenant);
+  if (resumed.documents.length === 1) return resumed.documents[0];
+  if (resumed.hasSourceEvidence) return null;
 
   // The pending fallback is a guess, and a guess must not outrank a fact. When an open document
   // holds this execution id, the event belongs to that run — it reached here only because its
@@ -418,6 +424,7 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
 /** Clears every process learned for one source binding without affecting the server deployment. */
 export function retireSourceSessionProcessBindings(document_) {
   document_?.sourceSession?.processOwners?.clear();
+  document_?.sourceSession?.retiredProcessOwners?.clear();
 }
 
 function sourceSessionOwnsDeployment(document_, deploymentId) {
@@ -446,6 +453,7 @@ function rememberSourceProcessOwner(document_, event, streamTenant) {
       || document_?.tenantId !== streamTenant
       || !sourceSessionOwnsDeployment(document_, event.deploymentId)) return;
   const owners = session.processOwners;
+  session.retiredProcessOwners.delete(processInstanceId);
   owners.delete(processInstanceId);
   owners.set(processInstanceId, Object.freeze({
     tenantId: streamTenant,
@@ -455,22 +463,39 @@ function rememberSourceProcessOwner(document_, event, streamTenant) {
     sessionId: session.sessionId,
     sessionGeneration: session.generation,
   }));
-  while (owners.size > SOURCE_PROCESS_OWNERSHIP_LIMIT) {
-    owners.delete(owners.keys().next().value);
+  enforceSourceProcessOwnershipLimit(session);
+}
+
+function rememberRetiredSourceProcessOwner(session, processInstanceId) {
+  const retired = session.retiredProcessOwners;
+  retired.delete(processInstanceId);
+  retired.add(processInstanceId);
+  enforceSourceProcessOwnershipLimit(session);
+}
+
+function enforceSourceProcessOwnershipLimit(session) {
+  const owners = session.processOwners;
+  const retired = session.retiredProcessOwners;
+  while (owners.size + retired.size > SOURCE_PROCESS_OWNERSHIP_LIMIT) {
+    if (retired.size > 0) retired.delete(retired.values().next().value);
+    else owners.delete(owners.keys().next().value);
   }
 }
 
-function documentsForRememberedSourceProcess(workspace, event, streamTenant) {
+function rememberedSourceProcessDecision(workspace, event, streamTenant) {
   const processInstanceId = typeof event?.processInstanceId === 'string' && event.processInstanceId
     ? event.processInstanceId : null;
   const graphVersion = typeof event?.graphVersion === 'string' && event.graphVersion
     ? event.graphVersion : null;
-  if (!processInstanceId || !graphVersion || streamTenant === undefined) return [];
-  const matches = [];
+  if (!processInstanceId) return { documents: [], hasSourceEvidence: false };
+  const documents = [];
+  let hasSourceEvidence = false;
   for (const document_ of workspace.documents) {
     const session = document_.sourceSession;
+    if (session?.retiredProcessOwners?.has(processInstanceId)) hasSourceEvidence = true;
     const owner = session?.processOwners?.get(processInstanceId);
     if (!owner) continue;
+    hasSourceEvidence = true;
     const current = document_.incarnation === owner.documentIncarnation
       && document_.tenantId === owner.tenantId
       && sourceSessionOwnsDeployment(document_, owner.deploymentId)
@@ -478,11 +503,15 @@ function documentsForRememberedSourceProcess(workspace, event, streamTenant) {
       && session.generation === owner.sessionGeneration;
     if (!current) {
       session.processOwners.delete(processInstanceId);
+      rememberRetiredSourceProcessOwner(session, processInstanceId);
       continue;
     }
-    if (owner.tenantId === streamTenant && owner.graphVersion === graphVersion) matches.push(document_);
+    if (streamTenant !== undefined && graphVersion
+        && owner.tenantId === streamTenant && owner.graphVersion === graphVersion) {
+      documents.push(document_);
+    }
   }
-  return matches;
+  return { documents, hasSourceEvidence };
 }
 
 // Leaving the page is a decision about the whole workspace, not about the document in front of the

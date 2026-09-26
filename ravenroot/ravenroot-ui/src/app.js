@@ -832,6 +832,19 @@ function runtimeEventScope(client) {
   return workspaceAuthority.scope || SESSION_ONLY_RUNTIME_EVENT_SCOPE;
 }
 
+async function deliverRuntimeEventAfterAuthority(event, client, authorityRequest) {
+  // The transport advances Last-Event-ID only after this promise resolves. A frame can arrive while
+  // configuration is still proving the exact client's workspace tenant or restoring its documents;
+  // hold that frame here so it is neither routed without authority nor silently acknowledged. A
+  // failed or superseded authority rejects delivery, leaving the cursor at the last accepted frame.
+  await authorityRequest;
+  if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
+      || workspaceAuthority.client !== client) {
+    throw new Error('Runtime event authority is unavailable');
+  }
+  handleRuntimeEvent(event, client);
+}
+
 function normalizedWorkspaceServiceUrl(client) {
   return new URL(client?.baseUrl || globalThis.location.origin, globalThis.location.origin).href.replace(/\/$/, '');
 }
@@ -11471,7 +11484,8 @@ async function connectRuntime(atBoot = false) {
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
-    runtimeDisconnect = runtimeClient.connect(event => handleRuntimeEvent(event, connectedClient),
+    runtimeDisconnect = runtimeClient.connect(
+      event => deliverRuntimeEventAfterAuthority(event, connectedClient, connectedConfigurationRequest),
       (status, message) => {
         setRuntimeConnectionState(status, message);
         if (status === 'connected') void configureHumanTasks();

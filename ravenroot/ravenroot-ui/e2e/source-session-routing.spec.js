@@ -82,27 +82,42 @@ function durableHumanTaskReentryStream(deploymentId) {
   })}\n\n`).join('');
 }
 
-async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = null } = {}) {
+async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = null,
+  configurationResponder, eventResponder } = {}) {
   const sourceCalls = [];
   const executionCalls = [];
+  const configurationCalls = [];
+  const eventCalls = [];
   // The editor connects its stream at boot, before any session exists, so the frames cannot be
   // composed up front: their deployment id is the one the browser invents when Run is pressed. The
   // stream therefore waits for the start request and is composed from it, which is also the order
   // the real server publishes in.
   let announceSession = () => {};
   const startedSession = new Promise(resolve => { announceSession = resolve; });
-  if (workspaceTenant) {
-    await page.route('**/v1/configuration', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
-        workspace: { tenantId: workspaceTenant } }),
-    }));
+  if (workspaceTenant || configurationResponder) {
+    await page.route('**/v1/configuration', async route => {
+      configurationCalls.push({ headers: route.request().headers() });
+      if (configurationResponder) {
+        await configurationResponder({ route, configurationCalls });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
+          workspace: { tenantId: workspaceTenant } }),
+      });
+    });
   }
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json', body: SOURCE_CATALOG,
   }));
   await page.route('**/v1/events**', async route => {
+    eventCalls.push({ headers: route.request().headers() });
+    if (eventResponder) {
+      await eventResponder({ route, eventCalls, startedSession });
+      return;
+    }
     if (!sourceTraffic) {
       await route.fulfill({ status: 204, body: '' });
       return;
@@ -144,7 +159,7 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
       body: JSON.stringify({ executionId: 'one-shot', graphVersion: 'v1', executionPolicy: 'STANDARD' }),
     });
   });
-  return { sourceCalls, executionCalls };
+  return { sourceCalls, executionCalls, configurationCalls, eventCalls };
 }
 
 async function openGraph(page, xml, name) {
@@ -229,6 +244,100 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
       executionId: '20000000-0000-4000-8000-000000000002' }),
     expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'source',
       executionId: '20000000-0000-4000-8000-000000000003' }),
+  ]));
+});
+
+test('re-authentication holds a source frame until workspace authority can deliver it', async ({ page }) => {
+  let releaseInitialTraffic;
+  const initialTrafficGate = new Promise(resolve => { releaseInitialTraffic = resolve; });
+  let releaseReauthentication;
+  const reauthenticationGate = new Promise(resolve => { releaseReauthentication = resolve; });
+  let announceReauthentication;
+  const reauthenticationStarted = new Promise(resolve => { announceReauthentication = resolve; });
+  const configurationBody = JSON.stringify({
+    schemaVersion: 1,
+    graphDocumentMaxBytes: 10 * 1024 * 1024,
+    workspace: { tenantId: 'tenant-authenticated' },
+  });
+  let deploymentId;
+  const calls = await stubRuntime(page, {
+    configurationResponder: async ({ route, configurationCalls }) => {
+      if (configurationCalls.length === 2) {
+        announceReauthentication();
+        await reauthenticationGate;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: configurationBody });
+    },
+    eventResponder: async ({ route, eventCalls, startedSession }) => {
+      if (eventCalls.length === 1) {
+        deploymentId = await startedSession;
+        await initialTrafficGate;
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: `retry: 30000\n${sourceEventStream(deploymentId, ['source'], 1)}`,
+        });
+        return;
+      }
+      if (eventCalls.length === 2) {
+        const event = {
+          schemaVersion: 1, source: 'RING', id: '7', eventType: 'NODE_COMPLETED', sequence: 7,
+          occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub', graphVersion: 'v1',
+          processInstanceId: '30000000-0000-4000-8000-000000000001',
+          traversalId: '40000000-0000-4000-8000-000000000001',
+          executionId: '40000000-0000-4000-8000-000000000001', deploymentId,
+          workloadId: 'source-workload-before-authority', type: 'NODE_COMPLETED', nodeId: 'source',
+          activeInstances: 0, inFlightArrivals: 0, fallback: false, description: 'stub',
+          publicReason: null, message: null, messageRedacted: false, messageTruncated: false,
+          processingDuration: null, output: 'arrived-before-authority',
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: `retry: 250\nid: 7\nevent: execution\ndata: ${JSON.stringify(event)}\n\n`,
+        });
+        return;
+      }
+      await route.fulfill({ status: 403, body: '' });
+    },
+  });
+  await page.goto('/');
+  await openGraph(page, sourceGraph('external.consume'), 'source-authority-race.graphml');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  releaseInitialTraffic();
+  await expect.poll(() => page.evaluate(
+    () => window.ravenroot.activeDocument().execution.events.length)).toBe(2);
+
+  await page.locator('#access-token').fill('replacement-token');
+  await page.locator('#access-token').press('Enter');
+  await reauthenticationStarted;
+  await expect.poll(() => calls.eventCalls.length).toBe(2);
+  expect(calls.eventCalls[1].headers).not.toHaveProperty('last-event-id');
+
+  // If the pending callback were treated as delivered, the 250 ms retry would already acknowledge
+  // frame 7 here. The exact client authority is still blocked, so neither routing nor reconnect may
+  // advance beyond this request.
+  await page.waitForTimeout(500);
+  expect(calls.eventCalls).toHaveLength(2);
+  expect(await page.locator('#activity-log').textContent()).not.toContain('arrived-before-authority');
+
+  releaseReauthentication();
+  await expect(page.locator('#activity-log')).toContainText('arrived-before-authority');
+  await expect.poll(() => calls.eventCalls.length).toBe(3);
+  expect(calls.eventCalls[2].headers['last-event-id']).toBe('7');
+  const timeline = await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      processOwners: [...document_.sourceSession.processOwners.keys()],
+      events: document_.execution.events,
+    };
+  });
+  expect(timeline.processOwners).toContain('30000000-0000-4000-8000-000000000001');
+  expect(timeline.events).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'NODE_COMPLETED', nodeId: 'source',
+      executionId: '40000000-0000-4000-8000-000000000001' }),
   ]));
 });
 

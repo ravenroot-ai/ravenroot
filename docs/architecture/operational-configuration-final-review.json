@@ -8383,7 +8383,7 @@
         },
         {
           "path": "scripts/check_release_configuration.py",
-          "digest": "5421c181fb275a40357b54020c645d40234801787d9b58e33f8c94c9159259f2",
+          "digest": "410e11578f4e01097b457242d99e66bfc6b93847f32d80ed3ba70a9a737f9e3f",
           "assertion": "Release checker consumes external tool configuration names."
         }
       ],

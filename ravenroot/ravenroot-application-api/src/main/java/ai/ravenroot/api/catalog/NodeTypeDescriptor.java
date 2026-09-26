@@ -140,7 +140,7 @@ public record NodeTypeDescriptor(
      * catalog registration
      * needs.
      * </p>
-     * 
+     *
      * @return declared default when present, otherwise
      *         {@link NodeRuntimeNature#DEFAULT}
      */
@@ -164,7 +164,7 @@ public record NodeTypeDescriptor(
      * Fail-closed costs a
      * descriptor that wants choice one explicit declaration.
      * </p>
-     * 
+     *
      * @return declared allowed natures, or a singleton containing the effective
      *         default
      */
@@ -209,7 +209,7 @@ public record NodeTypeDescriptor(
      * suggest; it fills in
      * when a node package that actually interprets commands is installed.
      * </p>
-     * 
+     *
      * @return immutable allowlist of application command names
      */
     public Set<String> commands() {
@@ -218,7 +218,7 @@ public record NodeTypeDescriptor(
 
     /**
      * Whether this descriptor says anything at all about runtime nature.
-     * 
+     *
      * @return {@code true} when the descriptor explicitly constrains runtime nature
      */
     public boolean declaresNature() {
@@ -228,7 +228,7 @@ public record NodeTypeDescriptor(
     /**
      * This descriptor with the given nature constraint, for catalog-load
      * derivation.
-     * 
+     *
      * @param newDefault replacement default nature, or {@code null} to leave it
      *                   unspecified
      * @param newAllowed replacement set of natures graph content may select
@@ -257,7 +257,7 @@ public record NodeTypeDescriptor(
      * property this
      * descriptor does not declare is refused here exactly as it would be there.
      * </p>
-     * 
+     *
      * @param declared outcome declarations to attach to this descriptor
      * @return copy retaining all catalog metadata with the supplied outcomes
      */
@@ -269,7 +269,7 @@ public record NodeTypeDescriptor(
 
     /**
      * Copy with a trusted runtime-admission default and ceiling.
-     * 
+     *
      * @param constraint trusted runtime-admission default and ceiling
      * @return a descriptor copy carrying the supplied admission constraint
      */
@@ -367,7 +367,7 @@ public record NodeTypeDescriptor(
      * a resolved name
      * still holding a {@code {{…}}} token as unknowable rather than as wrong.
      * </p>
-     * 
+     *
      * @param propertyValues lookup of configured property values by property name
      * @return immutable distinct outcome names after property-derived outcomes are
      *         resolved
@@ -417,7 +417,7 @@ public record NodeTypeDescriptor(
      * unless the
      * source-capability derivation finds a declaration in the code itself.
      * </p>
-     * 
+     *
      * @param behavior     unique identifier used to select the behavior
      *                     implementation
      * @param displayName  editor label, normalized to {@code behavior} when absent
@@ -489,7 +489,7 @@ public record NodeTypeDescriptor(
      * existed: it says nothing, and an editor offers no suggestions rather than
      * inventing some.
      * </p>
-     * 
+     *
      * @param behavior       unique identifier used to select the behavior
      *                       implementation
      * @param displayName    editor label, normalized to {@code behavior} when
@@ -522,7 +522,7 @@ public record NodeTypeDescriptor(
     /**
      * Compatibility constructor preserving the twelve-argument canonical
      * descriptor.
-     * 
+     *
      * @param behavior       unique identifier used to select the node
      *                       implementation
      * @param displayName    editor-facing behavior name

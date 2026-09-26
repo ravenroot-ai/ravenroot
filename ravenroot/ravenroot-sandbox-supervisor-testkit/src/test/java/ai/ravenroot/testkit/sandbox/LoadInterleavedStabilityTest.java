@@ -97,14 +97,16 @@ class LoadInterleavedStabilityTest {
 
     /**
      * How long this test is willing to wait for the FIRST {@code mvn -pl
-     * ravenroot-programming-graalvm -am test} invocation to complete before concluding the load never
-     * genuinely started. Generous because it covers JVM/Maven startup plus a full module test run
-     * on a possibly cold local repository cache, not because a slow success should be tolerated
-     * indefinitely -- see {@link LoadWrapperGuard#verifyFirstIterationSucceeded}, which fails the
-     * instant a completed iteration reports a non-zero exit code, regardless of how quickly that
-     * happens.
+     * ravenroot-programming-graalvm -am test} reactor invocation to complete before failing the
+     * bounded first-iteration wait. Generous because it covers JVM/Maven startup, the GraalVM module,
+     * and upstream {@code -am} test work on a possibly cold local repository cache. CI has measured
+     * the GraalVM module alone near three minutes before that upstream work, so five minutes
+     * accommodates slower CI startup while the test's separate ten-minute outer timeout still bounds
+     * the whole measurement. See {@link
+     * LoadWrapperGuard#verifyFirstIterationSucceeded}, which fails the instant a completed
+     * iteration reports a non-zero exit code, regardless of how quickly that happens.
      */
-    private static final Duration FIRST_ITERATION_TIMEOUT = Duration.ofMinutes(3);
+    private static final Duration FIRST_ITERATION_TIMEOUT = Duration.ofMinutes(5);
 
     /**
      * Propagates the parent build's local repository to the nested {@code mvn}, or nothing when the

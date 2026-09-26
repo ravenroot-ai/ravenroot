@@ -79,16 +79,18 @@ def latest_release(root: Path):
     return sorted(releases, key=lambda version: version.semantic_key())[-1]
 
 
-def replace_exactly(path: Path, old: str, new: str, expected: int | None = None) -> None:
-    contents = path.read_text(encoding="utf-8")
+def replaced_exactly(path: Path, contents: str, old: str, new: str,
+                     expected: int | None = None) -> str:
+    """Return one validated replacement without changing a release surface yet."""
     found = contents.count(old)
     if found == 0 or (expected is not None and found != expected):
         raise ReleaseContractError(f"{path}: expected {expected or 'some'} of {old!r}, found {found}")
-    path.write_text(contents.replace(old, new), encoding="utf-8")
+    return contents.replace(old, new)
 
 
 def bump_surfaces(root: Path, previous: str, target: str) -> None:
     """Move every surface the maintainer procedure names, plus the snippets derived from them."""
+    updates: dict[Path, str] = {}
     for relative in git(root, "ls-files", "*pom.xml").splitlines():
         path = root / relative
         contents = path.read_text(encoding="utf-8")
@@ -97,28 +99,49 @@ def bump_surfaces(root: Path, previous: str, target: str) -> None:
             f"<ravenroot.version>{previous}</ravenroot.version>",
             f"<ravenroot.version>{target}</ravenroot.version>",
         )
-        path.write_text(updated, encoding="utf-8")
+        updates[path] = updated
 
-    replace_exactly(root / UI_PACKAGE, f'"version": "{previous}"', f'"version": "{target}"', 1)
-    replace_exactly(root / UI_LOCKFILE, f'"version": "{previous}"', f'"version": "{target}"', 2)
-    lock = json.loads((root / UI_LOCKFILE).read_text(encoding="utf-8"))
+    package_path = root / UI_PACKAGE
+    updates[package_path] = replaced_exactly(
+        package_path, package_path.read_text(encoding="utf-8"),
+        f'"version": "{previous}"', f'"version": "{target}"', 1,
+    )
+    lock_path = root / UI_LOCKFILE
+    updates[lock_path] = replaced_exactly(
+        lock_path, lock_path.read_text(encoding="utf-8"),
+        f'"version": "{previous}"', f'"version": "{target}"', 2,
+    )
+    lock = json.loads(updates[lock_path])
     if lock.get("version") != target or lock.get("packages", {}).get("", {}).get("version") != target:
         raise ReleaseContractError(f"{UI_LOCKFILE}: the root package version did not move to {target}")
 
-    replace_exactly(root / HELM_CHART, f"version: {previous}\n", f"version: {target}\n", 1)
-    replace_exactly(root / HELM_CHART, f'appVersion: "{previous}"', f'appVersion: "{target}"', 1)
+    chart_path = root / HELM_CHART
+    chart = replaced_exactly(
+        chart_path, chart_path.read_text(encoding="utf-8"),
+        f"version: {previous}\n", f"version: {target}\n", 1,
+    )
+    updates[chart_path] = replaced_exactly(
+        chart_path, chart, f'appVersion: "{previous}"', f'appVersion: "{target}"', 1,
+    )
     # The README also records that the lifecycle began at the first release; only the install
     # coordinates follow the current version.
-    replace_exactly(root / README, f"<version>{previous}</version>", f"<version>{target}</version>")
-    replace_exactly(
-        root / EXTENSION_PACK_GUIDE,
+    readme_path = root / README
+    updates[readme_path] = replaced_exactly(
+        readme_path, readme_path.read_text(encoding="utf-8"),
+        f"<version>{previous}</version>", f"<version>{target}</version>",
+    )
+    guide_path = root / EXTENSION_PACK_GUIDE
+    guide = replaced_exactly(
+        guide_path, guide_path.read_text(encoding="utf-8"),
         f"<ravenroot.version>{previous}</ravenroot.version>",
         f"<ravenroot.version>{target}</ravenroot.version>",
         1,
     )
-    replace_exactly(
-        root / EXTENSION_PACK_GUIDE, f"-Dravenroot.version={previous}", f"-Dravenroot.version={target}", 1
+    updates[guide_path] = replaced_exactly(
+        guide_path, guide, f"-Dravenroot.version={previous}", f"-Dravenroot.version={target}", 1,
     )
+    for path, contents in updates.items():
+        path.write_text(contents, encoding="utf-8")
 
 
 def collect_fragments(root: Path) -> dict[str, list[tuple[Path, str]]]:

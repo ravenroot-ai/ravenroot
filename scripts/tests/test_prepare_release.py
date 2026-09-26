@@ -134,6 +134,25 @@ class PrepareReleaseTest(unittest.TestCase):
                 prepare(root, "minor")
             self.assertTrue((root / ".changes/1.feature.md").exists(), "a refusal changes nothing")
 
+    def test_a_surface_refusal_does_not_leave_earlier_surfaces_modified(self) -> None:
+        root = fixture(FRAGMENTS)
+        chart = root / "deploy/helm/ravenroot/Chart.yaml"
+        chart.write_text(
+            chart.read_text(encoding="utf-8").replace(f'appVersion: "{PREVIOUS}"', "appVersion: missing"),
+            encoding="utf-8",
+        )
+        before = {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file() and ".git" not in path.relative_to(root).parts
+        }
+        with self.assertRaises(ReleaseContractError):
+            prepare(root, "minor")
+        after = {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file() and ".git" not in path.relative_to(root).parts
+        }
+        self.assertEqual(before, after)
+
 
 PUBLISHED = [(parse_tag(f"v{PREVIOUS}"), f"v{PREVIOUS}")]
 

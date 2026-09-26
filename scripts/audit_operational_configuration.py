@@ -25,10 +25,15 @@ from pathlib import Path
 from typing import Iterable
 
 try:
-    from check_product_version import SEMVER as PRODUCT_SEMVER, helm_errors as product_helm_errors
+    from check_product_version import (
+        SEMVER as PRODUCT_SEMVER,
+        errors as product_version_errors,
+        helm_errors as product_helm_errors,
+    )
 except ModuleNotFoundError:  # Imported as scripts.audit_operational_configuration.
     from scripts.check_product_version import (
         SEMVER as PRODUCT_SEMVER,
+        errors as product_version_errors,
         helm_errors as product_helm_errors,
     )
 
@@ -1126,6 +1131,12 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
             elif ENVIRONMENT_BINDING.search(raw) and FIXED.search(raw):
                 label = "binding-value"
                 kind = "binding-default"
+        if relative.as_posix() == HELM_CHART_PATH and label == "appVersion":
+            # Helm appVersion is an exact product-version mirror. It is release metadata, not
+            # operator configuration; helm_chart_metadata verifies it through the complete
+            # product-version authority instead of pinning every release in the inventory.
+            offset += len(raw) + 1
+            continue
         if kind and label:
             for atom in FIXED_ATOM.finditer(raw):
                 candidate_offset = offset + atom.start()
@@ -2535,23 +2546,35 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
             or fields["name"] != "ravenroot" \
             or fields["type"] != "application":
         return None
-    # Release tooling owns version transitions; this proof reuses its accepted grammar and
-    # equality check while treating both values as chart metadata rather than operator settings.
+    # Release tooling owns version transitions. The shared product-version checker proves both
+    # chart fields against every product surface, while the normalized source digest continues to
+    # pin all non-release chart content.
     if PRODUCT_SEMVER.fullmatch(fields["version"]) is None \
             or product_helm_errors(fields["version"], source) \
             or re.fullmatch(r">=[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?",
                             fields["kubeVersion"]) is None:
         return None
+    # Narrow fixture roots exercise only the chart contract. A product checkout always carries
+    # the authoritative Maven surface, so require the complete cross-surface proof there.
+    if (root / "ravenroot/pom.xml").is_file():
+        try:
+            if product_version_errors(fields["version"], root):
+                return None
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            return None
+    release_normalized = re.sub(
+        r'(?m)^(version|appVersion):\\s*(?:"[^"\\n]+"|\'[^\'\\n]+\'|[^\\s#]+)\\s*$',
+        r"\\1: <release-version>",
+        source,
+    )
     return {
         "path": HELM_CHART_PATH,
         "apiVersion": fields["apiVersion"],
         "name": fields["name"],
         "description": fields["description"],
         "type": fields["type"],
-        "version": fields["version"],
-        "appVersion": fields["appVersion"],
         "kubeVersion": fields["kubeVersion"],
-        "digest": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+        "releaseNormalizedDigest": hashlib.sha256(release_normalized.encode("utf-8")).hexdigest(),
     }
 
 

@@ -19,6 +19,7 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import audit_operational_configuration as audit  # noqa: E402
+from scripts.prepare_release import prepare  # noqa: E402
 
 
 ROOT = SCRIPTS.parent
@@ -150,6 +151,34 @@ def external_io_reviewed_entries(
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_prepared_release_tree_uses_source_derived_chart_release_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location) / "release"
+            subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(root)], check=True)
+            prepared = prepare(root, "minor")
+            self.assertEqual("0.5.0-alpha.1", prepared["version"])
+            self.assertEqual(
+                [],
+                audit.check(
+                    root,
+                    root / "scripts/operational-configuration-inventory.json",
+                    root / "docs/architecture/operational-configuration-audit.md",
+                ),
+            )
+            chart = root / audit.HELM_CHART_PATH
+            chart.write_text(
+                chart.read_text(encoding="utf-8").replace(
+                    'appVersion: "0.5.0-alpha.1"', 'appVersion: "0.5.0-alpha.2"', 1),
+                encoding="utf-8",
+            )
+            errors = audit.check(
+                root,
+                root / "scripts/operational-configuration-inventory.json",
+                root / "docs/architecture/operational-configuration-audit.md",
+            )
+            self.assertTrue(any("Helm values, schema, templates, runtime, or executable tests" in error
+                                for error in errors), errors)
+
     def test_final_review_authority_applies_one_exact_source_anchored_partition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

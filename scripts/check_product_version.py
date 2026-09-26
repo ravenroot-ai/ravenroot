@@ -21,19 +21,19 @@ def text(root: ET.Element, path: str) -> str | None:
     return element.text.strip() if element is not None and element.text else None
 
 
-def authoritative_version() -> str:
-    root = ET.parse(ROOT / "ravenroot/pom.xml").getroot()
-    version = text(root, "m:version")
+def authoritative_version(root: Path = ROOT) -> str:
+    project = ET.parse(root / "ravenroot/pom.xml").getroot()
+    version = text(project, "m:version")
     if version is None:
         raise ValueError("ravenroot/pom.xml has no direct project version")
     return version
 
 
-def tracked_files() -> list[Path]:
+def tracked_files(root: Path = ROOT) -> list[Path]:
     result = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
+        ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True
     )
-    return [ROOT / item for item in result.stdout.decode("utf-8").split("\0") if item]
+    return [root / item for item in result.stdout.decode("utf-8").split("\0") if item]
 
 
 def helm_errors(version: str, contents: str) -> list[str]:
@@ -48,11 +48,11 @@ def helm_errors(version: str, contents: str) -> list[str]:
     return findings
 
 
-def errors(version: str) -> list[str]:
+def errors(version: str, root: Path = ROOT) -> list[str]:
     findings: list[str] = []
     if not SEMVER.fullmatch(version):
         findings.append(f"ravenroot/pom.xml: {version!r} is not Semantic Versioning")
-    files = tracked_files()
+    files = tracked_files(root)
     for pom in sorted(path for path in files if path.name == "pom.xml"):
         project = ET.parse(pom).getroot()
         group = text(project, "m:groupId") or text(project, "m:parent/m:groupId")
@@ -60,9 +60,9 @@ def errors(version: str) -> list[str]:
             continue
         candidate = text(project, "m:version") or text(project, "m:parent/m:version")
         if candidate != version:
-            findings.append(f"{pom.relative_to(ROOT)}: version {candidate!r} differs from {version!r}")
+            findings.append(f"{pom.relative_to(root)}: version {candidate!r} differs from {version!r}")
     for relative in ("ravenroot/ravenroot-ui/package.json", "ravenroot/ravenroot-ui/package-lock.json"):
-        document = json.loads((ROOT / relative).read_text(encoding="utf-8"))
+        document = json.loads((root / relative).read_text(encoding="utf-8"))
         if document.get("version") != version:
             findings.append(f"{relative}: root version differs from {version!r}")
         packages = document.get("packages")
@@ -71,24 +71,24 @@ def errors(version: str) -> list[str]:
     findings.extend(
         helm_errors(
             version,
-            (ROOT / "deploy/helm/ravenroot/Chart.yaml").read_text(encoding="utf-8"),
+            (root / "deploy/helm/ravenroot/Chart.yaml").read_text(encoding="utf-8"),
         )
     )
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
     coordinates = set(re.findall(r"<version>([^<]+)</version>", readme))
     if coordinates and coordinates != {version}:
         findings.append(f"README.md: Maven coordinates {sorted(coordinates)!r} differ from {version!r}")
     for tracked in files:
         if not tracked.is_file() or tracked.suffix in {".png", ".jpg", ".jpeg"}:
             continue
-        if tracked.resolve() == Path(__file__).resolve():
+        if tracked.resolve() == (root / "scripts/check_product_version.py").resolve():
             continue
         try:
             contents = tracked.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
         if "1.0.0-SNAPSHOT" in contents:
-            findings.append(f"{tracked.relative_to(ROOT)}: legacy product version reintroduced")
+            findings.append(f"{tracked.relative_to(root)}: legacy product version reintroduced")
     return findings
 
 

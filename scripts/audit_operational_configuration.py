@@ -2563,8 +2563,8 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
         except (OSError, ValueError, subprocess.CalledProcessError):
             return None
     release_normalized = re.sub(
-        r'(?m)^(version|appVersion):\\s*(?:"[^"\\n]+"|\'[^\'\\n]+\'|[^\\s#]+)\\s*$',
-        r"\\1: <release-version>",
+        r'(?m)^(version|appVersion):\s*(?:"[^"\n]+"|\'[^\'\n]+\'|[^\s#]+)\s*$',
+        r"\1: <release-version>",
         source,
     )
     return {

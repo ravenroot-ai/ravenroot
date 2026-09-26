@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24051 |
+| Atomic operational candidates discovered | 24158 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24051 |
+| Reviewed | 24158 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10003 |
+| Retained protocol or format invariants | 10006 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 677 |
 | Retained derived values | 1074 |
-| Test fixtures | 8146 |
+| Test fixtures | 8250 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 2137.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 104.
+Checked source reconciliations: 105.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24051 candidates.
+zero-count or unclassified rows as needed and sums to 24158 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24051 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22390 |
+| retained | 22497 |
 
 ### Classification counts
 
@@ -86,10 +86,10 @@ zero-count or unclassified rows as needed and sums to 24051 candidates.
 | derived | 1074 |
 | operator-configurable | 1661 |
 | presentation-text | 677 |
-| protocol-or-format-invariant | 10003 |
+| protocol-or-format-invariant | 10006 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
-| test-fixture | 8146 |
+| test-fixture | 8250 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 24051 candidates.
 | deployment | 2865 |
 | deployment-example | 20 |
 | java | 7282 |
-| script | 2328 |
-| test-fixture | 8146 |
+| script | 2331 |
+| test-fixture | 8250 |
 | ui | 3410 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8516 |
-| Retained; no remediation required | 13515 |
+| Retained; no remediation required | 13622 |
 
 ## Latest reconciliation
 
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 24051 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 24051 |
+| Semantically classified additions | 107 |
+| Current candidates | 24158 |
 
 ## Final semantic review
 
@@ -15398,56 +15398,59 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-014e2b8cbda7da85ed2c` | `scripts/check_release_configuration.py:134` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-dee49603d7d146cb665d` | `scripts/check_release_configuration.py:143` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-0fade4df79d3954502d9` | `scripts/check_release_configuration.py:145` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-43186d5eebbe8478dcd9` | `scripts/check_release_configuration.py:150` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-266229716c15a640a45f` | `scripts/check_release_configuration.py:153` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-b554c788b9e8ae298232` | `scripts/check_release_configuration.py:153` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8e957d39d4246b28536d` | `scripts/check_release_configuration.py:156` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-ca0f07b5fe7f4f9e76a2` | `scripts/check_release_configuration.py:159` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-0a8b3d0703325fa75fb0` | `scripts/check_release_configuration.py:161` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-63450632972df932943c` | `scripts/check_release_configuration.py:164` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-3f56203399f0fe7fb419` | `scripts/check_release_configuration.py:165` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-995d439c5bca7f6a49ae` | `scripts/check_release_configuration.py:165` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f21266ec76ac2d23aac7` | `scripts/check_release_configuration.py:165` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-de955df7045b5db82128` | `scripts/check_release_configuration.py:166` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-0732329815122310b423` | `scripts/check_release_configuration.py:167` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-53b553c3a7f506582150` | `scripts/check_release_configuration.py:168` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-671fdb700ed7feddd67e` | `scripts/check_release_configuration.py:171` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-150b4455b22d801f6184` | `scripts/check_release_configuration.py:176` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-3cc1d3d36b8de33c0d5f` | `scripts/check_release_configuration.py:178` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6d913f4171b0ca47bc7a` | `scripts/check_release_configuration.py:187` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-c7723869cb8618048daf` | `scripts/check_release_configuration.py:189` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6ca60f51fb7ca9c30846` | `scripts/check_release_configuration.py:192` `check_workflows` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-fbdf97d6e2984721b65c` | `scripts/check_release_configuration.py:196` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d0b4ef8db9ed12431952` | `scripts/check_release_configuration.py:200` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-2cdf05bbb6fc760186c1` | `scripts/check_release_configuration.py:203` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-44efd6d282255f1293ab` | `scripts/check_release_configuration.py:203` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8cc6eba99a208e63cb33` | `scripts/check_release_configuration.py:203` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f97533b443cb832d5ac4` | `scripts/check_release_configuration.py:203` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-4e630864e57849303bc1` | `scripts/check_release_configuration.py:205` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-5257187011c648c37941` | `scripts/check_release_configuration.py:210` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-7c06f32943854826906f` | `scripts/check_release_configuration.py:213` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-60149af9fb912e199731` | `scripts/check_release_configuration.py:215` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
-| `oc-f45e8bd4a37768cff9a1` | `scripts/check_release_configuration.py:215` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
-| `oc-61b2ad2a448a006fcf5b` | `scripts/check_release_configuration.py:218` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-aca838a688f1fd8612c3` | `scripts/check_release_configuration.py:238` `check_documentation` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5d4424635a3edaf7872d` | `scripts/check_release_configuration.py:244` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8662e4843e99b889bb66` | `scripts/check_release_configuration.py:245` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-34e22bfa7a30fe5b018d` | `scripts/check_release_configuration.py:246` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5f952bbe1a981b45293c` | `scripts/check_release_configuration.py:247` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-87025aa0df2746a1af77` | `scripts/check_release_configuration.py:248` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a5bc4c98b3efd0b2f109` | `scripts/check_release_configuration.py:251` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-3a5bece3a143e0bc9898` | `scripts/check_release_configuration.py:252` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-f9f613c1f1531c6f9cc1` | `scripts/check_release_configuration.py:252` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-343b8bf6778363387a34` | `scripts/check_release_configuration.py:253` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-40f67a7494ef31ed9d71` | `scripts/check_release_configuration.py:256` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-47aeb80030e39f808bf4` | `scripts/check_release_configuration.py:259` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-25350cff74b99658e87a` | `scripts/check_release_configuration.py:260` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
-| `oc-0db856cf2ecddbab3289` | `scripts/check_release_configuration.py:262` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-c59e9b6c31b10dc2dc03` | `scripts/check_release_configuration.py:263` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
-| `oc-2cb271bd78a67b17f38b` | `scripts/check_release_configuration.py:264` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-256ef45753b3d663c584` | `scripts/check_release_configuration.py:265` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
-| `oc-512a53aa3de7fdbdba56` | `scripts/check_release_configuration.py:276` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-876b691ad4e59be157d0` | `scripts/check_release_configuration.py:278` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-45e692dfcb8ffcb6932b` | `scripts/check_release_configuration.py:147` `check_workflows` | script | retained | protocol-or-format-invariant | The exact unittest invocation and diagnostic bind the prerelease rehearsal to the full CI contract. This is repository tooling vocabulary, not an operational default. |
+| `oc-be4252896a7e34103796` | `scripts/check_release_configuration.py:149` `check_workflows` | script | retained | protocol-or-format-invariant | The exact unittest invocation and diagnostic bind the prerelease rehearsal to the full CI contract. This is repository tooling vocabulary, not an operational default. |
+| `oc-eb690467a75ae6358f7d` | `scripts/check_release_configuration.py:150` `check_workflows` | script | retained | protocol-or-format-invariant | The exact unittest invocation and diagnostic bind the prerelease rehearsal to the full CI contract. This is repository tooling vocabulary, not an operational default. |
+| `oc-43186d5eebbe8478dcd9` | `scripts/check_release_configuration.py:155` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-266229716c15a640a45f` | `scripts/check_release_configuration.py:158` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-b554c788b9e8ae298232` | `scripts/check_release_configuration.py:158` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8e957d39d4246b28536d` | `scripts/check_release_configuration.py:161` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-ca0f07b5fe7f4f9e76a2` | `scripts/check_release_configuration.py:164` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-0a8b3d0703325fa75fb0` | `scripts/check_release_configuration.py:166` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-63450632972df932943c` | `scripts/check_release_configuration.py:169` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-3f56203399f0fe7fb419` | `scripts/check_release_configuration.py:170` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-995d439c5bca7f6a49ae` | `scripts/check_release_configuration.py:170` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f21266ec76ac2d23aac7` | `scripts/check_release_configuration.py:170` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-de955df7045b5db82128` | `scripts/check_release_configuration.py:171` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-0732329815122310b423` | `scripts/check_release_configuration.py:172` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-53b553c3a7f506582150` | `scripts/check_release_configuration.py:173` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-671fdb700ed7feddd67e` | `scripts/check_release_configuration.py:176` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-150b4455b22d801f6184` | `scripts/check_release_configuration.py:181` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-3cc1d3d36b8de33c0d5f` | `scripts/check_release_configuration.py:183` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6d913f4171b0ca47bc7a` | `scripts/check_release_configuration.py:192` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-c7723869cb8618048daf` | `scripts/check_release_configuration.py:194` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6ca60f51fb7ca9c30846` | `scripts/check_release_configuration.py:197` `check_workflows` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-fbdf97d6e2984721b65c` | `scripts/check_release_configuration.py:201` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d0b4ef8db9ed12431952` | `scripts/check_release_configuration.py:205` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-2cdf05bbb6fc760186c1` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-44efd6d282255f1293ab` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8cc6eba99a208e63cb33` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f97533b443cb832d5ac4` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4e630864e57849303bc1` | `scripts/check_release_configuration.py:210` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-5257187011c648c37941` | `scripts/check_release_configuration.py:215` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-7c06f32943854826906f` | `scripts/check_release_configuration.py:218` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-60149af9fb912e199731` | `scripts/check_release_configuration.py:220` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
+| `oc-f45e8bd4a37768cff9a1` | `scripts/check_release_configuration.py:220` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
+| `oc-61b2ad2a448a006fcf5b` | `scripts/check_release_configuration.py:223` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-aca838a688f1fd8612c3` | `scripts/check_release_configuration.py:243` `check_documentation` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5d4424635a3edaf7872d` | `scripts/check_release_configuration.py:249` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8662e4843e99b889bb66` | `scripts/check_release_configuration.py:250` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-34e22bfa7a30fe5b018d` | `scripts/check_release_configuration.py:251` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5f952bbe1a981b45293c` | `scripts/check_release_configuration.py:252` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-87025aa0df2746a1af77` | `scripts/check_release_configuration.py:253` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-a5bc4c98b3efd0b2f109` | `scripts/check_release_configuration.py:256` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-3a5bece3a143e0bc9898` | `scripts/check_release_configuration.py:257` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-f9f613c1f1531c6f9cc1` | `scripts/check_release_configuration.py:257` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-343b8bf6778363387a34` | `scripts/check_release_configuration.py:258` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-40f67a7494ef31ed9d71` | `scripts/check_release_configuration.py:261` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-47aeb80030e39f808bf4` | `scripts/check_release_configuration.py:264` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-25350cff74b99658e87a` | `scripts/check_release_configuration.py:265` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
+| `oc-0db856cf2ecddbab3289` | `scripts/check_release_configuration.py:267` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-c59e9b6c31b10dc2dc03` | `scripts/check_release_configuration.py:268` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
+| `oc-2cb271bd78a67b17f38b` | `scripts/check_release_configuration.py:269` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-256ef45753b3d663c584` | `scripts/check_release_configuration.py:270` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
+| `oc-512a53aa3de7fdbdba56` | `scripts/check_release_configuration.py:281` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-876b691ad4e59be157d0` | `scripts/check_release_configuration.py:283` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-66500282286c29c3d3d4` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-b570e6aaf76487f6eb65` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-f5716462f484283f2eb2` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |

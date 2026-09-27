@@ -205,12 +205,12 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("Scheduled runs intentionally select the all-reactor regression path", backend)
         self.assertEqual(6, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
 
-    def test_push_backend_scope_uses_the_exact_push_base(self) -> None:
+    def test_push_consumers_use_the_exact_push_base(self) -> None:
+        classifier = self.jobs["release-classification"]
         backend = self.jobs["full-backend-tests"]
-        self.assertIn(
-            "github.event.merge_group.base_sha || github.event.before",
-            backend,
-        )
+        expected_fallback = "github.event.merge_group.base_sha || github.event.before"
+        self.assertIn(expected_fallback, classifier)
+        self.assertIn(expected_fallback, backend)
         self.assertIn('test -n "$base"', backend)
 
 

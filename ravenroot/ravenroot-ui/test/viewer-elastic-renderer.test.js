@@ -94,6 +94,57 @@ describe('shared D3 Elastic renderer', () => {
     expect(document.activeElement).toBe(restoredHeader);
     renderer.destroy(); vi.unstubAllGlobals();
   });
+
+  it('paints and expires internal, external, and between-group flow on visible representatives', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const renderer = mountD3ElasticRenderer({ svg: document.querySelector('svg'),
+      nodes: ['a', 'b', 'c', 'd', 'outside'].map((id, index) => ({
+        id, label: id, r: 10, color: '#fff', x: index * 70, y: index % 2 ? 40 : 10,
+      })),
+      links: [
+        { id: 'internal', source: 'a', target: 'b', baseWidth: 1.8, restLen: 70, color: '#fff' },
+        { id: 'external', source: 'b', target: 'outside', baseWidth: 1.8, restLen: 70, color: '#fff' },
+        { id: 'between', source: 'b', target: 'c', baseWidth: 1.8, restLen: 70, color: '#fff' },
+      ], width: 420, height: 180, palette: {}, startSimulation: false });
+    const groups = [
+      { id: 'g1', name: 'One', memberNodeIds: ['a', 'b'], anchorNodeId: 'a', collapsed: true },
+      { id: 'g2', name: 'Two', memberNodeIds: ['c', 'd'], anchorNodeId: 'c', collapsed: true },
+    ];
+    renderer.setVisualGroups({ groups, state: {}, animate: false });
+    renderer.updateEdgeFlow('internal', { recent: 1, count: 1 }, { reducedMotion: true });
+    renderer.updateEdgeFlow('external', { recent: 2, count: 2 }, { reducedMotion: true });
+    renderer.updateEdgeFlow('between', { recent: 3, count: 3 }, { reducedMotion: true });
+    const projected = id => document.querySelector(`.d3-visual-edges [data-original-edge-id="${id}"]`);
+    expect(document.querySelector('[aria-label="Expand visual group One, 2 members"]')
+      .getAttribute('data-member-edge-pulses')).toBe('1');
+    for (const id of ['external', 'between']) {
+      expect(Number(projected(id).getAttribute('stroke-width'))).toBeGreaterThan(1.8);
+      expect(projected(id).classList.contains('d3-edge--active')).toBe(true);
+      expect(projected(id).getAttribute('stroke-dasharray')).toBe('7 5');
+    }
+    renderer.updateEdgeFlow('internal', { recent: 0, count: 1 }, { reducedMotion: true });
+    renderer.updateEdgeFlow('external', { recent: 0, count: 2 }, { reducedMotion: true });
+    renderer.updateEdgeFlow('between', { recent: 0, count: 3 }, { reducedMotion: true });
+    expect(document.querySelector('[aria-label="Expand visual group One, 2 members"]')
+      .getAttribute('data-member-edge-pulses')).toBe('0');
+    for (const id of ['external', 'between']) {
+      expect(Number(projected(id).getAttribute('stroke-width'))).toBe(1.8);
+      expect(projected(id).classList.contains('d3-edge--active')).toBe(false);
+    }
+    renderer.setVisualGroups({ groups, state: { g1: { collapsed: false }, g2: { collapsed: false } }, animate: false });
+    renderer.setVisualGroups({ groups, state: {}, selectedGroupId: 'g1', animate: false });
+    expect(Number(projected('between').getAttribute('stroke-width'))).toBe(1.8);
+    const selectedSummary = document.querySelector('[aria-label="Expand visual group One, 2 members"]');
+    renderer.updateEdgeFlow('internal', { recent: 1, count: 2 }, { reducedMotion: true });
+    expect(selectedSummary.getAttribute('data-selected')).toBe('true');
+    expect(selectedSummary.querySelector('rect').getAttribute('stroke')).toBe('#d2a8ff');
+    expect(selectedSummary.querySelector('rect').getAttribute('stroke-width')).toBe('5');
+    renderer.updateEdgeFlow('internal', { recent: 0, count: 2 }, { reducedMotion: true });
+    expect(selectedSummary.getAttribute('data-selected')).toBe('true');
+    expect(selectedSummary.querySelector('rect').getAttribute('stroke')).toBe('#086adb');
+    expect(selectedSummary.querySelector('rect').getAttribute('stroke-width')).toBe('3');
+    renderer.destroy();
+  });
   it('mounts a real SVG force renderer and tears it down deterministically', () => {
     document.body.innerHTML = '<svg id="elastic"></svg>';
     const svg = document.querySelector('#elastic');
@@ -123,9 +174,19 @@ describe('shared D3 Elastic renderer', () => {
     expect(svg.querySelector('.d3-nodes circle').getAttribute('cx')).toBe('40');
     expect(svg.querySelector('.d3-nodes circle').getAttribute('cy')).toBe('50');
     expect(svg.querySelector('marker')).not.toBeNull();
-    renderer.zoomBy(1.1);
-    renderer.panBy({ x: 8, y: -4 });
+    const transformBeforeResize = svg.__zoom.toString();
+    renderer.resize(640, 400);
+    expect(svg.getAttribute('viewBox')).toBe('0 0 640 400');
+    expect(svg.__zoom.toString()).toBe(transformBeforeResize);
     renderer.fit(20);
+    expect(svg.__zoom.apply([100, 75])).toEqual(expect.arrayContaining([
+      expect.closeTo(320, 5), expect.closeTo(200, 5),
+    ]));
+    renderer.zoomBy(1.1);
+    expect(svg.__zoom.apply([100, 75])).toEqual(expect.arrayContaining([
+      expect.closeTo(320, 5), expect.closeTo(200, 5),
+    ]));
+    renderer.panBy({ x: 8, y: -4 });
     renderer.destroy();
     renderer.destroy();
     expect(svg.children).toHaveLength(0);
@@ -197,16 +258,24 @@ describe('shared D3 Elastic renderer', () => {
   });
 
   it('refreshes a visible operational tooltip without exposing arbitrary datum fields', () => {
-    document.body.innerHTML = '<svg id="elastic"></svg><div id="tooltip"></div>';
+    document.body.innerHTML = '<div id="host"><svg id="elastic"></svg><div id="tooltip"></div></div>';
     const svg = document.querySelector('#elastic');
     const tooltip = document.querySelector('#tooltip');
+    const host = document.querySelector('#host');
+    let hostWidth = 120;
+    host.getBoundingClientRect = () => ({ width: hostWidth, height: 100 });
+    tooltip.getBoundingClientRect = () => ({ width: tooltip.textContent.includes('State: active') ? 80 : 30,
+      height: 40 });
     const renderer = mountD3ElasticRenderer({
       svg, tooltip,
       nodes: [{ id: 'a', label: 'Worker', r: 10, color: '#fff', x: 20, y: 20,
         secret: 'must-not-render', runtimeObserved: false }],
       links: [], width: 100, height: 100, palette: {},
     });
-    svg.querySelector('circle').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    const hover = new MouseEvent('mouseover', { bubbles: true });
+    Object.defineProperties(hover, { offsetX: { value: 90 }, offsetY: { value: 90 } });
+    svg.querySelector('circle').dispatchEvent(hover);
+    expect(tooltip.style.left).toBe('82px');
     expect(tooltip.textContent).toContain('State: Unavailable');
     expect(tooltip.textContent).not.toContain('must-not-render');
     renderer.updateNode('a', {
@@ -216,6 +285,10 @@ describe('shared D3 Elastic renderer', () => {
     expect(tooltip.textContent).toContain('State: active');
     expect(tooltip.textContent).toContain('Active instances: 2');
     expect(tooltip.textContent).toContain('In-flight arrivals: 3');
+    expect(tooltip.style.left).toBe('32px');
+    hostWidth = 90;
+    renderer.resize(90, 100);
+    expect(tooltip.style.left).toBe('8px');
     renderer.destroy();
   });
 

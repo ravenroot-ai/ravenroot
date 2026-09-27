@@ -115,14 +115,35 @@ test('deployed groups show hidden member and internal-edge activity, then expose
   const summary = page.getByRole('button', { name: 'Expand visual group Pipeline, 2 members' });
   await expect(summary).toHaveAttribute('data-member-edge-pulses', '1');
   await expect(summary.locator('rect')).toHaveAttribute('stroke-width', '5');
-  await testInfo.attach('embed-group-dark-collapsed.png', {
-    body: await page.screenshot(), contentType: 'image/png',
-  });
-  if (evidencePath('embed-group-dark-collapsed.png')) {
-    await page.screenshot({ path: evidencePath('embed-group-dark-collapsed.png') });
-  }
+  const externalFlow = await page.evaluate(({ source, currentGeneration }) => {
+    const result = window.v2Viewer.observe({ type: 'execution', ...source, processInstanceId: 'run-a', cursor: 'e2',
+      event: { type: 'EDGE_TRAVERSED', edgeId: 'finish', executionId: 'run-a', sequence: 3,
+        occurredAt: new Date().toISOString() } }, currentGeneration);
+    const paths = [...document.querySelectorAll('.d3-visual-edges path')].map(path => ({
+      edge: path.getAttribute('data-original-edge-id'), className: path.getAttribute('class'),
+      width: path.getAttribute('stroke-width'),
+    }));
+    return { result, paths };
+  }, { source: grouped.source, currentGeneration: generation });
+  expect(externalFlow).toMatchObject({ result: { accepted: true, reason: 'execution' },
+    paths: expect.arrayContaining([{ edge: 'finish', className: expect.stringContaining('d3-edge--active'),
+      width: expect.any(String) }]) });
+  const projectedFinish = page.locator('.d3-visual-edges [data-original-edge-id="finish"]');
+  await expect(projectedFinish).toHaveClass(/d3-edge--active/);
+  expect(Number(await projectedFinish.getAttribute('stroke-width'))).toBeGreaterThan(1.8);
+  const duplicate = await page.evaluate(({ source, currentGeneration }) => window.v2Viewer.observe({
+    type: 'execution', ...source, processInstanceId: 'run-a', cursor: 'e2',
+    event: { type: 'EDGE_TRAVERSED', edgeId: 'finish', executionId: 'run-a', sequence: 3,
+      occurredAt: new Date().toISOString() },
+  }, currentGeneration), { source: grouped.source, currentGeneration: generation });
+  expect(duplicate).toMatchObject({ accepted: false, reason: 'duplicate' });
+  await expect(projectedFinish).toHaveClass(/d3-edge--active/);
+  await expect(summary).toHaveAttribute('data-member-edge-pulses', '0', { timeout: 3_000 });
+  await expect(projectedFinish).not.toHaveClass(/d3-edge--active/, { timeout: 3_000 });
+  expect(Number(await projectedFinish.getAttribute('stroke-width'))).toBe(1.8);
   await summary.click();
-  await expect(page.getByRole('button', { name: 'Collapse visual group Pipeline, 2 members' })).toBeVisible();
+  const collapse = page.getByRole('button', { name: 'Collapse visual group Pipeline, 2 members' });
+  await expect(collapse).toBeVisible();
   await page.locator('.d3-nodes circle[data-node-id="worker"]').hover();
   const tooltip = page.locator('.embed-runtime-tooltip');
   await expect(tooltip).toContainText('Worker');
@@ -142,6 +163,31 @@ test('deployed groups show hidden member and internal-edge activity, then expose
   expect(box.y + box.height).toBeLessThanOrEqual(canvas.y + canvas.height + 1);
   if (evidencePath('embed-group-dark-expanded-tooltip.png')) {
     await page.screenshot({ path: evidencePath('embed-group-dark-expanded-tooltip.png') });
+  }
+  await collapse.click();
+  await page.evaluate(({ source, currentGeneration }) => {
+    window.v2Viewer.observe({ type: 'execution', ...source, processInstanceId: 'run-a', cursor: 'e3',
+      event: { type: 'EDGE_TRAVERSED', edgeId: 'route', executionId: 'run-a', sequence: 4,
+        occurredAt: new Date().toISOString() } }, currentGeneration);
+  }, { source: grouped.source, currentGeneration: generation });
+  await expect(summary).toHaveAttribute('data-selected', 'true');
+  await expect(summary).toHaveAttribute('data-member-edge-pulses', '1');
+  await expect(summary.locator('rect')).toHaveAttribute('stroke-width', '5');
+  await page.evaluate(() => {
+    window.v2Viewer.updateRuns({ runs: [
+      { processInstanceId: 'run-a', status: 'ACTIVE', outcome: null },
+      { processInstanceId: 'run-b', status: 'ACTIVE', outcome: null },
+    ] }, 'run-a');
+  });
+  await page.getByRole('combobox', { name: 'Live run' }).selectOption('run-b');
+  await expect(summary).toHaveAttribute('data-member-edge-pulses', '0');
+  await expect(summary).toHaveAttribute('data-selected', 'true');
+  await expect(summary.locator('rect')).toHaveAttribute('stroke-width', '3');
+  await testInfo.attach('embed-group-dark-collapsed.png', {
+    body: await page.screenshot(), contentType: 'image/png',
+  });
+  if (evidencePath('embed-group-dark-collapsed.png')) {
+    await page.screenshot({ path: evidencePath('embed-group-dark-collapsed.png') });
   }
 
   await mount(page, grouped, 'light');

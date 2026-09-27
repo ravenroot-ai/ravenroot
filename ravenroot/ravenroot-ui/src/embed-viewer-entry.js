@@ -38,6 +38,7 @@ import {
 } from './minimap-geometry.js';
 import { createEmbedMaximizeController } from './embed-maximize.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
+import { edgeFlowSnapshot, FLOW_PULSE_MS } from './monitoring-runtime-state.js';
 
 export function viewerStylesheet(mode = 'cyto', theme = 'dark') {
   return createViewerStylesheet(requireEmbedTheme(theme), mode);
@@ -188,6 +189,9 @@ export function createEmbedViewer(container, {
     if (!deploymentState) return;
     const projection = isMonitoring() ? elasticMount?.visualGroupProjection : visualGroupsRenderer?.projection;
     if (!projection) return;
+    // Elastic node and edge updates repaint the current projection in place. Re-projecting here
+    // replaces its visible paths during the same observation and can erase a just-painted pulse.
+    if (isMonitoring()) return;
     for (const group of projection.groups.filter(item => item.collapsed)) {
       const runtimes = group.memberNodeIds.map(id => deploymentState.nodeStates.get(id)).filter(Boolean);
       const priority = ['failed', 'active', 'fallback', 'bypassed', 'completed'];
@@ -195,21 +199,16 @@ export function createEmbedViewer(container, {
       const internalPulse = currentSnapshot.edges.some(edge => group.memberNodeIds.includes(edge.source)
         && group.memberNodeIds.includes(edge.target) && edge.runtimeIdentity
         && deploymentState.edgeStates.get(edge.runtimeIdentity)?.recent > 0);
-      if (isMonitoring()) {
-        // Rebuilding the presentation reads member runtime state without manufacturing group state.
-        elasticMount?.setVisualGroups(groupOptions());
-      } else {
-        const summary = instance.getElementById(group.summaryId);
-        if (summary.nonempty() && (state || internalPulse)) summary.style({
-          'border-color': state ? (state === 'active' ? palette.selection
-            : state === 'failed' ? palette.edgeType.failed : palette.edgeType[state] || palette.runtimeIdle)
-            : palette.selection,
-          'border-width': state === 'active' || internalPulse ? 5 : 3,
-          'underlay-color': state === 'failed' ? palette.edgeType.failed : palette.selection,
-          'underlay-opacity': internalPulse ? .3 : .14,
-          'underlay-padding': internalPulse ? 12 : 7,
-        });
-      }
+      const summary = instance.getElementById(group.summaryId);
+      if (summary.nonempty() && (state || internalPulse)) summary.style({
+        'border-color': state ? (state === 'active' ? palette.selection
+          : state === 'failed' ? palette.edgeType.failed : palette.edgeType[state] || palette.runtimeIdle)
+          : palette.selection,
+        'border-width': state === 'active' || internalPulse ? 5 : 3,
+        'underlay-color': state === 'failed' ? palette.edgeType.failed : palette.selection,
+        'underlay-opacity': internalPulse ? .3 : .14,
+        'underlay-padding': internalPulse ? 12 : 7,
+      });
     }
     for (const edge of projection.edges) {
       const runtime = edge.originalEdgeIds.map(runtimeEdgeIdentity).filter(Boolean)
@@ -221,6 +220,32 @@ export function createEmbedViewer(container, {
         visible.data('runtimeCount', runtime?.count || 0);
       }
     }
+  };
+  const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  const paintElasticEdgeFlow = edgeId => {
+    if (!elasticMount || !deploymentState) return;
+    const flow = edgeFlowSnapshot(deploymentState.runtime, edgeId);
+    deploymentState.edgeStates.set(edgeId, flow);
+    const remainingPulseMs = flow.expiresAt == null ? 0 : Math.max(0, flow.expiresAt - Date.now());
+    elasticMount.updateEdgeFlow(edgeId, flow, {
+      reducedMotion: reducedMotion(),
+      decayMs: remainingPulseMs || FLOW_PULSE_MS,
+      onDecay: flow.recent > 0 ? () => paintElasticEdgeFlow(edgeId) : null,
+    });
+    applyGroupedRuntime();
+  };
+  const resetElasticRuntimePresentation = () => {
+    if (!elasticMount) return;
+    elasticMount.nodes.forEach(node => elasticMount.updateNode(node.id, {
+      runtimeObserved: false, runtimeState: 'idle', instances: null, arrivals: null,
+      lastEventType: null, lastOccurredAt: null, processingDuration: null,
+      fallback: false, stroke: palette.runtimeIdle, strokeWidth: 1.5,
+    }));
+    elasticMount.links.forEach(link => elasticMount.updateEdgeFlow(
+      link.runtimeIdentity === undefined ? link.id : link.runtimeIdentity,
+      { recent: 0, count: 0, lastEvent: null, lastOccurredAt: null, expiresAt: null },
+      { reducedMotion: true }));
+    applyGroupedRuntime();
   };
 
   const applyDesignPresentation = () => {
@@ -303,6 +328,7 @@ export function createEmbedViewer(container, {
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = null;
       instance.resize();
+      elasticMount?.resize(canvas.clientWidth || 800, canvas.clientHeight || 500);
       scheduleMinimap();
     });
   });
@@ -387,7 +413,7 @@ export function createEmbedViewer(container, {
         fallback: runtime.fallback, stroke: runtimeColor(runtime.runtimeState),
         strokeWidth: runtime.runtimeState === 'active' ? 5 : 3,
       }));
-      deploymentState.edgeStates.forEach((runtime, edgeId) => elasticMount.updateEdgeFlow(edgeId, runtime));
+      deploymentState.edgeStates.forEach((_runtime, edgeId) => paintElasticEdgeFlow(edgeId));
     }
   };
   const captureMode = () => {
@@ -455,6 +481,7 @@ export function createEmbedViewer(container, {
       resetDeploymentViewRuntime(deploymentState, runSelect.value ? 'CONNECTING' : 'DETACHED',
         runSelect.value ? null : 'NO_AUTHORIZED_RUNS');
       applyDeploymentViewStateToRenderer(instance, deploymentState);
+      resetElasticRuntimePresentation();
     }
     onRunSelected(runSelect.value || null, runGeneration);
     status.textContent = runSelect.value ? 'Connecting to selected run.' : 'No authorized runs.';
@@ -649,6 +676,9 @@ export function createEmbedViewer(container, {
       if (generation !== runGeneration) return { accepted: false, reason: 'stale-generation' };
       const result = applyDeploymentViewFrame(deploymentState, frame);
       applyDeploymentViewStateToRenderer(instance, deploymentState);
+      if (result.reason !== 'execution' && (result.accepted || result.terminal)) {
+        resetElasticRuntimePresentation();
+      }
       if (elasticMount && frame.event?.nodeId) {
         const runtime = deploymentState.nodeStates.get(frame.event.nodeId);
         const runtimeColor = state => state === 'active' ? palette.selection
@@ -667,7 +697,7 @@ export function createEmbedViewer(container, {
       }
       if (elasticMount && frame.event?.edgeId) {
         const runtime = deploymentState.edgeStates.get(frame.event.edgeId);
-        if (runtime) elasticMount.updateEdgeFlow(frame.event.edgeId, runtime);
+        if (runtime) paintElasticEdgeFlow(frame.event.edgeId);
       }
       applyGroupedRuntime();
       container.dataset.viewerContinuity = deploymentState.continuity.toLowerCase();
@@ -715,6 +745,7 @@ export function createEmbedViewer(container, {
       if (deploymentState) {
         resetDeploymentViewRuntime(deploymentState, 'DETACHED', reason);
         applyDeploymentViewStateToRenderer(instance, deploymentState);
+        resetElasticRuntimePresentation();
         container.dataset.viewerContinuity = deploymentState.continuity.toLowerCase();
         container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
       }

@@ -70,11 +70,14 @@ export function mountD3ElasticRenderer({
 
   const viewportWidth = Math.max(1, finite(width, 800));
   const viewportHeight = Math.max(1, finite(height, 600));
+  let currentViewportWidth = viewportWidth;
+  let currentViewportHeight = viewportHeight;
   const nodeText = palette?.nodeText ?? '#e6edf3';
   const edgeLabel = palette?.edgeLabel ?? '#b1bac4';
   let destroyed = false;
   let hovered = null;
   let refreshTooltip = () => {};
+  let tooltipObserver = null;
   let visualGroups = null;
   const pulseTimers = new Map();
 
@@ -152,6 +155,7 @@ export function mountD3ElasticRenderer({
 
   if (tooltip !== null) {
     const tip = d3.select(tooltip);
+    let tooltipPoint = null;
     const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
     const nodeText = node => {
       const state = node.runtimeObserved ? node.runtimeState : null;
@@ -172,6 +176,8 @@ export function mountD3ElasticRenderer({
       known('Configured weight', link.configuredWeight),
     ].join('\n');
     const positionTooltip = event => {
+      if (!event) return;
+      tooltipPoint = { offsetX: finite(event.offsetX, 0), offsetY: finite(event.offsetY, 0) };
       const bounds = tooltip.parentElement?.getBoundingClientRect?.() || { width: 0, height: 0 };
       const tipBounds = tooltip.getBoundingClientRect();
       const left = Math.max(8, Math.min(event.offsetX + 14, bounds.width - tipBounds.width - 8));
@@ -194,7 +200,12 @@ export function mountD3ElasticRenderer({
     refreshTooltip = () => {
       if (!hovered || tooltip.style.display === 'none') return;
       tip.text(hovered.kind === 'node' ? nodeText(hovered.datum) : edgeText(hovered.datum));
+      positionTooltip(tooltipPoint);
     };
+    if (typeof ResizeObserver === 'function' && tooltip.parentElement) {
+      tooltipObserver = new ResizeObserver(() => refreshTooltip());
+      tooltipObserver.observe(tooltip.parentElement);
+    }
   }
 
   const arcPath = link => {
@@ -391,21 +402,30 @@ export function mountD3ElasticRenderer({
       const y1 = Math.min(...nodes.map(node => node.y - node.r));
       const y2 = Math.max(...nodes.map(node => node.y + node.r));
       const scale = Math.max(.05, Math.min(10,
-        Math.min((viewportWidth - padding * 2) / Math.max(1, x2 - x1),
-          (viewportHeight - padding * 2) / Math.max(1, y2 - y1))));
+        Math.min((currentViewportWidth - padding * 2) / Math.max(1, x2 - x1),
+          (currentViewportHeight - padding * 2) / Math.max(1, y2 - y1))));
       const transform = d3.zoomIdentity
-        .translate(viewportWidth / 2 - ((x1 + x2) / 2) * scale,
-          viewportHeight / 2 - ((y1 + y2) / 2) * scale)
+        .translate(currentViewportWidth / 2 - ((x1 + x2) / 2) * scale,
+          currentViewportHeight / 2 - ((y1 + y2) / 2) * scale)
         .scale(scale);
       root.call(zoom.transform, transform);
     },
     zoomBy(factor) {
-      if (!destroyed) root.call(zoom.scaleBy, finite(factor, 1), [viewportWidth / 2, viewportHeight / 2]);
+      if (!destroyed) root.call(zoom.scaleBy, finite(factor, 1),
+        [currentViewportWidth / 2, currentViewportHeight / 2]);
     },
     panBy(delta) {
       if (!destroyed) root.call(zoom.translateBy,
         finite(delta?.x, 0) / d3.zoomTransform(svg).k,
         finite(delta?.y, 0) / d3.zoomTransform(svg).k);
+    },
+    resize(nextWidth, nextHeight) {
+      if (destroyed) return;
+      currentViewportWidth = Math.max(1, finite(nextWidth, currentViewportWidth));
+      currentViewportHeight = Math.max(1, finite(nextHeight, currentViewportHeight));
+      root.attr('width', currentViewportWidth).attr('height', currentViewportHeight)
+        .attr('viewBox', `0 0 ${currentViewportWidth} ${currentViewportHeight}`);
+      refreshTooltip();
     },
     destroy() {
       if (destroyed) return;
@@ -414,6 +434,7 @@ export function mountD3ElasticRenderer({
       visualGroups.destroy();
       pulseTimers.forEach(clearTimeout);
       pulseTimers.clear();
+      tooltipObserver?.disconnect();
       root.on('.zoom', null).interrupt();
       root.selectAll('*').interrupt().remove();
       if (tooltip !== null) tooltip.style.display = 'none';

@@ -1,4 +1,5 @@
 import * as d3 from 'd3';
+import { edgeFlowWidth } from './monitoring-runtime-state.js';
 import { projectVisualGroups } from './visual-group-projection.js';
 import { createVisualGroupTransition } from './visual-group-transition.js';
 
@@ -114,6 +115,10 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
     paths.attr('data-original-edge-id', edge => edge.originalEdgeIds[0]);
     paths.attr('stroke-dasharray', edge => edge.lineStyle === 'dashed' ? (edge.dashPattern || '6 4') : null)
       .attr('stroke-width', edge => (edge.baseWidth || 1.8) * (edge.parallel ? 1.6 : 1));
+    paths.attr('stroke-width', edge => edgeFlowWidth(edge.flow?.recent || 0)
+      * (edge.parallel ? 1.6 : 1)).classed('d3-edge--active', edge => (edge.flow?.recent || 0) > 0)
+      .attr('stroke-dasharray', edge => (edge.flow?.recent || 0) > 0
+        ? '7 5' : edge.lineStyle === 'dashed' ? (edge.dashPattern || '6 4') : null);
     edgeLayer.selectAll('text').data(projectedEdges, edge => edge.id).join('text')
       .attr('x', edge => (edge.source.x+edge.target.x)/2)
       .attr('y', edge => (edge.source.y+edge.target.y)/2-8)
@@ -202,16 +207,16 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
       .attr('height', group => group.role === 'header' ? 24 : 60)
       .attr('rx', 7).attr('fill', groupFill)
       .attr('stroke', group => {
-        if (group.groupId === selectedGroup) return '#086adb';
         const runtime = groupRuntime(group);
         if (runtime.state === 'failed') return '#f85149';
         if (runtime.state === 'active' || runtime.pulses) return '#d2a8ff';
         if (runtime.state === 'completed') return '#3fb950';
+        if (group.groupId === selectedGroup) return '#086adb';
         return groupBorder;
       })
       .attr('stroke-width', group => {
         const runtime = groupRuntime(group);
-        return group.groupId === selectedGroup ? 3 : runtime.state === 'active' || runtime.pulses ? 5 : 2;
+        return runtime.state === 'active' || runtime.pulses ? 5 : group.groupId === selectedGroup ? 3 : 2;
       });
     badge.select('text').attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
       .attr('fill', groupText).attr('font-size', 12)

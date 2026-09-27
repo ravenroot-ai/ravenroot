@@ -650,9 +650,13 @@ test('vertical toolbar and textual menu own keyboard focus without a trap', asyn
 
   await page.locator('#cy-wrap').focus();
   await page.keyboard.press('ArrowRight');
+  const maximize = page.locator('.doc-pane--active [data-pane-document-maximize]');
+  await page.keyboard.press('Tab');
+  await expect(maximize).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.locator('.doc-pane--active .graph-node-action:focus')).toHaveCount(1);
   await page.keyboard.press('Shift+Tab');
+  await expect(maximize).toBeFocused();
   await expect(page.locator('.doc-pane--active .graph-node-actions')).toBeHidden();
   await expect.poll(() => page.evaluate(() => document.activeElement?.matches('.graph-node-action'))).toBe(false);
 });
@@ -669,6 +673,9 @@ test.describe('coarse pointer node actions', () => {
     expect(scaleBox.x + scaleBox.width).toBeLessThanOrEqual(768);
     await page.locator('#cy-wrap').focus();
     await page.keyboard.press('ArrowRight');
+    const maximize = page.locator('.doc-pane--active [data-pane-document-maximize]');
+    await page.keyboard.press('Tab');
+    await expect(maximize).toBeFocused();
     await page.keyboard.press('Tab');
     const more = page.getByRole('button', { name: 'More node actions' });
     await expect(more).toBeFocused();
@@ -949,6 +956,9 @@ test('read-only, keyboard, theme, zoom and document ownership keep the minibar h
   await page.keyboard.press('ArrowRight');
   const keyboardTrace = page.getByRole('button', { name: 'Trace full path from Do something' });
   await expect(keyboardTrace).toBeVisible();
+  const maximize = page.locator('.doc-pane--active [data-pane-document-maximize]');
+  await page.keyboard.press('Tab');
+  await expect(maximize).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(keyboardTrace).toBeFocused();
   await page.keyboard.press('Enter');

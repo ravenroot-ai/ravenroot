@@ -2887,9 +2887,9 @@ function documentPane(document_) {
   close.dataset.paneDocumentClose = document_.id;
   close.textContent = '×';
   // Out of the TAB ORDER, deliberately, the same way the pane above is until there is more than one
-  // to choose between: a native <button> defaults to tabIndex 0, which places it between the pane and
-  // the resize separator (pane, close, separator, pane instead of pane, separator, pane) and breaks
-  // the measured Tab route. It remains a real, mouse- and
+  // to choose between: a native <button> defaults to tabIndex 0, which would add a second header stop
+  // (pane, maximize, close, separator, pane instead of pane, maximize, separator, pane) and break the
+  // measured Tab route. It remains a real, mouse- and
   // programmatically-focusable control -- `close.click()`/`close.focus()` both work -- just not a stop
   // Tab lands on by itself. Closing a background document from the keyboard still works: Tab into its
   // pane (which activates it, same as any other pane focus) and use the ordinary Close command.

@@ -30,6 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -183,6 +184,121 @@ class ManagedExecutionStoreTest {
         assertTrue(amongCalled.get(), "the next bounded sweep must resume beyond incompatible keys");
     }
 
+    @Test
+    void exhaustedSavedCursorWrapsWithinTheRemainingPageBudget() {
+        ExecutionKey low = key(1);
+        ExecutionKey high = key(100);
+        ExecutionKey tail = key(200);
+        var lowEligible = new AtomicBoolean();
+        var requestedAfter = new ArrayList<Optional<UUID>>();
+        var claimedAmong = new ArrayList<List<ExecutionKey>>();
+        ExecutionStore delegate = executionStore((method, arguments) -> switch (method.getName()) {
+            case "maxPayloadBytes" -> 1024;
+            case "maxLeaseTtl" -> Duration.ofMinutes(5);
+            case "maxInventoryPageSize" -> 32;
+            case "managedClaimCandidates" -> {
+                @SuppressWarnings("unchecked") Optional<UUID> after = (Optional<UUID>) arguments[5];
+                requestedAfter.add(after);
+                if (after.isPresent()) {
+                    yield CompletableFuture.completedFuture(
+                            new ManagedClaimCandidatePage(lowEligible.get() ? List.of(tail) : List.of(),
+                                    Optional.empty()));
+                }
+                if (lowEligible.get()) {
+                    // The tail is deliberately repeated after wrap. The wrapper must merge authority
+                    // by key rather than spend claim capacity twice on the same execution.
+                    yield CompletableFuture.completedFuture(
+                            new ManagedClaimCandidatePage(List.of(low, tail), Optional.empty()));
+                }
+                ExecutionKey candidate = high;
+                Optional<UUID> next = lowEligible.get() ? Optional.empty()
+                        : Optional.of(candidate.processInstanceId());
+                yield CompletableFuture.completedFuture(
+                        new ManagedClaimCandidatePage(List.of(candidate), next));
+            }
+            case "claimPendingWorkAmong" -> {
+                @SuppressWarnings("unchecked") Map<ExecutionKey, ExecutionPersistenceAuthority> verified =
+                        (Map<ExecutionKey, ExecutionPersistenceAuthority>) arguments[4];
+                claimedAmong.add(verified.keySet().stream().toList());
+                yield CompletableFuture.completedFuture(List.of());
+            }
+            default -> defaultStoreValue(method.getName());
+        });
+        ExecutionStore managed = ManagedExecutionStore.protect(delegate,
+                manifestStore(Map.of(low, stored(low, 1024, true), high, stored(high, 1024, true),
+                        tail, stored(tail, 1024, true))));
+
+        managed.claimPendingWork("acme", "worker", 1, Duration.ofSeconds(5))
+                .toCompletableFuture().join();
+        lowEligible.set(true);
+        managed.claimPendingWork("acme", "worker", 2, Duration.ofSeconds(5))
+                .toCompletableFuture().join();
+
+        assertEquals(List.of(Optional.empty(), Optional.of(high.processInstanceId()), Optional.empty()),
+                requestedAfter);
+        assertEquals(List.of(high), claimedAmong.getFirst());
+        assertEquals(java.util.Set.of(low, tail), java.util.Set.copyOf(claimedAmong.getLast()),
+                "work that becomes eligible below the cursor must be authorized in the same wakeup");
+    }
+
+    @Test
+    void sqliteManagedRecoveryLoadsAuthorityOnlyForEligibleWork(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        var database = directory.resolve("managed-candidates.db");
+        var clock = java.time.Clock.systemUTC();
+        try (var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(database, clock);
+             var manifests = new ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore(
+                     database, clock, ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE)) {
+            for (int index = 1; index <= 96; index++) {
+                ExecutionKey key = key(index);
+                var authority = ExecutionPersistenceAuthority.from(
+                        manifests.pin(stored(key, store.maxPayloadBytes(), true).manifest())
+                                .toCompletableFuture().join());
+                var created = store.applyManaged(creationBatch(key), authority).toCompletableFuture().join();
+                store.applyManaged(ExecutionBatch.to(key)
+                        .expecting(RevisionExpectation.exactly(created.revision()))
+                        .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                        .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                        .build(), authority).toCompletableFuture().join();
+            }
+
+            ExecutionKey ready = new ExecutionKey("acme", new UUID(1, 1));
+            UUID traversal = UUID.randomUUID();
+            UUID invocation = UUID.randomUUID();
+            var readyAuthority = ExecutionPersistenceAuthority.from(
+                    manifests.pin(stored(ready, store.maxPayloadBytes(), true).manifest())
+                            .toCompletableFuture().join());
+            var created = store.applyManaged(creationBatch(ready, traversal), readyAuthority)
+                    .toCompletableFuture().join();
+            store.applyManaged(ExecutionBatch.to(ready)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversal,
+                            ai.ravenroot.api.application.TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversal,
+                            new ai.ravenroot.api.application.NodeInvocation(invocation, "work", java.util.Set.of(),
+                                    ai.ravenroot.api.application.NodeInvocationStatus.SCHEDULED, List.of(),
+                                    ai.ravenroot.api.execution.NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.InvocationTransitioned(traversal, invocation,
+                            ai.ravenroot.api.application.NodeInvocationStatus.RUNNING))
+                    .apply(new ExecutionTransition.AttemptAdded(traversal, invocation,
+                            new ai.ravenroot.api.application.NodeAttempt(UUID.randomUUID(), 1,
+                                    ai.ravenroot.api.application.NodeAttemptStatus.SCHEDULED)))
+                    .build(), readyAuthority).toCompletableFuture().join();
+
+            var loads = new AtomicInteger();
+            ExecutionManifestStore counted = countingManifestStore(manifests, loads);
+            ExecutionStore managed = ManagedExecutionStore.protect(store, counted);
+            var claimed = managed.claimPendingWork("acme", "worker", 1, Duration.ofSeconds(5))
+                    .toCompletableFuture().join();
+
+            assertEquals(List.of(ready), claimed.stream().map(ai.ravenroot.api.persistence.PendingWork::key)
+                    .toList());
+            assertEquals(1, loads.get(),
+                    "irrelevant terminal history must consume neither candidate nor authority budget");
+        }
+    }
+
     private static ExecutionStore executionStore(Invocation invocation) {
         return (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
                 new Class<?>[]{ExecutionStore.class}, (proxy, method, args) -> invocation.invoke(method,
@@ -199,6 +315,19 @@ class ManagedExecutionStoreTest {
                     }
                     if (method.getName().equals("close")) return null;
                     throw new AssertionError("unexpected manifest method " + method.getName());
+                });
+    }
+
+    private static ExecutionManifestStore countingManifestStore(ExecutionManifestStore delegate,
+                                                                 AtomicInteger loads) {
+        return (ExecutionManifestStore) Proxy.newProxyInstance(ExecutionManifestStore.class.getClassLoader(),
+                new Class<?>[]{ExecutionManifestStore.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("load")) loads.incrementAndGet();
+                    try {
+                        return method.invoke(delegate, args);
+                    } catch (InvocationTargetException wrapped) {
+                        throw wrapped.getCause();
+                    }
                 });
     }
 
@@ -221,6 +350,20 @@ class ManagedExecutionStoreTest {
                 new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through", "1".repeat(64),
                         "2".repeat(64), "3".repeat(64), "4".repeat(64)), List.of(), Instant.EPOCH, policy);
         return new StoredExecutionManifest(manifest, manifest.digest(), Instant.EPOCH);
+    }
+
+    private static ExecutionBatch creationBatch(ExecutionKey key) {
+        return creationBatch(key, UUID.randomUUID());
+    }
+
+    private static ExecutionBatch creationBatch(ExecutionKey key, UUID traversal) {
+        var instance = new ai.ravenroot.api.application.ProcessInstance(key.processInstanceId(),
+                ProcessInstanceStatus.ACCEPTED, Map.of(traversal,
+                new ai.ravenroot.api.application.Traversal(traversal, "start",
+                        ai.ravenroot.api.application.TraversalStatus.ACCEPTED, Map.of())));
+        return ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(instance,
+                        new ai.ravenroot.api.persistence.GraphVersionPin("graph-v1"))).build();
     }
 
     private static ResolvedOperationalPolicy.GraphLimits graph() {

@@ -21,6 +21,10 @@ import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -31,6 +35,7 @@ import ai.ravenroot.api.persistence.TimerSchedule;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -58,6 +63,11 @@ public abstract class ManagedExecutionStoreContract {
 
     protected final Bundle bundle() {
         if (bundle == null) bundle = open("managed-" + UUID.randomUUID(), Clock.systemUTC());
+        return bundle;
+    }
+
+    private Bundle bundle(MutableClock clock) {
+        if (bundle == null) bundle = open("managed-" + UUID.randomUUID(), clock);
         return bundle;
     }
 
@@ -218,6 +228,174 @@ public abstract class ManagedExecutionStoreContract {
     @Test
     final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys() {
         assertRestrictedClaimsAreAtomicAndExcludeUnverifiedNewKeys(true);
+    }
+
+    @Test
+    final void managedCandidatesDoNotSpendTheirPageOnTerminalHistory() {
+        String tenant = "managed-terminal-history";
+        for (int index = 1; index <= 96; index++) {
+            terminalManagedProcess(tenant, new UUID(0, index));
+        }
+        ManagedAttemptFixture ready = managedAttempt(tenant, new UUID(1, 1));
+
+        var page = await(bundle().executionStore().managedClaimCandidates(
+                tenant, "worker-1", 1, java.time.Duration.ofSeconds(5), false, Optional.empty()));
+
+        assertEquals(List.of(ready.key()), page.keys(),
+                "retained terminal rows with no work must not consume the managed candidate bound");
+    }
+
+    @Test
+    final void managedCandidatesMatchWorkKindsAndTimerDueBoundary() {
+        var clock = new MutableClock(NOW);
+        bundle(clock);
+        String tenant = "managed-candidate-kinds";
+        ManagedAttemptFixture attempt = managedAttempt(tenant, new UUID(0, 1));
+        ManagedHandlerFixture handler = managedResolvedHandler(tenant, new UUID(0, 2));
+        ManagedFixture due = managedTimer(tenant, new UUID(0, 3), NOW);
+        ManagedFixture future = managedTimer(tenant, new UUID(0, 4), NOW.plusSeconds(1));
+
+        assertEquals(List.of(attempt.key(), handler.key(), due.key()),
+                candidateKeys(tenant, "worker-1", false, 10, Optional.empty()),
+                "general discovery includes attempts, due timers, and resumable handlers only");
+        assertEquals(List.of(due.key()),
+                candidateKeys(tenant, "worker-1", true, 10, Optional.empty()),
+                "timersOnly excludes attempt and handler work as well as future timers");
+
+        clock.advance(java.time.Duration.ofSeconds(1));
+        assertEquals(List.of(due.key(), future.key()),
+                candidateKeys(tenant, "worker-1", true, 10, Optional.empty()),
+                "a timer enters discovery exactly at its due instant");
+    }
+
+    @Test
+    final void managedCandidatesMatchVisibilityBoundaryAndAcknowledgement() {
+        var clock = new MutableClock(NOW);
+        bundle(clock);
+        String tenant = "managed-candidate-visibility";
+        ManagedAttemptFixture fixture = managedAttempt(tenant, new UUID(0, 1));
+        PendingWork claim = restrictedClaim(tenant, false,
+                Map.of(fixture.key(), fixture.authority())).getFirst();
+
+        clock.set(claim.leaseExpiresAt().minusNanos(1));
+        assertTrue(candidateKeys(tenant, "worker-1", false, 10, Optional.empty()).isEmpty(),
+                "a live visibility window excludes the work immediately before its boundary");
+        clock.set(claim.leaseExpiresAt());
+        assertEquals(List.of(fixture.key()),
+                candidateKeys(tenant, "worker-1", false, 10, Optional.empty()),
+                "visibility is no longer live at its exact boundary");
+        clock.set(claim.leaseExpiresAt().plusNanos(1));
+        assertEquals(List.of(fixture.key()),
+                candidateKeys(tenant, "worker-1", false, 10, Optional.empty()),
+                "expired visibility keeps the unacknowledged work eligible");
+
+        String acknowledgedTenant = "managed-candidate-ack";
+        ManagedAttemptFixture acknowledged = managedAttempt(acknowledgedTenant, new UUID(0, 1));
+        PendingWork acknowledgedClaim = restrictedClaim(acknowledgedTenant, false,
+                Map.of(acknowledged.key(), acknowledged.authority())).getFirst();
+        await(bundle().executionStore().ack(acknowledgedClaim));
+        clock.set(acknowledgedClaim.leaseExpiresAt().plusNanos(1));
+        assertTrue(candidateKeys(acknowledgedTenant, "worker-1", false, 10, Optional.empty()).isEmpty(),
+                "acknowledged work stays out of discovery after visibility and lease expiry");
+    }
+
+    @Test
+    final void managedCandidatesRespectLeaseOwnerAndExpiry() {
+        var clock = new MutableClock(NOW);
+        bundle(clock);
+        String tenant = "managed-candidate-lease";
+        ManagedAttemptFixture fixture = managedAttempt(tenant, new UUID(0, 1));
+        var lease = await(bundle().executionStore().claimManaged(fixture.key(), "owner",
+                java.time.Duration.ofSeconds(5), fixture.authority()));
+
+        assertTrue(candidateKeys(tenant, "other", false, 10, Optional.empty()).isEmpty(),
+                "another worker cannot discover work behind a live process lease");
+        assertEquals(List.of(fixture.key()),
+                candidateKeys(tenant, "owner", false, 10, Optional.empty()),
+                "the current lease owner may rediscover outstanding work it has not delivered");
+
+        clock.set(lease.expiresAt());
+        assertEquals(List.of(fixture.key()),
+                candidateKeys(tenant, "other", false, 10, Optional.empty()),
+                "another worker may discover the work exactly when the old lease expires");
+    }
+
+    @Test
+    final void managedCandidateCursorIsTenantScopedAndNewEligibilityCanBeWrappedTo() {
+        var clock = new MutableClock(NOW);
+        bundle(clock);
+        String tenant = "managed-candidate-page";
+        ManagedFixture lowerFuture = managedTimer(tenant, new UUID(0, 1), NOW.plusSeconds(1));
+        ManagedAttemptFixture higherReady = managedAttempt(tenant, new UUID(0, 3));
+        ManagedFixture otherTenant = managedTimer("managed-candidate-other", new UUID(0, 2), NOW);
+
+        var first = await(bundle().executionStore().managedClaimCandidates(tenant, "worker-1", 1,
+                java.time.Duration.ofSeconds(5), false, Optional.empty()));
+        assertEquals(List.of(higherReady.key()), first.keys());
+        assertEquals(Optional.of(higherReady.key().processInstanceId()), first.nextAfter());
+
+        clock.advance(java.time.Duration.ofSeconds(1));
+        var tail = await(bundle().executionStore().managedClaimCandidates(tenant, "worker-1", 1,
+                java.time.Duration.ofSeconds(5), false, first.nextAfter()));
+        assertTrue(tail.keys().isEmpty(), "the adapter cursor remains a strict lower bound");
+        assertTrue(tail.nextAfter().isEmpty());
+        assertEquals(List.of(lowerFuture.key()),
+                candidateKeys(tenant, "worker-1", false, 1, Optional.empty()),
+                "work becoming eligible below a saved cursor is visible when the bounded sweep wraps");
+        assertEquals(List.of(otherTenant.key()),
+                candidateKeys(otherTenant.key().tenantId(), "worker-1", false, 10, Optional.empty()),
+                "the other tenant's eligible work remains independently discoverable");
+    }
+
+    @Test
+    final void terminalProcessWithAResumingHandlerRemainsARecoveryCandidate() {
+        String tenant = "managed-terminal-obligation";
+        ManagedHandlerFixture fixture = managedResolvedHandler(tenant, new UUID(0, 1));
+
+        var page = await(bundle().executionStore().managedClaimCandidates(
+                tenant, "worker-1", 10, java.time.Duration.ofSeconds(5), false, Optional.empty()));
+        assertEquals(List.of(fixture.key()), page.keys(),
+                "process terminality cannot hide a durable handler trigger that still owes re-entry");
+
+        var claimed = restrictedClaim(tenant, false, Map.of(fixture.key(), fixture.authority()));
+        assertEquals(1, claimed.size());
+        assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst());
+    }
+
+    @Test
+    final void parkedAttemptBecomesDiscoverableOnlyAfterAHumanSchedulesItsRetry() {
+        String tenant = "managed-parked-obligation";
+        ManagedAttemptFixture fixture = managedAttempt(tenant, new UUID(0, 1));
+        PendingWork claim = restrictedClaim(tenant, false,
+                Map.of(fixture.key(), fixture.authority())).getFirst();
+        var current = await(bundle().executionStore().load(fixture.key()));
+        await(bundle().executionStore().applyManaged(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .fencedBy(claim.fencingToken())
+                .apply(new ExecutionTransition.AttemptTransitioned(fixture.traversalId(),
+                        fixture.invocationId(), fixture.attemptId(), NodeAttemptStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptParked(fixture.traversalId(),
+                        fixture.invocationId(), fixture.attemptId(), "effect outcome is unknown"))
+                .build(), fixture.authority()));
+
+        assertTrue(await(bundle().executionStore().managedClaimCandidates(
+                tenant, "worker-1", 10, java.time.Duration.ofSeconds(5), false, Optional.empty()))
+                        .keys().isEmpty(),
+                "a parked effect waits for a human decision and must not be machine-redelivered");
+
+        UUID retryId = UUID.randomUUID();
+        current = await(bundle().executionStore().load(fixture.key()));
+        await(bundle().executionStore().applyManaged(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .fencedBy(claim.fencingToken())
+                .apply(new ExecutionTransition.ParkResolvedWithRetry(fixture.traversalId(),
+                        fixture.invocationId(), fixture.attemptId(),
+                        new NodeAttempt(retryId, 2, NodeAttemptStatus.SCHEDULED)))
+                .build(), fixture.authority()));
+
+        assertEquals(List.of(fixture.key()), await(bundle().executionStore().managedClaimCandidates(
+                tenant, "worker-1", 10, java.time.Duration.ofSeconds(5), false, Optional.empty())).keys(),
+                "the human-created retry is a new scheduled attempt and must enter discovery immediately");
     }
 
     @Test
@@ -421,6 +599,12 @@ public abstract class ManagedExecutionStoreContract {
                 tenantId, "worker-1", 10, java.time.Duration.ofSeconds(5), authorities));
     }
 
+    private List<ExecutionKey> candidateKeys(String tenantId, String workerId, boolean timersOnly,
+                                             int limit, Optional<UUID> after) {
+        return await(bundle().executionStore().managedClaimCandidates(tenantId, workerId, limit,
+                java.time.Duration.ofSeconds(5), timersOnly, after)).keys();
+    }
+
     private ManagedFixture managedClaimable(String tenantId, boolean timersOnly) {
         return timersOnly ? managedDueTimer(tenantId) : managedPendingWork(tenantId);
     }
@@ -430,9 +614,20 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     private ManagedFixture managedPendingWork(String tenantId, boolean formatFour) {
-        ExecutionKey key = new ExecutionKey(tenantId, UUID.randomUUID());
+        ManagedAttemptFixture fixture = managedAttempt(tenantId, UUID.randomUUID(), formatFour);
+        return new ManagedFixture(fixture.key(), fixture.authority());
+    }
+
+    private ManagedAttemptFixture managedAttempt(String tenantId, UUID processInstanceId) {
+        return managedAttempt(tenantId, processInstanceId, false);
+    }
+
+    private ManagedAttemptFixture managedAttempt(String tenantId, UUID processInstanceId,
+                                                  boolean formatFour) {
+        ExecutionKey key = new ExecutionKey(tenantId, processInstanceId);
         UUID traversal = UUID.randomUUID();
         UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
         var stored = await(bundle().manifestStore().pin(formatFour
                 ? manifestV4(key, bundle().executionStore().maxPayloadBytes())
                 : manifest(key, bundle().executionStore().maxPayloadBytes())));
@@ -448,9 +643,66 @@ public abstract class ManagedExecutionStoreContract {
                 .apply(new ExecutionTransition.InvocationTransitioned(
                         traversal, invocation, NodeInvocationStatus.RUNNING))
                 .apply(new ExecutionTransition.AttemptAdded(traversal, invocation,
-                        new NodeAttempt(UUID.randomUUID(), 1, NodeAttemptStatus.SCHEDULED)))
+                        new NodeAttempt(attempt, 1, NodeAttemptStatus.SCHEDULED)))
+                .build(), authority));
+        return new ManagedAttemptFixture(key, authority, traversal, invocation, attempt);
+    }
+
+    private ManagedFixture terminalManagedProcess(String tenantId, UUID processInstanceId) {
+        ExecutionKey key = new ExecutionKey(tenantId, processInstanceId);
+        UUID traversal = UUID.randomUUID();
+        var stored = await(bundle().manifestStore().pin(
+                manifest(key, bundle().executionStore().maxPayloadBytes())));
+        var authority = ExecutionPersistenceAuthority.from(stored);
+        var created = await(bundle().executionStore().applyManaged(creationBatch(key, traversal), authority));
+        await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
                 .build(), authority));
         return new ManagedFixture(key, authority);
+    }
+
+    private ManagedHandlerFixture managedResolvedHandler(String tenantId, UUID processInstanceId) {
+        ExecutionKey key = new ExecutionKey(tenantId, processInstanceId);
+        UUID waitingTraversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID handler = UUID.randomUUID();
+        UUID resumeTraversal = UUID.randomUUID();
+        var stored = await(bundle().manifestStore().pin(
+                manifest(key, bundle().executionStore().maxPayloadBytes())));
+        var authority = ExecutionPersistenceAuthority.from(stored);
+        var created = await(bundle().executionStore().applyManaged(
+                creationBatch(key, waitingTraversal), authority));
+        var registration = new HandlerRegistration(handler, "human-task", waitingTraversal, invocation,
+                "correlation-" + handler, "deduplication-" + handler,
+                new HandlerPayloadSchema("application/json", "human-task/v1", 1024),
+                HandlerAuthorization.ofRoles("APPROVER"));
+        var waiting = await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(waitingTraversal,
+                        TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(waitingTraversal,
+                        new NodeInvocation(invocation, "human-task", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.TraversalTransitioned(waitingTraversal,
+                        TraversalStatus.WAITING))
+                .registerHandler(registration)
+                .build(), authority));
+        var resolved = await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(waiting.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(resumeTraversal, "resume",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .applyHandler(new HandlerTransition.Resolved(handler, "issuer|USER|approver",
+                        resumeTraversal, OpaquePayload.of("resolved".getBytes(StandardCharsets.UTF_8),
+                                "application/json")))
+                .build(), authority));
+        await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(resolved.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build(), authority));
+        return new ManagedHandlerFixture(key, authority, handler);
     }
 
     private ManagedFixture managedDueTimer(String tenantId) {
@@ -458,7 +710,16 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     private ManagedFixture managedDueTimer(String tenantId, boolean formatFour) {
-        ExecutionKey key = new ExecutionKey(tenantId, UUID.randomUUID());
+        return managedTimer(tenantId, UUID.randomUUID(), NOW, formatFour);
+    }
+
+    private ManagedFixture managedTimer(String tenantId, UUID processInstanceId, Instant dueAt) {
+        return managedTimer(tenantId, processInstanceId, dueAt, false);
+    }
+
+    private ManagedFixture managedTimer(String tenantId, UUID processInstanceId, Instant dueAt,
+                                        boolean formatFour) {
+        ExecutionKey key = new ExecutionKey(tenantId, processInstanceId);
         UUID traversal = UUID.randomUUID();
         var stored = await(bundle().manifestStore().pin(formatFour
                 ? manifestV4(key, bundle().executionStore().maxPayloadBytes())
@@ -467,7 +728,7 @@ public abstract class ManagedExecutionStoreContract {
         var created = await(bundle().executionStore().applyManaged(creationBatch(key, traversal), authority));
         await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.exactly(created.revision()))
-                .scheduleTimer(new TimerSchedule(UUID.randomUUID(), NOW, traversal, null,
+                .scheduleTimer(new TimerSchedule(UUID.randomUUID(), dueAt, traversal, null,
                         OpaquePayload.empty("application/octet-stream")))
                 .build(), authority));
         return new ManagedFixture(key, authority);
@@ -502,6 +763,12 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     private record ManagedFixture(ExecutionKey key, ExecutionPersistenceAuthority authority) {}
+
+    private record ManagedAttemptFixture(ExecutionKey key, ExecutionPersistenceAuthority authority,
+                                         UUID traversalId, UUID invocationId, UUID attemptId) {}
+
+    private record ManagedHandlerFixture(ExecutionKey key, ExecutionPersistenceAuthority authority,
+                                         UUID handlerId) {}
 
     private static ResolvedRuntimeProfile profile() {
         return new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through",

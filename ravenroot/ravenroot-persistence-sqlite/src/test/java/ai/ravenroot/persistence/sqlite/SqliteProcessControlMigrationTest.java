@@ -42,6 +42,9 @@ class SqliteProcessControlMigrationTest {
         }
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database); var statement = connection.createStatement()) {
+            statement.execute("DROP INDEX managed_recovery_attempt_candidate");
+            statement.execute("DROP INDEX managed_recovery_timer_candidate");
+            statement.execute("DROP INDEX managed_recovery_handler_candidate");
             statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
             statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("ALTER TABLE process_instance DROP COLUMN control_state");

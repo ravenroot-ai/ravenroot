@@ -58,10 +58,22 @@ class PostgresStatusLiteralSqlTest {
     void theDerivedHandlerListsAreExactlyTheNonTerminalAndTerminalMembers() {
         assertEquals(expectedHandlerList(false), PostgresExecutionStore.LIVE_HANDLER_STATUSES);
         assertEquals(expectedHandlerList(true), PostgresExecutionStore.TERMINAL_HANDLER_STATUSES);
+        assertEquals(expectedList(HandlerStatus.values(), HandlerStatus::resumesProcess, true),
+                PostgresExecutionStore.RESUMING_HANDLER_STATUSES);
         assertEquals(Set.of("WAITING", "ESCALATED"),
                 namesIn(PostgresExecutionStore.LIVE_HANDLER_STATUSES));
         assertEquals(Set.of("RESOLVED", "DENIED", "EXPIRED", "CANCELLED"),
                 namesIn(PostgresExecutionStore.TERMINAL_HANDLER_STATUSES));
+        assertEquals(Arrays.stream(HandlerStatus.values()).filter(HandlerStatus::resumesProcess)
+                        .map(Enum::name).collect(Collectors.toSet()),
+                namesIn(PostgresExecutionStore.RESUMING_HANDLER_STATUSES));
+    }
+
+    @Test
+    void theManagedRecoveryIndexCoversExactlyStatusesThatResume() {
+        String statement = theOneStatementContaining("managed_recovery_handler_candidate");
+        assertEquals(namesIn(PostgresExecutionStore.RESUMING_HANDLER_STATUSES), namesIn(statement),
+                "adding a resuming handler status requires a new candidate-index migration");
     }
 
     @Test

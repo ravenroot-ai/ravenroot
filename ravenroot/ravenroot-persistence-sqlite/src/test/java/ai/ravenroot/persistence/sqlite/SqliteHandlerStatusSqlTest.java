@@ -52,9 +52,26 @@ class SqliteHandlerStatusSqlTest {
     void theDerivedStatusListsAreExactlyTheNonTerminalAndTerminalMembers() {
         assertEquals(expected(false), SqliteExecutionStore.LIVE_HANDLER_STATUSES);
         assertEquals(expected(true), SqliteExecutionStore.TERMINAL_HANDLER_STATUSES);
+        assertEquals("('RESOLVED', 'DENIED', 'EXPIRED')",
+                SqliteExecutionStore.RESUMING_HANDLER_STATUSES);
         assertEquals(Set.of("WAITING", "ESCALATED"), namesIn(SqliteExecutionStore.LIVE_HANDLER_STATUSES));
         assertEquals(Set.of("RESOLVED", "DENIED", "EXPIRED", "CANCELLED"),
                 namesIn(SqliteExecutionStore.TERMINAL_HANDLER_STATUSES));
+        assertEquals(Arrays.stream(HandlerStatus.values()).filter(HandlerStatus::resumesProcess)
+                        .map(Enum::name).collect(Collectors.toSet()),
+                namesIn(SqliteExecutionStore.RESUMING_HANDLER_STATUSES));
+    }
+
+    @Test
+    void theManagedRecoveryIndexCoversExactlyStatusesThatResume() {
+        String statement = SqliteSchema.migrations().stream()
+                .filter(migration -> "indexed managed recovery candidates".equals(migration.description()))
+                .flatMap(migration -> migration.statements().stream())
+                .filter(sql -> sql.contains("managed_recovery_handler_candidate"))
+                .findFirst().orElseThrow();
+
+        assertEquals(namesIn(SqliteExecutionStore.RESUMING_HANDLER_STATUSES), namesIn(statement),
+                "adding a resuming handler status requires a new candidate-index migration");
     }
 
     @Test

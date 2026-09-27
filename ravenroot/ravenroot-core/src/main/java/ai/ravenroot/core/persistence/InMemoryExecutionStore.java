@@ -561,6 +561,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             if (current != null && !current.definition().equals(snapshot.definition())) {
                 throw failure(ExecutionStoreFailure.invalid("saga definition is immutable"));
             }
+            if (current != null && !current.traversalId().equals(snapshot.traversalId())) {
+                throw failure(ExecutionStoreFailure.invalid("saga traversal is immutable"));
+            }
             replacements.put(sagaKey, snapshot);
         }
         return replacements;
@@ -673,6 +676,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return sagas.values().stream()
                         .filter(snapshot -> snapshot.key().tenantId().equals(tenantId))
                         .filter(snapshot -> !leaseLive(instances.get(snapshot.key()), clock.instant()))
+                        .filter(snapshot -> {
+                            var entry = instances.get(snapshot.key());
+                            if (entry == null || entry.state.status().terminal()) return false;
+                            var traversal = entry.state.traversals().get(snapshot.traversalId());
+                            return traversal != null && !traversal.status().terminal();
+                        })
                         .filter(SagaSnapshot::graphCompleted)
                         .filter(snapshot -> snapshot.disposition() == SagaDisposition.SUCCEEDED
                                 || snapshot.disposition() == SagaDisposition.COMPENSATED)

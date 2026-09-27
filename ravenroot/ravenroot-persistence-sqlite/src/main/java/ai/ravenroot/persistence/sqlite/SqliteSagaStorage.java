@@ -55,14 +55,15 @@ final class SqliteSagaStorage {
             try (ResultSet rows = select.executeQuery()) {
                 if (!rows.next()) {
                     if (write.expectedRevision() != 0 || snapshot.revision() != 1) throw conflict(key, "saga create revision mismatch");
-                    try (var insert = connection.prepareStatement("INSERT INTO saga_instance (tenant_id,process_instance_id,saga_id,revision,disposition,graph_completed,snapshot) VALUES (?,?,?,?,?,?,?)")) {
-                        bindKey(insert, key); insert.setString(3, snapshot.sagaId().toString()); insert.setLong(4, snapshot.revision()); insert.setString(5, snapshot.disposition().name()); insert.setInt(6, snapshot.graphCompleted() ? 1 : 0); insert.setBytes(7, SagaSnapshotCodec.encode(snapshot)); insert.executeUpdate();
+                    try (var insert = connection.prepareStatement("INSERT INTO saga_instance (tenant_id,process_instance_id,saga_id,traversal_id,revision,disposition,graph_completed,snapshot) VALUES (?,?,?,?,?,?,?,?)")) {
+                        bindKey(insert, key); insert.setString(3, snapshot.sagaId().toString()); insert.setString(4, snapshot.traversalId().toString()); insert.setLong(5, snapshot.revision()); insert.setString(6, snapshot.disposition().name()); insert.setInt(7, snapshot.graphCompleted() ? 1 : 0); insert.setBytes(8, SagaSnapshotCodec.encode(snapshot)); insert.executeUpdate();
                     }
                     return;
                 }
                 long revision = rows.getLong(1); SagaSnapshot current = SagaSnapshotCodec.decode(rows.getBytes(2));
                 if (revision != write.expectedRevision() || snapshot.revision() != revision + 1) throw conflict(key, "saga revision mismatch");
                 if (!current.definition().equals(snapshot.definition())) throw invalid("a persisted saga definition is immutable");
+                if (!current.traversalId().equals(snapshot.traversalId())) throw invalid("a persisted saga traversal is immutable");
                 try (var update = connection.prepareStatement("UPDATE saga_instance SET revision=?, disposition=?, graph_completed=?, snapshot=? WHERE tenant_id=? AND process_instance_id=? AND saga_id=? AND revision=?")) {
                     update.setLong(1, snapshot.revision()); update.setString(2, snapshot.disposition().name()); update.setInt(3, snapshot.graphCompleted() ? 1 : 0); update.setBytes(4, SagaSnapshotCodec.encode(snapshot)); update.setString(5, key.tenantId()); update.setString(6, key.processInstanceId().toString()); update.setString(7, snapshot.sagaId().toString()); update.setLong(8, revision);
                     if (update.executeUpdate() != 1) throw conflict(key, "concurrent saga update");
@@ -120,7 +121,7 @@ final class SqliteSagaStorage {
             throws SQLException {
         var result = new ArrayList<SagaSnapshot>();
         try (var statement = connection.prepareStatement(
-                "SELECT s.snapshot FROM saga_instance s LEFT JOIN lease l ON l.tenant_id=s.tenant_id AND l.process_instance_id=s.process_instance_id WHERE s.tenant_id=? AND s.graph_completed=1 AND s.disposition IN ('SUCCEEDED','COMPENSATED') AND (l.process_instance_id IS NULL OR l.expires_at_epoch_second<? OR (l.expires_at_epoch_second=? AND l.expires_at_nano<=?)) ORDER BY s.process_instance_id,s.saga_id LIMIT ?")) {
+                "SELECT s.snapshot FROM saga_instance s JOIN process_instance p ON p.tenant_id=s.tenant_id AND p.process_instance_id=s.process_instance_id JOIN traversal t ON t.tenant_id=s.tenant_id AND t.process_instance_id=s.process_instance_id AND t.traversal_id=s.traversal_id LEFT JOIN lease l ON l.tenant_id=s.tenant_id AND l.process_instance_id=s.process_instance_id WHERE s.tenant_id=? AND p.status NOT IN ('COMPLETED','FAILED') AND t.status NOT IN ('COMPLETED','FAILED') AND s.graph_completed=1 AND s.disposition IN ('SUCCEEDED','COMPENSATED') AND (l.process_instance_id IS NULL OR l.expires_at_epoch_second<? OR (l.expires_at_epoch_second=? AND l.expires_at_nano<=?)) ORDER BY s.process_instance_id,s.saga_id LIMIT ?")) {
             statement.setString(1, tenant); statement.setLong(2, now.getEpochSecond());
             statement.setLong(3, now.getEpochSecond()); statement.setInt(4, now.getNano());
             statement.setInt(5, limit);

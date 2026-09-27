@@ -1453,14 +1453,17 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
-     * Lists a bounded tenant page of terminal sagas whose graph boundary was durably reached.
+     * Lists a bounded tenant page of terminal sagas whose graph boundary was durably reached while
+     * the owning traversal still needs its terminal execution projection.
      *
      * <p>This recovery inventory exists so an outbox worker restarted after both the participant
      * and Ravenroot crashed can finish the owning execution. It is diagnostic/recovery authority,
-     * not a cross-tenant enumeration.</p>
+     * not a cross-tenant enumeration. Implementations filter already-terminal processes and
+     * traversals, and executions with a live runner lease, before applying {@code limit}; historical
+     * terminal work therefore cannot starve a newer actionable completion.</p>
      * @param tenantId tenant physical partition
      * @param limit maximum snapshots returned
-     * @return terminal graph-completion candidates
+     * @return actionable terminal graph-completion candidates
      */
     default CompletionStage<java.util.List<SagaSnapshot>> listSagaCompletionCandidates(
             String tenantId, int limit) {

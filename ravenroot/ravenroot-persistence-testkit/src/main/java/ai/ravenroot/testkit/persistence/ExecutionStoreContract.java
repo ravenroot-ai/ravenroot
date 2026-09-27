@@ -6721,6 +6721,98 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void sagaCompletionCandidatePageFiltersSettledWorkAndLiveLeasesBeforeApplyingItsBound() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        var definition = new SagaDefinition(1, "bounded-completion", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        Instant now = clock().instant();
+        var terminalSuccessKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000011"));
+        var terminalCompensationKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000012"));
+        var liveKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000013"));
+        var actionableKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000014"));
+
+        UUID successTraversal = UUID.randomUUID(), compensationTraversal = UUID.randomUUID();
+        UUID liveTraversal = UUID.randomUUID(), actionableTraversal = UUID.randomUUID();
+        StoredProcessInstance successCreated = await(store().apply(
+                creationBatch(terminalSuccessKey, successTraversal, "graph-v1")));
+        StoredProcessInstance compensationCreated = await(store().apply(
+                creationBatch(terminalCompensationKey, compensationTraversal, "graph-v1")));
+        StoredProcessInstance liveCreated = await(store().apply(
+                creationBatch(liveKey, liveTraversal, "graph-v1")));
+        StoredProcessInstance actionableCreated = await(store().apply(
+                creationBatch(actionableKey, actionableTraversal, "graph-v1")));
+
+        var success = new SagaSnapshot(terminalSuccessKey, UUID.randomUUID(), successTraversal,
+                definition, 1, SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", true);
+        var compensated = new SagaSnapshot(terminalCompensationKey, UUID.randomUUID(), compensationTraversal,
+                definition, 1, SagaDisposition.COMPENSATED, true, Map.of(), null, now, now, "", true);
+        var live = new SagaSnapshot(liveKey, UUID.randomUUID(), liveTraversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", true);
+        var actionable = new SagaSnapshot(actionableKey, UUID.randomUUID(), actionableTraversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", true);
+
+        await(store().apply(ExecutionBatch.to(terminalSuccessKey)
+                .expecting(RevisionExpectation.exactly(successCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, success))
+                .apply(new ExecutionTransition.TraversalTransitioned(successTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(successTraversal, TraversalStatus.COMPLETED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED)).build()));
+        await(store().apply(ExecutionBatch.to(terminalCompensationKey)
+                .expecting(RevisionExpectation.exactly(compensationCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, compensated))
+                .apply(new ExecutionTransition.TraversalTransitioned(
+                        compensationTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(
+                        compensationTraversal, TraversalStatus.FAILED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED)).build()));
+        await(store().apply(ExecutionBatch.to(liveKey)
+                .expecting(RevisionExpectation.exactly(liveCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, live)).build()));
+        await(store().apply(ExecutionBatch.to(actionableKey)
+                .expecting(RevisionExpectation.exactly(actionableCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, actionable)).build()));
+        await(store().claim(liveKey, "still-running", TTL));
+
+        assertEquals(List.of(actionable), await(store().listSagaCompletionCandidates(DEFAULT_TENANT, 1)),
+                "terminal success, compensated failure, and a live runner must be filtered before the "
+                        + "bounded page or historical work can starve a newly actionable completion");
+    }
+
+    @Test
+    final void sagaTraversalBindingCannotDivergeFromItsRelationalCompletionIndex() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey();
+        UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        var definition = new SagaDefinition(1, "indexed-traversal", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        Instant now = clock().instant();
+        UUID sagaId = UUID.randomUUID();
+        var original = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.RUNNING, false, Map.of(), null, now, now, "", false);
+        StoredProcessInstance written = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, original)).build()));
+        var altered = new SagaSnapshot(key, sagaId, UUID.randomUUID(), definition, 2,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, clock().instant(), "", true);
+
+        var refused = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(written.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 1, altered)).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(original, await(store().loadSaga(key, sagaId)).orElseThrow(),
+                "the serialized snapshot and the relational traversal index must keep one identity");
+    }
+
+    @Test
     final void sagaRecoveryIncludesSucceededBusinessWorkUntilItsGraphBoundaryIsDurable() {
         assumeCapability(StoreCapability.DURABLE_SAGAS);
         ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID();

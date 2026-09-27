@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24158 |
+| Atomic operational candidates discovered | 24195 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24158 |
+| Reviewed | 24195 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10006 |
+| Retained protocol or format invariants | 10016 |
 | Retained published contract descriptions | 530 |
-| Retained presentation text | 677 |
+| Retained presentation text | 678 |
 | Retained derived values | 1074 |
-| Test fixtures | 8250 |
+| Test fixtures | 8276 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2137.
+Retired source candidates preserved in inventory history: 2152.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 106.
+Checked source reconciliations: 109.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24158 candidates.
+zero-count or unclassified rows as needed and sums to 24195 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24158 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22497 |
+| retained | 22534 |
 
 ### Classification counts
 
@@ -85,22 +85,22 @@ zero-count or unclassified rows as needed and sums to 24158 candidates.
 |---|---:|
 | derived | 1074 |
 | operator-configurable | 1661 |
-| presentation-text | 677 |
-| protocol-or-format-invariant | 10006 |
+| presentation-text | 678 |
+| protocol-or-format-invariant | 10016 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
-| test-fixture | 8250 |
+| test-fixture | 8276 |
 | unclassified | 0 |
 
 ### Surface counts
 
 | Surface | Candidates |
 |---|---:|
-| deployment | 2865 |
+| deployment | 2864 |
 | deployment-example | 20 |
 | java | 7282 |
-| script | 2331 |
-| test-fixture | 8250 |
+| script | 2343 |
+| test-fixture | 8276 |
 | ui | 3410 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8516 |
-| Retained; no remediation required | 13622 |
+| Retained; no remediation required | 13659 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24051 |
-| Unchanged identities | 24051 |
+| Source inventory candidates | 24189 |
+| Unchanged identities | 24189 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 107 |
-| Current candidates | 24158 |
+| Semantically classified additions | 6 |
+| Current candidates | 24195 |
 
 ## Final semantic review
 
@@ -1297,7 +1297,6 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-f49404dab093ca3f78e9` | `deploy/dev/sandbox-supervisor.sh:71` `module` | deployment | retained | protocol-or-format-invariant | These atoms select reproducible build inputs, OCI metadata, filesystem locations, or container command vocabulary. |
 | `oc-107e73202ff972e53169` | `deploy/dev/sandbox-supervisor.sh:77` `module` | deployment | retained | protocol-or-format-invariant | These atoms select reproducible build inputs, OCI metadata, filesystem locations, or container command vocabulary. |
 | `oc-2d7c516244dfb35125e6` | `deploy/dev/sandbox-supervisor.sh:77` `module` | deployment | retained | protocol-or-format-invariant | These atoms select reproducible build inputs, OCI metadata, filesystem locations, or container command vocabulary. |
-| `oc-e864145fbadc4832eccb` | `deploy/helm/ravenroot/Chart.yaml:6` `module` | deployment | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
 | `oc-6b5aaaa8772589146262` | `deploy/helm/ravenroot/Chart.yaml:7` `module` | deployment | retained | protocol-or-format-invariant | This value is required Helm release or Kubernetes compatibility metadata governed by the product release contract, not an operator setting. |
 | `oc-54d357d43c98508dacc1` | `deploy/helm/ravenroot/templates/deployment.yaml:4` `module` | deployment | retained | derived | This template token derives a Kubernetes name, image, claim, or environment value from the closed Helm release and values inputs. |
 | `oc-73c8cf4044bc54b0282f` | `deploy/helm/ravenroot/templates/deployment.yaml:34` `module` | deployment | retained | derived | This template token derives a Kubernetes name, image, claim, or environment value from the closed Helm release and values inputs. |
@@ -15824,41 +15823,53 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-83d2c741ce7619b509eb` | `scripts/prepare_release.py:66` `product_version` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-69c51a9d0d8d59652401` | `scripts/prepare_release.py:78` `latest_release` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-01286faeb66fd2ad1761` | `scripts/prepare_release.py:79` `latest_release` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-0fcc6db2ac16cb89941c` | `scripts/prepare_release.py:83` `replace_exactly` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-0b85f6f4331e26b4190c` | `scripts/prepare_release.py:86` `replace_exactly` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-dce95e6e5e6f092d7ba0` | `scripts/prepare_release.py:87` `replace_exactly` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-569bdbe33ddcc020e6b3` | `scripts/prepare_release.py:94` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-1eec00d361a8dfce9a6b` | `scripts/prepare_release.py:100` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-13877e005555d774eb06` | `scripts/prepare_release.py:102` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-d57d8ede74f4235367a3` | `scripts/prepare_release.py:102` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-d71e0398c4f8c3322d9f` | `scripts/prepare_release.py:102` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-2d897366fefb705f4f3e` | `scripts/prepare_release.py:105` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-8136118f115eb77acc44` | `scripts/prepare_release.py:105` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-81a0b1c30fabcffddab4` | `scripts/prepare_release.py:105` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-ea0ff2bc353892baa5c1` | `scripts/prepare_release.py:105` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-165d27b4717822ae513a` | `scripts/prepare_release.py:106` `bump_surfaces` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-574d2033bfcfa25f50f2` | `scripts/prepare_release.py:126` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-cc6d60a1cf6aadace095` | `scripts/prepare_release.py:127` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-05b0259dc0fb72f37fe5` | `scripts/prepare_release.py:129` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-797a753b07a3c689ca4a` | `scripts/prepare_release.py:129` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-85f8f9bd976cdfe9cea8` | `scripts/prepare_release.py:129` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-9bb0014bb4cf82d52681` | `scripts/prepare_release.py:129` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-102be6a6cb4e452efa7a` | `scripts/prepare_release.py:131` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-cc137dffdfaff5de1aa6` | `scripts/prepare_release.py:132` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-3d1a04a2d80f29299ceb` | `scripts/prepare_release.py:134` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-bfd0ec7663d1118ea89f` | `scripts/prepare_release.py:137` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-a8817feaf47a77a7f640` | `scripts/prepare_release.py:147` `release_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-41201e00ed768fb3ab61` | `scripts/prepare_release.py:166` `link_notes` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-4d477e21c2d84644b967` | `scripts/prepare_release.py:168` `link_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-6c845ec952377e464900` | `scripts/prepare_release.py:169` `link_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-67b402be2360e0a841f9` | `scripts/prepare_release.py:177` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-35b6c5c2268c667a3e2c` | `scripts/prepare_release.py:182` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-45ab28c3b763138528c0` | `scripts/prepare_release.py:185` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-0eef4d4b76486e245278` | `scripts/prepare_release.py:187` `prepare` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-9ed5d872922ac1e6e3a0` | `scripts/prepare_release.py:189` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-cd4998646aaad65b7d0c` | `scripts/prepare_release.py:213` `main` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-2b36de18f2a182684682` | `scripts/prepare_release.py:220` `main` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-b9b42f027f37e236ee18` | `scripts/prepare_release.py:222` `main` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-581a1f737b93a50e6ec9` | `scripts/prepare_release.py:84` `replaced_exactly` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-72c6324eb9a242f9f1f5` | `scripts/prepare_release.py:84` `replaced_exactly` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-fb416bc129b8ee59b4ff` | `scripts/prepare_release.py:84` `replaced_exactly` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-c4bea286273075075ae6` | `scripts/prepare_release.py:87` `replaced_exactly` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-569bdbe33ddcc020e6b3` | `scripts/prepare_release.py:96` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-e28e96989bb31babf2cc` | `scripts/prepare_release.py:106` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-7717e52feb87e54197c5` | `scripts/prepare_release.py:111` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-2d897366fefb705f4f3e` | `scripts/prepare_release.py:115` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-8136118f115eb77acc44` | `scripts/prepare_release.py:115` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-81a0b1c30fabcffddab4` | `scripts/prepare_release.py:115` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-ea0ff2bc353892baa5c1` | `scripts/prepare_release.py:115` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-165d27b4717822ae513a` | `scripts/prepare_release.py:116` `bump_surfaces` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-30df5b6bced9eb83342f` | `scripts/prepare_release.py:120` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-4167da0bfee0438567a0` | `scripts/prepare_release.py:124` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-46c31fc144950abd450a` | `scripts/prepare_release.py:124` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-6a5dce68f12898688b07` | `scripts/prepare_release.py:124` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-5023a4748906608ce198` | `scripts/prepare_release.py:130` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-cb6a4a5d425af1ca67f7` | `scripts/prepare_release.py:135` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-65cc2c212d43b0ae0423` | `scripts/prepare_release.py:141` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-869e8e718016ecc883e2` | `scripts/prepare_release.py:141` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-91bce4a3514ffa74d42e` | `scripts/prepare_release.py:141` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-8f0a3a8b9bac46e706a9` | `scripts/prepare_release.py:144` `bump_surfaces` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-574d2033bfcfa25f50f2` | `scripts/prepare_release.py:149` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-cc6d60a1cf6aadace095` | `scripts/prepare_release.py:150` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-05b0259dc0fb72f37fe5` | `scripts/prepare_release.py:152` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-797a753b07a3c689ca4a` | `scripts/prepare_release.py:152` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-85f8f9bd976cdfe9cea8` | `scripts/prepare_release.py:152` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-9bb0014bb4cf82d52681` | `scripts/prepare_release.py:152` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-102be6a6cb4e452efa7a` | `scripts/prepare_release.py:154` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-cc137dffdfaff5de1aa6` | `scripts/prepare_release.py:155` `collect_fragments` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-3d1a04a2d80f29299ceb` | `scripts/prepare_release.py:157` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-bfd0ec7663d1118ea89f` | `scripts/prepare_release.py:160` `collect_fragments` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-a8817feaf47a77a7f640` | `scripts/prepare_release.py:170` `release_notes` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-56f40f697b7635beddf1` | `scripts/prepare_release.py:188` `navigation_with_notes` | script | retained | presentation-text | This docstring describes the release validation behavior and does not configure runtime operation. |
+| `oc-6b519495c8cc203d85f5` | `scripts/prepare_release.py:188` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or validation structure rather than an operator setting. |
+| `oc-ecc8d99c8280ecdc4643` | `scripts/prepare_release.py:188` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or validation structure rather than an operator setting. |
+| `oc-7bb9fa791f94055f8e22` | `scripts/prepare_release.py:190` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or validation structure rather than an operator setting. |
+| `oc-ac3b08a3958dd7878e25` | `scripts/prepare_release.py:192` `navigation_with_notes` | script | retained | presentation-text | This is human-readable release validation output, not an operator setting or protocol token. |
+| `oc-cdcdf70cfaaff1398077` | `scripts/prepare_release.py:193` `navigation_with_notes` | script | retained | protocol-or-format-invariant | This is fixed release-orchestration vocabulary or version metadata rather than an operator setting. |
+| `oc-67b402be2360e0a841f9` | `scripts/prepare_release.py:199` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-35b6c5c2268c667a3e2c` | `scripts/prepare_release.py:204` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-45ab28c3b763138528c0` | `scripts/prepare_release.py:207` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-0eef4d4b76486e245278` | `scripts/prepare_release.py:209` `prepare` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-9ed5d872922ac1e6e3a0` | `scripts/prepare_release.py:211` `prepare` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-cd4998646aaad65b7d0c` | `scripts/prepare_release.py:236` `main` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-2b36de18f2a182684682` | `scripts/prepare_release.py:243` `main` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-b9b42f027f37e236ee18` | `scripts/prepare_release.py:245` `main` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-2678a5dacef6f0d8959a` | `scripts/publish_bundle_reference.py:20` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-9193e2eb4bfe2b88e3ab` | `scripts/publish_bundle_reference.py:21` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-a9498191a1fdb7dba56f` | `scripts/publish_bundle_reference.py:21` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |

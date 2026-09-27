@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24329 |
+| Atomic operational candidates discovered | 24335 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24329 |
+| Reviewed | 24335 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 315 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1980 |
+| Retained security ceilings or defaults | 1985 |
 | Retained protocol or format invariants | 10063 |
 | Retained published contract descriptions | 536 |
 | Retained presentation text | 680 |
 | Retained derived values | 1083 |
-| Test fixtures | 8316 |
+| Test fixtures | 8317 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 2161.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 111.
+Checked source reconciliations: 112.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24329 candidates.
+zero-count or unclassified rows as needed and sums to 24335 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24329 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22658 |
+| retained | 22664 |
 
 ### Classification counts
 
@@ -88,8 +88,8 @@ zero-count or unclassified rows as needed and sums to 24329 candidates.
 | presentation-text | 680 |
 | protocol-or-format-invariant | 10063 |
 | published-contract-description | 536 |
-| security-ceiling-or-default | 1980 |
-| test-fixture | 8316 |
+| security-ceiling-or-default | 1985 |
+| test-fixture | 8317 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -98,9 +98,9 @@ zero-count or unclassified rows as needed and sums to 24329 candidates.
 |---|---:|
 | deployment | 2864 |
 | deployment-example | 20 |
-| java | 7363 |
+| java | 7368 |
 | script | 2343 |
-| test-fixture | 8316 |
+| test-fixture | 8317 |
 | ui | 3423 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8516 |
-| Retained; no remediation required | 13793 |
+| Retained; no remediation required | 13799 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24202 |
-| Unchanged identities | 23385 |
-| Approved identity migrations | 808 |
-| Approved retirements | 9 |
-| Semantically classified additions | 136 |
-| Current candidates | 24329 |
+| Source inventory candidates | 24329 |
+| Unchanged identities | 24327 |
+| Approved identity migrations | 2 |
+| Approved retirements | 0 |
+| Semantically classified additions | 6 |
+| Current candidates | 24335 |
 
 ## Final semantic review
 
@@ -4831,6 +4831,11 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-c4d5ee7963bdda588b99` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedRuntimeProfile.java:61` `ResolvedRuntimeProfile` | java | retained | protocol-or-format-invariant | Execution-manifest domain tag or digest field name fixes replay-visible component-digest derivation and safe persisted shape. |
 | `oc-c4386096e9bff3398212` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedRuntimeProfile.java:75` `if` | java | retained | presentation-text | ManifestTokens.requireSha256Hex uses this field-name string only to identify executionLimitsDigest in a local validation exception. |
 | `oc-fa2dee2cb71162073791` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaCommandCodec.java:14` `SagaCommandCodec` | java | retained | protocol-or-format-invariant | Frozen saga command or definition contract version used to reject incompatible durable data rather than treating it as an operator choice. |
+| `oc-7e4378d6f0d40c5094be` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaCommandCodec.java:15` `SagaCommandCodec` | java | retained | security-ceiling-or-default | Fixed codec or constructor safety ceiling derived from the published 256 KiB command and 640 KiB receipt contracts; it bounds allocation and persisted data rather than exposing operator policy. |
+| `oc-e757df7c4e6bc23cb3f9` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaCommandCodec.java:15` `SagaCommandCodec` | java | retained | security-ceiling-or-default | Fixed codec or constructor safety ceiling derived from the published 256 KiB command and 640 KiB receipt contracts; it bounds allocation and persisted data rather than exposing operator policy. |
+| `oc-10233c7719d564c1a8c4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaCommandIntent.java:30` `SagaCommandIntent` | java | retained | security-ceiling-or-default | Fixed codec or constructor safety ceiling derived from the published 256 KiB command and 640 KiB receipt contracts; it bounds allocation and persisted data rather than exposing operator policy. |
+| `oc-6e02597f68de1d2ff185` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaCommandIntent.java:30` `SagaCommandIntent` | java | retained | security-ceiling-or-default | Fixed codec or constructor safety ceiling derived from the published 256 KiB command and 640 KiB receipt contracts; it bounds allocation and persisted data rather than exposing operator policy. |
+| `oc-ff7a077741d73a57319f` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaCommandIntent.java:31` `SagaCommandIntent` | java | retained | security-ceiling-or-default | Fixed codec or constructor safety ceiling derived from the published 256 KiB command and 640 KiB receipt contracts; it bounds allocation and persisted data rather than exposing operator policy. |
 | `oc-27e390ff627b2025d3f4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaDefinition.java:16` `SagaDefinition` | java | retained | protocol-or-format-invariant | Frozen saga command or definition contract version used to reject incompatible durable data rather than treating it as an operator choice. |
 | `oc-b58bbd37a78035fe7fa4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaOutboxCapacity.java:11` `SagaOutboxCapacity` | java | already-centralized | operator-configurable | These two system properties are the deliberate operator controls for bounded saga outbox command and byte capacity; constants and resolver calls are one centralized typed setting family. |
 | `oc-ffdf1ad96b9c4240be13` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaOutboxCapacity.java:11` `SagaOutboxCapacity` | java | already-centralized | operator-configurable | These two system properties are the deliberate operator controls for bounded saga outbox command and byte capacity; constants and resolver calls are one centralized typed setting family. |
@@ -4845,8 +4850,8 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-f6d1e4eb0fd614b19f58` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaOutboxSettlement.java:19` `if` | java | retained | security-ceiling-or-default | Fixed positive one-day retry-delay validation bound prevents invalid or unbounded publisher rescheduling. |
 | `oc-fc986f0022a9dab6f766` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaOutboxSettlement.java:19` `if` | java | retained | security-ceiling-or-default | Fixed positive one-day retry-delay validation bound prevents invalid or unbounded publisher rescheduling. |
 | `oc-7f25a700f2df716a16dd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaOutboxSettlement.java:20` `if` | java | retained | security-ceiling-or-default | Fixed positive one-day retry-delay validation bound prevents invalid or unbounded publisher rescheduling. |
-| `oc-b9be9578ad92f09d47d5` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaRecoveryEnvelope.java:19` `SagaRecoveryEnvelope` | java | retained | protocol-or-format-invariant | Versioned saga recovery envelope media type identifying the frozen durable payload format. |
-| `oc-84720bf93fee74c4c271` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaRecoveryEnvelope.java:42` `encode` | java | retained | protocol-or-format-invariant | Zero-length compensation encoding is the canonical wire representation for an envelope with no compensation command. |
+| `oc-b9be9578ad92f09d47d5` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaRecoveryEnvelope.java:21` `SagaRecoveryEnvelope` | java | retained | protocol-or-format-invariant | Versioned saga recovery envelope media type identifying the frozen durable payload format. |
+| `oc-84720bf93fee74c4c271` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaRecoveryEnvelope.java:44` `encode` | java | retained | protocol-or-format-invariant | Zero-length compensation encoding is the canonical wire representation for an envelope with no compensation command. |
 | `oc-b2b787e2ddf03ad53d83` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaSnapshotCodec.java:15` `SagaSnapshotCodec` | java | retained | protocol-or-format-invariant | Frozen saga snapshot magic/version atom used to detect incompatible or corrupt durable records. |
 | `oc-31e93f5c03280bfbd478` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaSnapshotCodec.java:16` `SagaSnapshotCodec` | java | retained | protocol-or-format-invariant | Frozen saga snapshot magic/version atom used to detect incompatible or corrupt durable records. |
 | `oc-71fcca4b10a09509a03d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaSnapshotCodec.java:17` `SagaSnapshotCodec` | java | retained | security-ceiling-or-default | Fixed decode bound limiting saga snapshot bytes or collection cardinality before allocation; it is an implementation safety ceiling, not operator policy. |
@@ -4854,8 +4859,8 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-93458ee888d2dbcd7ce4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaSnapshotCodec.java:17` `SagaSnapshotCodec` | java | retained | security-ceiling-or-default | Fixed decode bound limiting saga snapshot bytes or collection cardinality before allocation; it is an implementation safety ceiling, not operator policy. |
 | `oc-8c67de3f50c457767b55` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaSnapshotCodec.java:80` `decode` | java | retained | security-ceiling-or-default | Fixed decode bound limiting saga snapshot bytes or collection cardinality before allocation; it is an implementation safety ceiling, not operator policy. |
 | `oc-52c2427256815f8d2007` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaSnapshotCodec.java:94` `decode` | java | retained | security-ceiling-or-default | Fixed decode bound limiting saga snapshot bytes or collection cardinality before allocation; it is an implementation safety ceiling, not operator policy. |
-| `oc-2a2123268f7e2b308b94` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaStepSnapshot.java:23` `SagaStepSnapshot` | java | retained | security-ceiling-or-default | Fixed maximum retained participant receipt size bounds durable saga state independently of operator capacity settings. |
-| `oc-8ac14b7d780ab4584806` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaStepSnapshot.java:23` `SagaStepSnapshot` | java | retained | security-ceiling-or-default | Fixed maximum retained participant receipt size bounds durable saga state independently of operator capacity settings. |
+| `oc-3f26270ad683dfb59440` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaStepSnapshot.java:23` `SagaStepSnapshot` | java | retained | security-ceiling-or-default | Fixed maximum retained participant receipt size bounds durable saga state independently of operator capacity settings. |
+| `oc-8237e7dcded9d372cfe1` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/SagaStepSnapshot.java:23` `SagaStepSnapshot` | java | retained | security-ceiling-or-default | Fixed maximum retained participant receipt size bounds durable saga state independently of operator capacity settings. |
 | `oc-c4e6f73573634cab59df` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ToolApprovalRegistration.java:59` `ToolApprovalRegistration` | java | retained | security-ceiling-or-default | Argument and continuation byte caps bound authority-bearing state before durable approval storage. |
 | `oc-e6f21bdfa186cee49034` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ToolApprovalRegistration.java:59` `ToolApprovalRegistration` | java | retained | security-ceiling-or-default | Argument and continuation byte caps bound authority-bearing state before durable approval storage. |
 | `oc-381b9e2ccf42e74dddc8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ToolApprovalRegistration.java:60` `ToolApprovalRegistration` | java | retained | security-ceiling-or-default | Argument and continuation byte caps bound authority-bearing state before durable approval storage. |
@@ -5684,9 +5689,9 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-3bef507a43b20ca8895b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:1223` `if` | java | retained | protocol-or-format-invariant | The atom is an immutable evidence/compatibility metadata key or its deterministic absent-value normalization, not a JVM property setting. |
 | `oc-8ed0d39907d055a321db` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:1228` `if` | java | retained | protocol-or-format-invariant | The atom is an immutable evidence/compatibility metadata key or its deterministic absent-value normalization, not a JVM property setting. |
 | `oc-8f4972ec07d0258c9a1d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:1229` `if` | java | retained | protocol-or-format-invariant | The atom is an immutable evidence/compatibility metadata key or its deterministic absent-value normalization, not a JVM property setting. |
-| `oc-d0e947ccf540d38e537d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:3298` `requireTenant` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-c2ef6da38ace43e5331d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:3355` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-03f170950d627e254ae9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:3371` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-d0e947ccf540d38e537d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:3302` `requireTenant` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-c2ef6da38ace43e5331d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:3359` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
+| `oc-03f170950d627e254ae9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java:3375` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-93684e60d2d5231fbe62` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionBudget.java:22` `ExecutionBudget` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-1412327001c29cf98ba2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionInstanceBusyException.java:28` `ExecutionInstanceBusyException` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-3530347c63881cd2af5f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionMonitor.java:30` `ExecutionMonitor` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
@@ -5905,14 +5910,14 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-1839a86749d175f3ce11` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:92` `catch` | java | retained | protocol-or-format-invariant | These literals are exact Java property keys; values and defaults are reviewed at their typed consumers. |
 | `oc-060e16f7b3f852d28e99` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/DelayNodeBehaviorFactory.java:21` `DelayNodeBehaviorFactory` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-739938cb0d65b4235305` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/DelayNodeBehaviorFactory.java:22` `DelayNodeBehaviorFactory` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-85278a331045aaa86254` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:36` `HttpRequestNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-acb00a01c0493aa21637` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:36` `HttpRequestNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-c0999494eff91547a3c1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:36` `HttpRequestNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-841ff990ed68c665d68d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:115` `create` | java | retained | protocol-or-format-invariant | Exact trusted saga adapter identifier required by the concrete participant behavior before governed effect dispatch. |
-| `oc-394fa63ea1a446a17413` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:124` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-54f6351125be320738b9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:124` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-bcc68763ab713de04803` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:144` `if` | java | retained | derived | One millisecond is the representable positive floor derived when a requested HTTP duration is converted to whole milliseconds. |
-| `oc-b248e6c5bb6cbf14a4c5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:145` `if` | java | retained | derived | Zero is the comparison identity used to select the smaller positive pinned and request timeout. |
+| `oc-85278a331045aaa86254` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:40` `HttpRequestNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-acb00a01c0493aa21637` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:40` `HttpRequestNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-c0999494eff91547a3c1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:40` `HttpRequestNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-841ff990ed68c665d68d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:118` `create` | java | retained | protocol-or-format-invariant | Exact trusted saga adapter identifier required by the concrete participant behavior before governed effect dispatch. |
+| `oc-394fa63ea1a446a17413` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:127` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-54f6351125be320738b9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:127` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
+| `oc-bcc68763ab713de04803` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:147` `if` | java | retained | derived | One millisecond is the representable positive floor derived when a requested HTTP duration is converted to whole milliseconds. |
+| `oc-b248e6c5bb6cbf14a4c5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HttpRequestNodeBehaviorFactory.java:148` `if` | java | retained | derived | Zero is the comparison identity used to select the smaller positive pinned and request timeout. |
 | `oc-8fd99317469b39980594` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HumanTaskNodeBehaviorFactory.java:37` `HumanTaskNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | Classic Human Task response media type. |
 | `oc-5ac9f90647871e609357` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HumanTaskNodeBehaviorFactory.java:38` `HumanTaskNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | Schema label misidentified lexically as a property binding; no System.getProperty read. |
 | `oc-c956dc5a388af1af4fb7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/HumanTaskNodeBehaviorFactory.java:38` `HumanTaskNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | Classic Human Task response schema name. |
@@ -9836,14 +9841,14 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-f5e5bd737090a16f1ec1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:4707` `liveExecutionJson` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-f17ea1aad48e342ff349` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:4789` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-f184e4d66db885de8d18` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:4801` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-b7be2a7c87c6172eb9b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5413` `try` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-ef1121e1c703f53b504c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5423` `readGraphMlRequest` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-403e8f08f3393559adfd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5487` `catch` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-e3932243cb08f8954d56` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5490` `catch` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-fc0f515957907698d835` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5504` `catch` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-00bb178e7a709fcb06d5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5624` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-9d2f389572c3d1ead2d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5718` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-e9e6b367b31bf6739387` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:6421` `defaultHttpSecurity` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
+| `oc-b7be2a7c87c6172eb9b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5421` `try` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-ef1121e1c703f53b504c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5431` `readGraphMlRequest` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-403e8f08f3393559adfd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5495` `catch` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-e3932243cb08f8954d56` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5498` `catch` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-fc0f515957907698d835` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5512` `catch` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-00bb178e7a709fcb06d5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5632` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-9d2f389572c3d1ead2d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:5726` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-e9e6b367b31bf6739387` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java:6429` `defaultHttpSecurity` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-20f796f0e15a1c389586` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:76` `run` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-564dc62e9653b1dea6d1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:76` `run` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-92e7a625ae5d828264bc` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:76` `run` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

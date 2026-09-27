@@ -2793,15 +2793,15 @@ let maximizeGeneration = 0;
 
 function setGraphDocumentMaximized(document_, maximized) {
   if (!document_ || workspace.find(document_.id) !== document_) return false;
+  if (!maximized && maximizedDocumentId !== document_.id) return false;
   if (maximized && workspace.activeId !== document_.id) activateDocument(document_.id);
   const generation = ++maximizeGeneration;
   document_.maximizeGeneration = generation;
+  document_.maximizeViewport = document_.cy ? { zoom: document_.cy.zoom(), pan: { ...document_.cy.pan() } } : null;
   if (maximized) {
     maximizedReturnFocus = window.document.activeElement;
     maximizedDocumentId = document_.id;
-    document_.maximizeViewport ||= document_.cy ? { zoom: document_.cy.zoom(), pan: { ...document_.cy.pan() } } : null;
-  } else if (maximizedDocumentId !== document_.id) return false;
-  else maximizedDocumentId = null;
+  } else maximizedDocumentId = null;
   window.document.documentElement.classList.toggle('graph-document-maximized', maximized);
   workspace.documents.forEach(entry => {
     const active = maximized && entry === document_;
@@ -2819,31 +2819,29 @@ function setGraphDocumentMaximized(document_, maximized) {
     document_.cy?.forceRender();
     if (maximized) {
       if (generation === maximizeGeneration) document_.pane?.querySelector('[data-pane-document-maximize]')?.focus({ preventScroll: true });
-    } else {
-      // The workspace ResizeObserver can deliver once more after this frame. Keep the saved
-      // viewport authoritative through that delivery, then repeat it once the restored pane has
-      // its final size before releasing the guard.
-      window.requestAnimationFrame(() => {
-        if (generation !== document_.maximizeGeneration || workspace.find(document_.id) !== document_) return;
-        resizeDocumentElastic(document_);
-        document_.cy?.resize();
-        if (document_.maximizeViewport) document_.cy?.viewport(document_.maximizeViewport);
-        document_.cy?.forceRender();
-        if (document_.container?.clientWidth && document_.container?.clientHeight) {
-          paneRenderedSize.set(document_.id, {
-            width: document_.container.clientWidth,
-            height: document_.container.clientHeight,
-          });
-        }
-        if (generation === maximizeGeneration) {
-          const target = maximizedReturnFocus?.isConnected ? maximizedReturnFocus
-            : document_.pane?.querySelector('[data-pane-document-maximize]');
-          target?.focus?.({ preventScroll: true });
-          maximizedReturnFocus = null;
-        }
-        document_.maximizeViewport = null;
-      });
     }
+    // Hold the current viewport only through this container transition. Keeping an entry snapshot
+    // for the whole maximized session would undo navigation performed before restoring the pane.
+    window.requestAnimationFrame(() => {
+      if (generation !== document_.maximizeGeneration || workspace.find(document_.id) !== document_) return;
+      resizeDocumentElastic(document_);
+      document_.cy?.resize();
+      if (document_.maximizeViewport) document_.cy?.viewport(document_.maximizeViewport);
+      document_.cy?.forceRender();
+      if (document_.container?.clientWidth && document_.container?.clientHeight) {
+        paneRenderedSize.set(document_.id, {
+          width: document_.container.clientWidth,
+          height: document_.container.clientHeight,
+        });
+      }
+      if (!maximized && generation === maximizeGeneration) {
+        const target = maximizedReturnFocus?.isConnected ? maximizedReturnFocus
+          : document_.pane?.querySelector('[data-pane-document-maximize]');
+        target?.focus?.({ preventScroll: true });
+        maximizedReturnFocus = null;
+      }
+      document_.maximizeViewport = null;
+    });
   });
   return true;
 }
@@ -3318,6 +3316,8 @@ function syncPaneRenderer(document_) {
     cy.viewport(document_.maximizeViewport);
     return;
   }
+  // A maximized document keeps its current navigation even when the browser window resizes.
+  if (maximizedDocumentId === document_.id) return;
   // Restoring several documents passes through temporary pane sizes. Those intermediate boxes
   // must not replace each document's saved viewport with an automatic fit or recenter.
   if (workspaceRestoreInProgress && document_.canvasState) return;

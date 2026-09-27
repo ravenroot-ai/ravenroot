@@ -90,11 +90,17 @@ for (const theme of ['dark', 'light']) {
       button.click(); button.click(); button.click();
     });
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    expect(await page.evaluate(() => window.ravenroot.workspace.active.maximizeViewport)).not.toBe(null);
+    expect(await page.evaluate(() => ({ zoom: window.cy.zoom(), pan: window.cy.pan() })))
+      .toEqual({ zoom: 1.37, pan: { x: 47, y: -31 } });
+    await page.evaluate(() => { window.cy.zoom(1.61); window.cy.pan({ x: 91, y: -77 }); });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await page.evaluate(() => ({ zoom: window.cy.zoom(), pan: window.cy.pan() })))
+      .toEqual({ zoom: 1.61, pan: { x: 91, y: -77 } });
     await page.keyboard.press('Escape');
     await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.active.maximizeViewport)).toBe(null);
     expect(await page.evaluate(() => ({ zoom: window.cy.zoom(), pan: window.cy.pan() })))
-      .toEqual({ zoom: 1.37, pan: { x: 47, y: -31 } });
+      .toEqual({ zoom: 1.61, pan: { x: 91, y: -77 } });
     await page.locator('.doc-pane--active [data-pane-document-maximize]').click();
     await page.evaluate(() => window.ravenroot.replaceActiveDocumentFromText(
       window.ravenroot.serializeGraphML(window.ravenroot.workspace.active.graph), 'replacement.graphml'));
@@ -116,14 +122,21 @@ for (const theme of ['dark', 'light']) {
       height: Number(element.getAttribute('height')), box: element.getAttribute('viewBox'),
       hostWidth: element.parentElement.clientWidth, hostHeight: element.parentElement.clientHeight,
       transform: element.__zoom.toString() }));
-    const before = await geometry();
+    let expectedTransform = (await geometry()).transform;
     for (let cycle = 0; cycle < 2; cycle++) {
       await page.locator('.doc-pane--active [data-pane-document-maximize]').click();
       await expect.poll(async () => { const g = await geometry(); return g.box === `0 0 ${g.hostWidth} ${g.hostHeight}`; }).toBe(true);
-      expect((await geometry()).transform).toBe(before.transform);
+      expect((await geometry()).transform).toBe(expectedTransform);
+      await page.evaluate(() => {
+        const renderer = window.ravenroot.workspace.active.renderer.elasticMount;
+        renderer.zoomBy(1.2); renderer.panBy({ x: 31, y: -17 });
+      });
+      const navigatedTransform = (await geometry()).transform;
+      expect(navigatedTransform).not.toBe(expectedTransform);
+      expectedTransform = navigatedTransform;
       await page.keyboard.press('Escape');
       await expect.poll(async () => { const g = await geometry(); return g.box === `0 0 ${g.hostWidth} ${g.hostHeight}`; }).toBe(true);
-      expect((await geometry()).transform).toBe(before.transform);
+      expect((await geometry()).transform).toBe(expectedTransform);
     }
   });
 }

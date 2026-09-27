@@ -76,8 +76,11 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/commits/${{ steps.contract.outputs.commit }}/pulls" \
             --header 'Accept: application/vnd.github+json' \
             > "$RUNNER_TEMP/associated-prs.json"
-          prior=$(git rev-parse "${{ steps.contract.outputs.commit }}^1")
-          gh api "repos/$GITHUB_REPOSITORY/commits/$prior/pulls" \
+          anchor=$(python3 scripts/release_contract.py prior-promotion-anchor \
+            --base "$(git rev-parse "${{ steps.contract.outputs.commit }}^1")" \
+            --head "${{ steps.contract.outputs.commit }}" | \
+            python3 -c 'import json, sys; print(json.load(sys.stdin)["anchor"])')
+          gh api "repos/$GITHUB_REPOSITORY/commits/$anchor/pulls" \
             --header 'Accept: application/vnd.github+json' \
             > "$RUNNER_TEMP/prior-promotion-prs.json"
           python3 scripts/release_contract.py validate-tag-authorization \

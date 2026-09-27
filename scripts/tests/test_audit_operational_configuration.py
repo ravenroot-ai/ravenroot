@@ -19,7 +19,8 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import audit_operational_configuration as audit  # noqa: E402
-from scripts.prepare_release import prepare  # noqa: E402
+from scripts.prepare_release import latest_release, prepare, product_version  # noqa: E402
+from scripts.release_contract import expected_next, parse_tag  # noqa: E402
 
 
 ROOT = SCRIPTS.parent
@@ -153,12 +154,21 @@ def external_io_reviewed_entries(
 class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_prepared_release_tree_uses_source_derived_chart_release_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as location:
-            def prepared_tree(intent: str) -> Path:
-                root = Path(location) / intent
+            def fixture_git(root: Path, *arguments: str) -> None:
+                subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+
+            def isolated_tree(name: str, source: Path, revision: str) -> Path:
+                """Clone a complete audit fixture with independent local refs and no source config."""
+                root = Path(location) / name
                 subprocess.run(
-                    ["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(root)], check=True)
+                    ["git", "clone", "--quiet", "--no-local", str(source), str(root)], check=True)
+                fixture_git(root, "checkout", "--quiet", revision)
+                fixture_git(root, "remote", "remove", "origin")
+                return root
+
+            def prepared_tree(root: Path, intent: str, previous: str) -> str:
                 prepared = prepare(root, intent)
-                expected = {"patch": "0.4.2-alpha.1", "minor": "0.5.0-alpha.1"}[intent]
+                expected = str(expected_next(parse_tag(f"v{previous}"), intent))
                 self.assertEqual(expected, prepared["version"])
                 self.assertEqual(
                     [],
@@ -168,15 +178,35 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                         root / "docs/architecture/operational-configuration-audit.md",
                     ),
                 )
-                return root
+                return str(prepared["version"])
 
-            prepared_tree("patch")
-            root = prepared_tree("minor")
+            source_revision = "HEAD" if product_version(ROOT) == str(latest_release(ROOT)) else "HEAD^"
+            source_version = str(latest_release(ROOT))
+            for intent in ("patch", "minor"):
+                ordinary = isolated_tree(f"ordinary-{intent}", ROOT, source_revision)
+                prepared_tree(ordinary, intent, source_version)
+
+            prepared_source = isolated_tree("prepared-source", ROOT, source_revision)
+            prepared_version = prepare(prepared_source, "minor")["version"]
+            fixture_git(prepared_source, "add", ".")
+            fixture_git(prepared_source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "prepared fixture")
+            fixture_git(prepared_source, "tag", f"v{prepared_version}")
+            fragment = prepared_source / ".changes/future.feature.md"
+            fragment.write_text("Exercises preparation from a prior release state.\n", encoding="utf-8")
+            fixture_git(prepared_source, "add", fragment.relative_to(prepared_source).as_posix())
+            fixture_git(prepared_source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "fixture fragment")
+
+            for intent in ("patch", "minor"):
+                root = isolated_tree(f"prepared-{intent}", prepared_source, "HEAD")
+                final_version = prepared_tree(root, intent, str(prepared_version))
+
             chart = root / audit.HELM_CHART_PATH
             source = chart.read_text(encoding="utf-8")
             chart.write_text(
                 source.replace(
-                    'appVersion: "0.5.0-alpha.1"', 'appVersion: "0.5.0-alpha.2"', 1),
+                    f'appVersion: "{final_version}"', 'appVersion: "mismatched-version"', 1),
                 encoding="utf-8",
             )
             errors = audit.check(
@@ -188,7 +218,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
             chart.write_text(
                 source.replace(
-                    "version: 0.5.0-alpha.1", "version: 0.5.0-alpha.2", 1),
+                    f"version: {final_version}", "version: mismatched-version", 1),
                 encoding="utf-8",
             )
             errors = audit.check(

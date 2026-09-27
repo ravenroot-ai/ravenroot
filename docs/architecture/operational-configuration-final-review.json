@@ -5658,8 +5658,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2311f5d9bf5d1a13030c70c6bb11969d7d966fe7c1a41f9311db294a8a5a1c3b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #486 preserves the reviewed configuration meaning while adding tenant-scoped saga lookup with explicit not-found mapping."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
@@ -5688,8 +5688,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2311f5d9bf5d1a13030c70c6bb11969d7d966fe7c1a41f9311db294a8a5a1c3b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #486 preserves the reviewed configuration meaning while adding tenant-scoped saga lookup with explicit not-found mapping."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/provider/AssistantOutputLimit.java",
@@ -5761,8 +5761,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
-          "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2311f5d9bf5d1a13030c70c6bb11969d7d966fe7c1a41f9311db294a8a5a1c3b",
+          "assertion": "Server composition consumes exact process environment keys. Issue #486 preserves the reviewed environment binding identities while adding tenant-scoped saga lookup with explicit not-found mapping."
         },
         {
           "path": "docs/reference/configuration.md",
@@ -6223,8 +6223,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2311f5d9bf5d1a13030c70c6bb11969d7d966fe7c1a41f9311db294a8a5a1c3b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #486 preserves the reviewed configuration meaning while adding tenant-scoped saga lookup with explicit not-found mapping."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
@@ -6364,8 +6364,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2311f5d9bf5d1a13030c70c6bb11969d7d966fe7c1a41f9311db294a8a5a1c3b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #486 preserves the reviewed configuration meaning while adding tenant-scoped saga lookup with explicit not-found mapping."
         }
       ],
       "candidateCount": 29,

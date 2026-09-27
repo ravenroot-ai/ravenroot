@@ -4728,6 +4728,12 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
   const monitoringPositions = monitoringState?.canvasState?.positions || {};
   const nodeRange = metricExtent(target.nodes(), n => Number(n.data('instances')));
   const fontPx = owner.fontSize || DEFAULT_FONT_SIZE;
+  // The idle silhouette a fully-idle graph paints: the sizing helper's zero-instance size. A runtime
+  // reset must restore THIS, not whatever instance counts happened to be on the canvas when the
+  // renderer mounted -- a run -> Design -> Monitoring round-trip remounts the renderer without
+  // clearing `instances`, so a mount-derived radius can be a painted one (#494). Derived from the
+  // same helper and bounds as the live sizing rather than hardcoded, so the two cannot drift.
+  const idleRadius = scaleMetric(0, { min: 0, max: 0 }, 12, 44, 18) / 2;
 
   const idIndex = {};
   const d3nodes = target.nodes().map((n, i) => {
@@ -4808,6 +4814,7 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     palette: rendererPalette,
     markerKey: renderer.token.generation,
     fontSize: fontPx,
+    idleRadius,
     attraction: forces.attraction,
     repulsion: forces.repulsion,
     speed: forces.speed,
@@ -12564,6 +12571,23 @@ function paintVisibleGroupRuntime(owner, groupId) {
   if (elasticRendererFor(owner)?.elasticMount) refreshVisualGroups(owner);
 }
 
+// Launching a Test or Run clears the previous run's painting. On the elastic (Monitoring) renderer
+// that used to mean tearing the renderer down and mounting a new one, which re-laid-out the graph
+// and reset the viewport because a fresh force simulation starts at full alpha (#494). A reset is a
+// paint operation, so it happens on the renderer already on the canvas: the run state is cleared in
+// place, node coordinates and zoom/pan are preserved, and the simulation is never restarted. Only
+// the genuine mount/reheat entry points -- setRenderMode, renderActiveMode, the explicit elastic
+// layout job and reconcileActiveRenderModeRenderer -- still call startD3Elastic, so the reheats #469
+// allows (a node drag, an explicit layout arrangement, the force controls) remain the only ones. The
+// idle labels and their human-task attention classes are a document projection, so they are
+// re-projected from the now-idle model exactly as a mount would have done.
+function resetElasticRuntimePaint(owner) {
+  const renderer = elasticRendererFor(owner);
+  if (!renderer?.resetRuntime || !rendererSessions.isLive(renderer.token)) return;
+  renderer.resetRuntime({ idleStroke: runtimeColor('idle') });
+  applyHumanTaskProjection(owner);
+}
+
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
@@ -12586,7 +12610,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   });
   if (targetLayoutMode === 'elastic') {
-    startD3Elastic(owner, targetCy, owner.layoutSessionToken);
+    resetElasticRuntimePaint(owner);
   } else if (isN8nFamilyLayout(targetVisualStyle)) {
     applyN8nNodeStyle(targetCy, owner);
   }

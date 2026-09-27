@@ -58,6 +58,7 @@ export function mountD3ElasticRenderer({
   onViewportChange = () => {},
   initialTransform = null,
   startSimulation = true,
+  idleRadius = null,
 }) {
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
@@ -72,6 +73,17 @@ export function mountD3ElasticRenderer({
   const viewportHeight = Math.max(1, finite(height, 600));
   let currentViewportWidth = viewportWidth;
   let currentViewportHeight = viewportHeight;
+  // The idle silhouette `resetRuntime` restores: the zero-instance size the caller derives from the
+  // sizing helper, NOT the instance counts painted when this renderer mounted. A run -> Design ->
+  // Monitoring round-trip remounts the renderer without clearing `instances` (#494), so a
+  // mount-derived radius can be a run-derived one; capturing the caller's idle radius keeps the
+  // reset independent of what was on the canvas at mount. Captured once, before any runtime update
+  // can mutate `r`; the datum's own value is only a fallback for callers that supply none.
+  nodes.forEach(node => {
+    if (!Number.isFinite(node.baseR)) {
+      node.baseR = Number.isFinite(idleRadius) ? idleRadius : node.r;
+    }
+  });
   const nodeText = palette?.nodeText ?? '#e6edf3';
   const edgeLabel = palette?.edgeLabel ?? '#b1bac4';
   let destroyed = false;
@@ -362,6 +374,51 @@ export function mountD3ElasticRenderer({
     refreshCollisionRadii() {
       if (destroyed) return;
       simulation.force('collision', createCollisionForce());
+    },
+    // Clears the previous run's painting on THIS renderer, in place. Launching a Test or Run resets
+    // the runtime projection, and the renderer used to be torn down and re-mounted for it: the fresh
+    // force simulation starts at full alpha, so it re-laid-out the graph, and the new SVG/host lost
+    // the viewport (#494). A reset is a paint operation, not a layout one, so it restores each node's
+    // mount-time silhouette and the idle edge decoration without touching coordinates, the zoom
+    // transform, or the simulation. It deliberately never calls alpha/alphaTarget/restart/stop and
+    // never rebuilds the simulation, so the #469 convergence rule still holds exactly: a settled
+    // Monitoring graph stays settled, and dragging a node, an explicit layout arrangement, or a
+    // force control remain the only reheat sources.
+    resetRuntime({ idleStroke = null, idleStrokeWidth = 1.5 } = {}) {
+      if (destroyed) return;
+      nodes.forEach(node => {
+        node.instances = 0;
+        node.arrivals = 0;
+        node.runtimeState = 'idle';
+        node.runtimeObserved = false;
+        node.lastEventType = null;
+        node.lastOccurredAt = null;
+        node.processingDuration = null;
+        node.fallback = false;
+        if (Number.isFinite(node.baseR)) node.r = node.baseR;
+        // The idle stroke is palette policy the renderer does not keep current across a theme change,
+        // so the caller supplies it; `null` leaves whatever the mount already painted.
+        if (idleStroke != null) node.stroke = idleStroke;
+        node.strokeWidth = idleStrokeWidth;
+      });
+      nodeSelection.attr('r', node => node.r)
+        .attr('stroke', node => node.stroke)
+        .attr('stroke-width', node => node.strokeWidth);
+      links.forEach(link => {
+        link.flow = { recent: 0, count: 0, lastEvent: null, lastOccurredAt: null, expiresAt: null };
+        edgeSelection.filter(candidate => candidate.id === link.id).interrupt('flow')
+          .classed('d3-edge--active', false)
+          .attr('stroke-dasharray', null)
+          .attr('stroke-dashoffset', null);
+        clearTimeout(pulseTimers.get(link.id));
+        pulseTimers.delete(link.id);
+      });
+      // Idle radii make the collide force's cached sizes stale for the NEXT legitimate reheat;
+      // recomputing them installs the same force policy without changing alpha or restarting (#469).
+      simulation.force('collision', createCollisionForce());
+      // Repaint restores the idle edge widths/opacity and geometry from the unchanged positions.
+      paintGeometry();
+      refreshTooltip();
     },
     updateEdgeFlow(edgeId, flow, { reducedMotion = false, decayMs = 1_400, onDecay = null } = {}) {
       const runtimeIdentity = candidate => candidate.runtimeIdentity === undefined

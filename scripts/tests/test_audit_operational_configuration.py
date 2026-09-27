@@ -180,8 +180,22 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 )
                 return str(prepared["version"])
 
-            source_revision = "HEAD" if product_version(ROOT) == str(latest_release(ROOT)) else "HEAD^"
             source_version = str(latest_release(ROOT))
+            source_revision = "HEAD"
+            if product_version(ROOT) != source_version:
+                for revision in subprocess.run(
+                        ["git", "rev-list", "--first-parent", "HEAD"], cwd=ROOT,
+                        check=True, capture_output=True, text=True,
+                ).stdout.splitlines():
+                    pom = subprocess.run(
+                        ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=ROOT,
+                        check=True, capture_output=True, text=True,
+                    ).stdout
+                    if f"<version>{source_version}</version>" in pom:
+                        source_revision = revision
+                        break
+                else:
+                    self.fail("no ordinary product source is reachable from the latest release tag")
             for intent in ("patch", "minor"):
                 ordinary = isolated_tree(f"ordinary-{intent}", ROOT, source_revision)
                 prepared_tree(ordinary, intent, source_version)

@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24447 |
+| Atomic operational candidates discovered | 24468 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24447 |
+| Reviewed | 24468 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10061 |
+| Retained protocol or format invariants | 10069 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 699 |
 | Retained derived values | 1087 |
-| Test fixtures | 8449 |
+| Test fixtures | 8462 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2170.
+Retired source candidates preserved in inventory history: 2187.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 117.
+Checked source reconciliations: 118.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24447 candidates.
+zero-count or unclassified rows as needed and sums to 24468 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24447 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22786 |
+| retained | 22807 |
 
 ### Classification counts
 
@@ -86,10 +86,10 @@ zero-count or unclassified rows as needed and sums to 24447 candidates.
 | derived | 1087 |
 | operator-configurable | 1661 |
 | presentation-text | 699 |
-| protocol-or-format-invariant | 10061 |
+| protocol-or-format-invariant | 10069 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
-| test-fixture | 8449 |
+| test-fixture | 8462 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 24447 candidates.
 | deployment | 2864 |
 | deployment-example | 20 |
 | java | 7288 |
-| script | 2369 |
-| test-fixture | 8449 |
+| script | 2377 |
+| test-fixture | 8462 |
 | ui | 3457 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8510 |
-| Retained; no remediation required | 13917 |
+| Retained; no remediation required | 13938 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24440 |
-| Unchanged identities | 24437 |
+| Source inventory candidates | 24447 |
+| Unchanged identities | 24430 |
 | Approved identity migrations | 0 |
-| Approved retirements | 3 |
-| Semantically classified additions | 10 |
-| Current candidates | 24447 |
+| Approved retirements | 17 |
+| Semantically classified additions | 38 |
+| Current candidates | 24468 |
 
 ## Final semantic review
 
@@ -16564,32 +16564,40 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-216a628f549cef153960` | `scripts/release_contract.py:342` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-991ea0ecf31e978f6406` | `scripts/release_contract.py:343` `parser` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
 | `oc-d0f95634fb2fe56bfb1b` | `scripts/release_contract.py:348` `parser` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-f41d5a7b6405061be368` | `scripts/release_contract.py:388` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8424e153e0476cab608e` | `scripts/release_contract.py:403` `require_target_tag_available` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-d80a911df3b3bce9264c` | `scripts/release_contract.py:405` `require_target_tag_available` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-c311c34dc608419c681d` | `scripts/release_contract.py:409` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-d7fb1996916ed17f03e9` | `scripts/release_contract.py:409` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-f7bfa917b51e20f9abf5` | `scripts/release_contract.py:409` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-ce71b8bf11783308cbd5` | `scripts/release_contract.py:410` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-6b1b52405c6540a1e830` | `scripts/release_contract.py:412` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-f1664bac53fcd2997502` | `scripts/release_contract.py:422` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-d7de9f936583de8a8f23` | `scripts/release_contract.py:424` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-b2c04fda4e1374119a52` | `scripts/release_contract.py:425` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-1f6d06dce8577a1a2316` | `scripts/release_contract.py:431` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-8d7aabf418677bba842b` | `scripts/release_contract.py:431` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-cda98174fa4975b69a40` | `scripts/release_contract.py:431` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-b1b937ac98262f82373e` | `scripts/release_contract.py:433` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-8e7e3504db1c9356a193` | `scripts/release_contract.py:436` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-aa7aa78cffde66075af0` | `scripts/release_contract.py:438` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-9420aa0540e7faef6dad` | `scripts/release_contract.py:440` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-644056250c389974ca9b` | `scripts/release_contract.py:443` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-900fbaf09547521acac8` | `scripts/release_contract.py:445` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-7d3ab3d5472c892039c3` | `scripts/release_contract.py:446` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-9d65c10f79abb793490d` | `scripts/release_contract.py:446` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-accb7f4b8f0abd051308` | `scripts/release_contract.py:446` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-c671b1cfcbaa234cb956` | `scripts/release_contract.py:447` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-7ceb62552564d5874a2d` | `scripts/release_contract.py:449` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
-| `oc-bd66a2d11fb01d431898` | `scripts/release_contract.py:457` `authorized_release_intent` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f41d5a7b6405061be368` | `scripts/release_contract.py:393` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8424e153e0476cab608e` | `scripts/release_contract.py:408` `require_target_tag_available` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d80a911df3b3bce9264c` | `scripts/release_contract.py:410` `require_target_tag_available` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-c311c34dc608419c681d` | `scripts/release_contract.py:414` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d7fb1996916ed17f03e9` | `scripts/release_contract.py:414` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f7bfa917b51e20f9abf5` | `scripts/release_contract.py:414` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-ce71b8bf11783308cbd5` | `scripts/release_contract.py:415` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-6b1b52405c6540a1e830` | `scripts/release_contract.py:417` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f1664bac53fcd2997502` | `scripts/release_contract.py:427` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d7de9f936583de8a8f23` | `scripts/release_contract.py:429` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-b2c04fda4e1374119a52` | `scripts/release_contract.py:430` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-5e87ff68e116d7ad11e5` | `scripts/release_contract.py:434` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-7c642739cd0b91bb56cf` | `scripts/release_contract.py:434` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-c27f70b4a420a9a7f5c1` | `scripts/release_contract.py:434` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-663dfedf1db779b9b462` | `scripts/release_contract.py:437` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-bca022b02871281d1e19` | `scripts/release_contract.py:439` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-626aaaccbf0081d35276` | `scripts/release_contract.py:441` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-88723fcc38fe3d8a6d84` | `scripts/release_contract.py:450` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-bfa1989bfabc987f9353` | `scripts/release_contract.py:450` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-e9fc06de258afadd4f49` | `scripts/release_contract.py:450` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-2313aafc1cf1b3e04f2c` | `scripts/release_contract.py:456` `prepared_unreleased_minor_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-383f252c7409b7f608e2` | `scripts/release_contract.py:466` `prior_promotion_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-497166b08e2013e902b6` | `scripts/release_contract.py:466` `prior_promotion_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-80ee0f50bb6c9bfcba5e` | `scripts/release_contract.py:466` `prior_promotion_anchor` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-1f6d06dce8577a1a2316` | `scripts/release_contract.py:475` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-8d7aabf418677bba842b` | `scripts/release_contract.py:475` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-cda98174fa4975b69a40` | `scripts/release_contract.py:475` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-b1b937ac98262f82373e` | `scripts/release_contract.py:477` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-8e7e3504db1c9356a193` | `scripts/release_contract.py:480` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-aa7aa78cffde66075af0` | `scripts/release_contract.py:482` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-9420aa0540e7faef6dad` | `scripts/release_contract.py:484` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f4a8f55cad66eec89755` | `scripts/release_contract.py:487` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed historical prepared-release recovery contract and does not configure runtime behavior. |
+| `oc-7ceb62552564d5874a2d` | `scripts/release_contract.py:489` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-bd66a2d11fb01d431898` | `scripts/release_contract.py:497` `authorized_release_intent` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
 | `oc-328a92a902d0093f7ef5` | `scripts/select_backend_tests.py:24` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
 | `oc-36c35c73b4eb78210a1a` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
 | `oc-6471af3402cf9b2b9af6` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |

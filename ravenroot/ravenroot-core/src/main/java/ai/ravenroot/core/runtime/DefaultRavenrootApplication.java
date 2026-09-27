@@ -2310,7 +2310,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
         if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga status unavailable");
-        return await(executionStore.listSagas(new ExecutionKey(tenantId, processInstanceId)));
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        await(executionStore.load(key));
+        return await(executionStore.listSagas(key));
     }
 
     @Override
@@ -2319,7 +2321,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
         if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga status unavailable");
-        return await(executionStore.listSagaCommands(new ExecutionKey(tenantId, processInstanceId)));
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        await(executionStore.load(key));
+        return await(executionStore.listSagaCommands(key));
     }
 
     @Override

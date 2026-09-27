@@ -6,7 +6,9 @@ import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.execution.NodeMessage;
+import ai.ravenroot.api.execution.RetryClassified;
 import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
+import ai.ravenroot.api.persistence.Retryability;
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.graph.GraphNode;
@@ -30,6 +32,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
     private static final Set<String> GRAPH_FORBIDDEN_HEADERS = Set.of(
@@ -97,11 +101,10 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                                 "POST", "PUT", "PATCH", "DELETE"))),
                 Set.of("network", "credential-reference", "side-effect",
                         "saga-adapter:ravenroot.http-idempotency.v1"))
-                // Parameterized, not fixed: the author names these. Note that the failure outcome is a
-                // non-2xx RESPONSE, which is a completed request — a transport error produces no
-                // outcome at all and fails the node, which is a different route (see the failure
-                // edges). Declaring the defaults "continue" and "error" as literals would be right
-                // only for a node that left both properties alone.
+                // Parameterized, not fixed: the author names these. For an ordinary node a non-2xx
+                // response selects the failure outcome and a transport error fails the node. A trusted
+                // saga participant additionally reconciles both cases through its governed outcome
+                // lookup before either can become an effect classification.
                 .withOutcomes(
                         NodeOutcomeDescriptor.fromProperty("successOutcome",
                                 "The endpoint answered with an HTTP 2xx status."),
@@ -196,43 +199,72 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                                     "http.uri", uri.toString())));
             if (!"http-idempotency-v1".equals(node.properties().get("saga.participant"))
                     || outcomeLookupTemplate.isEmpty()) return delivery;
-            return delivery.exceptionallyCompose(failure -> {
-                URI lookup = URI.create(NodeProperties.render(outcomeLookupTemplate, message, node));
-                outboundPolicy.requireAllowed(lookup);
-                ToolAuthorization.requireAllowed(toolPolicy, message, "http.request",
-                        Map.of("host", lookup.getHost(), "method", "GET"));
-                var lookupBuilder = HttpRequest.newBuilder(lookup).timeout(effectiveTimeout).GET();
-                if (!credentialRef.isEmpty()) {
-                    var secret = credentials.resolve(credentialRef).orElseThrow(() ->
-                            new SecurityException("Credential reference cannot be resolved: " + credentialRef));
-                    try (secret) {
-                        char[] value = secret.copy();
-                        try {
-                            lookupBuilder.header(credentialHeader, credentialScheme.isEmpty()
-                                    ? new String(value) : credentialScheme + " " + new String(value));
-                        } finally {
-                            java.util.Arrays.fill(value, '\0');
-                        }
-                    }
+            return delivery.handle((result, failure) -> {
+                Object status = result == null ? null : result.attributes().get("http.status");
+                if (failure == null && status instanceof Number number
+                        && number.intValue() >= 200 && number.intValue() < 300) {
+                    return CompletableFuture.completedFuture(result);
                 }
-                HttpRequest query = lookupBuilder.build();
-                return client.sendAsync(query, BoundedBodyHandlers.ofString(
-                                capacity.maximumResponseBytes(), StandardCharsets.UTF_8))
-                        .thenCompose(response -> {
-                            String operationId = String.valueOf(message.attributes().get("sagaOperationId"));
-                            String expected = operationId
-                                    .startsWith("compensate:") ? "COMPENSATED" : "APPLIED";
-                            if (response.statusCode() == 200 && reconciled(response.body(), operationId,
-                                    requestFingerprint, expected)) {
-                                return java.util.concurrent.CompletableFuture.completedFuture(new NodeResult(
-                                        successOutcome, response.body(), NodeProperties.attributes(message,
-                                        "http.status", response.statusCode(), "http.uri", uri.toString(),
-                                        "saga.reconciled", true)));
-                            }
-                            return java.util.concurrent.CompletableFuture.<NodeResult>failedFuture(failure);
-                        });
-            });
+                Throwable unknown = failure == null
+                        ? new ParticipantOutcomeUnknown("HTTP participant returned a non-2xx response")
+                        : failure;
+                return reconcile(node, message, outcomeLookupTemplate, effectiveTimeout, capacity,
+                        credentialRef, credentialHeader, credentialScheme, uri, requestFingerprint,
+                        successOutcome, unknown);
+            }).thenCompose(java.util.function.Function.identity());
         };
+    }
+
+    private CompletionStage<NodeResult> reconcile(
+            GraphNode node, NodeMessage message, String outcomeLookupTemplate, Duration effectiveTimeout,
+            ResolvedOperationalPolicy.BuiltInHttpCapacity capacity, String credentialRef,
+            String credentialHeader, String credentialScheme, URI originalUri, String requestFingerprint,
+            String successOutcome, Throwable unknown) {
+        URI lookup = URI.create(NodeProperties.render(outcomeLookupTemplate, message, node));
+        outboundPolicy.requireAllowed(lookup);
+        ToolAuthorization.requireAllowed(toolPolicy, message, "http.request",
+                Map.of("host", lookup.getHost(), "method", "GET"));
+        var lookupBuilder = HttpRequest.newBuilder(lookup).timeout(effectiveTimeout).GET();
+        if (!credentialRef.isEmpty()) {
+            var secret = credentials.resolve(credentialRef).orElseThrow(() ->
+                    new SecurityException("Credential reference cannot be resolved: " + credentialRef));
+            try (secret) {
+                char[] value = secret.copy();
+                try {
+                    lookupBuilder.header(credentialHeader, credentialScheme.isEmpty()
+                            ? new String(value) : credentialScheme + " " + new String(value));
+                } finally {
+                    java.util.Arrays.fill(value, '\0');
+                }
+            }
+        }
+        return client.sendAsync(lookupBuilder.build(), BoundedBodyHandlers.ofString(
+                        capacity.maximumResponseBytes(), StandardCharsets.UTF_8))
+                .thenCompose(response -> {
+                    String operationId = String.valueOf(message.attributes().get("sagaOperationId"));
+                    String forwardOperationId = String.valueOf(
+                            message.attributes().get("sagaForwardOperationId"));
+                    String compensationOperationId = String.valueOf(
+                            message.attributes().get("sagaCompensationOperationId"));
+                    boolean compensation = operationId.equals(compensationOperationId);
+                    if (!compensation && !operationId.equals(forwardOperationId)) {
+                        return CompletableFuture.<NodeResult>failedFuture(unknown);
+                    }
+                    String expected = compensation ? "COMPENSATED" : "APPLIED";
+                    ReconciledReceipt receipt = response.statusCode() == 200
+                            ? reconciled(response.body(), operationId, requestFingerprint, expected)
+                            : ReconciledReceipt.INVALID;
+                    if (receipt == ReconciledReceipt.APPLIED) {
+                        return CompletableFuture.completedFuture(new NodeResult(
+                                successOutcome, response.body(), NodeProperties.attributes(message,
+                                "http.status", response.statusCode(), "http.uri", originalUri.toString(),
+                                "saga.reconciled", true)));
+                    }
+                    if (receipt == ReconciledReceipt.NOT_APPLIED) {
+                        return CompletableFuture.<NodeResult>failedFuture(new ParticipantConfirmedNoEffect());
+                    }
+                    return CompletableFuture.<NodeResult>failedFuture(unknown);
+                });
     }
 
     private static String sha256(byte[] value) {
@@ -243,17 +275,35 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
         }
     }
 
-    private static boolean reconciled(String response, String operationId, String fingerprint, String state) {
+    private static ReconciledReceipt reconciled(
+            String response, String operationId, String fingerprint, String expectedState) {
         try {
             Object decoded = ai.ravenroot.api.payload.PayloadJson.read(response.getBytes(StandardCharsets.UTF_8),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
-            if (!(decoded instanceof Map<?, ?> values)) return false;
-            return operationId.equals(values.get("operationId"))
-                    && fingerprint.equals(values.get("fingerprint"))
-                    && state.equals(values.get("state"));
+            if (!(decoded instanceof Map<?, ?> values)
+                    || !operationId.equals(values.get("operationId"))
+                    || !fingerprint.equals(values.get("fingerprint"))) {
+                return ReconciledReceipt.INVALID;
+            }
+            if (expectedState.equals(values.get("state"))) return ReconciledReceipt.APPLIED;
+            if ("NOT_APPLIED".equals(values.get("state"))) return ReconciledReceipt.NOT_APPLIED;
+            return ReconciledReceipt.INVALID;
         } catch (RuntimeException malformed) {
-            return false;
+            return ReconciledReceipt.INVALID;
         }
+    }
+
+    private enum ReconciledReceipt { APPLIED, NOT_APPLIED, INVALID }
+
+    private static final class ParticipantConfirmedNoEffect extends RuntimeException
+            implements RetryClassified {
+        @Override public Retryability retryability() { return Retryability.RETRYABLE_NO_EFFECT; }
+    }
+
+    private static final class ParticipantOutcomeUnknown extends RuntimeException
+            implements RetryClassified {
+        private ParticipantOutcomeUnknown(String message) { super(message); }
+        @Override public Retryability retryability() { return Retryability.INDETERMINATE; }
     }
 
     private ResolvedOperationalPolicy.BuiltInHttpCapacity capacityFor(NodeMessage message) {

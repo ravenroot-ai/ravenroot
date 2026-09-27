@@ -9,13 +9,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Application command committed atomically with the saga state that created it.
+ * Payload bytes are bounded at 256 KiB. The deterministic format reserves a further 16 KiB for
+ * the bounded identity, routing, content-type, fingerprint, causality, timestamp, and framing fields.
  * @param messageId stable message identity
  * @param sagaId owning saga identity
  * @param operationId stable business operation identity
  * @param destination governed destination name
  * @param commandType versioned application command type
  * @param schemaVersion positive command schema version
- * @param payload bounded opaque command body
+ * @param payload opaque command body of at most 256 KiB with a content type of at most 256 characters
  * @param payloadFingerprint SHA-256 of payload bytes
  * @param causalMessageId prior message that caused this command, or null
  * @param notBefore earliest delivery instant
@@ -25,6 +27,8 @@ public record SagaCommandIntent(UUID messageId, UUID sagaId, String operationId,
                                 String commandType, int schemaVersion, OpaquePayload payload,
                                 String payloadFingerprint, UUID causalMessageId, Instant notBefore,
                                 int maxAttempts) {
+    static final int MAX_PAYLOAD_BYTES = 256 * 1024;
+    static final int MAX_CONTENT_TYPE_CHARACTERS = 256;
     /** Validates and defensively snapshots the durable value. */
     public SagaCommandIntent {
         Objects.requireNonNull(messageId, "messageId");
@@ -34,7 +38,12 @@ public record SagaCommandIntent(UUID messageId, UUID sagaId, String operationId,
         commandType = token(commandType, "commandType", 128);
         if (schemaVersion < 1) throw new IllegalArgumentException("schemaVersion must be positive");
         Objects.requireNonNull(payload, "payload");
-        if (payload.size() > 256 * 1024) throw new IllegalArgumentException("saga command exceeds 256 KiB");
+        if (payload.size() > MAX_PAYLOAD_BYTES) {
+            throw new IllegalArgumentException("saga command exceeds 256 KiB");
+        }
+        if (payload.contentType().length() > MAX_CONTENT_TYPE_CHARACTERS) {
+            throw new IllegalArgumentException("saga command contentType is not bounded");
+        }
         if (payloadFingerprint == null || !payloadFingerprint.matches("[0-9a-f]{64}")) {
             throw new IllegalArgumentException("payloadFingerprint must be SHA-256");
         }

@@ -180,14 +180,16 @@ final class SqliteSagaStorage {
 
     static SagaOutboxRecord settle(Connection connection,String tenant,UUID message,String worker,long fence,SagaOutboxSettlement settlement,Instant now)throws SQLException{
         SagaOutboxRecord current=read(connection,tenant,message);
-        if(current.status()!=SagaOutboxStatus.CLAIMED||!worker.equals(current.owner())||current.fencingToken()!=fence) throw invalid("stale saga outbox settlement");
+        if(current.status()!=SagaOutboxStatus.CLAIMED||!worker.equals(current.owner())
+                ||current.fencingToken()!=fence||current.leaseExpiresAt()==null
+                ||!now.isBefore(current.leaseExpiresAt())) throw invalid("stale saga outbox settlement");
         String status; Instant next=current.nextAttemptAt(),accepted=current.brokerAcceptedAt(),completed=current.businessCompletedAt(); String failure="";
         if(settlement instanceof SagaOutboxSettlement.BrokerAccepted){status="BROKER_ACCEPTED";accepted=now;next=now.plusSeconds(1);}
         else if(settlement instanceof SagaOutboxSettlement.BusinessCompleted){status="BUSINESS_COMPLETED";completed=now;SagaSnapshot saga=load(connection,current.key(),current.intent().sagaId()).orElseThrow(()->invalid("saga disappeared"));writeSnapshot(connection,current.key(),new SagaWrite(UUID.randomUUID(),saga.revision(),SagaCommandCompletion.fold(saga,current.intent(),now)));}
         else if(settlement instanceof SagaOutboxSettlement.Retry retry){status=current.attempts()>=current.intent().maxAttempts()?"EXHAUSTED":current.brokerAcceptedAt()==null?"PENDING":"BROKER_ACCEPTED";next=now.plus(retry.delay());failure=retry.safeReason();if("EXHAUSTED".equals(status))foldExhausted(connection,current,failure,now);}
         else {status="EXHAUSTED";failure=((SagaOutboxSettlement.Exhausted)settlement).safeReason();foldExhausted(connection,current,failure,now);}
-        try(var update=connection.prepareStatement("UPDATE saga_command_outbox SET status=?,owner=NULL,lease_expires_at_epoch_second=NULL,lease_expires_at_nano=NULL,next_attempt_at_epoch_second=?,next_attempt_at_nano=?,broker_accepted_at_epoch_second=?,broker_accepted_at_nano=?,business_completed_at_epoch_second=?,business_completed_at_nano=?,last_failure=? WHERE tenant_id=? AND message_id=? AND owner=? AND fencing_token=?")){
-            update.setString(1,status);StoredInstant.bindValue(update,2,next);bindNullable(update,4,accepted);bindNullable(update,6,completed);update.setString(8,failure);update.setString(9,tenant);update.setString(10,message.toString());update.setString(11,worker);update.setLong(12,fence);if(update.executeUpdate()!=1)throw invalid("stale saga outbox settlement");
+        try(var update=connection.prepareStatement("UPDATE saga_command_outbox SET status=?,owner=NULL,lease_expires_at_epoch_second=NULL,lease_expires_at_nano=NULL,next_attempt_at_epoch_second=?,next_attempt_at_nano=?,broker_accepted_at_epoch_second=?,broker_accepted_at_nano=?,business_completed_at_epoch_second=?,business_completed_at_nano=?,last_failure=? WHERE tenant_id=? AND message_id=? AND status='CLAIMED' AND owner=? AND fencing_token=? AND (lease_expires_at_epoch_second>? OR (lease_expires_at_epoch_second=? AND lease_expires_at_nano>?))")){
+            update.setString(1,status);StoredInstant.bindValue(update,2,next);bindNullable(update,4,accepted);bindNullable(update,6,completed);update.setString(8,failure);update.setString(9,tenant);update.setString(10,message.toString());update.setString(11,worker);update.setLong(12,fence);update.setLong(13,now.getEpochSecond());update.setLong(14,now.getEpochSecond());update.setInt(15,now.getNano());if(update.executeUpdate()!=1)throw invalid("stale saga outbox settlement");
         }
         return read(connection,tenant,message);
     }

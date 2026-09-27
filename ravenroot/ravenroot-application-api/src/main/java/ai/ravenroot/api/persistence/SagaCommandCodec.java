@@ -12,6 +12,8 @@ import java.util.UUID;
 /** Deterministic bounded binary encoding used by execution-store saga outboxes. */
 public final class SagaCommandCodec {
     private static final int VERSION = 1;
+    private static final int MAX_COMMAND_METADATA_BYTES = 16 * 1024;
+    static final int MAX_ENCODED_BYTES = MAX_COMMAND_METADATA_BYTES + SagaCommandIntent.MAX_PAYLOAD_BYTES;
 
     private SagaCommandCodec() { }
 
@@ -33,7 +35,11 @@ public final class SagaCommandCodec {
             out.writeBoolean(intent.causalMessageId() != null);
             if (intent.causalMessageId() != null) uuid(out, intent.causalMessageId());
             instant(out, intent.notBefore()); out.writeInt(intent.maxAttempts()); out.flush();
-            return bytes.toByteArray();
+            byte[] encoded = bytes.toByteArray();
+            if (encoded.length > MAX_ENCODED_BYTES) {
+                throw new IllegalArgumentException("encoded saga command exceeds 272 KiB");
+            }
+            return encoded;
         } catch (IOException impossible) { throw new IllegalStateException(impossible); }
     }
 
@@ -43,13 +49,17 @@ public final class SagaCommandCodec {
      * @return command
      */
     public static SagaCommandIntent decode(byte[] encoded) {
-        if (encoded == null || encoded.length > 512 * 1024) throw new IllegalArgumentException("invalid saga command encoding");
+        if (encoded == null || encoded.length > MAX_ENCODED_BYTES) {
+            throw new IllegalArgumentException("invalid saga command encoding");
+        }
         try {
             var in = new DataInputStream(new ByteArrayInputStream(encoded));
             if (in.readInt() != VERSION) throw new IllegalArgumentException("unsupported saga command encoding");
             UUID message = uuid(in), saga = uuid(in); String operation = text(in), destination = text(in), type = text(in);
             int schema = in.readInt(); String contentType = text(in); int size = in.readInt();
-            if (size < 0 || size > 256 * 1024) throw new IllegalArgumentException("invalid saga command payload length");
+            if (size < 0 || size > SagaCommandIntent.MAX_PAYLOAD_BYTES) {
+                throw new IllegalArgumentException("invalid saga command payload length");
+            }
             OpaquePayload payload = OpaquePayload.of(in.readNBytes(size), contentType); String fingerprint = text(in);
             UUID causal = in.readBoolean() ? uuid(in) : null; Instant notBefore = instant(in); int attempts = in.readInt();
             if (in.available() != 0) throw new IllegalArgumentException("trailing saga command bytes");
@@ -62,7 +72,7 @@ public final class SagaCommandCodec {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8); out.writeInt(bytes.length); out.write(bytes);
     }
     private static String text(DataInputStream in) throws IOException {
-        int size = in.readInt(); if (size < 0 || size > 512 * 1024) throw new IOException("invalid text length");
+        int size = in.readInt(); if (size < 0 || size > MAX_ENCODED_BYTES) throw new IOException("invalid text length");
         return new String(in.readNBytes(size), StandardCharsets.UTF_8);
     }
     private static void uuid(DataOutputStream out, UUID value) throws IOException { out.writeLong(value.getMostSignificantBits()); out.writeLong(value.getLeastSignificantBits()); }

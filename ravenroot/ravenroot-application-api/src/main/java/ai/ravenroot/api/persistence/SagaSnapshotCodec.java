@@ -96,7 +96,7 @@ public final class SagaSnapshotCodec {
                 UUID occurrence = uuid(in); String stepId = text(in); UUID invocation = uuid(in);
                 String forward = text(in), compensation = text(in), fingerprint = text(in);
                 SagaStepStatus status = SagaStepStatus.valueOf(text(in)); String contentType = text(in);
-                OpaquePayload receipt = OpaquePayload.of(bytes(in, 64 * 1024), contentType);
+                OpaquePayload receipt = OpaquePayload.of(bytes(in, SagaStepSnapshot.MAX_RECEIPT_BYTES), contentType);
                 String detail = text(in); Instant stepUpdated = instant(in);
                 occurrences.put(occurrence, new SagaStepSnapshot(occurrence, stepId, invocation, forward,
                         compensation, fingerprint, status, receipt, detail, stepUpdated));

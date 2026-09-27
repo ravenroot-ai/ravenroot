@@ -10,6 +10,8 @@ import java.util.Objects;
 
 /**
  * Frozen participant operations needed to reconcile or compensate one saga occurrence.
+ * Its deterministic format is capped at the 640 KiB saga-receipt boundary and can hold two
+ * maximum-payload commands because each encoded command has a 272 KiB ceiling.
  *
  * @param forward frozen forward participant operation
  * @param compensation frozen compensation operation, or {@code null} for an irreversible step
@@ -48,7 +50,11 @@ public record SagaRecoveryEnvelope(SagaCommandIntent forward, SagaCommandIntent 
                 output.writeInt(compensationBytes.length);
                 output.write(compensationBytes);
             }
-            return OpaquePayload.of(bytes.toByteArray(), CONTENT_TYPE);
+            byte[] encoded = bytes.toByteArray();
+            if (encoded.length > SagaStepSnapshot.MAX_RECEIPT_BYTES) {
+                throw new IllegalArgumentException("saga recovery envelope exceeds 640 KiB");
+            }
+            return OpaquePayload.of(encoded, CONTENT_TYPE);
         } catch (IOException impossible) {
             throw new IllegalStateException(impossible);
         }
@@ -79,7 +85,9 @@ public record SagaRecoveryEnvelope(SagaCommandIntent forward, SagaCommandIntent 
 
     private static byte[] read(DataInputStream input) throws IOException {
         int length = input.readInt();
-        if (length < 0 || length > 256 * 1024) throw new IllegalArgumentException("recovery intent is oversized");
+        if (length < 0 || length > SagaCommandCodec.MAX_ENCODED_BYTES) {
+            throw new IllegalArgumentException("recovery intent is oversized");
+        }
         byte[] bytes = input.readNBytes(length);
         if (bytes.length != length) throw new IllegalArgumentException("truncated recovery envelope");
         return Arrays.copyOf(bytes, bytes.length);

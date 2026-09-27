@@ -5060,16 +5060,24 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
-        var sagas = authorizedApplication.processInstanceSagas(
-                httpContext.applicationContext(), processInstanceId);
-        var commands = authorizedApplication.processInstanceSagaCommands(
-                httpContext.applicationContext(), processInstanceId);
-        String sagaBody = sagas.stream().map(RavenrootServer::sagaJson)
-                .collect(java.util.stream.Collectors.joining(","));
-        String commandBody = commands.stream().map(RavenrootServer::sagaCommandJson)
-                .collect(java.util.stream.Collectors.joining(","));
-        String body = "{\"sagas\":[" + sagaBody + "],\"outbox\":[" + commandBody + "]}";
-        json(exchange, 200, body);
+        try {
+            var sagas = authorizedApplication.processInstanceSagas(
+                    httpContext.applicationContext(), processInstanceId);
+            var commands = authorizedApplication.processInstanceSagaCommands(
+                    httpContext.applicationContext(), processInstanceId);
+            String sagaBody = sagas.stream().map(RavenrootServer::sagaJson)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String commandBody = commands.stream().map(RavenrootServer::sagaCommandJson)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String body = "{\"sagas\":[" + sagaBody + "],\"outbox\":[" + commandBody + "]}";
+            json(exchange, 200, body);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
     }
 
     private void controlSaga(HttpExchange exchange, HttpRequestContext httpContext, String rawProcessId,

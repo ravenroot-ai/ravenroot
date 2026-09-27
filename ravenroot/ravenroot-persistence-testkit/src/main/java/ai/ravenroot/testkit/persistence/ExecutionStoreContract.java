@@ -6710,6 +6710,110 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void sagaCommandSettlementRequiresAnUnexpiredLeaseAtTheAtomicWriteBoundary() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        SagaCommandFixture before = sagaCommandFixture(3);
+        var beforeClaim = await(store().claimSagaCommands(DEFAULT_TENANT, "before", 1, TTL)).getFirst();
+        clock().set(beforeClaim.leaseExpiresAt().minusNanos(1));
+        await(store().settleSagaCommand(DEFAULT_TENANT, before.command().messageId(), "before",
+                beforeClaim.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()));
+
+        SagaCommandFixture exact = sagaCommandFixture(3);
+        var exactClaim = await(store().claimSagaCommands(DEFAULT_TENANT, "exact", 1, TTL)).getFirst();
+        clock().set(exactClaim.leaseExpiresAt());
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().settleSagaCommand(DEFAULT_TENANT, exact.command().messageId(), "exact",
+                        exactClaim.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()))));
+
+    }
+
+    @Test
+    final void sagaCommandSettlementAfterLeaseExpiryIsRejected() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        SagaCommandFixture fixture = sagaCommandFixture(3);
+        var claim = await(store().claimSagaCommands(DEFAULT_TENANT, "expired", 1, TTL)).getFirst();
+        clock().set(claim.leaseExpiresAt().plusNanos(1));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().settleSagaCommand(DEFAULT_TENANT, fixture.command().messageId(), "expired",
+                        claim.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()))));
+    }
+
+    @Test
+    final void anExpiredSagaCommandOwnerCannotSettleAcrossACompetingReclaim() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        SagaCommandFixture fixture = sagaCommandFixture(3);
+        var stale = await(store().claimSagaCommands(DEFAULT_TENANT, "stale", 1, TTL)).getFirst();
+        clock().set(stale.leaseExpiresAt());
+        var current = await(store().claimSagaCommands(DEFAULT_TENANT, "current", 1, TTL)).getFirst();
+
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().settleSagaCommand(DEFAULT_TENANT, fixture.command().messageId(), "stale",
+                        stale.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()))));
+        await(store().settleSagaCommand(DEFAULT_TENANT, fixture.command().messageId(), "current",
+                current.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()));
+        assertEquals(SagaOutboxStatus.BROKER_ACCEPTED,
+                await(store().listSagaCommands(fixture.key())).getFirst().status());
+    }
+
+    @Test
+    final void sagaCommandCrashExhaustionHonorsTheIntentLimitAtOneIntermediateAndOneHundred() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        for (int maximum : List.of(1, 7, 100)) {
+            SagaCommandFixture fixture = sagaCommandFixture(maximum);
+            for (int attempt = 1; attempt <= maximum; attempt++) {
+                var claim = await(store().claimSagaCommands(DEFAULT_TENANT,
+                        "crashed-" + maximum + "-" + attempt, 1, TTL)).getFirst();
+                assertEquals(attempt, claim.attempts());
+                clock().set(claim.leaseExpiresAt());
+            }
+            assertTrue(await(store().claimSagaCommands(DEFAULT_TENANT,
+                    "after-final-crash-" + maximum, 1, TTL)).isEmpty());
+            var exhausted = await(store().listSagaCommands(fixture.key())).getFirst();
+            assertEquals(maximum, exhausted.attempts());
+            assertEquals(SagaOutboxStatus.EXHAUSTED, exhausted.status());
+            assertEquals(SagaDisposition.UNRESOLVED,
+                    await(store().loadSaga(fixture.key(), fixture.sagaId())).orElseThrow().disposition());
+        }
+    }
+
+    @Test
+    final void maximumReceiptAndTwoMaximumCommandsRoundTripThroughSagaPersistence() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID(); UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        Instant now = clock().instant();
+        byte[] body = new byte[256 * 1024];
+        java.util.Arrays.fill(body, (byte) 23);
+        OpaquePayload payload = OpaquePayload.of(body, "€".repeat(256));
+        String digest;
+        try { digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body)); }
+        catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        var forward = new SagaCommandIntent(UUID.randomUUID(), sagaId, "€".repeat(256), "文".repeat(256),
+                "€".repeat(128), Integer.MAX_VALUE, payload, digest, null, Instant.MAX, 100);
+        var compensation = new SagaCommandIntent(UUID.randomUUID(), sagaId, "文".repeat(256),
+                "€".repeat(256), "文".repeat(128), Integer.MAX_VALUE, payload, digest,
+                forward.messageId(), Instant.MAX, 100);
+        OpaquePayload receipt = new ai.ravenroot.api.persistence.SagaRecoveryEnvelope(
+                forward, compensation).encode();
+        UUID occurrence = UUID.randomUUID();
+        var definition = new SagaDefinition(1, "maximum-envelope", "a".repeat(64), "b".repeat(64), Map.of(
+                "effect", new SagaStepDefinition("effect", "effect", "jdbc-receipt-v1",
+                        "undo", List.of(), false, false)));
+        var step = new SagaStepSnapshot(occurrence, "effect", UUID.randomUUID(), forward.operationId(),
+                compensation.operationId(), digest, SagaStepStatus.CONFIRMED_SUCCESS, receipt, "", now);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, Map.of(occurrence, step), null, now, now, "", false);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot)).build()));
+
+        SagaSnapshot loaded = await(store().loadSaga(key, sagaId)).orElseThrow();
+        assertEquals(snapshot, loaded);
+        assertEquals(new ai.ravenroot.api.persistence.SagaRecoveryEnvelope(forward, compensation),
+                ai.ravenroot.api.persistence.SagaRecoveryEnvelope.decode(
+                        loaded.occurrences().get(occurrence).receipt()));
+    }
+
+    @Test
     final void sagaRecoveryCandidatePageFiltersLiveRunnerLeasesBeforeApplyingItsBound() {
         assumeCapability(StoreCapability.DURABLE_SAGAS);
         var liveKey = new ExecutionKey(DEFAULT_TENANT,
@@ -6951,6 +7055,33 @@ public abstract class ExecutionStoreContract {
     private static OpaquePayload fingerprint(String value) {
         return OpaquePayload.of(value.getBytes(StandardCharsets.UTF_8), "text/plain");
     }
+
+    private SagaCommandFixture sagaCommandFixture(int maxAttempts) {
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID(); UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        Instant now = clock().instant();
+        OpaquePayload payload = fingerprint("command-" + sagaId);
+        String digest;
+        try { digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload.bytes())); }
+        catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        UUID occurrence = UUID.randomUUID(); String operation = "forward-" + occurrence;
+        var definition = new SagaDefinition(1, "lease", "a".repeat(64), "b".repeat(64), Map.of(
+                "effect", new SagaStepDefinition("effect", "participant", "receipt-v1",
+                        null, List.of(), true, false)));
+        var step = new SagaStepSnapshot(occurrence, "effect", UUID.randomUUID(), operation,
+                "compensate-" + occurrence, digest, SagaStepStatus.DISPATCHED,
+                OpaquePayload.empty("application/json"), "", now);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, Map.of(occurrence, step), null, now, now, "", false);
+        var command = new SagaCommandIntent(UUID.randomUUID(), sagaId, operation, "participant",
+                "test.command", 1, payload, digest, null, now, maxAttempts);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot))
+                .enqueueSagaCommand(command).build()));
+        return new SagaCommandFixture(key, sagaId, command);
+    }
+
+    private record SagaCommandFixture(ExecutionKey key, UUID sagaId, SagaCommandIntent command) { }
 
     private static <T> T await(CompletionStage<T> stage) {
         return stage.toCompletableFuture().join();

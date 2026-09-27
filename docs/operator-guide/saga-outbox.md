@@ -60,14 +60,20 @@ two JDBC nodes into one transaction. An HTTP participant must persist the idempo
 outcome lookup. Ravenroot propagates the trusted saga operation id as `Idempotency-Key`; forward and
 lookup calls pass through the same destination policy, tool grant and server-side credential
 reference. A lookup is accepted only when its bounded receipt matches operation id, request-body
-fingerprint and the expected `APPLIED` or `COMPENSATED` state. An AMQP
+fingerprint and the expected `APPLIED` or `COMPENSATED` state. A lost response and every non-2xx
+response, including a replay conflict or a server error after commit, are ambiguous until that same
+governed lookup completes. Only an exact `NOT_APPLIED` receipt confirms no effect; a malformed,
+mismatched, denied, or unavailable lookup remains unknown. An AMQP
 consumer must atomically insert the stable message id in an inbox and apply its business effect in
 the same local transaction.
 
 The application-command outbox has distinct `PENDING`, `CLAIMED`, `BROKER_ACCEPTED`,
 `BUSINESS_COMPLETED`, and `EXHAUSTED` stages. Claims have a bounded TTL and monotonic fence. A live
 claim cannot be reacquired, including by the same worker. Expired claims preserve message identity,
-consume a bounded attempt, and reject stale settlement. After a durable broker confirmation, later
+consume a bounded attempt, and reject stale settlement at and after the exact expiry instant. The
+atomic settlement write checks status, owner, fence, and the still-live lease together. Each intent's
+declared `maxAttempts` (1 through 100) is authoritative, including the final attempt; there is no
+separate adapter attempt ceiling. After a durable broker confirmation, later
 sweeps perform participant receipt lookup and do not publish again. If a publisher dies before it can
 store the confirmation, publication may repeat with the same message id; inbox deduplication is what
 makes that interval safe. Business completion settlement and its saga-step transition commit in the
@@ -109,7 +115,10 @@ Saga snapshots and outbox records are tenant and process scoped through `Executi
 authenticated execution reader can inspect bounded, payload-free status at
 `GET /v1/executions/{processInstanceId}/sagas`; the response exposes identities, step states,
 outbox stages and attempt counts, and actionable reasons without receipts, destinations or command
-bodies. The deployments window shows the same disposition, reason, per-step states and outbox
+bodies. An existing process with no saga returns an empty 200 response. An absent, expired, or
+different-tenant process returns the same 404, a malformed process id returns 400, and a deployment
+without durable saga status returns 501. The deployments window shows the same disposition, reason,
+per-step states and outbox
 progress for its selected process; it derives no saga success from
 the event stream. Server
 managed execution writes still pass the pinned manifest authority. Tenant-wide outbox claims are
@@ -133,8 +142,14 @@ than becoming an unbounded automatic retry loop.
 
 ## Operational limits
 
-Command payloads are opaque, content typed, and capped at 256 KiB. A step's frozen recovery envelope,
-which may contain both forward and compensation commands, is capped at 640 KiB. Delivery pages, lease TTLs,
+Command payloads are opaque, content typed, and capped at 256 KiB. Their content type is capped at
+256 characters; operation and destination at 256 characters; command type at 128 characters. The
+format-1 encoded command reserves 16 KiB for those bounded fields, UUIDs, fingerprint, timestamps,
+causality and framing, so its internal decode ceiling is 272 KiB without reducing the public payload
+limit. A step receipt and its format-1 frozen recovery envelope are each capped at 640 KiB. The
+envelope may contain two maximum-size commands plus framing within that bound. Saga snapshot format 2
+already declared the same 640 KiB receipt limit; decoders accept persisted valid receipts above the
+old 64 KiB implementation ceiling without changing the format version. Delivery pages, lease TTLs,
 attempts, and retry delays are bounded. The execution store also refuses an atomic batch before any
 row is written when a tenant would exceed 128 non-terminal commands or 16 MiB of encoded immutable
 intents. Operators may lower these process-wide admission limits with the JVM properties

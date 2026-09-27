@@ -12,7 +12,7 @@ import java.util.UUID;
  * @param compensationOperationId stable compensation-operation identity
  * @param payloadFingerprint SHA-256 binding identity to input
  * @param status durable participant outcome state
- * @param receipt bounded participant receipt
+ * @param receipt participant receipt of at most 640 KiB
  * @param detail redacted actionable detail
  * @param updatedAt last durable transition instant
  */
@@ -20,7 +20,7 @@ public record SagaStepSnapshot(UUID occurrenceId, String stepId, UUID invocation
                                String forwardOperationId, String compensationOperationId,
                                String payloadFingerprint, SagaStepStatus status,
                                OpaquePayload receipt, String detail, Instant updatedAt) {
-    private static final int MAX_RECEIPT_BYTES = 640 * 1024;
+    static final int MAX_RECEIPT_BYTES = 640 * 1024;
     /** Validates and defensively snapshots the durable value. */
     public SagaStepSnapshot {
         Objects.requireNonNull(occurrenceId, "occurrenceId");

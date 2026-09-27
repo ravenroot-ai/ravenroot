@@ -11,7 +11,9 @@ import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.SagaDisposition;
+import ai.ravenroot.api.persistence.SagaRecoveryEnvelope;
 import ai.ravenroot.api.persistence.SagaStepStatus;
+import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.node.service.SagaCommandTransport;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
@@ -374,6 +376,127 @@ class SagaGraphRunnerIntegrationTest {
     }
 
     @Test
+    void frozenJdbcCompensationReplacesForwardOrAuthoredReceiptIdentity(@TempDir Path directory) {
+        var forward = new GraphNode("write", NodeKind.BEHAVIOR, "jdbc.insert", Map.of(
+                "saga.scope", "order", "saga.step", "order-write",
+                "saga.participant", "jdbc-receipt-v1",
+                "saga.adapter", "ravenroot.jdbc-receipt.v1",
+                "saga.receiptStatement", "lookup-order-effect",
+                "saga.compensation", "cancel"));
+        var compensation = new GraphNode("cancel", NodeKind.BEHAVIOR, "jdbc.insert", Map.of(
+                "saga.scope", "order", "saga.role", "compensation",
+                "saga.participant", "jdbc-receipt-v1",
+                "saga.adapter", "ravenroot.jdbc-receipt.v1",
+                "saga.receiptStatement", "lookup-order-reversal"));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), forward, compensation,
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "write"),
+                GraphEdge.to("write", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("jdbc.insert", "JDBC", "Test", "Trusted JDBC probe",
+                        "actor", false, List.of(), java.util.Set.of(
+                        "side-effect", "saga-adapter:ravenroot.jdbc-receipt.v1"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        var payload = Map.<String, Object>of("contract", "jdbc.parameters.v1", "parameters", Map.of(
+                "orderId", "A-1", "sagaOperationId", "authored-operation",
+                "sagaPayloadFingerprint", "0".repeat(64)));
+        var original = new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                UUID.randomUUID(), UUID.randomUUID(), "write", payload, Map.of());
+        try (var store = new SqliteExecutionStore(directory.resolve("frozen-identities.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var before = coordinator.before(forward, original, recorder);
+                var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+                var step = saga.occurrences().values().iterator().next();
+                var envelope = SagaRecoveryEnvelope.decode(step.receipt());
+                Map<?, ?> forwardEnvelope = jsonMap(envelope.forward().payload().bytes());
+                Map<?, ?> compensationEnvelope = jsonMap(envelope.compensation().payload().bytes());
+                Map<?, ?> forwardParameters = jsonMap(jsonMap(forwardEnvelope.get("payload")).get("parameters"));
+                Map<?, ?> compensationParameters = jsonMap(
+                        jsonMap(compensationEnvelope.get("payload")).get("parameters"));
+
+                assertEquals(envelope.forward().operationId(), forwardParameters.get("sagaOperationId"));
+                assertEquals(step.payloadFingerprint(), forwardParameters.get("sagaPayloadFingerprint"));
+                assertEquals(envelope.compensation().operationId(),
+                        compensationParameters.get("sagaOperationId"));
+                assertEquals(step.payloadFingerprint(),
+                        compensationParameters.get("sagaPayloadFingerprint"));
+                assertEquals(envelope.compensation().operationId(),
+                        before.message().attributes().get("sagaCompensationOperationId"));
+            }
+        }
+    }
+
+    @Test
+    void frozenAmqpOperationsReplaceAuthoredMessageIdentityAndKeepCausality(@TempDir Path directory) {
+        Map<String, Object> forwardProperties = new java.util.LinkedHashMap<>(Map.of(
+                "saga.scope", "order", "saga.step", "publish",
+                "saga.participant", "amqp-inbox-v1",
+                "saga.adapter", "ravenroot.amqp-inbox.v1",
+                "saga.inboxBinding", "orders-v1", "saga.businessCompletionRequired", true,
+                "persistent", true, "saga.compensation", "cancel-publish"));
+        var forward = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", forwardProperties);
+        var compensation = new GraphNode("cancel-publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
+                "saga.scope", "order", "saga.role", "compensation",
+                "saga.participant", "amqp-inbox-v1",
+                "saga.adapter", "ravenroot.amqp-inbox.v1",
+                "saga.inboxBinding", "orders-v1", "saga.businessCompletionRequired", true,
+                "persistent", true));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), forward, compensation,
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "publish"),
+                GraphEdge.to("publish", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("amqp.publish", "AMQP", "Test", "Trusted AMQP probe",
+                        "actor", false, List.of(), java.util.Set.of(
+                        "side-effect", "saga-adapter:ravenroot.amqp-inbox.v1"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        var body = Map.<String, Object>of("orderId", "A-1", "operationId", "authored-operation",
+                "payloadFingerprint", "0".repeat(64));
+        var payload = Map.<String, Object>of("messageId", "authored-message", "bodyJson", body);
+        var original = new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                UUID.randomUUID(), UUID.randomUUID(), "publish", payload, Map.of());
+        try (var store = new SqliteExecutionStore(directory.resolve("frozen-messages.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                coordinator.before(forward, original, recorder);
+                var step = store.listSagas(key).toCompletableFuture().join().getFirst()
+                        .occurrences().values().iterator().next();
+                var envelope = SagaRecoveryEnvelope.decode(step.receipt());
+                Map<?, ?> frozenForward = jsonMap(envelope.forward().payload().bytes());
+                Map<?, ?> frozenCompensation = jsonMap(envelope.compensation().payload().bytes());
+                Map<?, ?> forwardPayload = jsonMap(frozenForward.get("payload"));
+                Map<?, ?> compensationPayload = jsonMap(frozenCompensation.get("payload"));
+                Map<?, ?> forwardBody = jsonMap(forwardPayload.get("bodyJson"));
+                Map<?, ?> compensationBody = jsonMap(compensationPayload.get("bodyJson"));
+
+                assertEquals(envelope.forward().messageId().toString(), forwardPayload.get("messageId"));
+                assertEquals(envelope.compensation().messageId().toString(),
+                        compensationPayload.get("messageId"));
+                assertEquals(envelope.forward().operationId(), forwardBody.get("operationId"));
+                assertEquals(envelope.compensation().operationId(), compensationBody.get("operationId"));
+                assertEquals(step.payloadFingerprint(), forwardBody.get("payloadFingerprint"));
+                assertEquals(step.payloadFingerprint(), compensationBody.get("payloadFingerprint"));
+                assertEquals(envelope.forward().messageId(), envelope.compensation().causalMessageId());
+            }
+        }
+    }
+
+    @Test
     void compensationNodeMustMatchTheTrustedParticipantAdapter() {
         var forward = new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
                 "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",
@@ -491,6 +614,13 @@ class SagaGraphRunnerIntegrationTest {
     private static NodeMessage message(UUID process, UUID traversal, UUID invocation) {
         return new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal, invocation,
                 UUID.randomUUID(), "effect", Map.of("order", "A-1"), Map.of());
+    }
+
+    private static Map<?, ?> jsonMap(Object value) {
+        if (value instanceof byte[] bytes) {
+            value = PayloadJson.read(bytes, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+        }
+        return (Map<?, ?>) value;
     }
 
     private static void assertUntrustedParticipantRejected(String behavior, String participant,

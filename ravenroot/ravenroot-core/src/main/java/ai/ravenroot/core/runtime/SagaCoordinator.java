@@ -523,7 +523,11 @@ final class SagaCoordinator {
                 // same business message identity.  A broker confirm may be lost after the first
                 // publish; using the outbox record id on both paths lets the participant inbox
                 // discard that redelivery atomically with its effect.
-                enriched.putIfAbsent("messageId", id("message", operationId).toString());
+                // This identity belongs to the current frozen operation.  The incoming payload may
+                // have crossed an earlier saga step and therefore carry that step's message id; an
+                // authored payload may also try to supply one.  Neither is authority for the new
+                // operation, especially when this is the compensation paired with a forward intent.
+                enriched.put("messageId", id("message", operationId).toString());
                 if (enriched.get("bodyJson") instanceof Map<?, ?> rawBody) {
                     var body = new LinkedHashMap<String, Object>();
                     rawBody.forEach((key, value) -> body.put(String.valueOf(key), value));
@@ -539,8 +543,11 @@ final class SagaCoordinator {
             } else if ("jdbc.insert".equals(node.behavior()) && enriched.get("parameters") instanceof Map<?, ?> raw) {
                 var parameters = new LinkedHashMap<String, Object>();
                 raw.forEach((key, value) -> parameters.put(String.valueOf(key), value));
-                parameters.putIfAbsent("sagaOperationId", operationId);
-                parameters.putIfAbsent("sagaPayloadFingerprint", fingerprint);
+                // Runtime-owned identity must replace values left by a forward delivery and values
+                // supplied by a graph payload.  Preserving either would make the compensation use
+                // the forward receipt key, or let authored data choose the participant identity.
+                parameters.put("sagaOperationId", operationId);
+                parameters.put("sagaPayloadFingerprint", fingerprint);
                 enriched.put("parameters", java.util.Collections.unmodifiableMap(parameters));
             } else {
                 putIdentity(enriched, sagaId, occurrenceId, operationId, forwardOperationId,

@@ -123,6 +123,9 @@ class SqliteDeploymentRegistryRetentionTest {
             // Restore the exact version-32 shape. Identity bindings are migration 33 and the
             // process incarnation origin is migration 34, so both later structures and history
             // rows must be removed before exercising the identity backfill.
+            statement.execute("DROP INDEX managed_recovery_attempt_candidate");
+            statement.execute("DROP INDEX managed_recovery_timer_candidate");
+            statement.execute("DROP INDEX managed_recovery_handler_candidate");
             statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
             statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("DROP TABLE deployment_identity_binding");

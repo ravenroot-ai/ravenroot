@@ -1069,6 +1069,16 @@ final class PostgresSchema {
                 new SchemaMigration(14, "durable deployment incarnation origin", List.of(
                         "ALTER TABLE process_instance ADD COLUMN deployment_incarnation_id TEXT",
                         "CREATE INDEX idx_process_instance_deployment_incarnation ON process_instance "
-                                + "(tenant_id, deployment_id, deployment_incarnation_id)")));
+                                + "(tenant_id, deployment_id, deployment_incarnation_id)")),
+                new SchemaMigration(15, "indexed managed recovery candidates", List.of(
+                        "CREATE INDEX managed_recovery_attempt_candidate ON attempt "
+                                + "(tenant_id, process_instance_id, attempt_id) "
+                                + "WHERE status IN ('SCHEDULED', 'RUNNING')",
+                        "CREATE INDEX managed_recovery_timer_candidate ON timer "
+                                + "(tenant_id, due_at_epoch_second, due_at_nano, "
+                                + "process_instance_id, timer_id)",
+                        "CREATE INDEX managed_recovery_handler_candidate ON execution_handler "
+                                + "(tenant_id, process_instance_id, handler_id) "
+                                + "WHERE status IN ('RESOLVED', 'DENIED', 'EXPIRED')")));
     }
 }

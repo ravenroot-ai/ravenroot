@@ -335,6 +335,45 @@ class SagaGraphRunnerIntegrationTest {
     }
 
     @Test
+    void restartAfterDurableDispatchIntentBeforeParticipantInvocationReusesTheFrozenOperation(
+            @TempDir Path directory) {
+        var node = sagaNode("effect", "reserve");
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                NodeResult.continueWith(message.payload())));
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        String frozenOperation;
+        try (var store = new SqliteExecutionStore(directory.resolve("intent-before-dispatch.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker-before-crash",
+                    Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var persisted = coordinator.before(node,
+                        message(process, traversal, UUID.randomUUID()), recorder);
+                frozenOperation = String.valueOf(persisted.message().attributes().get("sagaOperationId"));
+                // Simulate process death here: the real participant handler has not been invoked.
+            }
+            var afterCrash = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(SagaStepStatus.DISPATCHED,
+                    afterCrash.occurrences().values().iterator().next().status());
+            long resumedRevision = store.load(key).toCompletableFuture().join().revision();
+            try (var recorder = ExecutionRecorder.open(store, key, "worker-after-restart",
+                    Duration.ofSeconds(30), resumedRevision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var recovered = coordinator.before(node,
+                        message(process, traversal, UUID.randomUUID()), recorder);
+                assertEquals(frozenOperation, recovered.message().attributes().get("sagaOperationId"));
+                coordinator.succeeded(recovered, NodeResult.continueWith(recovered.message().payload()), recorder);
+            }
+            var completed = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(SagaDisposition.SUCCEEDED, completed.disposition());
+            assertEquals(1, completed.occurrences().size());
+        }
+    }
+
+    @Test
     void compensationNodeMustMatchTheTrustedParticipantAdapter() {
         var forward = new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
                 "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",

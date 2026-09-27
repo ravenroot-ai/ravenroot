@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Raw RFC 6455 TLS peer: no WebSocket library can accidentally mirror production behavior. */
 final class DeterministicTlsWebSocketServer implements AutoCloseable {
     enum Script { CAPTURE_SEND, RECEIVE_FRAGMENTS_AND_PING, REJECT_HANDSHAKE, SCRIPTED_FRAMES,
+        SCRIPTED_BACKPRESSURE,
         HOLD_UNTIL_CLIENT_CLOSE }
     private static final char[] PASSWORD = "changeit".toCharArray();
     private static KeyStore keys;
@@ -39,6 +40,7 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
     private final int connections;
     private final List<List<ServerFrame>> scriptedFrames;
     private final CountDownLatch scriptRelease;
+    private final CountDownLatch remainingScriptRelease;
     private final Thread worker;
     private final AtomicBoolean closed = new AtomicBoolean();
     final List<String> requestTargets = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -59,7 +61,9 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
         this.script = script;
         this.connections = connections;
         this.scriptedFrames = scriptedFrames.stream().map(List::copyOf).toList();
-        this.scriptRelease = new CountDownLatch(script == Script.SCRIPTED_FRAMES ? 1 : 0);
+        this.scriptRelease = new CountDownLatch(
+                script == Script.SCRIPTED_FRAMES || script == Script.SCRIPTED_BACKPRESSURE ? 1 : 0);
+        this.remainingScriptRelease = new CountDownLatch(script == Script.SCRIPTED_BACKPRESSURE ? 1 : 0);
         this.completed = new CountDownLatch(connections);
         listener = (SSLServerSocket) serverContext().getServerSocketFactory().createServerSocket(0);
         worker = Thread.ofVirtual().name("ravenroot-websocket-raw-tls").start(this::serve);
@@ -75,7 +79,13 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
         return new DeterministicTlsWebSocketServer(Script.SCRIPTED_FRAMES, connections.size(), connections);
     }
 
+    static DeterministicTlsWebSocketServer backpressure(List<ServerFrame> frames) throws Exception {
+        if (frames.size() < 2) throw new IllegalArgumentException("backpressure script needs a first and remaining frame");
+        return new DeterministicTlsWebSocketServer(Script.SCRIPTED_BACKPRESSURE, 1, List.of(frames));
+    }
+
     void releaseScripts() { scriptRelease.countDown(); }
+    void releaseRemainingScript() { remainingScriptRelease.countDown(); }
 
     SSLContext trustedClientContext() throws Exception {
         KeyStore trust = KeyStore.getInstance(KeyStore.getDefaultType());
@@ -110,6 +120,7 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
                     if (script == Script.CAPTURE_SEND) captureSend(peer);
                     else if (script == Script.RECEIVE_FRAGMENTS_AND_PING) receiveScript(peer);
                     else if (script == Script.HOLD_UNTIL_CLIENT_CLOSE) holdUntilClientClose(peer);
+                    else if (script == Script.SCRIPTED_BACKPRESSURE) scriptedBackpressure(peer, scriptedFrames.get(index));
                     else {
                         if (!scriptRelease.await(4, TimeUnit.SECONDS)) {
                             throw new IOException("script release timeout");
@@ -162,13 +173,34 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
         writeFrame(output, 0x88, new byte[]{0x03, (byte) 0xE8});
     }
 
+    private void scriptedBackpressure(Socket peer, List<ServerFrame> frames) throws IOException {
+        awaitScript(scriptRelease, "script release timeout");
+        scripted(peer.getOutputStream(), List.of(frames.getFirst()), false);
+        awaitScript(remainingScriptRelease, "remaining script release timeout");
+        scripted(peer.getOutputStream(), frames.subList(1, frames.size()), false);
+        holdUntilClientClose(peer);
+    }
+
+    private static void awaitScript(CountDownLatch latch, String timeout) throws IOException {
+        try {
+            if (!latch.await(4, TimeUnit.SECONDS)) throw new IOException(timeout);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("script interrupted", interrupted);
+        }
+    }
+
     static void scripted(OutputStream output, List<ServerFrame> frames) throws IOException {
         // A limit refusal correctly aborts the peer. Send the unchanged, small frame script in
         // one TLS application write so the trailing close cannot race that abort in a later write.
         // WebSocket frame boundaries remain explicit; no transport exception is suppressed.
+        scripted(output, frames, true);
+    }
+
+    private static void scripted(OutputStream output, List<ServerFrame> frames, boolean close) throws IOException {
         var script = new ByteArrayOutputStream();
         for (ServerFrame frame : frames) writeFrame(script, frame.firstByte(), frame.payload());
-        writeFrame(script, 0x88, new byte[]{0x03, (byte) 0xE8});
+        if (close) writeFrame(script, 0x88, new byte[]{0x03, (byte) 0xE8});
         if (script.size() > 16 * 1024) throw new IOException("script exceeds one TLS application record");
         output.write(script.toByteArray());
         output.flush();

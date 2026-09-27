@@ -152,6 +152,46 @@ def external_io_reviewed_entries(
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_topological_history_selects_the_current_dev_ordinary_source_after_a_main_merge(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            def git(*arguments: str) -> str:
+                return subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True,
+                                      text=True).stdout.strip()
+            def write(version: str, marker: str) -> None:
+                pom = root / "ravenroot/pom.xml"
+                pom.parent.mkdir(parents=True, exist_ok=True)
+                pom.write_text(f"<project><version>{version}</version></project>\n", encoding="utf-8")
+                (root / "inventory-marker").write_text(marker, encoding="utf-8")
+            def commit(message: str) -> str:
+                git("add", ".")
+                git("commit", "-qm", message)
+                return git("rev-parse", "HEAD")
+
+            git("init", "-q")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            write("0.4.1-alpha.1", "stale-main-source")
+            ordinary_main = commit("ordinary main source")
+            write("0.4.1-alpha.1", "current-dev-source")
+            current_dev = commit("current dev ordinary source")
+            git("checkout", "--quiet", "--detach", ordinary_main)
+            write("0.5.0-alpha.1", "prepared-main")
+            stale_prepared_main = commit("prepared main")
+            merged = git("commit-tree", "HEAD^{tree}", "-p", stale_prepared_main, "-p", current_dev,
+                         "-m", "main merge")
+            git("checkout", "--quiet", "--detach", merged)
+
+            def ordinary_source(command: list[str]) -> str:
+                for revision in git(*command, "HEAD").splitlines():
+                    pom = git("show", f"{revision}:ravenroot/pom.xml")
+                    if "<version>0.4.1-alpha.1</version>" in pom:
+                        return revision
+                self.fail("fixture did not expose an ordinary source")
+
+            self.assertEqual(ordinary_main, ordinary_source(["rev-list", "--first-parent"]))
+            self.assertEqual(current_dev, ordinary_source(["rev-list", "--topo-order"]))
+
     def test_prepared_release_tree_uses_source_derived_chart_release_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             def fixture_git(root: Path, *arguments: str) -> None:
@@ -196,7 +236,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             source_revision = "HEAD"
             if product_version(ROOT) != source_version:
                 for revision in subprocess.run(
-                        ["git", "rev-list", "--first-parent", "HEAD"], cwd=ROOT,
+                        ["git", "rev-list", "--topo-order", "HEAD"], cwd=ROOT,
                         check=True, capture_output=True, text=True,
                 ).stdout.splitlines():
                     pom = subprocess.run(

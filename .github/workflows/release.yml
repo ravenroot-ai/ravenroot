@@ -76,9 +76,14 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/commits/${{ steps.contract.outputs.commit }}/pulls" \
             --header 'Accept: application/vnd.github+json' \
             > "$RUNNER_TEMP/associated-prs.json"
+          prior=$(git rev-parse "${{ steps.contract.outputs.commit }}^1")
+          gh api "repos/$GITHUB_REPOSITORY/commits/$prior/pulls" \
+            --header 'Accept: application/vnd.github+json' \
+            > "$RUNNER_TEMP/prior-promotion-prs.json"
           python3 scripts/release_contract.py validate-tag-authorization \
             --tag '${{ steps.contract.outputs.tag }}' \
-            --prs-json "$RUNNER_TEMP/associated-prs.json"
+            --prs-json "$RUNNER_TEMP/associated-prs.json" \
+            --prior-prs-json "$RUNNER_TEMP/prior-promotion-prs.json"
       - name: Verify release automation and metadata contracts
         run: |
           python3 scripts/check_release_configuration.py

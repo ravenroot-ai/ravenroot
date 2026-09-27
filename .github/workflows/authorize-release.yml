@@ -35,6 +35,13 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls"
           --header 'Accept: application/vnd.github+json'
           > "$RUNNER_TEMP/associated-prs.json"
+      - name: Locate the prepared promotion before this main merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api "repos/$GITHUB_REPOSITORY/commits/${{ github.event.before }}/pulls"
+          --header 'Accept: application/vnd.github+json'
+          > "$RUNNER_TEMP/prior-promotion-prs.json"
       - name: Verify release intent and version transition
         id: contract
         run: >-
@@ -42,6 +49,7 @@ jobs:
           --before '${{ github.event.before }}'
           --head "$GITHUB_SHA"
           --prs-json "$RUNNER_TEMP/associated-prs.json"
+          --prior-prs-json "$RUNNER_TEMP/prior-promotion-prs.json"
       - name: Require exact-commit continuous integration
         if: steps.contract.outputs.should_release == 'true'
         env:

@@ -144,7 +144,7 @@ const proxy = (request, response) => {
 
 const parentHtml = (viewerLaunchUrl, registrationId) => `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer"
 content="no-referrer"><title>Ravenroot embed boundary fixture</title></head><body>
-<iframe id="viewer" name="viewer" width="800" height="500"
+<iframe allow="${registrationId === 'theme-light' ? 'fullscreen' : "fullscreen 'none'"}" id="viewer" name="viewer" width="800" height="500"
 sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"
 src=${JSON.stringify(viewerLaunchUrl)}></iframe>
 <iframe id="foreign" name="foreign" hidden src=${JSON.stringify(`${foreignOrigin.origin}/`)}></iframe>
@@ -214,6 +214,7 @@ const failureViewerHtml = `<!doctype html><html lang="en"><head><meta charset="u
 <header class="embed-viewer-header"><p data-viewer-metadata></p><nav class="embed-viewer-controls">
 <select data-viewer-mode><option value="cyto">Cyto</option><option value="n8n">N8N</option>
 <option value="elastic">Elastic</option></select><button type="button" data-viewer-command="fit">Fit</button>
+<button type="button" data-viewer-maximize aria-label="Maximize embedded graph"></button>
 </nav></header><div class="embed-viewer-canvas" data-viewer-canvas tabindex="0"></div>
 <canvas class="embed-viewer-minimap" data-viewer-minimap tabindex="0"></canvas>
 <ol class="embed-viewer-alternative" data-viewer-alternative></ol>

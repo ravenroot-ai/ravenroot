@@ -135,6 +135,13 @@ public final class EmbedSnapshotProjector {
     public static EmbedGraphProjection projectDefinition(GraphDefinition definition, String graphId,
                                                           String graphVersionId, String canonicalDigest,
                                                           EmbedProjectionBudget budget) {
+        return projectDefinition(definition, definition.properties().get("ravenroot.ui.visualGroups"), graphId,
+                graphVersionId, canonicalDigest, budget);
+    }
+
+    public static EmbedGraphProjection projectDefinition(GraphDefinition definition, Object visualGroupsMetadata,
+                                                          String graphId, String graphVersionId,
+                                                          String canonicalDigest, EmbedProjectionBudget budget) {
         Objects.requireNonNull(definition, "definition");
         Objects.requireNonNull(budget, "budget");
         requireIdentifier(graphId, budget);
@@ -162,8 +169,11 @@ public final class EmbedSnapshotProjector {
                                     : EmbedGraphProjection.Routing.OUTCOME);
                 })
                 .toList();
+        var groups = EmbedVisualGroups.parse(visualGroupsMetadata,
+                nodes.stream().map(EmbedGraphProjection.Node::id).collect(java.util.stream.Collectors.toSet()),
+                budget);
         var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
-                graphId, graphVersionId, canonicalDigest, nodes, edges, designArrangement(definition));
+                graphId, graphVersionId, canonicalDigest, nodes, edges, designArrangement(definition), groups);
         if (projection.jsonBytes() > budget.maxJsonBytes()) throw new ProjectionTooLarge();
         return projection;
     }

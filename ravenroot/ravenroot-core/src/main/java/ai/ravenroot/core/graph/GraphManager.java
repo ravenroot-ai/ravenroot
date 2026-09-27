@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -90,6 +91,7 @@ public final class GraphManager implements AutoCloseable {
      * rather than left to be discovered.</p>
      */
     private final Map<String, Object> graphProperties;
+    private final String visualGroupsMetadata;
 
     /**
      * Package-private, not private: every public factory below reaches this same constructor,
@@ -101,14 +103,16 @@ public final class GraphManager implements AutoCloseable {
      * constructor's signature changes.
      */
     GraphManager(TinkerGraph graph) {
-        this(graph, null, Map.of());
+        this(graph, null, Map.of(), null);
     }
 
-    private GraphManager(TinkerGraph graph, byte[] importedGraphMl, Map<String, Object> graphProperties) {
+    private GraphManager(TinkerGraph graph, byte[] importedGraphMl, Map<String, Object> graphProperties,
+                         String visualGroupsMetadata) {
         this.graph = graph;
         this.importedGraphMl = importedGraphMl;
         this.importedGraphState = importedGraphMl == null ? null : graphState(graph);
         this.graphProperties = Map.copyOf(graphProperties);
+        this.visualGroupsMetadata = visualGroupsMetadata;
     }
 
     public static GraphManager from(GraphDefinition definition) {
@@ -130,7 +134,7 @@ public final class GraphManager implements AutoCloseable {
             created.property(OUTCOME, edge.outcome());
             edge.properties().forEach((key, value) -> setProperty(created, key, value));
         }
-        return new GraphManager(graph, null, definition.properties());
+        return new GraphManager(graph, null, definition.properties(), null);
     }
 
     public static GraphManager readGraphMl(InputStream input) {
@@ -317,7 +321,8 @@ public final class GraphManager implements AutoCloseable {
                     .create()
                     .readGraph(propertyGraphInput, graph);
             rejectReservedProperties(graph);
-            var manager = new GraphManager(graph, document.original(), document.graphProperties());
+            var manager = new GraphManager(graph, document.original(), document.graphProperties(),
+                    document.visualGroupsMetadata());
             return new Imported(manager, document.report(manager.nodeCount(), manager.edgeCount()));
         } catch (IOException | RuntimeException exception) {
             graph.close();
@@ -395,6 +400,11 @@ public final class GraphManager implements AutoCloseable {
             List<GraphEdge> edges = traversal.E().toList().stream().map(this::toEdge).toList();
             return new GraphDefinition(nodes, edges, graphProperties);
         });
+    }
+
+    /** Optional inert visual-group document metadata; never enters the executable definition. */
+    public Optional<String> visualGroupsMetadata() {
+        return Optional.ofNullable(visualGroupsMetadata);
     }
 
     public GraphNode start() {

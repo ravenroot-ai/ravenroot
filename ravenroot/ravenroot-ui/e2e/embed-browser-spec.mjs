@@ -1,10 +1,13 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import path from 'node:path';
 
 const parentOrigin = process.env.RR_EMBED_PARENT_ORIGIN;
 const viewerOrigin = process.env.RR_EMBED_VIEWER_ORIGIN;
 const foreignOrigin = process.env.RR_EMBED_FOREIGN_ORIGIN;
 const controlOrigin = process.env.RR_EMBED_CONTROL_ORIGIN;
+const evidencePath = name => process.env.RR_VISUAL_EVIDENCE_DIR
+  ? path.join(process.env.RR_VISUAL_EVIDENCE_DIR, name) : undefined;
 
 const rgb = value => value.match(/[\d.]+/gu).slice(0, 3).map(Number);
 const luminance = value => rgb(value).map(component => component / 255)
@@ -68,6 +71,42 @@ for (const scenario of [
       expect(after.storage).toEqual({
         cookie: '', local: 0, session: 0, databases: 0, caches: 0, serviceWorkers: 0,
       });
+      await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId)))
+        .toBe(true);
+      expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+      await page.evaluate(() => window.postViewerAcknowledgement());
+      const shell = viewer.locator('#ravenroot-embed-viewer');
+      await expect(shell).toHaveAttribute('data-viewer-state', 'ready');
+      if (evidencePath(`server-embed-${scenario.expected}-normal.png`)) {
+        await shell.screenshot({ path: evidencePath(`server-embed-${scenario.expected}-normal.png`) });
+      }
+      const nativeFullscreen = scenario.path === '/theme-light';
+      // The cross-origin fixture grants fullscreen only for the light scenario; the other
+      // frames exercise the browser's real Permissions-Policy denial and deterministic fallback.
+      const maximize = viewer.locator('[data-viewer-maximize]');
+      await maximize.click();
+      await expect(shell).toHaveClass(/embed-viewer--maximized/u);
+      await expect(maximize).toHaveAttribute('aria-label', 'Restore embedded graph');
+      await expect.poll(() => viewer.evaluate(() => Boolean(document.fullscreenElement))).toBe(nativeFullscreen);
+      expect(await viewer.locator('.embed-viewer-controls > :not(.embed-maximize)')
+        .evaluateAll(elements => elements.every(element => getComputedStyle(element).display === 'none')))
+        .toBe(true);
+      await expect(viewer.locator('.embed-viewer-minimap')).toBeHidden();
+      await expect(viewer.locator('.embed-viewer-alternative')).toBeHidden();
+      const restoreBox = await maximize.boundingBox();
+      expect(restoreBox.width).toBeGreaterThanOrEqual(40);
+      expect(restoreBox.height).toBeGreaterThanOrEqual(40);
+      const shellBox = await shell.boundingBox();
+      const canvasBox = await viewer.locator('[data-viewer-canvas]').boundingBox();
+      expect(canvasBox).toMatchObject({ x: shellBox.x, y: shellBox.y,
+        width: shellBox.width, height: shellBox.height });
+      if (evidencePath(`server-embed-${scenario.expected}-maximized.png`)) {
+        await shell.screenshot({ path: evidencePath(`server-embed-${scenario.expected}-maximized.png`) });
+      }
+      if (nativeFullscreen) await viewer.evaluate(() => document.exitFullscreen());
+      else await maximize.press('Escape');
+      await expect(shell).not.toHaveClass(/embed-viewer--maximized/u);
+      await expect(maximize).toBeFocused();
       const accessibility = await new AxeBuilder({ page })
         .include(['#viewer', 'html'])
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
@@ -103,6 +142,7 @@ test('rejects a malformed bootstrap theme before HELLO, key generation, or fetch
 
 test('observes a live deployment and ends truthfully on cross-origin registration revocation',
   async ({ page, request }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
     const consoleMessages = [];
     const requestedUrls = [];
     const observationRequests = [];
@@ -149,7 +189,7 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
 
     const shell = viewer.locator('#ravenroot-embed-viewer');
     await expect(shell).toHaveAttribute('data-viewer-state', 'ready');
-    await expect(viewer.locator('[data-viewer-alternative] > li')).toHaveCount(2);
+    await expect(viewer.locator('[data-viewer-alternative] > li')).toHaveCount(3);
     await expect(viewer.locator('[data-viewer-mode]')).toHaveValue('design');
     await expect(viewer.locator('[data-viewer-mode] option')).toHaveText(['Design', 'Monitoring']);
     await expect(viewer.locator('[data-viewer-command="render"]')).toHaveAccessibleName('Render');
@@ -163,6 +203,34 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     await expect(runs).toBeEnabled();
     await expect(runs.locator('option')).toHaveCount(1);
     await expect.poll(() => observationRequests.length).toBe(1);
+    await viewer.locator('[data-viewer-mode]').selectOption('monitoring');
+    const deployedGroup = viewer.getByRole('button', { name: 'Expand visual group Pipeline, 2 members' });
+    await expect(deployedGroup).toBeVisible();
+    if (evidencePath('server-embed-group-dark-collapsed.png')) {
+      await shell.screenshot({ path: evidencePath('server-embed-group-dark-collapsed.png') });
+    }
+    await deployedGroup.click();
+    await expect(viewer.getByRole('button', { name: 'Collapse visual group Pipeline, 2 members' })).toBeVisible();
+    await viewer.locator('.d3-nodes circle[data-node-id="worker"]').hover();
+    const memberTooltip = viewer.locator('.embed-runtime-tooltip');
+    await expect(memberTooltip).toContainText('ID: worker');
+    await expect(memberTooltip).toContainText('State:');
+    await expect(memberTooltip).toContainText('Active instances:');
+    await expect(memberTooltip).toContainText('In-flight arrivals:');
+    await expect(memberTooltip).toContainText('Last event:');
+    await expect(memberTooltip).toContainText('Last event time:');
+    await expect(memberTooltip).toContainText('Processing duration:');
+    await expect(memberTooltip).toContainText('Fallback:');
+    await expect(memberTooltip).toContainText('Bypassed:');
+    const tooltipBox = await memberTooltip.boundingBox();
+    const canvasBox = await viewer.locator('[data-viewer-canvas]').boundingBox();
+    expect(tooltipBox.x).toBeGreaterThanOrEqual(canvasBox.x);
+    expect(tooltipBox.y).toBeGreaterThanOrEqual(canvasBox.y);
+    expect(tooltipBox.x + tooltipBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1);
+    expect(tooltipBox.y + tooltipBox.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1);
+    if (evidencePath('server-embed-group-dark-expanded-tooltip.png')) {
+      await shell.screenshot({ path: evidencePath('server-embed-group-dark-expanded-tooltip.png') });
+    }
 
     expect((await page.evaluate(() => fetch('/__drop-next-start', {
       method: 'POST', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
@@ -509,7 +577,7 @@ test('isolates the real bootstrap and projection flow across three origins', asy
   expect(storage).toEqual({
     cookie: '', local: 0, session: 0, databases: 0, caches: 0, serviceWorkers: 0,
   });
-  await expect(viewer.locator('body')).toContainText('Graph view');
+  await expect(viewer.getByRole('heading', { level: 1 })).toHaveText('Graph');
   await expect(viewer.locator('body')).not.toContainText('browser-secret-graph');
 
   const isolation = await page.evaluate(() => {

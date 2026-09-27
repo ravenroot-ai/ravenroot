@@ -1,0 +1,97 @@
+/**
+ * Keeps the embedded viewer's renderer mounted while its containing surface changes size.
+ * Native fullscreen is preferred, but a same-document fixed viewport is a deterministic fallback
+ * for sandboxed iframes and browsers that deny or omit the Fullscreen API.
+ */
+export function createEmbedMaximizeController(root, button, {
+  document = root?.ownerDocument,
+  window = document?.defaultView,
+  onResize = () => {},
+} = {}) {
+  if (!root || !button || !document || !window) throw new TypeError('Embed maximize controls are required.');
+  let maximized = false;
+  let nativeFullscreen = false;
+  let returnFocus = null;
+  let destroyed = false;
+  let generation = 0;
+
+  const resize = () => {
+    if (window.requestAnimationFrame) window.requestAnimationFrame(() => { if (!destroyed) onResize(); });
+    else if (!destroyed) onResize();
+  };
+  const exitOwnedFullscreen = () => {
+    if (document.fullscreenElement === root && typeof document.exitFullscreen === 'function') {
+      try { Promise.resolve(document.exitFullscreen()).catch(() => {}); } catch { /* Already exited. */ }
+    }
+  };
+  const publish = value => {
+    maximized = value;
+    root.classList.toggle('embed-viewer--maximized', value);
+    document.documentElement.classList.toggle('embed-viewer-document--maximized',
+      Boolean(document.querySelector('.embed-viewer--maximized')));
+    button.setAttribute('aria-pressed', String(value));
+    button.setAttribute('aria-label', value ? 'Restore embedded graph' : 'Maximize embedded graph');
+    button.title = value ? 'Restore embedded graph' : 'Maximize embedded graph';
+    button.dataset.viewerMaximized = String(value);
+    resize();
+  };
+  const restore = ({ focus = true } = {}) => {
+    generation += 1;
+    if (!maximized) { exitOwnedFullscreen(); return; }
+    nativeFullscreen = false;
+    publish(false);
+    exitOwnedFullscreen();
+    if (focus) (returnFocus?.isConnected ? returnFocus : button).focus?.({ preventScroll: true });
+    returnFocus = null;
+  };
+  const maximize = () => {
+    if (destroyed || maximized) return;
+    const requestGeneration = ++generation;
+    returnFocus = document.activeElement;
+    publish(true);
+    button.focus?.({ preventScroll: true });
+    if (typeof root.requestFullscreen !== 'function') return;
+    try {
+      Promise.resolve(root.requestFullscreen()).then(() => {
+        if (destroyed || requestGeneration !== generation || !maximized) {
+          // A later maximize still owns this root; a retired request must not exit its view.
+          if (destroyed || !maximized) exitOwnedFullscreen();
+          return;
+        }
+        nativeFullscreen = document.fullscreenElement === root;
+      }).catch(() => { /* Keep the published fixed-viewport fallback. */ });
+    } catch { /* Synchronous denial also retains the fallback. */ }
+  };
+  const toggle = () => maximized ? restore() : maximize();
+  const onFullscreenChange = () => {
+    if (document.fullscreenElement === root) {
+      if (destroyed || !maximized) exitOwnedFullscreen();
+      else nativeFullscreen = true;
+    } else if (nativeFullscreen) restore();
+  };
+  const onKeydown = event => {
+    if (maximized && event.key === 'Escape' && !nativeFullscreen) {
+      event.preventDefault();
+      restore();
+    }
+  };
+  button.addEventListener('click', toggle);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('keydown', onKeydown);
+  publish(false);
+
+  return Object.freeze({
+    get maximized() { return maximized; },
+    maximize,
+    restore,
+    toggle,
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      restore({ focus: false });
+      button.removeEventListener('click', toggle);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('keydown', onKeydown);
+    },
+  });
+}

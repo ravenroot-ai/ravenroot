@@ -208,15 +208,21 @@ class EmbedBrowserPlaywrightIntegrationTest {
             <?xml version="1.0" encoding="UTF-8"?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
               <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
               <key id="label" for="node" attr.name="label" attr.type="string"/>
               <key id="classification" for="node" attr.name="classification" attr.type="string"/>
               <key id="arrangement" for="graph" attr.name="ravenroot.designArrangement" attr.type="string"/>
+              <key id="groups" for="graph" attr.name="ravenroot.ui.visualGroups" attr.type="string"/>
               <graph id="browser-secret-topology" edgedefault="directed">
                 <data key="arrangement">flow</data>
+                <data key="groups">{"version":1,"groups":[{"id":"pipeline","name":"Pipeline","memberNodeIds":["start","worker"],"anchorNodeId":"start","collapsed":true}]}</data>
                 <node id="start"><data key="kind">START</data><data key="label">Live start</data></node>
+                <node id="worker"><data key="kind">BEHAVIOR</data><data key="behavior">passthrough</data>
+                  <data key="label">Live worker</data></node>
                 <node id="end"><data key="kind">END</data><data key="label">Live end</data>
                   <data key="classification">quartz-worker</data></node>
-                <edge id="live-edge" source="start" target="end"/>
+                <edge id="live-edge" source="start" target="worker"/>
+                <edge id="finish-edge" source="worker" target="end"/>
               </graph>
             </graphml>
             """;

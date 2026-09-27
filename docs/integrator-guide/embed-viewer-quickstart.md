@@ -11,6 +11,13 @@ authority: it renders a pre-authorized projection and exposes no Modify action, 
 no credential, no adapter, and no operator API. Panning, zooming, switching layout, and reading the
 graph contents are the whole of what it does.
 
+The maximize control uses the browser Fullscreen API when the frame is allowed to do so and otherwise
+fills the frame's viewport. Grant the cross-origin iframe `allow="fullscreen"` (and ensure the
+parent's Permissions-Policy permits fullscreen for the viewer origin) to enable native fullscreen.
+The same control and **Escape** restore the view, including when fullscreen
+ends outside the viewer. Graph position, zoom, selected nodes, selected run, and live observations remain
+attached throughout the transition.
+
 There is no embeddable editor. If you are here to put the Ravenroot authoring workspace into another
 product, stop: that surface does not exist, and nothing on this page will produce it.
 
@@ -177,6 +184,13 @@ The two forms do not fall back to each other. A live registration never reads a 
 its deployment disappears or changes version, and a snapshot registration never starts observing a
 deployment whose identifier happens to match. This prevents a registration from silently showing a
 different source than the operator approved.
+
+Supported flat, disjoint visual groups are included in deployed projections with their labels, members,
+anchor, and collapsed presentation. Expanding or collapsing a group changes only the view. Monitoring
+continues to show activity from hidden members and their internal edges on the collapsed representative;
+expansion exposes each real node's identifier and live fields. Malformed, overlapping, nested, or future
+group metadata is omitted while the complete deployed graph remains visible. The viewer does not infer
+execution or aggregate state for a group.
 
 For deployment sources, a transient connection loss is retried a bounded number of times with the
 last opaque cursor. A replay-window gap, replacement incarnation, graph-version change, undeploy, or
@@ -381,7 +395,7 @@ to your viewer origin, and serve it from your registered origin.
 <body>
 <h1>Our graph</h1>
 <p id="state">Starting the graph view&hellip;</p>
-<iframe id="viewer" title="Ravenroot read-only graph"
+<iframe allow="fullscreen" id="viewer" title="Ravenroot read-only graph"
         sandbox="allow-scripts allow-same-origin"
         referrerpolicy="no-referrer"></iframe>
 

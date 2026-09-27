@@ -305,6 +305,7 @@ export function viewerProjectionElements(nodes, edges) {
         source: edge.source, target: edge.target,
         label: edge.label || '', edgeType: edge.visualType || edge.edgeType || 'continue',
         runtimeActive: false, runtimeRecent: 0, runtimeCount: 0,
+        runtimeIdentity: edge.runtimeIdentity || null,
       },
     })),
   ];

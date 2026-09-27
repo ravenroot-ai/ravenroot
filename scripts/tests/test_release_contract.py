@@ -155,89 +155,6 @@ class TagGateTest(unittest.TestCase):
             validate_tag_authorization("v0.1.0-alpha.1", Path("unused"))
 
 
-class PreparedUnreleasedRecoveryTest(unittest.TestCase):
-    previous = ReleaseVersion.parse("0.4.1-alpha.1")
-    target = "0.5.0-alpha.1"
-    base = "prepared-main"
-    prior_main = "previous-main"
-    promoted_dev = "prepared-dev"
-    recovery_head = "recovery-main"
-
-    def prior_promotion(self, *, promoted_dev: str | None = None, label: str = "release:minor"):
-        return [{
-            "merge_commit_sha": self.base,
-            "merged_at": "2026-09-27T00:00:00Z",
-            "base": {"ref": "main"},
-            "head": {
-                "ref": "dev",
-                "sha": promoted_dev or self.promoted_dev,
-                "repo": {"full_name": "ravenroot-ai/ravenroot"},
-            },
-            "labels": [{"name": label}],
-        }]
-
-    def recovery(self, document, *, versions=None, tag_exists=False, allow_existing_exact_tag=False):
-        versions = versions or {
-            self.base: self.target,
-            self.recovery_head: self.target,
-            self.prior_main: str(self.previous),
-            self.promoted_dev: self.target,
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "prior.json"
-            path.write_text(json.dumps(document), encoding="utf-8")
-
-            def fake_git(*arguments, **_kwargs):
-                if arguments == ("show", "-s", "--format=%P", self.base):
-                    return f"{self.prior_main} {self.promoted_dev}"
-                if arguments == ("cat-file", "-e", f"{self.base}:docs/releases/v{self.target}.md"):
-                    return ""
-                if arguments == ("rev-parse", f"refs/tags/v{self.target}^{{commit}}"):
-                    return self.recovery_head
-                raise AssertionError(arguments)
-
-            with mock.patch.object(release_contract, "release_tags_merged_into", return_value=[(self.previous, f"v{self.previous}")]), \
-                 mock.patch.object(release_contract, "version_at", side_effect=versions.__getitem__), \
-                 mock.patch.object(release_contract, "run_git", side_effect=fake_git), \
-                 mock.patch.object(release_contract, "subprocess") as process:
-                process.run.return_value = subprocess.CompletedProcess([], 0 if tag_exists else 1)
-                return release_contract.prepared_unreleased_minor_recovery(
-                    base=self.base,
-                    head=self.recovery_head,
-                    prior_prs_json=path,
-                    allow_existing_exact_tag=allow_existing_exact_tag,
-                )
-
-    def test_accepts_the_exact_unpublished_minor_recovery(self):
-        self.assertEqual("minor", self.recovery(self.prior_promotion()))
-
-    def test_refuses_missing_prior_promotion_evidence(self):
-        with self.assertRaisesRegex(ReleaseContractError, "requires prior promotion evidence"):
-            release_contract.prepared_unreleased_minor_recovery(
-                base=self.base, head=self.recovery_head, prior_prs_json=None
-            )
-
-    def test_refuses_an_existing_or_different_target_tag(self):
-        with self.assertRaisesRegex(ReleaseContractError, "already exists"):
-            self.recovery(self.prior_promotion(), tag_exists=True)
-        self.assertEqual(
-            "minor",
-            self.recovery(self.prior_promotion(), tag_exists=True, allow_existing_exact_tag=True),
-        )
-
-    def test_refuses_wrong_expected_version_and_prior_promotion_identity(self):
-        versions = {
-            self.base: self.target,
-            self.recovery_head: self.target,
-            self.prior_main: str(self.previous),
-            self.promoted_dev: "0.4.2-alpha.1",
-        }
-        with self.assertRaisesRegex(ReleaseContractError, "does not bridge"):
-            self.recovery(self.prior_promotion(), versions=versions)
-        with self.assertRaisesRegex(ReleaseContractError, "exact merged internal dev promotion"):
-            self.recovery(self.prior_promotion(promoted_dev="other-dev"))
-
-
 class MainAuthorizationTest(unittest.TestCase):
     def pull_request_document(self, labels):
         return [
@@ -401,6 +318,89 @@ class RepositoryConfigurationTest(unittest.TestCase):
         check_workflows()
         check_documentation()
         check_oci_metadata()
+
+
+class PreparedUnreleasedRecoveryTest(unittest.TestCase):
+    previous = ReleaseVersion.parse("0.4.1-alpha.1")
+    target = "0.5.0-alpha.1"
+    base = "prepared-main"
+    prior_main = "previous-main"
+    promoted_dev = "prepared-dev"
+    recovery_head = "recovery-main"
+
+    def prior_promotion(self, *, promoted_dev: str | None = None, label: str = "release:minor"):
+        return [{
+            "merge_commit_sha": self.base,
+            "merged_at": "2026-09-27T00:00:00Z",
+            "base": {"ref": "main"},
+            "head": {
+                "ref": "dev",
+                "sha": promoted_dev or self.promoted_dev,
+                "repo": {"full_name": "ravenroot-ai/ravenroot"},
+            },
+            "labels": [{"name": label}],
+        }]
+
+    def recovery(self, document, *, versions=None, tag_exists=False, allow_existing_exact_tag=False):
+        versions = versions or {
+            self.base: self.target,
+            self.recovery_head: self.target,
+            self.prior_main: str(self.previous),
+            self.promoted_dev: self.target,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prior.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+
+            def fake_git(*arguments, **_kwargs):
+                if arguments == ("show", "-s", "--format=%P", self.base):
+                    return f"{self.prior_main} {self.promoted_dev}"
+                if arguments == ("cat-file", "-e", f"{self.base}:docs/releases/v{self.target}.md"):
+                    return ""
+                if arguments == ("rev-parse", f"refs/tags/v{self.target}^{{commit}}"):
+                    return self.recovery_head
+                raise AssertionError(arguments)
+
+            with mock.patch.object(release_contract, "release_tags_merged_into", return_value=[(self.previous, f"v{self.previous}")]), \
+                 mock.patch.object(release_contract, "version_at", side_effect=versions.__getitem__), \
+                 mock.patch.object(release_contract, "run_git", side_effect=fake_git), \
+                 mock.patch.object(release_contract, "subprocess") as process:
+                process.run.return_value = subprocess.CompletedProcess([], 0 if tag_exists else 1)
+                return release_contract.prepared_unreleased_minor_recovery(
+                    base=self.base,
+                    head=self.recovery_head,
+                    prior_prs_json=path,
+                    allow_existing_exact_tag=allow_existing_exact_tag,
+                )
+
+    def test_accepts_the_exact_unpublished_minor_recovery(self):
+        self.assertEqual("minor", self.recovery(self.prior_promotion()))
+
+    def test_refuses_missing_prior_promotion_evidence(self):
+        with self.assertRaisesRegex(ReleaseContractError, "requires prior promotion evidence"):
+            release_contract.prepared_unreleased_minor_recovery(
+                base=self.base, head=self.recovery_head, prior_prs_json=None
+            )
+
+    def test_refuses_an_existing_or_different_target_tag(self):
+        with self.assertRaisesRegex(ReleaseContractError, "already exists"):
+            self.recovery(self.prior_promotion(), tag_exists=True)
+        self.assertEqual(
+            "minor",
+            self.recovery(self.prior_promotion(), tag_exists=True, allow_existing_exact_tag=True),
+        )
+
+    def test_refuses_wrong_expected_version_and_prior_promotion_identity(self):
+        versions = {
+            self.base: self.target,
+            self.recovery_head: self.target,
+            self.prior_main: str(self.previous),
+            self.promoted_dev: "0.4.2-alpha.1",
+        }
+        with self.assertRaisesRegex(ReleaseContractError, "does not bridge"):
+            self.recovery(self.prior_promotion(), versions=versions)
+        with self.assertRaisesRegex(ReleaseContractError, "exact merged internal dev promotion"):
+            self.recovery(self.prior_promotion(promoted_dev="other-dev"))
 
 
 if __name__ == "__main__":

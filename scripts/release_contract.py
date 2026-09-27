@@ -161,76 +161,6 @@ def require_release_notes(version: str) -> None:
         raise ReleaseContractError(f"reviewed release notes are missing: docs/releases/v{version}.md")
 
 
-def require_target_tag_available(tag: str, head: str, allow_existing_exact_tag: bool) -> None:
-    """Reject a published target, allowing only the tag that triggered its own validation."""
-    tag_exists = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"], cwd=ROOT
-    ).returncode == 0
-    if not tag_exists:
-        return
-    if not allow_existing_exact_tag:
-        raise ReleaseContractError(f"{tag} already exists and release versions are immutable")
-    if run_git("rev-parse", f"refs/tags/{tag}^{{commit}}") != head:
-        raise ReleaseContractError(f"{tag} identifies different immutable content")
-
-
-def require_prior_minor_promotion(path: Path, base: str, promoted_dev: str) -> None:
-    """Bind recovery to the exact reviewed minor promotion that prepared ``base``."""
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, list):
-        raise ReleaseContractError("prior associated pull requests response is not a list")
-    candidates = [
-        item
-        for item in payload
-        if item.get("merge_commit_sha") == base
-        and item.get("merged_at")
-        and item.get("base", {}).get("ref") == "main"
-        and item.get("head", {}).get("ref") == "dev"
-        and item.get("head", {}).get("sha") == promoted_dev
-        and item.get("head", {}).get("repo", {}).get("full_name") == "ravenroot-ai/ravenroot"
-    ]
-    if len(candidates) != 1:
-        raise ReleaseContractError(
-            "the prepared main base must map to one exact merged internal dev promotion"
-        )
-    labels = {
-        label.get("name") for label in candidates[0].get("labels", []) if isinstance(label, dict)
-    }
-    if sorted(RELEASE_LABELS.intersection(labels)) != ["release:minor"]:
-        raise ReleaseContractError("the prior prepared promotion must carry exactly release:minor")
-
-
-def prepared_unreleased_minor_recovery(
-    *, base: str, head: str, prior_prs_json: Path | None, allow_existing_exact_tag: bool = False
-) -> str:
-    """Authorize the one untagged minor recovery path without reopening version reuse.
-
-    A recovery is possible only while the target tag is absent and ``base`` is itself the exact
-    protected main merge that first prepared the next minor from the latest immutable release.
-    The caller supplies GitHub's associated-PR evidence for that prior merge on every path that can
-    authorize or validate the eventual tag.
-    """
-    if prior_prs_json is None:
-        raise ReleaseContractError("prepared-release recovery requires prior promotion evidence")
-    published = release_tags_merged_into(base)
-    if not published:
-        raise ReleaseContractError("prepared-release recovery requires an immutable prior release")
-    previous = published[-1][0]
-    target = str(expected_next(previous, "minor"))
-    if version_at(base) != target or version_at(head) != target:
-        raise ReleaseContractError("prepared-release recovery must retain the exact expected minor version")
-
-    parents = run_git("show", "-s", "--format=%P", base).split()
-    if len(parents) != 2:
-        raise ReleaseContractError("prepared-release recovery base is not a main merge commit")
-    if version_at(parents[0]) != str(previous) or version_at(parents[1]) != target:
-        raise ReleaseContractError("prepared-release recovery base does not bridge the immutable minor")
-    run_git("cat-file", "-e", f"{base}:docs/releases/v{target}.md")
-    require_prior_minor_promotion(prior_prs_json, base, parents[1])
-    require_target_tag_available(f"v{target}", head, allow_existing_exact_tag)
-    return "minor"
-
-
 def release_transition(
     *,
     old_version: str,
@@ -286,18 +216,10 @@ def check_promotion(
     findings = version_errors(new_version)
     if findings:
         raise ReleaseContractError("; ".join(findings))
-    published = release_tags_merged_into(base)
-    if label_intent == "minor" and old_version == new_version and published:
-        immutable_intent = prepared_unreleased_minor_recovery(
-            base=base, head=head, prior_prs_json=prior_prs_json
-        )
-    else:
-        immutable_intent = release_transition(
-            old_version=old_version,
-            new_version=new_version,
-            changed=run_git("diff", "--no-renames", "--name-only", base, head).splitlines(),
-            published=published,
-        )
+    immutable_intent = authorized_release_intent(
+        base=base, head=head, label_intent=label_intent, old_version=old_version,
+        new_version=new_version, prior_prs_json=prior_prs_json,
+    )
     if label_intent != immutable_intent:
         raise ReleaseContractError(
             f"release:{label_intent} does not match the content, which carries release:{immutable_intent} "
@@ -331,22 +253,11 @@ def authorize_main(
     if findings:
         raise ReleaseContractError("; ".join(findings))
 
-    published = release_tags_merged_into(before)
-    if label_intent == "minor" and old_version == new_version and published:
-        immutable_intent = prepared_unreleased_minor_recovery(
-            base=before,
-            head=head,
-            prior_prs_json=prior_prs_json,
-            allow_existing_exact_tag=allow_existing_exact_tag,
-        )
-    else:
-        changed = run_git("diff", "--no-renames", "--name-only", before, head).splitlines()
-        immutable_intent = release_transition(
-            old_version=old_version,
-            new_version=new_version,
-            changed=changed,
-            published=published,
-        )
+    immutable_intent = authorized_release_intent(
+        base=before, head=head, label_intent=label_intent, old_version=old_version,
+        new_version=new_version, prior_prs_json=prior_prs_json,
+        allow_existing_exact_tag=allow_existing_exact_tag,
+    )
 
     if label_intent != immutable_intent:
         raise ReleaseContractError(
@@ -479,6 +390,80 @@ def main() -> int:
     print(json.dumps(values, sort_keys=True))
     write_outputs(values)
     return 0
+
+
+def require_target_tag_available(tag: str, head: str, allow_existing_exact_tag: bool) -> None:
+    """Reject a published target, allowing only the tag that triggered its own validation."""
+    tag_exists = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"], cwd=ROOT
+    ).returncode == 0
+    if not tag_exists:
+        return
+    if not allow_existing_exact_tag:
+        raise ReleaseContractError(f"{tag} already exists and release versions are immutable")
+    if run_git("rev-parse", f"refs/tags/{tag}^{{commit}}") != head:
+        raise ReleaseContractError(f"{tag} identifies different immutable content")
+
+
+def require_prior_minor_promotion(path: Path, base: str, promoted_dev: str) -> None:
+    """Bind recovery to the exact reviewed minor promotion that prepared ``base``."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ReleaseContractError("prior associated pull requests response is not a list")
+    candidates = [
+        item for item in payload
+        if item.get("merge_commit_sha") == base and item.get("merged_at")
+        and item.get("base", {}).get("ref") == "main"
+        and item.get("head", {}).get("ref") == "dev"
+        and item.get("head", {}).get("sha") == promoted_dev
+        and item.get("head", {}).get("repo", {}).get("full_name") == "ravenroot-ai/ravenroot"
+    ]
+    if len(candidates) != 1:
+        raise ReleaseContractError("the prepared main base must map to one exact merged internal dev promotion")
+    labels = {label.get("name") for label in candidates[0].get("labels", []) if isinstance(label, dict)}
+    if sorted(RELEASE_LABELS.intersection(labels)) != ["release:minor"]:
+        raise ReleaseContractError("the prior prepared promotion must carry exactly release:minor")
+
+
+def prepared_unreleased_minor_recovery(
+    *, base: str, head: str, prior_prs_json: Path | None, allow_existing_exact_tag: bool = False
+) -> str:
+    """Authorize only an untagged minor that was already prepared by one exact main promotion."""
+    if prior_prs_json is None:
+        raise ReleaseContractError("prepared-release recovery requires prior promotion evidence")
+    published = release_tags_merged_into(base)
+    if not published:
+        raise ReleaseContractError("prepared-release recovery requires an immutable prior release")
+    previous = published[-1][0]
+    target = str(expected_next(previous, "minor"))
+    if version_at(base) != target or version_at(head) != target:
+        raise ReleaseContractError("prepared-release recovery must retain the exact expected minor version")
+    parents = run_git("show", "-s", "--format=%P", base).split()
+    if len(parents) != 2:
+        raise ReleaseContractError("prepared-release recovery base is not a main merge commit")
+    if version_at(parents[0]) != str(previous) or version_at(parents[1]) != target:
+        raise ReleaseContractError("prepared-release recovery base does not bridge the immutable minor")
+    run_git("cat-file", "-e", f"{base}:docs/releases/v{target}.md")
+    require_prior_minor_promotion(prior_prs_json, base, parents[1])
+    require_target_tag_available(f"v{target}", head, allow_existing_exact_tag)
+    return "minor"
+
+
+def authorized_release_intent(
+    *, base: str, head: str, label_intent: str, old_version: str, new_version: str,
+    prior_prs_json: Path | None, allow_existing_exact_tag: bool = False,
+) -> str:
+    published = release_tags_merged_into(base)
+    if label_intent == "minor" and old_version == new_version and published:
+        return prepared_unreleased_minor_recovery(
+            base=base, head=head, prior_prs_json=prior_prs_json,
+            allow_existing_exact_tag=allow_existing_exact_tag,
+        )
+    return release_transition(
+        old_version=old_version, new_version=new_version,
+        changed=run_git("diff", "--no-renames", "--name-only", base, head).splitlines(),
+        published=published,
+    )
 
 
 if __name__ == "__main__":

@@ -398,9 +398,9 @@ class SagaOutboxPublisherTest {
                         ProcessInstanceStatus.ACCEPTED, Map.of(traversal, new Traversal(traversal, "start",
                         TraversalStatus.ACCEPTED, Map.of()))), new GraphVersionPin("graph-v1"))).build())
                 .toCompletableFuture().join();
-        var failed = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(accepted.revision()))
-                .apply(new ExecutionTransition.TraversalTransitioned(traversal, TraversalStatus.FAILED))
-                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+        var running = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(accepted.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
                 .build()).toCompletableFuture().join();
         OpaquePayload body = frozenPayload(key, traversal);
         String digest = sha256(body);
@@ -421,7 +421,7 @@ class SagaOutboxPublisherTest {
         var interrupted = new SagaSnapshot(key, sagaId, traversal, definition, 1,
                 SagaDisposition.SUCCEEDED, false, Map.of(occurrence, step), null,
                 clock.instant(), clock.instant(), "", false);
-        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(failed.revision()))
+        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(running.revision()))
                 .writeSaga(new SagaWrite(UUID.randomUUID(), 0, interrupted)).build())
                 .toCompletableFuture().join();
 
@@ -430,7 +430,7 @@ class SagaOutboxPublisherTest {
                 return CompletableFuture.completedFuture(new BrokerResult(true, "accepted"));
             }
             @Override public CompletableFuture<Boolean> businessCompleted(SagaCommandIntent ignored) {
-                return CompletableFuture.completedFuture(false);
+                return CompletableFuture.completedFuture(true);
             }
         }, (ignoredKey, ignoredIntent) -> { }, "recovery", 8,
                 Duration.ofSeconds(5), Duration.ofMillis(10), clock);
@@ -438,11 +438,28 @@ class SagaOutboxPublisherTest {
         assertEquals(List.of(), publisher.runOnce("tenant-a"));
         var recovered = store.loadSaga(key, sagaId).toCompletableFuture().join().orElseThrow();
         assertEquals(true, recovered.cancellationRequested());
+        assertEquals(true, recovered.graphCompleted(),
+                "recovery owns the interrupted graph boundary after the runner lease has ended");
         assertEquals(SagaDisposition.COMPENSATION_PENDING, recovered.disposition());
         assertEquals(SagaStepStatus.COMPENSATING,
                 recovered.occurrences().values().iterator().next().status());
         assertEquals(compensationOperation, store.listSagaCommands(key).toCompletableFuture().join()
                 .getFirst().intent().operationId());
+
+        assertEquals(SagaOutboxStatus.BROKER_ACCEPTED, publisher.runOnce("tenant-a").getFirst().status());
+        clock.advance(Duration.ofSeconds(1));
+        assertEquals(SagaOutboxStatus.BUSINESS_COMPLETED, publisher.runOnce("tenant-a").getFirst().status());
+        assertEquals(SagaDisposition.COMPENSATED,
+                store.loadSaga(key, sagaId).toCompletableFuture().join().orElseThrow().disposition());
+        assertEquals(ProcessInstanceStatus.FAILED,
+                store.load(key).toCompletableFuture().join().state().status(),
+                "completed recovery must release the durable execution from RUNNING");
+        var coldReader = new ExecutionResultRegistry(1, 1, DurableExecutionResults.of(store));
+        var lookup = coldReader.lookup(new ExecutionResultRegistry.Key("tenant-a", traversal));
+        var found = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                ai.ravenroot.api.application.ExecutionLookup.Found.class, lookup);
+        assertEquals(ProcessInstanceStatus.FAILED, found.outcome().status(),
+                "a restarted application must read the recovery-owned terminal result");
     }
 
     private static OpaquePayload frozenPayload(ExecutionKey key, UUID traversal) {

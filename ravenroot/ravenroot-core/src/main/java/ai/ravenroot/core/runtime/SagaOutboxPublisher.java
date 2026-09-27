@@ -197,7 +197,7 @@ public final class SagaOutboxPublisher {
                 var next = new ai.ravenroot.api.persistence.SagaSnapshot(current.key(), current.sagaId(),
                         current.traversalId(), current.definition(), current.revision() + 1, disposition,
                         cancellation, occurrences, current.deadline(), current.createdAt(), now, reason,
-                        current.graphCompleted());
+                        current.graphCompleted() || abortInterruptedGraph);
                 var batch = ExecutionBatch.to(candidate.key())
                         .expecting(RevisionExpectation.exactly(stored.revision())).fencedBy(lease)
                         .writeSaga(new SagaWrite(java.util.UUID.randomUUID(), current.revision(), next));
@@ -270,6 +270,9 @@ public final class SagaOutboxPublisher {
                 boolean compensated = sagas.stream()
                         .filter(saga -> saga.traversalId().equals(candidate.traversalId()))
                         .anyMatch(saga -> saga.disposition() == SagaDisposition.COMPENSATED);
+                if (compensated) {
+                    recordMissingRecoveryResult(stored, candidate.traversalId(), sagas);
+                }
                 batch.apply(new ExecutionTransition.TraversalTransitioned(candidate.traversalId(),
                         compensated ? TraversalStatus.FAILED : TraversalStatus.COMPLETED));
                 boolean otherOpen = process.traversals().entrySet().stream()
@@ -296,6 +299,42 @@ public final class SagaOutboxPublisher {
             } finally {
                 releaseBestEffort(lease);
             }
+        }
+    }
+
+    private void recordMissingRecoveryResult(
+            ai.ravenroot.api.persistence.StoredProcessInstance stored,
+            java.util.UUID traversalId,
+            java.util.List<ai.ravenroot.api.persistence.SagaSnapshot> sagas) {
+        if (store.loadExecutionResult(stored.tenantId(), traversalId).toCompletableFuture().join().isPresent()) {
+            return;
+        }
+        var traversalSagas = sagas.stream()
+                .filter(saga -> saga.traversalId().equals(traversalId)).toList();
+        java.time.Instant startedAt = traversalSagas.stream()
+                .map(ai.ravenroot.api.persistence.SagaSnapshot::createdAt)
+                .min(java.time.Instant::compareTo).orElse(stored.updatedAt());
+        java.time.Instant endedAt = traversalSagas.stream()
+                .map(ai.ravenroot.api.persistence.SagaSnapshot::updatedAt)
+                .max(java.time.Instant::compareTo).orElse(clock.instant());
+        try {
+            store.recordExecutionResult(ai.ravenroot.api.persistence.DurableExecutionResult.of(
+                    stored.key(), traversalId, stored.graphVersionPin(), ProcessInstanceStatus.FAILED,
+                    null, startedAt, endedAt,
+                    ai.ravenroot.api.persistence.ExecutionResultPayload.none(),
+                    ai.ravenroot.api.persistence.ExecutionResultNodes.empty(), null))
+                    .toCompletableFuture().join();
+        } catch (java.util.concurrent.CompletionException concurrentResult) {
+            Throwable cause = concurrentResult.getCause();
+            if (!(cause instanceof ExecutionStoreException refused)
+                    || !(refused.failure()
+                    instanceof ExecutionStoreFailure.ExecutionResultNotRecordable)
+                    || store.loadExecutionResult(stored.tenantId(), traversalId)
+                    .toCompletableFuture().join().isEmpty()) {
+                throw concurrentResult;
+            }
+            // A graph-completion callback won the result race. Its immutable record is the
+            // authority; the process transition below reconciles its visible lifecycle.
         }
     }
 

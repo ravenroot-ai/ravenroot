@@ -2429,7 +2429,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public ai.ravenroot.api.application.ExecutionLookup executionResult(String tenantId, UUID executionId) {
-        var lookup = executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId));
+        var lookup = reconcileDurableExecutionLifecycle(tenantId, executionId,
+                executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId)));
         // The pause is applied on the way out and never stored in the registry. The registry holds
         // an immutable record of what a traversal has done; whether it is holding right now belongs
         // to the runtime, changes without the registry being written, and would go stale the instant
@@ -2447,6 +2448,37 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             return new ai.ravenroot.api.application.ExecutionLookup.Found(found.outcome().withPaused(true));
         }
         return lookup;
+    }
+
+    private ai.ravenroot.api.application.ExecutionLookup reconcileDurableExecutionLifecycle(
+            String tenantId, UUID executionId, ai.ravenroot.api.application.ExecutionLookup lookup) {
+        if (!(lookup instanceof ai.ravenroot.api.application.ExecutionLookup.Found found)
+                || executionStore == null) return lookup;
+        var outcome = found.outcome();
+        try {
+            var stored = await(executionStore.load(new ExecutionKey(tenantId, outcome.processInstanceId())));
+            var traversal = stored.state().traversals().get(executionId);
+            if (traversal == null) return lookup;
+            var durableStatus = ProcessInstanceStatus.valueOf(traversal.status().name());
+            if (durableStatus == outcome.status()) return lookup;
+            // A graph can finish before its durable participant receipts do.  The initial result
+            // record then describes graph completion, while the aggregate remains WAITING and may
+            // later become FAILED because its business effects were compensated.  The aggregate is
+            // the lifecycle authority, including after restart; the graph result still supplies the
+            // bounded node evidence, but it must never promote that business rollback to success.
+            var reconciled = new ai.ravenroot.api.application.ExecutionOutcome(
+                    outcome.processInstanceId(), outcome.traversalId(), durableStatus,
+                    durableStatus == ProcessInstanceStatus.COMPLETED ? outcome.payload() : null,
+                    outcome.visitedNodes(), outcome.defaultedNodes(), outcome.bypassedNodes(),
+                    outcome.handledFailureNodes(), outcome.untakenEdges(), false,
+                    traversal.terminationReason());
+            return new ai.ravenroot.api.application.ExecutionLookup.Found(reconciled);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException unavailable) {
+            if (unavailable.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                return lookup;
+            }
+            throw unavailable;
+        }
     }
 
     @Override

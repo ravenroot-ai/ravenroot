@@ -8,7 +8,12 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
 
-/** Frozen participant operations needed to reconcile or compensate one saga occurrence. */
+/**
+ * Frozen participant operations needed to reconcile or compensate one saga occurrence.
+ *
+ * @param forward frozen forward participant operation
+ * @param compensation frozen compensation operation, or {@code null} for an irreversible step
+ */
 public record SagaRecoveryEnvelope(SagaCommandIntent forward, SagaCommandIntent compensation) {
     /** Media type stored in the bounded step receipt. */
     public static final String CONTENT_TYPE = "application/vnd.ravenroot.saga-recovery.v1";
@@ -26,7 +31,11 @@ public record SagaRecoveryEnvelope(SagaCommandIntent forward, SagaCommandIntent 
         }
     }
 
-    /** Encodes this envelope into the public bounded opaque-payload contract. */
+    /**
+     * Encodes this envelope into the public bounded opaque-payload contract.
+     *
+     * @return encoded recovery envelope
+     */
     public OpaquePayload encode() {
         try {
             byte[] forwardBytes = SagaCommandCodec.encode(forward);
@@ -45,7 +54,12 @@ public record SagaRecoveryEnvelope(SagaCommandIntent forward, SagaCommandIntent 
         }
     }
 
-    /** Decodes and bounds one stored recovery envelope. */
+    /**
+     * Decodes and bounds one stored recovery envelope.
+     *
+     * @param payload encoded recovery envelope
+     * @return decoded recovery envelope
+     */
     public static SagaRecoveryEnvelope decode(OpaquePayload payload) {
         Objects.requireNonNull(payload, "payload");
         if (!CONTENT_TYPE.equals(payload.contentType())) {

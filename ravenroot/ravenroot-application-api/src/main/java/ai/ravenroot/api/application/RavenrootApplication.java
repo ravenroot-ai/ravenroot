@@ -182,6 +182,19 @@ public interface RavenrootApplication extends AutoCloseable {
     GraphSummary inspectGraphMl(InputStream graphMl);
 
     /**
+     * Purpose-aware admission inspection; old implementations retain execution inspection semantics.
+     * @param graphMl readable exact GraphML bytes; ownership remains with the caller
+     * @param purpose operation for which the graph is being admitted
+     * @return policy-independent admission summary for the requested purpose
+     */
+    default GraphSummary inspectGraphMl(InputStream graphMl, GraphAdmissionPurpose purpose) {
+        if (purpose != GraphAdmissionPurpose.EXECUTION) {
+            throw new UnsupportedOperationException("purpose-aware graph inspection is unavailable");
+        }
+        return inspectGraphMl(graphMl);
+    }
+
+    /**
  * Trusted start contract for adapters that must establish security state before execution events
  * can be published. Implementations must use exactly {@code executionId} or fail before starting.
  *
@@ -378,6 +391,112 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     default java.util.Optional<LocalDeploymentStatus> localDeployment(String tenantId, String deploymentId) {
         return java.util.Optional.empty();
+    }
+
+    /**
+     * Resolves a browser-safe view from the immutable definition retained by one local deployment.
+     * Unknown and cross-tenant identifiers are the same empty result.
+     * @param tenantId tenant whose deployment is read
+     * @param deploymentId tenant-scoped deployment identifier
+     * @return browser-safe view, or empty when the source is unavailable to the tenant
+     */
+    default java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * Lists browser-safe views for the tenant's process-local deployments.
+     *
+     * <p>The caller applies its own lifecycle filter. Returning the complete local set here keeps
+     * discovery and exact session-time resolution on the same source of truth, while the authorized
+     * facade decides which subset may cross an adapter boundary.</p>
+     * @param tenantId tenant whose local deployment views are read
+     * @return deterministic immutable list of currently resolvable deployment views
+     */
+    default java.util.List<DeploymentViewerView> localDeploymentViews(String tenantId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        return java.util.List.of();
+    }
+
+    /**
+     * Replays only events belonging to one exact local deployment incarnation and graph version.
+     * Implementations filter before returning the page; callers must never filter a tenant-wide page.
+     * @param tenantId tenant that owns the deployment
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId captured physical deployment incarnation
+     * @param graphVersion captured immutable graph version
+     * @param sequence last sequence consumed by the caller
+     * @return bounded filtered replay result
+     */
+    default DeploymentEventBatch localDeploymentEventsAfter(String tenantId, String deploymentId,
+                                                              String incarnationId, String graphVersion,
+                                                              long sequence) {
+        return DeploymentEventBatch.unavailable(DeploymentEventBatch.Status.UNAVAILABLE);
+    }
+
+    /**
+     * Subscribes to future events only after tenant, deployment and graph-version filtering.
+     * The listener is an adapter-side bounded wakeup or queue, never the filtering boundary.
+     * @param tenantId tenant that owns the deployment
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId captured physical deployment incarnation
+     * @param graphVersion captured immutable graph version
+     * @param listener consumer reached only by events for the captured source
+     * @return handle that closes the filtered subscription
+     */
+    default AutoCloseable subscribeToLocalDeploymentEvents(String tenantId, String deploymentId,
+                                                            String incarnationId, String graphVersion,
+                                                            java.util.function.Consumer<ExecutionEvent> listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        return () -> { };
+    }
+
+    /**
+     * Starts one payload-free traversal from an exact immutable local deployment binding.
+     * Implementations must compare both graph version and incarnation before admitting the request,
+     * and must reconcile {@code requestId} through durable ingress rather than dispatch twice.
+     * @param security authenticated tenant and principal
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param requestId bounded idempotency identity
+     * @return sanitized authoritative admission outcome
+     */
+    default EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
+                                                                 String deploymentId,
+                                                                 String incarnationId,
+                                                                 String graphVersion,
+                                                                 String requestId) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
+    /**
+     * Reads one exact process's durable event stream for authoritative embed reconciliation.
+     * @param tenantId owning tenant
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of events to return
+     * @return ordered durable events after the requested sequence
+     */
+    default List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
+                                                                 long afterSequence, int limit) {
+        return List.of();
+    }
+
+    /**
+     * Returns one process replay page with its atomically observed retention boundary.
+     * @param tenantId exact owning tenant
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable process sequence
+     * @param limit maximum event count
+     * @return bounded events and authoritative retained/allocation boundaries
+     */
+    default DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
+                                                                long afterSequence, int limit) {
+        List<DurableExecutionEvent> events = durableEventsForProcess(
+                tenantId, processInstanceId, afterSequence, limit);
+        return new DurableProcessEventPage(events, 1,
+                events.isEmpty() ? afterSequence + 1 : events.getLast().streamSequence() + 1);
     }
 
     /**

@@ -11,9 +11,36 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/status` | Service status |
 | `GET /v1/runtime` | Selected engine and runtime capabilities |
 | `GET /v1/node-types` | Effective node catalog |
-| `POST /v1/graphs/inspect` | Validate and inspect GraphML without executing it |
+| `POST /v1/graphs/inspect?purpose=EXECUTION\|LOCAL_DEPLOYMENT\|SOURCE_SESSION` | Validate the exact GraphML bytes without executing them. A parsed but inadmissible graph remains HTTP 200 with `valid:false` and one `ravenroot.graph-admission/1` finding; malformed GraphML remains an error response carrying the same safe finding shape. |
 | `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget and the authenticated principal's exact opaque `workspace.tenantId` |
 | `POST /v1/drain` | Stop admission and drain accepted work |
+
+## Deployment lifecycle
+
+| Method and path | Result |
+|---|---|
+| `GET /v1/deployments` | List only the authenticated tenant's registrations. `deploymentGeneration` is present when a row is governed by durable lifecycle authority and absent for legacy/source-session compatibility rows. `scope=LOCAL_PROCESS` describes runtime placement; a generation describes durable command intent, not cluster ownership. |
+| `POST /v1/deployments?id=ID` | Register immutable GraphML. With durable deployment control, the tenant and local ID acquire a non-expiring identity binding: reopening the same store returns the current aggregate and authoritative generation, while a tombstoned durable ID is refused before a local runtime is published. The binding survives command-ledger expiry and purge. |
+| `GET /v1/deployments/{id}` | Read status and its current authoritative generation when durable. Unknown, sibling-tenant, and removed IDs remain the same nondisclosing 404. |
+| `POST /v1/deployments/{id}/start` | Legacy rows return status. Durable rows require `Idempotency-Key` and `X-Ravenroot-Expected-Generation` and return a `DeploymentCommandOutcome`. |
+| `POST /v1/deployments/{id}/stop` | As Start, plus a required bounded `X-Ravenroot-Reason` for durable rows. Stop leaves the registration reusable. |
+| `POST /v1/deployments/{id}/restart` | As Start. Restart intentionally has no reason header. |
+| `DELETE /v1/deployments/{id}` | Durable Undeploy additionally requires a bounded reason and an explicit `X-Ravenroot-Undeploy-Disposition`: `DRAIN_FIRST`, `CANCEL_IN_FLIGHT`, or `REFUSE_IF_BUSY`. No disposition is inferred. Terminal removal retains a tombstone for exact replay while removing the local runtime. |
+
+Durable command outcomes are `ACCEPTED`, `CONVERGED`, `REPLAYED`, `IDEMPOTENCY_CONFLICT`,
+`STALE_GENERATION`, `SUPERSEDED`, `REFUSED`, `FAILED`, and `TERMINAL`. Clients reconcile the
+authoritative status after a response. Stale, superseded, and refused decisions are shown without
+automatic resubmission; an ambiguous transport delivery may be retried only with the identical intent
+key and metadata. If that retry also loses its response, clients issue an authoritative GET without a
+third command delivery. They expose the observed state (or Undeploy's authoritative 404) separately
+from the still-unknown command outcome.
+
+Failed deployment and source-session status bodies may carry `failure` with contract
+`ravenroot.startup-failure/1`. Its phase, closed reason, bounded display node, opaque `nodeRef`, and
+incident handle are safe to show. Extension-owned lower-kebab reasons appear only when the trusted
+source package declared them at registration; unknown or undeclared failures use `STARTUP_FAILED`
+and an incident handle. Property values, adapter exception messages, profiles, hosts, and stacks are
+never part of this response. `diagnostic` remains for older consumers and stays a fixed bounded text.
 
 ## Execution and events
 
@@ -36,6 +63,24 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 
 ## Governed resources
 
+### Human Tasks
+
+| Method and path | Contract |
+|---|---|
+| `GET /v1/human-tasks` | Tenant-scoped payload-free summary inbox. |
+| `GET /v1/human-tasks/attention` | Summary attention page, or exact authorized task/generation detail with bounded review content. |
+| `POST /v1/human-tasks/{taskId}/settle?generation=N` | Canonical strict JSON settlement with separate action, comment, typed response, and optional explicitly authorized override. |
+| `POST /v1/human-tasks/{taskId}/interaction?generation=N` | Issue one registered custom/external capability after ordinary responder authorization. |
+| `DELETE /v1/human-tasks/{taskId}/interaction?generation=N` | Durably revoke that capability across restart/replicas. |
+| `POST /v1/human-task-interactions/complete` | External-provider-only capability callback; refuses bearer/cookie and fences origin/exact-body signature/expiry/revocation/current generation/profile/schema/action. Custom hosts settle through the parent's current authenticated session. |
+| `GET /v1/admin/human-tasks` | Authorized bounded payload-free consistency inventory. |
+| `GET /v1/admin/human-tasks/{taskId}/attention?tenant=T&generation=N&reason=R` | Tenant-explicit exact override review; tenant admin stays tenant-local and platform admin may cross tenant. |
+| `POST /v1/admin/human-tasks/{taskId}/settle?tenant=T&generation=N&reason=R` | Tenant-explicit canonical override settlement with bounded audit evidence. |
+| `POST /v1/admin/human-tasks/purge` | Dry-run or atomic bounded reconciliation with a required idempotency key. |
+
+All settlement transports return deterministic typed outcomes from the same durable service. See the
+[complete Human Task contract](human-tasks.md) for request schemas and disclosure boundaries.
+
 | Method and path | Contract |
 |---|---|
 | `GET, POST /v1/credentials` | List caller-owned metadata or write a secret and mint its reference |
@@ -52,6 +97,8 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET, POST, DELETE /v1/assistant/connection` | Read, establish, or remove the caller’s connection |
 | `POST /v1/assistant/messages` | Submit a message through the established connection |
 | `POST /v1/embed/sessions` | Create an authorized embedded session request |
+| `GET /v1/embed/deployments` | Discover a bounded page of tenant-owned READY local deployment selections |
+| `DELETE /v1/embed/grants/{id}` | Revoke a dynamic read-only embed grant idempotently |
 | `POST /v1/embed/acknowledgements` | Record the browser acknowledgement |
 | `GET /v1/embed/launch` | Serve the launch boundary |
 | `POST /v1/embed/exchange` | Exchange a one-time launch value |
@@ -71,10 +118,12 @@ plus the repository's service, bundle, development, build, and test scripts.
 | `ravenroot node-types` | Read effective catalog |
 | `ravenroot inspect FILE` | Inspect without effects |
 | `ravenroot validate FILE` | Validate the GraphML profile |
+| `ravenroot validate --register-machine FILE` | Validate GraphML, then run the bounded static Register Machine Profile v1 linter with separate errors and warnings |
 | `ravenroot run FILE` | Execute with Run semantics |
 | `ravenroot inventory` | List the tenant's whole durable process inventory (`GET /v1/executions/inventory`, paged to completion internally — never a partial page); unfiltered, terminal rows **included** by default; a trailing `retained-from=` line always prints, even for an idle tenant |
 | `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`), also followed by a trailing `retained-from=` line; the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |
 | `ravenroot process PROCESS-INSTANCE-ID COMMAND EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Apply a durable process Pause, Resume, Cancel, Drain, or recoverable Stop through the remote server; prints the typed outcome, new generation, state, and retained reason |
+| `ravenroot deployments ...` | List/register/inspect/Start/Stop/Restart/Undeploy local runtimes. Durable rows print generation and typed command outcomes; Stop requires `--reason`, and Undeploy requires both explicit `--disposition` and `--reason`. |
 | `ravenroot-server` | Start the standalone service |
 
 CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Authentication and ownership checks are identical to HTTP because the CLI is a client, not a privileged bypass.

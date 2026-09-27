@@ -67,7 +67,7 @@ function catalogButton(document, type, iconFor, onActivate, onDragStart, selecte
     const button = document.createElement('button');
     button.className = 'catalog-item';
     button.type = 'button';
-    button.dataset.catalogAdd = String(type.behavior || '');
+    button.dataset.catalogAdd = String(type.presetId || type.behavior || '');
     button.dataset.catalogOrder = String(order);
     button.draggable = true;
     button.setAttribute('aria-pressed', String(button.dataset.catalogAdd === selectedBehavior));

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="behavior" for="node" attr.name="behavior" attr.type="string"/><key id="operation" for="node" attr.name="operation" attr.type="string"/><key id="left" for="node" attr.name="left" attr.type="string"/><key id="right" for="node" attr.name="right" attr.type="string"/><key id="target" for="node" attr.name="target" attr.type="string"/>
+  <graph id="register-division" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="dividend"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:123</data><data key="target">dividend</data></node>
+    <node id="divisor"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:10</data><data key="target">divisor</data></node>
+    <node id="quotient"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">floor-divide</data><data key="left">field:dividend</data><data key="right">field:divisor</data><data key="target">quotient</data></node>
+    <node id="remainder"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">modulo</data><data key="left">field:dividend</data><data key="right">field:divisor</data><data key="target">remainder</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="e0" source="start" target="dividend"/><edge id="e1" source="dividend" target="divisor"/><edge id="e2" source="divisor" target="quotient"/><edge id="e3" source="quotient" target="remainder"/><edge id="e4" source="remainder" target="end"/>
+  </graph>
+</graphml>

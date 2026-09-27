@@ -155,10 +155,12 @@ class AuthorizedEmbedGraphProjectionTest {
                 "resolveProjection must stay a default method, or an adapter gains a seam for a "
                         + "second read");
 
+        // The allowlisted Design arrangement is presentation metadata, not mutable graph or
+        // runtime state, and therefore remains inside this deliberately bounded projection DTO.
         assertTrue(Arrays.stream(EmbedGraphProjection.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toList()
                 .equals(List.of("viewerContractVersion", "graphId", "graphVersionId", "canonicalDigest",
-                        "nodes", "edges")));
+                        "nodes", "edges", "designArrangement")));
     }
 
     private static EmbedRegistrationAuthority recording(AtomicBoolean called) {

@@ -5,7 +5,7 @@ This inventory was reviewed against the `dev` development snapshot at commit
 released `0.1.0-alpha.1` notes remain the authority for that release; a development entry below must
 not be read as a claim that an older release contains it.
 
-The default server composition registers the 11 core node types below. Optional first-party source
+The default server composition registers the 12 core node types below. Optional first-party source
 contains 20 buildable bundle modules and 48 node descriptors. The snapshot's CI publication
 selection is empty, so its official image assembly path stages no optional bundles. That is evidence
 about this snapshot's configured path, not a retrospective inventory of already-published artifacts.
@@ -26,6 +26,7 @@ the effective running deployment.
 | `human-task` | [Durable human tasks](human-tasks.md) | Descriptor, store, authorization, re-entry, and timer tests |
 | `template` | [Core nodes](core-nodes.md#template) | Descriptor and template behavior tests |
 | `json-parse` | [Core nodes](core-nodes.md#json-parse) | Descriptor, canonical payload, and budget tests |
+| `bigint-op` | [Core nodes](core-nodes.md#bigint-op) | Descriptor, exact arithmetic, property-based, ceiling, and cancellation tests |
 | `cel-transform` | [Core nodes](core-nodes.md#cel-transform) | Descriptor and closed CEL evaluator tests |
 | `cel-decision` | [Core nodes](core-nodes.md#cel-decision) | Descriptor, Boolean result, and routing tests |
 | `json-path` | [Core nodes](core-nodes.md#json-path) | Descriptor and RFC 9535 conformance/budget tests |
@@ -35,6 +36,16 @@ the effective running deployment.
 
 The earlier broad catalog page also named `llm-prompt` and `agent` among shipped behavior families.
 They are optional AI-bundle nodes in this baseline and are now inventoried below.
+
+## Computational profiles
+
+| Profile | Maintained contract and library | Validation evidence |
+|---|---|---|
+| Register Machine Profile v1 | [Profile reference](register-machine-profile.md), [executable GraphML library](../examples/register-machine/) | Bounded static-validator tests; compiler/interpreter differential properties; real-engine exact-output, event, cancellation, Pi, payload-JSON, and SQLite-reopen tests; opt-in measurement matrix |
+
+Profiles compose existing catalog nodes and add no hidden behavior registration. The register-machine
+editor presets serialize ordinary `bigint-op`, `cel-decision`, `log`, edge, and terminal elements;
+the running catalog and generated node-descriptor reference therefore remain unchanged.
 
 ## First-party optional bundles
 

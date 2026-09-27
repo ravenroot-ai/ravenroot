@@ -14,6 +14,10 @@ documentation. Active development is integrated on `dev`.
 3. Make the change, its tests, its documentation, and any required change fragment together.
 4. Push the topic branch to your fork and open a pull request against `ravenroot-ai/ravenroot:dev`.
 
+Opening the pull request triggers `ci.yml` on it directly, from a fork or from a repository branch
+alike, and that run carries the complete functional suite — the same tier the merge queue runs on the
+integration commit — so `ci-required` reports from the pull request's own event.
+
 Ordinary pull requests from forks or repository branches must target `dev`, not `main`. Pull requests
 to `main` are reserved for the internal `dev` branch and protected internal `hotfix/*` branches. A
 maintainer classifies each such pull request with exactly one of `release:none`, `release:patch`,

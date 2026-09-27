@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -60,6 +61,37 @@ class DefaultGraphDeploymentObservabilityTest {
               </graph>
             </graphml>
             """;
+
+    @Test
+    void viewerDefinitionIsDeferredUntilSuccessfulStartupAndAbsentAfterParseFailure() throws Exception {
+        var engine = new JoinTestEngine();
+        try {
+            var valid = new DefaultGraphDeployment(DeploymentId.of("viewer-ready"), engine,
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                    ExecutionIdentitySource.randomUuids(), graphBytes(),
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
+            assertTrue(valid.immutableDefinition().isEmpty(),
+                    "construction must not parse or publish a viewer definition");
+            assertEquals(DeploymentState.READY,
+                    valid.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS).state());
+            assertTrue(valid.immutableDefinition().isPresent());
+            valid.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            var invalid = new DefaultGraphDeployment(DeploymentId.of("viewer-failed"), engine,
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                    ExecutionIdentitySource.randomUuids(), "not graphml".getBytes(StandardCharsets.UTF_8),
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
+            assertTrue(invalid.immutableDefinition().isEmpty(),
+                    "an unparseable document must still be constructible under the deferred-start contract");
+            assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> invalid.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS));
+            assertEquals(DeploymentState.FAILED, invalid.status().state());
+            assertTrue(invalid.immutableDefinition().isEmpty(),
+                    "failed startup must not leave a viewer definition behind");
+        } finally {
+            engine.close();
+        }
+    }
 
     @Test
     void everyEventOfADeploymentTraversalCarriesTheSameDeploymentAndWorkloadIdentityAndTwoTraversalsDiffer()

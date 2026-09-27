@@ -189,6 +189,13 @@ final class Transactions {
     private Connection open() throws SQLException {
         Connection connection = dataSource.getConnection();
         try {
+            // A deployment pool may lend autocommit=false (the server's Hikari pool does).
+            // SET bounds must not accidentally begin the transaction before readConsistent can
+            // select its isolation level. Discard any uncommitted borrowed state, never commit it.
+            if (!connection.getAutoCommit()) {
+                connection.rollback();
+                connection.setAutoCommit(true);
+            }
             connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             applyBounds(connection);
             return connection;

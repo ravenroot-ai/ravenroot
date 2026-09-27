@@ -46,6 +46,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -146,7 +147,7 @@ class PythonProgramNodeLiveExecutionTest {
         }
     }
 
-    private static SandboxPolicy policy() {
+    static SandboxPolicy policy() {
         Duration deadline = Duration.ofSeconds(150);
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
         return new SandboxPolicy(deadline, Math.toIntExact(deadline.toMillis()), 128, 32, 256, 64,
@@ -179,9 +180,18 @@ class PythonProgramNodeLiveExecutionTest {
      * child JVM and speaks the real supervisor wire framing around its stdout. See the class Javadoc
      * for why this is legitimate plumbing rather than a stand-in for the evidence under test.
      */
-    private static final class LiveGraalVmWorkerSupervisor implements SandboxSupervisorLauncher {
+    static final class LiveGraalVmWorkerSupervisor implements SandboxSupervisorLauncher {
         private static final Path JAVA = Path.of(System.getProperty("java.home"), "bin", "java");
         private static final int SUPERVISOR_MAGIC = 0x52525331;
+        private final AtomicInteger workerStarts;
+
+        LiveGraalVmWorkerSupervisor() {
+            this(new AtomicInteger());
+        }
+
+        LiveGraalVmWorkerSupervisor(AtomicInteger workerStarts) {
+            this.workerStarts = workerStarts;
+        }
 
         @Override
         public void verifyCapability() {
@@ -192,6 +202,7 @@ class PythonProgramNodeLiveExecutionTest {
         public SandboxSupervisorSession launch(SandboxPolicy policy) throws IOException {
             Process process = new ProcessBuilder(JAVA.toString(), "-cp", System.getProperty("java.class.path"),
                     GraalVmWorkerMain.class.getName()).start();
+            workerStarts.incrementAndGet();
             return new LiveSession(process);
         }
 

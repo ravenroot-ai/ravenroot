@@ -4,6 +4,8 @@
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
 ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-21@sha256:2b4496088e7b80ae10a8c9f74e574ea21380325a006ec684532ad6bad5bc7273
 ARG RUNTIME_IMAGE=eclipse-temurin:21-jre-noble@sha256:373787d1d45a87f084fda43e7de0e9acf5eedee049446efac738f13587ec4c64
+# Used only by the explicit trusted-local runner target. service.sh requires an operator-pinned digest.
+ARG DOCKER_CLI_IMAGE=scratch
 
 FROM ${NODE_IMAGE} AS ui-build
 WORKDIR /workspace/ravenroot-ui
@@ -160,3 +162,10 @@ STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
     CMD ["java", "-cp", "/opt/ravenroot/ravenroot.jar", "ai.ravenroot.server.RavenrootHealthcheck"]
 ENTRYPOINT ["java", "-jar", "/opt/ravenroot/ravenroot.jar"]
+
+FROM ${DOCKER_CLI_IMAGE} AS local-docker-cli
+FROM runtime AS local-runner
+COPY --from=local-docker-cli /usr/local/bin/docker /usr/bin/docker
+
+# The ordinary published/default image has neither a Docker client nor host-daemon authority.
+FROM runtime AS final

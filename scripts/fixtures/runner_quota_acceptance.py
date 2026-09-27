@@ -8,6 +8,7 @@ quotas and a separate classic-overlay2 daemon are prerequisites, never inferred 
 from __future__ import annotations
 
 import grp
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,13 +20,19 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+import importlib.util
+
+_endpoint_spec = importlib.util.spec_from_file_location("model_protocol_endpoint", Path(__file__).with_name("model_protocol_endpoint.py"))
+_endpoint_module = importlib.util.module_from_spec(_endpoint_spec)
+_endpoint_spec.loader.exec_module(_endpoint_module)
+ModelProtocolEndpoint = _endpoint_module.ModelProtocolEndpoint
 
 ROOT = Path(__file__).resolve().parents[2]
 # Official Python 3.13.15 / Alpine 3.24, linux/amd64; immutable manifest inspected during review.
 BASE_IMAGE = "python@sha256:46ee549c88617e9bc8acb843a326f1a5c0fa5608d7f9703509efe6d53b55f318"
 TEST = "writableContainerDevelopmentCycleUsesRealWorkspaceAcrossEveryRestart"
 TEST_CLASS = "ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest"
-TOOLS = ("sudo", "dockerd", "docker", "mkfs.xfs", "mount", "umount", "findmnt", "mvn")
+TOOLS = ("sudo", "dockerd", "docker", "ip", "mkfs.xfs", "mount", "umount", "findmnt", "mvn")
 DAEMON_READY_SECONDS = 60
 DAEMON_PROBE_SECONDS = 5
 DIAGNOSTIC_BYTES = 16 * 1024
@@ -39,10 +46,51 @@ def prerequisites(environment: dict[str, str]) -> Path:
     for tool in TOOLS:
         if shutil.which(tool) is None:
             raise RuntimeError(f"quota acceptance prerequisite missing: {tool}; no packages are installed implicitly")
+    if environment.get("RAVENROOT_RUNNER_ACCEPTANCE_CONFIG"):
+        raise RuntimeError("CI acceptance is secretless: external model configuration is forbidden")
     parent = Path(environment["RUNNER_TEMP"]).resolve(strict=True)
     if not parent.is_dir() or parent == Path("/"):
         raise RuntimeError("an existing dedicated runner temporary directory is required")
     return parent
+
+
+def bridge_name(directory: Path) -> str:
+    return "rrq" + hashlib.sha256(str(directory).encode()).hexdigest()[:12]
+
+
+def bridges(command) -> dict:
+    return {link["ifname"]: {key: link.get(key) for key in ("ifindex", "address", "ifalias")}
+            for link in json.loads(command(["ip", "-json", "-details", "link", "show", "type", "bridge"]))}
+
+
+def create_bridge(directory: Path, command) -> dict:
+    # --bridge=none is NOT isolated: Moby removes the host docker0 interface. An
+    # exclusively created user-managed bridge avoids that branch. Docker IPAM chooses
+    # an unused subnet; Agent containers continue to use network=none, never this bridge.
+    name = bridge_name(directory)
+    command(["sudo", "-n", "ip", "link", "add", "name", name, "type", "bridge"])
+    command(["sudo", "-n", "ip", "link", "set", "dev", name, "alias", directory.name])
+    identity = bridges(command).get(name)
+    if identity is None or identity["ifalias"] != directory.name:
+        raise RuntimeError("private bridge creation is unconfirmed; retaining fixture")
+    return identity
+
+
+def remove_bridge(directory: Path, command, identity: dict) -> None:
+    name = bridge_name(directory)
+    current = bridges(command).get(name)
+    if (current is None or current["ifalias"] != directory.name
+            or current["ifindex"] != identity["ifindex"]):
+        raise RuntimeError("private bridge ownership is unconfirmed; retaining fixture")
+    command(["sudo", "-n", "ip", "link", "delete", "dev", name, "type", "bridge"])
+    if name in bridges(command):
+        raise RuntimeError("private bridge remains; retaining fixture")
+
+
+def verify_bridges(before: dict, command) -> None:
+    after = bridges(command)
+    if any(after.get(name) != identity for name, identity in before.items()):
+        raise RuntimeError("a pre-existing host bridge changed during quota acceptance")
 
 
 def daemon_arguments(directory: Path) -> list[str]:
@@ -50,8 +98,8 @@ def daemon_arguments(directory: Path) -> list[str]:
             "--data-root=" + str(directory / "xfs" / "docker"), "--exec-root=" + str(directory / "exec"),
             "--pidfile=" + str(directory / "daemon.pid"), "--host=unix://" + str(directory / "docker.sock"),
             "--group=" + grp.getgrgid(os.getgid()).gr_name, "--storage-driver=overlay2",
-            "--feature=containerd-snapshotter=false", "--bridge=none", "--iptables=false",
-            "--ip6tables=false", "--ip-masq=false"]
+            "--feature=containerd-snapshotter=false", "--bridge=" + bridge_name(directory), "--iptables=false",
+            "--ip6tables=false", "--ip-masq=false", "--ip-forward=false"]
 
 
 def wait_for_daemon(daemon: subprocess.Popen, directory: Path, environment: dict[str, str]) -> dict:
@@ -138,7 +186,64 @@ def verify_report(path: Path) -> None:
             or cases[0].get("classname") != TEST_CLASS
             or cases[0].get("name") != TEST + "(Path)"
             or any(child.tag not in ("system-out", "system-err") for child in cases[0])):
-        raise RuntimeError("the writable nine-job acceptance did not execute successfully exactly once")
+        raise RuntimeError("the hermetic model-protocol explicit Workspace acceptance did not execute successfully exactly once")
+
+
+def mounted_paths() -> set[Path]:
+    """Read this mount namespace, including Docker's surviving bind-mounted netns."""
+    return {Path(re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), line.split()[4]))
+            for line in Path("/proc/self/mountinfo").read_text().splitlines()}
+
+
+def cleanup(parent: Path, directory: Path, daemon: subprocess.Popen | None, command,
+            bridge_identity=None, bridge_attempted=False) -> None:
+    """Stop the exact private daemon, then unmount its children before deleting owned files.
+
+    A failed ownership/quiescence/unmount check retains the directory for diagnosis. Neither
+    lazy unmount nor recursive deletion across a remaining mount is an acceptable fallback.
+    """
+    if (directory.parent != parent or not directory.name.startswith("ravenroot-runner-quota-")
+            or directory.resolve(strict=True) != directory):
+        raise RuntimeError("refusing cleanup outside the exact fixture directory")
+    if bridge_attempted and bridge_identity is None:
+        raise RuntimeError("private bridge creation is unconfirmed; retaining fixture")
+    if daemon is not None:
+        pid_file = directory / "daemon.pid"
+        if pid_file.exists():
+            pid = int(pid_file.read_text().strip())
+            if pid <= 1:
+                raise RuntimeError("refusing invalid private daemon identity")
+            process = Path(f"/proc/{pid}/cmdline")
+            try:
+                arguments = process.read_bytes().split(b"\0")
+            except FileNotFoundError:
+                arguments = None  # Already exited; no signal is necessary.
+            if arguments is not None:
+                required = ("--data-root=" + str(directory / "xfs/docker"),
+                            "--exec-root=" + str(directory / "exec"),
+                            "--pidfile=" + str(pid_file), "--host=unix://" + str(directory / "docker.sock"))
+                if not all(value.encode() in arguments for value in required):
+                    raise RuntimeError("refusing cleanup of a daemon outside this fixture")
+                command(["sudo", "-n", "kill", "-TERM", str(pid)])
+                daemon.wait(timeout=30)
+                if process.exists():
+                    raise RuntimeError("private daemon shutdown is unconfirmed; retaining fixture")
+        elif daemon.poll() is None:
+            raise RuntimeError("private daemon identity is unavailable; retaining fixture")
+        daemon.wait(timeout=30)
+    if bridge_identity is not None:
+        remove_bridge(directory, command, bridge_identity)
+    owned = {path for path in mounted_paths() if path == directory or directory in path.parents}
+    roots = (directory / "exec", directory / "xfs")
+    if any(not any(path == root or root in path.parents for root in roots) for path in owned):
+        raise RuntimeError("unexpected mount in fixture; refusing deletion")
+    # dockerd can leave exec/netns/default mounted even after a graceful exit. Containers'
+    # overlay mounts, if any, must likewise be detached before the backing XFS loop mount.
+    for path in sorted(owned, key=lambda value: (len(value.parts), str(value)), reverse=True):
+        command(["sudo", "-n", "umount", "--", str(path)])
+    if any(path == directory or directory in path.parents for path in mounted_paths()):
+        raise RuntimeError("fixture mounts remain; refusing deletion")
+    command(["sudo", "-n", "rm", "-rf", "--one-file-system", "--", str(directory)])
 
 
 def run() -> None:
@@ -148,7 +253,8 @@ def run() -> None:
     image_file = directory / "quota.img"
     mountpoint = directory / "xfs"
     daemon = None
-    mounted = False
+    bridge_identity = None
+    bridge_attempted = False
     environment = dict(os.environ)
     # Do not permit an ambient Docker context/TLS configuration to redirect the fixture or test.
     for key in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"):
@@ -159,6 +265,7 @@ def run() -> None:
         return subprocess.run(arguments, check=True, timeout=timeout, env=environment,
                               text=True, stdout=subprocess.PIPE).stdout.strip()
 
+    before_bridges = bridges(command)
     try:
         with image_file.open("xb") as image:
             image.truncate(4 * 1024 * 1024 * 1024)
@@ -166,10 +273,11 @@ def run() -> None:
         (directory / "daemon.json").write_text("{}\n", encoding="utf-8")
         command(["mkfs.xfs", "-f", "-n", "ftype=1", str(image_file)])
         command(["sudo", "-n", "mount", "-o", "loop,pquota", str(image_file), str(mountpoint)])
-        mounted = True
         filesystem = json.loads(command(["findmnt", "--json", "--mountpoint", str(mountpoint), "-o", "FSTYPE,OPTIONS"]))["filesystems"][0]
         if filesystem["fstype"] != "xfs" or not {"prjquota", "pquota"}.intersection(filesystem["options"].split(",")):
             raise RuntimeError("the fixture filesystem does not enforce XFS project quotas")
+        bridge_attempted = True
+        bridge_identity = create_bridge(directory, command)
         with (directory / "daemon.log").open("wb") as log:
             daemon = subprocess.Popen(daemon_arguments(directory), stdout=log, stderr=subprocess.STDOUT, env=environment)
         info = wait_for_daemon(daemon, directory, environment)
@@ -177,40 +285,54 @@ def run() -> None:
               "dockerVersion": info["ServerVersion"], "baseImage": BASE_IMAGE}), flush=True)
         command(["docker", "pull", BASE_IMAGE], 180)
         tag = "ravenroot-quota-acceptance:fixture"
-        command(["docker", "build", "--network=none", "--build-arg", "BASE_IMAGE=" + BASE_IMAGE,
+        # Build-time package installation is trusted image construction, not Agent egress.
+        # Every runtime is still network=none and carries neither workload nor model credentials.
+        command(["docker", "build", "--network=host", "--build-arg", "BASE_IMAGE=" + BASE_IMAGE,
+                 "-f", str(ROOT / "docs/examples/governed-runner/Agent.Dockerfile"),
                  "-t", tag, str(ROOT / "docs/examples/governed-runner")], 180)
         image = command(["docker", "image", "inspect", "--format={{.Id}}", tag])
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
             raise RuntimeError("the fixture image does not have an immutable local identity")
+        # Writable container root deliberately matches PER_WORKSPACE. Landlock/seccomp, not a
+        # read-only Docker root or a cooperative model, must prevent the adversarial mutations.
+        confinement = command(["docker", "run", "--rm", "--network=none", "--cap-drop=ALL",
+                               "--security-opt=no-new-privileges", "--user=65532:65532", "--pids-limit=32",
+                               "--memory=128m", "--cpus=1", "--storage-opt", "size=64m",
+                               "--entrypoint=python3", image, "/opt/security_acceptance.py"])
+        if not confinement.startswith("RUNNER_NATIVE_READ_ONLY_CONFINEMENT="):
+            raise RuntimeError("native confinement did not produce its positive evidence")
+        print(confinement, flush=True)
         report = ROOT / "ravenroot/ravenroot-core/target/surefire-reports/TEST-ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest.xml"
         if report.exists():
             report.unlink()  # Exact fixture report only; a stale green report is not acceptance.
-        subprocess.run(["mvn", "-B", "--no-transfer-progress", "-f", str(ROOT / "ravenroot/pom.xml"),
+        with ModelProtocolEndpoint() as model:
+            config = directory / "hermetic-model.json"
+            config.write_text(json.dumps(model.configuration()), encoding="utf-8")
+            subprocess.run(["mvn", "-B", "--no-transfer-progress", "-f", str(ROOT / "ravenroot/pom.xml"),
                         "-pl", "ravenroot-core", "-am", "-Dtest=WorkspaceAgentRuntimeTest#" + TEST,
                         "-Dsurefire.failIfNoSpecifiedTests=false", "-Dravenroot.runner.testWritableImage=" + image,
+                        "-Dravenroot.runner.testAgentConfiguration=" + str(config),
+                        "-Dravenroot.runner.testHermeticModel=true",
                         "-Dravenroot.runner.testDocker=" + str(Path(shutil.which("docker")).resolve()), "test"],
-                       check=True, timeout=900, env=environment)
+                           check=True, timeout=900, env=environment)
+            if model.requests == 0:
+                raise RuntimeError("production model gateway never called the hermetic endpoint")
         verify_report(report)
-        print("RUNNER_WRITABLE_NINE_JOB_ACCEPTANCE=passed", flush=True)
+        print("RUNNER_HERMETIC_MODEL_PROTOCOL_EXPLICIT_WORKSPACE_ACCEPTANCE=passed", flush=True)
     finally:
-        # Never address the host's default daemon or perform a global Docker prune.
-        if daemon is not None and daemon.poll() is None:
-            pid_file = directory / "daemon.pid"
-            if not pid_file.is_file():
-                daemon.terminate()
-                daemon.wait(timeout=30)
-            else:
-                pid = int(pid_file.read_text().strip())
-                arguments = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-                if ("--data-root=" + str(mountpoint / "docker")).encode() not in arguments:
-                    raise RuntimeError("refusing cleanup of a daemon outside this fixture")
-                command(["sudo", "-n", "kill", "-TERM", str(pid)])
-                daemon.wait(timeout=30)
-        if mounted:
-            command(["sudo", "-n", "umount", str(mountpoint)])
-        if directory.parent != parent or not directory.name.startswith("ravenroot-runner-quota-"):
-            raise RuntimeError("refusing cleanup outside the exact fixture directory")
-        command(["sudo", "-n", "rm", "-rf", "--", str(directory)])
+        primary = sys.exc_info()[1]
+        try:
+            cleanup(parent, directory, daemon, command, bridge_identity, bridge_attempted)
+            verify_bridges(before_bridges, command)
+            print("RUNNER_QUOTA_HOST_BRIDGES=preserved", flush=True)
+        except Exception as failure:
+            # Keep Maven/native enforcement failures primary. A green body with failed
+            # cleanup still fails the gate; no error is silently swallowed.
+            print("RUNNER_QUOTA_CLEANUP_FAILURE=" + json.dumps({"directory": str(directory),
+                  "error": str(failure), "primary": type(primary).__name__ if primary else None}),
+                  file=sys.stderr, flush=True)
+            if primary is None:
+                raise
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.TrustManagerFactory;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -112,14 +113,14 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
                         if (!scriptRelease.await(4, TimeUnit.SECONDS)) {
                             throw new IOException("script release timeout");
                         }
-                        scripted(peer, scriptedFrames.get(index));
+                        scripted(peer.getOutputStream(), scriptedFrames.get(index));
                     }
-                } finally {
-                    completed.countDown();
                 }
             }
         } catch (Throwable problem) {
             if (!closed.get()) failure = problem;
+        } finally {
+            // Publish failure before waking a waiter, including when the last connection fails.
             while (completed.getCount() > 0) completed.countDown();
         }
     }
@@ -152,10 +153,16 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
         writeFrame(output, 0x88, new byte[]{0x03, (byte) 0xE8});
     }
 
-    private static void scripted(Socket peer, List<ServerFrame> frames) throws IOException {
-        OutputStream output = peer.getOutputStream();
-        for (ServerFrame frame : frames) writeFrame(output, frame.firstByte(), frame.payload());
-        writeFrame(output, 0x88, new byte[]{0x03, (byte) 0xE8});
+    static void scripted(OutputStream output, List<ServerFrame> frames) throws IOException {
+        // A limit refusal correctly aborts the peer. Send the unchanged, small frame script in
+        // one TLS application write so the trailing close cannot race that abort in a later write.
+        // WebSocket frame boundaries remain explicit; no transport exception is suppressed.
+        var script = new ByteArrayOutputStream();
+        for (ServerFrame frame : frames) writeFrame(script, frame.firstByte(), frame.payload());
+        writeFrame(script, 0x88, new byte[]{0x03, (byte) 0xE8});
+        if (script.size() > 16 * 1024) throw new IOException("script exceeds one TLS application record");
+        output.write(script.toByteArray());
+        output.flush();
     }
 
     private static Handshake readHandshake(InputStream input) throws IOException {

@@ -12,7 +12,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerWorkerTest {
-    @Test void designatedWorkerRunsIndependentProcessesConcurrentlyWithinFourSlots() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {2, 7})
+    void designatedWorkerRunsIndependentProcessesWithinConfiguredCapacity(int capacity) throws Exception {
         var policy = new RunnerPolicy(Set.of(RunnerPolicy.Capability.WORKSPACE_READ), Set.of(), Set.of(), Set.of(), Set.of(),
                 new RunnerPolicy.Limits(Duration.ofMinutes(5), 64_000_000, 1, 1_000_000, 4096, 1024, 4096));
         var definition = new AgentDefinition(new AgentDefinition.Reference("tenant", "reader", 1), "Read only", "reference", "none",
@@ -21,7 +23,7 @@ class RunnerWorkerTest {
         var assignments = new ConcurrentHashMap<UUID, RunnerAssignment>();
         var futures = new LinkedHashMap<UUID, CompletableFuture<RunnerResult>>();
         var claims = new AtomicInteger();
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < capacity + 1; i++) {
             var id = new RunnerJobIdentity(new ExecutionKey("tenant", UUID.randomUUID()), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
             var now = Instant.now();
             var job = RunnerJob.accept(id, definition, "read", policy, registration, OpaquePayload.of("{}".getBytes(), "application/json"), now, now.plusSeconds(300));
@@ -61,27 +63,32 @@ class RunnerWorkerTest {
             public CompletionStage<RunnerResult> reconcile(RunnerAssignment assignment) { throw new AssertionError("queued jobs execute once"); }
             public void close() { }
         };
-        try (var worker = new RunnerWorker(new RemoteRunnerClient(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), () -> "test-workload"), driver)) {
+        var defaults = RunnerWorkerConfiguration.defaults();
+        var configuration = new RunnerWorkerConfiguration(capacity, defaults.pollInterval(), defaults.heartbeatInterval(),
+                defaults.cleanupTimeout(), defaults.shutdownTimeout());
+        try (var worker = new RunnerWorker(new RemoteRunnerClient(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), () -> "test-workload"), driver, configuration)) {
             var gauges = new ArrayList<Integer>();
             var failures = new AtomicInteger();
             worker.telemetry().install(new RunnerTelemetry() {
                 public void increment(Counter counter) { assertEquals(Counter.WORKER_FAILURE, counter); failures.incrementAndGet(); }
                 public void activeJobs(int count) { gauges.add(count); }
             });
-            worker.tick(); assertEquals(4, worker.activeJobs()); assertEquals(4, futures.size());
-            assertEquals(4, gauges.getLast());
-            assertEquals(4, futures.keySet().stream().map(id -> assignments.get(id).workspaceId()).distinct().count());
-            worker.tick(); assertEquals(4, claims.get(), "full capacity does not claim another execution");
+            worker.tick(); assertEquals(capacity, worker.activeJobs()); assertEquals(capacity, futures.size());
+            assertEquals(capacity, worker.capacity()); assertEquals(0, worker.availableJobs());
+            assertEquals(capacity, gauges.getLast());
+            assertEquals(capacity, futures.keySet().stream().map(id -> assignments.get(id).workspaceId()).distinct().count());
+            worker.tick(); assertEquals(capacity, claims.get(), "full capacity does not claim another execution");
             var first = futures.entrySet().iterator().next();
             first.getValue().complete(new RunnerResult("answered", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), first.getKey()));
-            assertEquals(3, worker.activeJobs());
-            assertEquals(3, gauges.getLast());
-            worker.tick(); assertEquals(4, worker.activeJobs()); assertEquals(5, futures.size()); assertEquals(5, claims.get());
+            assertEquals(capacity - 1, worker.activeJobs());
+            assertEquals(1, worker.availableJobs());
+            assertEquals(capacity - 1, gauges.getLast());
+            worker.tick(); assertEquals(capacity, worker.activeJobs()); assertEquals(capacity + 1, futures.size()); assertEquals(capacity + 1, claims.get());
             assertEquals(0, worker.protocolFailures());
             futures.values().stream().filter(value -> !value.isDone()).findFirst().orElseThrow()
                     .completeExceptionally(new IllegalStateException("worker transport failed"));
             assertEquals(1, failures.get());
-            assertEquals(3, gauges.getLast());
+            assertEquals(capacity - 1, gauges.getLast());
         } finally { server.stop(0); }
     }
 }

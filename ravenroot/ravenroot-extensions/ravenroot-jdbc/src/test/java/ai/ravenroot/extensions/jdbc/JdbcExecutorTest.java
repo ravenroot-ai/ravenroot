@@ -25,6 +25,15 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcExecutorTest {
+    /**
+     * Failure deadline for waits on cleanup the executor performs after the caller's stage has
+     * already completed. It is not a timing assumption: every wait below returns the moment its
+     * latch trips, so this bound is only how long the test is willing to call the work missing.
+     * It is deliberately far above any plausible scheduling delay, because a shorter bound makes a
+     * loaded machine indistinguishable from a broken one.
+     */
+    private static final long CLEANUP_DEADLINE_SECONDS = 30;
+
     @Test void queryUsesOneCredentialExactBindingsReadOnlyRollbackAndBoundedOrderedRows() {
         JdbcStatementProfile statement = JdbcTestSupport.query("SELECT id,name FROM users WHERE name=:name");
         JdbcProfile profile = JdbcTestSupport.profile(statement);
@@ -258,12 +267,14 @@ class JdbcExecutorTest {
         JdbcStatementProfile statement = JdbcTestSupport.query("SELECT id FROM users");
         JdbcProfile profile = JdbcTestSupport.profile("tenant-a", "main", statement, 100, 1);
         FakeJdbc.State state = new FakeJdbc.State(); state.columns = List.of("id"); state.rows = List.of(List.of(1L)); state.block();
+        state.observeCancellationCleanup();
         CompletionException thrown = assertThrows(CompletionException.class, () -> executor(profile, state)
                 .execute(JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
                         JdbcTestSupport.services("pw", new AtomicInteger()), "main", "find",
                         JdbcStatementProfile.Kind.QUERY).join());
         assertEquals(JdbcFailure.Code.DEADLINE_EXCEEDED, JdbcTestSupport.failure(thrown).code());
-        for (int attempt = 0; attempt < 100 && state.closes.get() == 0; attempt++) Thread.sleep(5);
+        assertTrue(state.closeEntered.await(CLEANUP_DEADLINE_SECONDS, TimeUnit.SECONDS),
+                "the deadline must close the connection after the caller's stage completes");
         assertTrue(state.cancels.get() > 0 || state.aborts.get() > 0);
         assertTrue(state.closes.get() > 0);
     }
@@ -273,6 +284,7 @@ class JdbcExecutorTest {
         JdbcProfile profile = JdbcTestSupport.profile("tenant-a", "main", statement, 100, 1);
         FakeJdbc.State state = new FakeJdbc.State();
         state.columns = List.of("id"); state.rows = List.of(List.of(1L)); state.block(); state.blockCancel();
+        state.observeCancellationCleanup();
         JdbcExecutor executor = executor(profile, state);
 
         CompletionException thrown = assertThrows(CompletionException.class, () -> executor
@@ -281,12 +293,16 @@ class JdbcExecutorTest {
                         JdbcStatementProfile.Kind.QUERY).join());
 
         assertEquals(JdbcFailure.Code.DEADLINE_EXCEEDED, JdbcTestSupport.failure(thrown).code());
-        assertTrue(state.cancelEntered.await(1, TimeUnit.SECONDS));
-        for (int attempt = 0; attempt < 100 && state.aborts.get() + state.closes.get() < 2; attempt++) Thread.sleep(5);
+        assertTrue(state.cancelEntered.await(CLEANUP_DEADLINE_SECONDS, TimeUnit.SECONDS));
+        assertTrue(state.abortEntered.await(CLEANUP_DEADLINE_SECONDS, TimeUnit.SECONDS),
+                "connection abort must run independently of blocked cancel");
+        assertTrue(state.closeEntered.await(CLEANUP_DEADLINE_SECONDS, TimeUnit.SECONDS),
+                "connection close must run independently of blocked cancel");
         assertTrue(state.aborts.get() > 0, "connection abort must run independently of blocked cancel");
         assertTrue(state.closes.get() > 0, "connection close must run independently of blocked cancel");
 
-        for (int attempt = 0; attempt < 100; attempt++) {
+        long admissionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CLEANUP_DEADLINE_SECONDS);
+        do {
             try {
                 executor.execute(JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
                         JdbcTestSupport.services("next", new AtomicInteger()), "main", "find",
@@ -297,7 +313,7 @@ class JdbcExecutorTest {
                 if (JdbcTestSupport.failure(refused).code() != JdbcFailure.Code.ADMISSION_REFUSED) throw refused;
                 Thread.sleep(5);
             }
-        }
+        } while (System.nanoTime() - admissionDeadline < 0);
         state.cancelRelease.countDown();
         throw new AssertionError("blocked Statement.cancel retained admission after the worker unwound");
     }

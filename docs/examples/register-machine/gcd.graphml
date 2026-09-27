@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="g-join" for="graph" attr.name="join.semantics" attr.type="string"/><key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="operation" for="node" attr.name="operation" attr.type="string"/><key id="left" for="node" attr.name="left" attr.type="string"/><key id="right" for="node" attr.name="right" attr.type="string"/><key id="target" for="node" attr.name="target" attr.type="string"/>
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/><key id="true" for="node" attr.name="trueOutcome" attr.type="string"/><key id="false" for="node" attr.name="falseOutcome" attr.type="string"/><key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="register-gcd" edgedefault="directed"><data key="g-join">declared</data>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="set-a"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:1071</data><data key="target">a</data></node>
+    <node id="set-b"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:462</data><data key="target">b</data></node>
+    <node id="zero-test"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">equal</data><data key="left">field:b</data><data key="right">literal:0</data><data key="target">bIsZero</data></node>
+    <node id="branch"><data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data><data key="expression">payload.bIsZero</data><data key="true">done</data><data key="false">again</data></node>
+    <node id="remainder"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">modulo</data><data key="left">field:a</data><data key="right">field:b</data><data key="target">remainder</data></node>
+    <node id="move-b"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">field:b</data><data key="target">a</data></node>
+    <node id="move-remainder"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">field:remainder</data><data key="target">b</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="e0" source="start" target="set-a"/><edge id="e1" source="set-a" target="set-b"/><edge id="e2" source="set-b" target="zero-test"/><edge id="e3" source="zero-test" target="branch"/>
+    <edge id="e4" source="branch" target="end"><data key="outcome">done</data></edge><edge id="e5" source="branch" target="remainder"><data key="outcome">again</data></edge>
+    <edge id="e6" source="remainder" target="move-b"/><edge id="e7" source="move-b" target="move-remainder"/><edge id="e8" source="move-remainder" target="zero-test"/>
+  </graph>
+</graphml>

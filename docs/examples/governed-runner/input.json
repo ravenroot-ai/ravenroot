@@ -1,7 +1,4 @@
 {
-  "files": {
-    "hello.py": "def add(a, b):\n    return a - b\n",
-    "test_hello.py": "import unittest\nfrom hello import add\n\nclass HelloTest(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n"
-  },
-  "remediationFiles": {"hello.py": "def add(a, b):\n    return a + b\n"}
+  "objective": "Inspect the disposable Git repository, record a plan, observe the failing baseline, remediate the addition defect, run the approved tests, and obtain read-only review.",
+  "constraints": "Preserve the same repository and uncommitted changes through every handoff. Never claim a test passed without the test tool result. Do not commit changes."
 }

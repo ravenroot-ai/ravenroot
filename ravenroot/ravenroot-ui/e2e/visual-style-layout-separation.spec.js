@@ -17,6 +17,10 @@ const state = page => page.evaluate(() => {
     renderer: owner.renderer.kind,
     history: owner.history.state(),
     positions: Object.fromEntries(owner.cy.nodes().map(node => [node.id(), node.position()])),
+    modelPositions: Object.fromEntries(owner.graph.nodes.map(node => [
+      node.id,
+      { x: node.ox, y: node.oy },
+    ])),
     routed: owner.cy.edges().toArray()
       .every(edge => edge.style('curve-style') === 'unbundled-bezier'),
   };
@@ -24,6 +28,7 @@ const state = page => page.evaluate(() => {
 
 async function chooseDesign(page) {
   await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   await expect(page.locator('.doc-pane--active')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', {
     timeout: 10_000,
@@ -38,7 +43,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('Design is one complete render mode that relayouts and routes without editing history', async ({ page }) => {
+test('explicit Design Render relayouts, routes, and records authoritative geometry', async ({ page }) => {
   const before = await state(page);
   await page.evaluate(() => {
     window.cy.nodes().forEach((node, index) =>
@@ -50,9 +55,27 @@ test('Design is one complete render mode that relayouts and routes without editi
 
   expect(after).toMatchObject({
     renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto',
-    renderer: 'cytoscape', history: before.history, routed: true,
+    renderer: 'cytoscape', routed: true,
+    modelPositions: after.positions,
+    history: {
+      depth: before.history.depth + 1,
+      dirty: true,
+      canUndo: true,
+      undoLabel: 'Render graph',
+    },
   });
   expect(after.positions).not.toEqual(scrambled);
+
+  await page.locator('#btn-undo').click();
+  await expect.poll(async () => (await state(page)).positions).toEqual(before.positions);
+  expect(await state(page)).toMatchObject({
+    modelPositions: before.modelPositions,
+    history: {
+      depth: before.history.depth,
+      dirty: before.history.dirty,
+      canUndo: before.history.canUndo,
+    },
+  });
 });
 
 test('Monitoring and Design remain isolated per document as semantic choices', async ({ page }) => {

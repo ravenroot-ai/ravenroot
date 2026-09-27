@@ -78,7 +78,22 @@ public enum AuthorizationAction {
     /** Reserved tool-invocation permission, not exposed by this API version. */
     TOOL_INVOKE("ravenroot.tool.invoke", false),
     /** Reserved administrative permission, not exposed by this API version. */
-    ADMIN("ravenroot.admin", false);
+    ADMIN("ravenroot.admin", false),
+
+    /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
+    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true),
+
+    /** Discover runs only within one embed registration's exact deployment binding. */
+    EMBED_DEPLOYMENT_RUN_READ("ravenroot.embed.deployment.runs.read", true),
+
+    /** Start one idempotent traversal through an exact embed deployment binding. */
+    EMBED_DEPLOYMENT_EXECUTE("ravenroot.embed.deployment.execute", true),
+
+    /** Explicitly override one Human Task decision policy with attributable operator intent. */
+    HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true),
+
+    /** Discover the caller tenant's process-local deployments that are currently ready to embed. */
+    EMBED_DEPLOYMENT_DISCOVER("ravenroot.embed.deployment.discover", true);
 
     private final String requiredScope;
     private final boolean available;

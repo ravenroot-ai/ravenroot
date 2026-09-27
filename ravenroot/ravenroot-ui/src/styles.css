@@ -230,15 +230,15 @@
     .application-menu-shortcut { color: var(--tx-3); font-size: 11px; white-space: nowrap; }
     .application-menu-separator { height: 1px; margin: 4px 6px; background: var(--bd); }
     #topbar.density-hide-view .view-mirrors,
-    #topbar.density-hide-file .file-mirrors,
-    #topbar.density-hide-monitoring-controls #elastic-ctrl { display: none !important; }
+    #topbar.density-hide-file .file-mirrors { display: none !important; }
     #graph-title {
       font-size: 13px; color: var(--tx-2);
       max-width: 240px; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap;
     }
     .document-switcher {
-      min-width: 32px; max-width: 360px; height: 32px; flex: 0 1 360px;
+      /* Do not collapse under the pointer when blur-time autosave widens the dirty label. */
+      min-width: 64px; max-width: 360px; height: 32px; flex: 0 1 360px;
       display: inline-flex; align-items: center; gap: 6px;
       padding: 0 8px; border: 1px solid transparent; border-radius: 4px;
       background: transparent; color: var(--tx-2); font: inherit; cursor: pointer;
@@ -1252,6 +1252,22 @@
     .deployment-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .deployment-item-actions .btn { font-size: 9px; padding: 2px 8px; }
     .deployment-item-actions small { color: var(--tx-2); font-size: 9px; }
+    .deployment-item-actions .lifecycle-unavailable-reason,
+    .deployment-item-actions .lifecycle-drain-bound { flex-basis: 100%; }
+    .deployment-item-actions .lifecycle-unavailable-reason { color: var(--outcome-warning-text); }
+    .deployment-operational-target, .process-select { align-self: flex-start; }
+    .lifecycle-processes { border-top: 1px solid var(--bd); margin-top: 14px; padding-top: 12px; }
+    .lifecycle-process-item { gap: 7px; }
+    .lifecycle-process-item b { overflow-wrap: anywhere; }
+    .process-item-actions .danger { color: var(--outcome-error-text); border-color: var(--outcome-error-text); }
+
+    @media (max-width: 640px) {
+      .deployments-dialog { width: min(100vw - 16px, 720px); max-height: calc(100vh - 16px); }
+      .deployment-item-head { align-items: flex-start; flex-direction: column; }
+      .deployment-item-actions .btn, .deployment-operational-target, .process-select {
+        min-height: 36px;
+      }
+    }
 
     /* ── STAGE COLUMN ─────────────────────────────────────────────────────────────────────────
        The graph and the bottom dock, stacked. The dock is a SIBLING of #cy-wrap and it PUSHES:
@@ -1434,6 +1450,10 @@
     /* The canvas fills what the strip leaves. It is created inside its pane and never moved: moving
        it stops Cytoscape painting, and resize/fit/forceRender do not bring it back. */
     .doc-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+    /* A document with no authored coordinates has no honest preset frame to show. Keep only that
+       initial canvas visually withheld until its selected finite arrangement and routing settle;
+       the pane header and live busy announcement remain available throughout. */
+    .doc-canvas--initial-layout-pending { opacity: 0; pointer-events: none; }
     /* ELK cannot be cancelled once its worker result has entered Cytoscape's animation. The canvas
        is therefore one accessible busy operation through final edge routing: document switching
        remains available on the pane, while pointer edits cannot race coordinates still in flight. */
@@ -1939,6 +1959,9 @@
     .human-task-dialog-identity { margin: 0; color: var(--tx-2); font: 10px/1.45 'SFMono-Regular', Consolas, monospace; overflow-wrap: anywhere; }
     .human-task-dialog textarea { width: 100%; min-height: 96px; resize: vertical; }
     .human-task-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .human-task-interaction-host { min-height: 240px; border: 1px solid var(--border); border-radius: 6px;
+      overflow: hidden; background: var(--bg-1); }
+    .human-task-presentation-frame { display: block; width: 100%; min-height: 320px; border: 0; }
     .human-task-decision-deny, .human-task-decision-cancel { color: var(--outcome-error-text); }
 
     .d3-nodes circle.human-task-attention {
@@ -2019,6 +2042,16 @@
       border-radius: 4px; padding: 3px 7px; cursor: pointer; font-size: 10px;
     }
     .activity-clear:hover, .property-remove:hover { border-color: var(--err); color: var(--outcome-error-text); }
+    /* ── THE OBSERVATION-LEVEL SELECTOR ───────────────────────────────────────────────────────
+       Sized against the header's own 24px controls so the header keeps its fixed height and the
+       panel's identity text keeps a chance to render before anything ellipsises — panels are
+       movable into a 224px column, where every pixel in this row is contested. Three visible words
+       rather than a popup menu: how much of the stream is shown is the single most consequential
+       reading choice this panel offers, and it should not be behind a disclosure. */
+    .activity-modes { flex: 0 0 auto; gap: 2px; }
+    .activity-modes .btn {
+      padding: 2px 7px; font-size: 10px; line-height: 1.4; border-radius: 4px;
+    }
     /* Fills the dock panel's body instead of claiming a fixed 240px of the right column. */
     #activity-log {
       flex: 1 1 auto; min-width: 0; min-height: 0; max-width: 100%; overflow-y: auto;
@@ -2038,6 +2071,14 @@
     .activity-entry.bypassed .activity-dot { background: var(--mag); }
     .activity-content { min-width: 0; max-width: 100%; }
     .activity-title { color: var(--tx-1); }
+    /* A concise log emission (Output and Nodes) puts the emitted value in the title slot, so it
+       inherits that slot's wrapping contract: `pre-wrap` keeps a real line feed in pretty-printed
+       JSON/XML instead of collapsing it, and `anywhere` keeps one unbounded token from widening the
+       panel. The value is already normalized, redacted and byte-bounded by `runtimeActivityOutput`;
+       this rule is layout only and never a disclosure decision. */
+    .activity-entry.output-value .activity-title {
+      white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+    }
     .activity-detail {
       min-width: 0; max-width: 100%; margin-top: 2px; color: var(--tx-3);
       white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
@@ -2361,7 +2402,6 @@
       .logo-wordmark { display: none; }
       .document-switcher { max-width: 250px; }
       #font-slider, #node-action-scale-slider { width: 56px; }
-      #rep-slider, #attr-slider { width: 52px; }
     }
 
     .badge {
@@ -2432,6 +2472,17 @@
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--cyan); border: 2px solid var(--bg-1);
       cursor: pointer;
+    }
+    @media (max-width: 1350px) {
+      #elastic-ctrl { gap: 2px; }
+      #rep-slider, #attr-slider { width: 36px; }
+      #rep-val, #attr-val { min-width: 22px; font-size: 10px; }
+      #speed-icon, #speed-slider, #speed-val { display: none; }
+      /* Monitoring keeps its unique forces reachable without changing the canvas height (which
+         would alter the restored viewport). The two general presentation sliders remain available
+         in Design and keep their document/global values through the round-trip. */
+      #topbar:has(#elastic-ctrl.visible) #font-ctrl,
+      #topbar:has(#elastic-ctrl.visible) #node-action-scale-ctrl { display: none; }
     }
     /* tooltip D3 elastic */
     .d3-tooltip {

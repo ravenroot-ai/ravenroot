@@ -9,6 +9,16 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerOpenApiTest {
+    @Test void nativePhysicalObservationIsClosedAndSeparateFromAgentOutput() {
+        var heartbeat = operation("/workspaces/{processId}/jobs/{jobId}/heartbeat", "post");
+        var schema = map(map(map(map(heartbeat.get("requestBody")).get("content")).get("application/json")).get("schema"));
+        var nativeSchema = map(map(schema.get("properties")).get("kubernetes"));
+        assertEquals(false, nativeSchema.get("additionalProperties"));
+        var fields = map(nativeSchema.get("properties"));
+        assertTrue(fields.keySet().containsAll(Set.of("protocolVersion", "cluster", "namespace", "podUid", "claimUid", "volumeName",
+                "ownershipGeneration", "phase", "condition", "reason", "exitCode", "modelTurns", "toolCalls", "modelTokens")));
+        assertFalse(fields.containsKey("endpoint")); assertFalse(fields.containsKey("token"));
+    }
     @SuppressWarnings("unchecked")
     private static Map<String, Object> map(Object value) { return (Map<String, Object>) value; }
     private static Map<String, Object> operation(String path, String method) {

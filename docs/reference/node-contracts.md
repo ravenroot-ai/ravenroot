@@ -42,15 +42,15 @@ bundle references rather than inferred from the descriptor snapshot.
 
 Each property table may scroll horizontally on a narrow viewport. Jump directly to a node:
 
-- [`agent`](#node-agent) · [`amqp.consume`](#node-amqp-consume) · [`amqp.publish`](#node-amqp-publish) · [`boundary-guard`](#node-boundary-guard) · [`cel-decision`](#node-cel-decision) · [`cel-transform`](#node-cel-transform) · [`delay`](#node-delay)
-- [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review) · [`github-events-source`](#node-github-events-source)
-- [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse) · [`json-path`](#node-json-path)
-- [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move)
-- [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook) · [`mattermost.send`](#node-mattermost-send) · [`object.delete`](#node-object-delete)
-- [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply)
-- [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision)
-- [`spel.transform`](#node-spel-transform) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send)
-- [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
+- [`agent`](#node-agent) · [`amqp.consume`](#node-amqp-consume) · [`amqp.publish`](#node-amqp-publish) · [`bigint-op`](#node-bigint-op) · [`boundary-guard`](#node-boundary-guard) · [`cel-decision`](#node-cel-decision) · [`cel-transform`](#node-cel-transform)
+- [`delay`](#node-delay) · [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review)
+- [`github-events-source`](#node-github-events-source) · [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse)
+- [`json-path`](#node-json-path) · [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete)
+- [`mail.imap.move`](#node-mail-imap-move) · [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook) · [`mattermost.send`](#node-mattermost-send)
+- [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive)
+- [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message)
+- [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message)
+- [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
 
 ## `agent` {#node-agent}
 
@@ -162,6 +162,32 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1-16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-publish retries | Only proven connection-establishment failures are retried (0-3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether republishing this message after a crash of unknown outcome is safe. The broker does not deduplicate; say repeatable only where the consumer discards a message id it has already handled. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+
+## `bigint-op` {#node-bigint-op}
+
+Canonical runtime rules: [core behavior reference](core-nodes.md).
+[Complete GraphML example](../examples/nodes/bigint-op.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Exact integer operation |
+| Category | Transformations |
+| Description | Applies one bounded, exact integer operation to top-level payload fields or decimal literals. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic,in-process,pure |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The copied payload contains the exact result in target; all attributes pass through. |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `operation` | Operation | One elementary integer operation. | `STRING` | true | Not declared | copy,add,subtract,multiply,floor-divide,modulo,equal,less-than | false | Not declared | Not declared | max UTF-8 bytes 32 |
+| `left` | Left operand | Operand reference: field:<name> or literal:<signed-decimal>. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 4105 |
+| `right` | Right operand | Second operand reference, required for every operation except copy. | `STRING` | false | Not declared | Not declared | false | operation:ONE_OF:add,subtract,multiply,floor-divide,modulo,equal,less-than | operation:ONE_OF:add,subtract,multiply,floor-divide,modulo,equal,less-than | max UTF-8 bytes 4105 |
+| `target` | Target field | Top-level payload field that receives the result. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 256 |
 
 ## `boundary-guard` {#node-boundary-guard}
 
@@ -506,7 +532,7 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Description | Creates durable, tenant-scoped work for a person and resumes from the pinned graph version. |
 | Visual type | human-task |
 | Agentic | false |
-| Capabilities | bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe |
+| Capabilities | bounded-metadata,built-in-form-v1,durable,embedded-confirmation-v1,human-task,registered-presentation-v1,restart-safe |
 | Declared default nature | Not declared |
 | Declared allowed natures | Not declared |
 | Application command allowlist | Not declared |
@@ -522,6 +548,10 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | `responseSchemaVersion` | Response schema version | Exact protocol label required at resolution. | `STRING` | false | 1 | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
 | `responseKind` | Response kind | Required top-level response shape. | `STRING` | false | MAP | SCALAR,LIST,MAP | false | Not declared | Not declared | Not declared |
 | `maxResponseBytes` | Maximum response bytes | Inclusive encoded-envelope byte bound owned by the server. | `INTEGER` | false | 65536 | Not declared | false | Not declared | Not declared | min 1; max 262144 |
+| `presentationKind` | Presentation kind | Closed built-in presentation or an opaque registered profile; no HTML, URL, or credential is graph-authored. | `STRING` | false | Not declared | CLASSIC,CONFIRMATION,FORM,CUSTOM,EXTERNAL | false | Not declared | Not declared | Not declared |
+| `presentationProfileId` | Presentation profile | Opaque registered profile identifier for CUSTOM or EXTERNAL presentations. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 256 |
+| `presentationProfileVersion` | Presentation profile version | Pinned allowed profile version for CUSTOM or EXTERNAL presentations. | `INTEGER` | false | 1 | Not declared | false | Not declared | Not declared | min 1; max 2147483647 |
+| `formSchema` | Form schema | Closed version-one form schema JSON; nested values and executable content are not supported. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 65536 |
 | `confirmationPresentationVersion` | Confirmation presentation | Version one enables the built-in embedded simple confirmation. | `STRING` | false | Not declared | 1 | false | Not declared | Not declared | Not declared |
 | `confirmationPrompt` | Confirmation prompt | Bounded plain-text prompt shown for this task. | `TEXT` | false | Confirm this task. | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 4096 |
 | `confirmationComment` | Comment | Whether the built-in decision comment is disallowed, optional, or required. | `STRING` | false | OPTIONAL | DISALLOWED,OPTIONAL,REQUIRED | false | confirmationPresentationVersion:EQUALS:1 | Not declared | Not declared |
@@ -1679,3 +1709,81 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | `maxMessageBytes` | Maximum message bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxFragments` | Maximum fragments | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `timeoutMs` | Deadline (ms) | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## Governed Workspace and named Agent variant
+
+Enabling the [runner plane](../operator-guide/governed-runners.md) adds `workspace` and
+extends `agent`; it does not replace ordinary Agent graphs. This separate compiled-descriptor
+snapshot is checked by the same `PublishedNodeContractTest`, which also validates the
+[minimal team](../examples/governed-runner/three-agents.graphml) and
+[development cycle](../examples/governed-runner/development-cycle.graphml). Regenerate it with
+the command above. There is no `workspace-agent` compatibility alias.
+
+`workspaceRef` is a same-graph typed node reference, not a filesystem path. The Workspace
+profile owns scope, runtime lifecycle, placement and capacity; graph selectors may only agree
+with its approved immutable version. Agent definitions own role, instructions, model profile,
+tools, budgets and output contract. `agentDefinition` can also be selected without a Workspace;
+the ordinary managed AI extension then executes it without filesystem authority. With neither
+selector, the legacy Agent descriptor and behavior above remain applicable.
+
+### `agent` (governed plane)
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Agent |
+| Category | AI |
+| Description | Named bounded Agent with optional governed Workspace access. |
+| Visual type | agent |
+| Agentic | true |
+| Capabilities | agentic,ai,credential-reference,external-provider,network |
+| Declared default nature | WORKER |
+| Declared allowed natures | WORKER |
+| Application command allowlist | handoff,implement,integrate,plan,read,remediate,research,resume,review,summarize,test |
+| Outcomes | continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.; answered: Governed Agent result.; approved: Governed Agent result.; blocked: Governed Agent result.; changes-requested: Governed Agent result.; completed: Governed Agent result.; escalation: Governed Agent result.; failed: Governed Agent result.; fixed: Governed Agent result.; flaky: Governed Agent result.; inconclusive: Governed Agent result.; needs-input: Governed Agent result.; needs-work: Governed Agent result.; not-fixed: Governed Agent result.; passed: Governed Agent result. |
+| Runtime concurrency | default 64; ceiling 256 |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
+| `instructions` | Instructions | Who the agent is and how it should work. Sent as untrusted graph content, separate from operator policy. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
+| `objective` | Objective | The task for this invocation. Sent as the first user turn. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
+| `model` | Model | Overrides the profile's model. The endpoint is not overridable. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `mcpServers` | MCP servers | Comma-separated names of MCP servers this deployment declared in its environment (RAVENROOT_MCP_SERVER_<hex(name)>). Their tools are offered to the model as <server>__<tool>. The executing runtime applies its configured admission ceiling. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `maxTurns` | Max turns | Model turns this run may take before it is refused. Defaults to the executing runtime default and may not exceed its configured ceiling. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `maxTotalTokens` | Max tokens | Cumulative reported tokens across the whole run before it is refused. The operator's finite ceiling still applies when absent. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `timeoutMs` | Deadline | Deadline for the WHOLE run, not for one turn. May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `maxTokens` | Max tokens per turn | Upper bound on one generated turn, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `temperature` | Temperature | Sampling temperature forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `topP` | Top-p | Nucleus sampling parameter forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `seed` | Seed | Sampling seed, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `workspaceRef` | Workspace | An explicitly declared Workspace in this graph. Blank retains bounded conversational execution. | `WORKSPACE_REFERENCE` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `agentDefinition` | Named Agent | Approved versioned Agent identity, instructions, model and tools. | `STRING` | false | Not declared | Not declared | false | Not declared | workspaceRef:PRESENT: | Not declared |
+| `agentVersion` | Agent version | Exact immutable approved definition version. | `INTEGER` | false | 1 | Not declared | false | Not declared | Not declared | min 1; max 9223372036854775807 |
+| `skills.<N>.name` | Skill item Name | An ordered collection of complete name, description, and instructions groups. The executing runtime applies its configured payload ceilings. Name passed to load_skill; matched ignoring case. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.<N>.description` | Skill item Description | An ordered collection of complete name, description, and instructions groups. The executing runtime applies its configured payload ceilings. One line telling the model when the skill is worth loading. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.<N>.instructions` | Skill item Instructions | An ordered collection of complete name, description, and instructions groups. The executing runtime applies its configured payload ceilings. Body returned only when the model calls load_skill. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+### `workspace` (governed plane)
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Workspace |
+| Category | Resources |
+| Description | Opens, inspects, checkpoints, closes or aborts an explicitly declared governed workspace. |
+| Visual type | workspace |
+| Agentic | false |
+| Capabilities | durable,restart-safe,runner |
+| Declared default nature | WORKER |
+| Declared allowed natures | WORKER |
+| Application command allowlist | abort,checkpoint,close,inspect,open |
+| Outcomes | ready: Workspace lifecycle result.; inspected: Workspace lifecycle result.; checkpointed: Workspace lifecycle result.; closed: Workspace lifecycle result.; aborted: Workspace lifecycle result.; blocked: Workspace lifecycle result. |
+| Runtime concurrency | default 64; ceiling 256 |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `workspaceProfile` | Workspace profile | Approved immutable workspace policy. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `workspaceVersion` | Profile version | Exact approved version. | `INTEGER` | false | 1 | Not declared | false | Not declared | Not declared | min 1; max 9223372036854775807 |
+| `workspaceScope` | Workspace scope | Must agree with the approved profile. | `STRING` | false | Not declared | EPHEMERAL,PROCESS_INSTANCE,NAMED | false | Not declared | Not declared | Not declared |
+| `runtimeLifecycle` | Runtime lifecycle | Must agree with the approved profile; independent of filesystem scope. | `STRING` | false | Not declared | PER_INVOCATION,PER_WORKSPACE | false | Not declared | Not declared | Not declared |
+| `runnerPool` | Runner pool | Approved profile placement pool. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `runtimeProfile` | Runtime profile | Approved profile image/runtime binding. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |

@@ -452,7 +452,7 @@ public final class GraphManager implements AutoCloseable {
         NodeKind kind = nodeKind(vertex.id().toString(), properties, behavior);
         if (kind == NodeKind.BEHAVIOR && (behavior == null || behavior.isBlank())) {
             throw new GraphValidationException(List.of("Node '" + vertex.id()
-                    + "' declares kind 'BEHAVIOR' without a behavior name"));
+                    + "' declares kind 'BEHAVIOR' without a behavior name"), vertex.id().toString());
         }
         properties.remove(KIND);
         properties.remove(BEHAVIOR);
@@ -508,7 +508,8 @@ public final class GraphManager implements AutoCloseable {
             } catch (IllegalArgumentException unknown) {
                 throw new GraphValidationException(List.of("Node '" + nodeId + "' declares an unknown kind '"
                         + raw + "'; the known kinds are "
-                        + Arrays.stream(NodeKind.values()).map(Enum::name).collect(Collectors.joining(", "))));
+                        + Arrays.stream(NodeKind.values()).map(Enum::name).collect(Collectors.joining(", "))),
+                        nodeId);
             }
         }
         return behavior == null ? NodeKind.PASSTHROUGH : NodeKind.BEHAVIOR;

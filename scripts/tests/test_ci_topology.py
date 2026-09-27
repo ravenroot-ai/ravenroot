@@ -22,9 +22,6 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_full_tier_exposes_independently_actionable_jobs(self) -> None:
         expected = {
-            "admission-policy",
-            "admission-ui",
-            "admission-backend",
             "full-docs-policy",
             "full-python-contracts",
             "full-shell-contracts",
@@ -36,6 +33,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "full-ui-e2e-shard",
             "full-ui-e2e",
             "backend-build",
+            "minio-fixture-preflight",
             "full-backend-tests",
             "backend-test",
             "full-plugin-boundary",
@@ -56,11 +54,38 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("-DskipTests clean install", self.jobs["backend-build"])
         self.assertNotIn("clean verify", self.jobs["backend-build"])
         self.assertIn("clean verify", self.jobs["full-backend-tests"])
+        self.assertIn("scripts/select_backend_tests.py", self.jobs["full-backend-tests"])
+        self.assertIn("-pl \"$BACKEND_PROJECTS\" -am verify", self.jobs["full-backend-tests"])
+        self.assertNotRegex(self.jobs["full-backend-tests"], r"mvn[^\n]*\s-amd(?:\s|$)")
+        self.assertIn("[ \"$BACKEND_SCOPE\" = none ] && [ -z \"$BACKEND_PROJECTS\" ]", self.jobs["full-backend-tests"])
+        self.assertIn("Refusing invalid backend scope", self.jobs["full-backend-tests"])
+        backend_checkout = self.jobs["full-backend-tests"].split("- name: Set up Java", 1)[0]
+        self.assertIn("fetch-depth: 0", backend_checkout)
+        self.assertEqual(
+            declared_needs(self.jobs["backend-build"]),
+            {"release-classification", "minio-fixture-preflight"},
+        )
         self.assertIn('= ravenroot-distribution ] && continue', self.jobs["backend-build"])
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])
         self.assertNotIn("npm test", self.jobs["full-ui-build"])
         self.assertNotIn("npm run build", self.jobs["full-ui-e2e-shard"])
+
+    def test_full_tier_requires_runner_deployment_evidence_without_tooling_skips(self) -> None:
+        job = self.jobs["full-shell-contracts"]
+        step = job.split("- name: Verify supervised runner deployment and independent replica topology", 1)[1]
+        self.assertNotIn("if:", step)
+        self.assertNotIn("continue-on-error", step)
+        required = (
+            "command -v helm",
+            "docker compose version",
+            "python3 -m unittest scripts.tests.test_runner_deployment_contract",
+            "./scripts/tests/test_helm_values_contract.sh",
+            "./scripts/tests/test_program_timeout_helm_contract.sh",
+            "./scripts/tests/test_execution_manifest_pin_helm_contract.sh",
+        )
+        positions = [step.index(command) for command in required]
+        self.assertEqual(sorted(positions), positions)
 
     def test_verified_artifact_dependencies_are_explicit(self) -> None:
         artifact_consumers = {
@@ -126,20 +151,32 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "only the download side may repeat a producer's artifact name",
         )
 
-    def test_feature_feedback_is_ultralight_and_does_not_repeat_test_suites(self) -> None:
-        fast = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))["fast-policy"]
+    def test_feature_feedback_stays_light_and_does_not_repeat_regression_suites(self) -> None:
+        """Point 4 retired the review-commit `admission` tier; its cheap checks moved here instead, so
+        this workflow now legitimately carries the CI-contract unittests and the UI unit suite. What
+        it must still never repeat is the expensive regression work owned by the full tier."""
+        fast_all = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))
         all_fast = FAST_WORKFLOW.read_text(encoding="utf-8")
-        self.assertNotIn("python3 -m unittest", all_fast)
+        self.assertIn("python3 -m unittest scripts.tests.test_classify_main_change", fast_all["fast-policy"])
+        self.assertIn("python3 -m unittest scripts.tests.test_ci_required", fast_all["fast-policy"])
+        self.assertIn("python3 -m unittest scripts.tests.test_ci_topology", fast_all["fast-policy"])
+        self.assertIn("npm test", fast_all["fast-ui"])
+        self.assertIn("-DskipTests compile", fast_all["fast-backend"])
         self.assertNotIn("./scripts/tests/", all_fast)
-        self.assertNotIn("npm test", all_fast)
         self.assertNotIn("clean install", all_fast)
-        self.assertIn("fetch-depth: 0", fast)
+        self.assertNotIn("clean verify", all_fast)
+        self.assertNotIn("npx playwright", all_fast)
+        self.assertIn("fetch-depth: 0", fast_all["fast-policy"])
 
     def test_operational_configuration_audit_runs_once_in_the_full_tier(self) -> None:
         block = self.jobs["full-python-contracts"]
         self.assertIn("fetch-depth: 0", block)
         self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_audit_operational_configuration"))
         self.assertEqual(1, block.count("python3 scripts/audit_operational_configuration.py --check"))
+
+    def test_backend_scope_selector_contract_cannot_disappear_from_full_python_contracts(self) -> None:
+        block = self.jobs["full-python-contracts"]
+        self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_select_backend_tests"))
 
     def test_expensive_regressions_wait_for_the_light_preflight(self) -> None:
         preflight = declared_needs(self.jobs["full-preflight"])
@@ -148,6 +185,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             {
                 "release-classification", "docs-site", "full-docs-policy", "full-source-policy",
                 "full-ui-audit", "full-ui-unit-tests", "full-ui-build", "backend-build",
+                "minio-fixture-preflight",
             },
         )
         for job in (
@@ -160,6 +198,12 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_container_smoke_waits_for_every_parallel_regression(self) -> None:
         self.assertIn("full-regression", declared_needs(self.jobs["full-runtime-container-smoke"]))
+
+    def test_full_tier_has_a_scheduled_all_reactor_regression_lane(self) -> None:
+        self.assertIn("  schedule:\n    - cron:", self.contents)
+        backend = self.jobs["full-backend-tests"]
+        self.assertIn("Scheduled runs intentionally select the all-reactor regression path", backend)
+        self.assertEqual(6, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
 
 
 if __name__ == "__main__":

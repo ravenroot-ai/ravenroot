@@ -1,0 +1,271 @@
+{{- if .Values.runnerPlane.enabled }}
+{{- $root := . }}
+{{- $namespaces := dict }}
+{{- range .Values.runnerPlane.workerPools }}
+{{- if eq .driver "kubernetes" }}
+{{- $pool := . }}
+{{- $manager := printf "%s-manager-%s" (include "ravenroot.fullname" $root) .name }}
+{{- $policy := printf "%s-agent-%s" (include "ravenroot.fullname" $root) .name }}
+{{- if or (eq .kubernetes.namespace $root.Release.Namespace) (hasKey $namespaces .kubernetes.namespace) }}
+{{- fail "each Kubernetes pool needs a distinct workload namespace, separate from the server and other pools" }}
+{{- end }}
+{{- $_ := set $namespaces .kubernetes.namespace true }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .kubernetes.namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.35
+    ravenroot.ai/workload-policy: {{ $policy }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $manager }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .kubernetes.agentServiceAccount }}
+  namespace: {{ .kubernetes.namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $manager }}
+  namespace: {{ .kubernetes.namespace }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims]
+    verbs: [create, get, patch, delete]
+  # Fixed Agent/attestation entry points only; CONNECT admission below is mandatory.
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $manager }}
+  namespace: {{ .kubernetes.namespace }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $manager }} }
+subjects:
+  - { kind: ServiceAccount, name: {{ $manager }}, namespace: {{ $root.Release.Namespace }} }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ravenroot.fullname" $root }}-kubernetes-{{ .name }}
+data:
+  kubeconfig: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: approved
+        cluster:
+          server: https://kubernetes.default.svc
+          certificate-authority: /var/run/ravenroot-kubernetes/ca.crt
+    users:
+      - name: manager
+        user:
+          tokenFile: /var/run/ravenroot-kubernetes/token
+    contexts:
+      - name: approved
+        context:
+          cluster: approved
+          user: manager
+          namespace: {{ .kubernetes.namespace }}
+    current-context: approved
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-agent-network
+  namespace: {{ .kubernetes.namespace }}
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bootstrap-network-control
+  namespace: {{ .kubernetes.namespace }}
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  podSelector:
+    matchLabels: { ravenroot.ai/attesting: "true" }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $root.Release.Namespace }} }
+          podSelector:
+            matchLabels: { ravenroot.ai/network-control: {{ $policy }} }
+      ports: [{ protocol: TCP, port: 9443 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $policy }}-network-control
+spec:
+  selector: { ravenroot.ai/network-control: {{ $policy }} }
+  ports: [{ name: control, port: 9443, targetPort: 9443 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $policy }}-network-control
+spec:
+  podSelector:
+    matchLabels: { ravenroot.ai/network-control: {{ $policy }} }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .kubernetes.namespace }} }
+          podSelector:
+            matchLabels: { ravenroot.ai/attesting: "true" }
+      ports: [{ protocol: TCP, port: 9443 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $policy }}-network-control
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { ravenroot.ai/network-control: {{ $policy }} }
+  template:
+    metadata:
+      labels: { ravenroot.ai/network-control: {{ $policy }} }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: control
+          image: {{ index .kubernetes.runtimeImages 0 | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [python3, -c, "import socket; s=socket.socket(); s.bind(('0.0.0.0',9443)); s.listen(16); exec('while True:\\n c,a=s.accept(); c.close()')"]
+          ports: [{ name: control, containerPort: 9443 }]
+          readinessProbe: { tcpSocket: { port: control }, periodSeconds: 2 }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 32Mi }
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: bounded-workload-inventory
+  namespace: {{ .kubernetes.namespace }}
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  hard:
+    pods: {{ .kubernetes.maxPods | quote }}
+    persistentvolumeclaims: {{ .kubernetes.maxClaims | quote }}
+    requests.storage: {{ .kubernetes.storageQuota | quote }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $manager }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      ravenroot.ai/worker-pool: {{ .name }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $policy }}
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: { ravenroot.ai/workload-policy: {{ $policy }} }
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  validations:
+    {{- if .kubernetes.runtimeClassName }}
+    - expression: {{ printf "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == '%s'" .kubernetes.runtimeClassName | quote }}
+      message: "The operator-approved RuntimeClass is mandatory"
+    {{- else }}
+    - expression: "!has(object.spec.runtimeClassName)"
+      message: "This pool approves only its default attested RuntimeClass"
+    {{- end }}
+    - expression: "request.operation != 'UPDATE' || !('ravenroot.ai/attesting' in object.metadata.labels) || ('ravenroot.ai/attesting' in oldObject.metadata.labels)"
+      message: "Network bootstrap is one-way and cannot be restored after Agent admission"
+    - expression: "object.spec.containers.size() == 1 && object.spec.containers[0].name == 'agent'"
+      message: "One governed Agent container is required"
+    - expression: "!has(object.spec.initContainers) && !has(object.spec.ephemeralContainers) && (!has(object.spec.hostNetwork) || !object.spec.hostNetwork) && (!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: "Host namespaces and additional containers are forbidden"
+    - expression: {{ printf "object.spec.containers[0].image in %s" (toJson .kubernetes.runtimeImages) | quote }}
+      message: "An operator-approved immutable Agent image is required"
+    - expression: {{ printf "object.spec.serviceAccountName == '%s' && has(object.spec.automountServiceAccountToken) && !object.spec.automountServiceAccountToken && object.spec.restartPolicy == 'Never'" .kubernetes.agentServiceAccount | quote }}
+      message: "Agent credentials and Kubernetes retries are forbidden"
+    - expression: "object.spec.containers[0].command == ['python3', '-c', 'import signal; signal.signal(signal.SIGCHLD,signal.SIG_IGN); signal.pause()'] && (!has(object.spec.containers[0].args) || object.spec.containers[0].args.size() == 0)"
+      message: "Only the immutable idle entry point is allowed"
+    - expression: "object.spec.containers[0].securityContext.runAsNonRoot && object.spec.containers[0].securityContext.runAsUser == 65532 && object.spec.containers[0].securityContext.runAsGroup == 65532 && !object.spec.containers[0].securityContext.allowPrivilegeEscalation && object.spec.containers[0].securityContext.readOnlyRootFilesystem && object.spec.containers[0].securityContext.capabilities.drop == ['ALL'] && (!has(object.spec.containers[0].securityContext.capabilities.add) || object.spec.containers[0].securityContext.capabilities.add.size() == 0) && object.spec.containers[0].securityContext.seccompProfile.type == 'RuntimeDefault'"
+      message: "The attested non-root confinement profile is mandatory"
+    - expression: "object.spec.volumes.size() == 1 && has(object.spec.volumes[0].persistentVolumeClaim) && object.spec.volumes[0].name == 'workspace' && object.spec.containers[0].volumeMounts.size() == 1 && object.spec.containers[0].volumeMounts[0].name == 'workspace' && object.spec.containers[0].volumeMounts[0].mountPath == '/workspace' && !has(object.spec.containers[0].volumeMounts[0].subPath)"
+      message: "The owned Workspace PVC is the only mount; sockets, credentials and host paths are forbidden"
+    - expression: "!has(object.spec.containers[0].envFrom) && object.spec.containers[0].env.size() == 6 && object.spec.containers[0].env.all(e, e.name in ['RAVENROOT_POD_UID', 'RAVENROOT_NETWORK_CONTROL_HOST', 'RAVENROOT_WORKSPACE_LIMIT_BYTES', 'RAVENROOT_PROCESS_LIMIT', 'RAVENROOT_MEMORY_LIMIT_BYTES', 'RAVENROOT_CPU_MILLICORES']) && object.spec.containers[0].env.all(e, !has(e.valueFrom) || (has(e.valueFrom.fieldRef) && e.valueFrom.fieldRef.fieldPath == 'metadata.uid'))"
+      message: "Credentials and arbitrary environment input are forbidden"
+    - expression: "dyn(object.spec.containers[0].resources).requests == dyn(object.spec.containers[0].resources).limits && 'cpu' in dyn(object.spec.containers[0].resources).limits && 'memory' in dyn(object.spec.containers[0].resources).limits"
+      message: "Explicit Guaranteed QoS CPU and memory ceilings are required"
+    - expression: "has(object.metadata.annotations) && ['ravenroot.ai/tenant', 'ravenroot.ai/process', 'ravenroot.ai/workspace', 'ravenroot.ai/node', 'ravenroot.ai/generation', 'ravenroot.ai/runner', 'ravenroot.ai/cluster', 'ravenroot.ai/protocol', 'ravenroot.ai/job', 'ravenroot.ai/fence', 'ravenroot.ai/traversal', 'ravenroot.ai/invocation', 'ravenroot.ai/attempt', 'ravenroot.ai/definition', 'ravenroot.ai/definition-version', 'ravenroot.ai/profile', 'ravenroot.ai/pool'].all(k, k in object.metadata.annotations && size(object.metadata.annotations[k]) <= 256)"
+      message: "Complete bounded Ravenroot ownership correlation is required"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $policy }}
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  policyName: {{ $policy }}
+  validationActions: [Deny, Audit]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $policy }}-channel
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: { ravenroot.ai/workload-policy: {{ $policy }} }
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CONNECT]
+        resources: [pods/exec, pods/attach, pods/portforward]
+  validations:
+    - expression: "request.subResource == 'exec' && object.container == 'agent' && (!has(object.tty) || !object.tty) && ((object.command == ['python3', '/opt/kubernetes_attestation.py']) || (object.command == ['python3', '/opt/kubernetes_attestation.py', '--network-control']) || (object.command == ['python3', '/opt/kubernetes_attestation.py', '--memory-boundary']) || (object.command.size() == 3 && object.command[0] == 'python3' && object.command[1] == '/opt/agent_runtime.py' && object.command[2].matches('^[1-9][0-9]{0,6}$') && int(object.command[2]) <= 1048576))"
+      message: "Only the audited bounded Agent and attestation channels are allowed"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $policy }}-channel
+  annotations: { helm.sh/resource-policy: keep }
+spec:
+  policyName: {{ $policy }}-channel
+  validationActions: [Deny, Audit]
+{{- end }}
+{{- end }}
+{{- end }}

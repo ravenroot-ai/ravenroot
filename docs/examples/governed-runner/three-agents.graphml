@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="k" for="node" attr.name="kind" attr.type="string"/>
+  <key id="b" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="n" for="node" attr.name="name" attr.type="string"/>
+  <key id="p" for="node" attr.name="workspaceProfile" attr.type="string"/>
+  <key id="w" for="node" attr.name="workspaceRef" attr.type="string"/>
+  <key id="a" for="node" attr.name="agentDefinition" attr.type="string"/>
+  <key id="j" for="node" attr.name="joinPolicy" attr.type="string"/>
+  <key id="c" for="edge" attr.name="command" attr.type="string"/>
+  <key id="o" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="three-named-agents" edgedefault="directed">
+    <node id="start"><data key="k">START</data></node>
+    <node id="error"><data key="k">ERROR</data></node>
+    <node id="end"><data key="k">END</data></node>
+    <node id="repository"><data key="k">BEHAVIOR</data><data key="b">workspace</data><data key="n">Repository Workspace</data><data key="p">development</data><data key="j">any</data></node>
+    <node id="polaris"><data key="k">BEHAVIOR</data><data key="b">agent</data><data key="n">Polaris</data><data key="a">polaris</data><data key="w">repository</data></node>
+    <node id="betelgeuse"><data key="k">BEHAVIOR</data><data key="b">agent</data><data key="n">Betelgeuse</data><data key="a">betelgeuse</data><data key="w">repository</data></node>
+    <node id="antares"><data key="k">BEHAVIOR</data><data key="b">agent</data><data key="n">Antares</data><data key="a">antares</data><data key="w">repository</data></node>
+    <edge source="start" target="repository"><data key="c">open</data></edge>
+    <edge source="repository" target="betelgeuse"><data key="o">ready</data><data key="c">implement</data></edge>
+    <edge source="betelgeuse" target="polaris"><data key="o">completed</data><data key="c">read</data></edge>
+    <edge source="polaris" target="antares"><data key="o">answered</data><data key="c">review</data></edge>
+    <edge source="antares" target="repository"><data key="o">changes-requested</data><data key="c">close</data></edge>
+    <edge source="antares" target="repository"><data key="o">approved</data><data key="c">close</data></edge>
+    <edge source="repository" target="end"><data key="o">closed</data></edge>
+  </graph>
+</graphml>

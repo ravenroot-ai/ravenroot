@@ -346,9 +346,25 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
             Objects.requireNonNull(command, "command");
             try {
                 return transactions.inTransaction(connection -> {
+                    IdentityBinding binding = command.retainIdentity()
+                            ? loadIdentityBinding(connection, command.tenantId(), command.key()) : null;
+                    if (binding != null) {
+                        if (!binding.digest().equals(command.digest())) {
+                            throw failure(new FailureReason.Conflict());
+                        }
+                        return requireAggregate(connection, command.tenantId(),
+                                binding.deploymentId()).record();
+                    }
                     LedgerEntry prior = loadCreateLedgerEntry(connection, command.tenantId(),
                             command.key());
                     if (prior != null) {
+                        if (command.retainIdentity()) {
+                            replay(prior, command.digest());
+                            insertIdentityBinding(connection, command.tenantId(), command.key(),
+                                    command.digest(), prior.record().deploymentId().value());
+                            return requireAggregate(connection, command.tenantId(),
+                                    prior.record().deploymentId().value()).record();
+                        }
                         return replay(prior, command.digest());
                     }
                     return insertNewDeployment(connection, content, command);
@@ -371,6 +387,15 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
         });
     }
 
+    @Override
+    public CompletionStage<Optional<Record>> retainedIdentity(String tenantId, String bindingKey) {
+        return async(() -> read(connection -> {
+            IdentityBinding binding = loadIdentityBinding(connection, tenantId, bindingKey);
+            return binding == null ? Optional.empty() : Optional.of(
+                    loadCurrentRecord(connection, tenantId, binding.deploymentId()));
+        }));
+    }
+
     /**
      * Answers a {@code create} that lost a unique-index race, from the row that won it.
      *
@@ -383,6 +408,17 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      * reports it.</p>
      */
     private Record resolveCreateCollision(CreateCommand command) {
+        if (command.retainIdentity()) {
+            IdentityBinding binding = read(connection ->
+                    loadIdentityBinding(connection, command.tenantId(), command.key()));
+            if (binding != null) {
+                if (!binding.digest().equals(command.digest())) {
+                    throw failure(new FailureReason.Conflict());
+                }
+                return read(connection -> loadCurrentRecord(connection, command.tenantId(),
+                        binding.deploymentId()));
+            }
+        }
         LedgerEntry winner = read(connection ->
                 loadCreateLedgerEntry(connection, command.tenantId(), command.key()));
         if (winner == null) {
@@ -404,6 +440,10 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 now, now);
         insertDeploymentRow(connection, command.tenantId(), id.value(), now);
         insertVersionRow(connection, command.tenantId(), id.value(), 1, content);
+        if (command.retainIdentity()) {
+            insertIdentityBinding(connection, command.tenantId(), command.key(), command.digest(),
+                    id.value());
+        }
         insertLedgerEntry(connection, command.tenantId(), id.value(), Action.CREATE, command.key(),
                 command.digest(), result, now, now.plus(commandRetention));
         return result;
@@ -1227,6 +1267,46 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     // ---------------------------------------------------------------- rows: command ledger
 
+    private IdentityBinding loadIdentityBinding(Connection connection, String tenant, String key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT deployment_id, digest FROM deployment_identity_binding "
+                        + "WHERE tenant_id = ? AND binding_key = ?")) {
+            statement.setString(1, tenant);
+            statement.setString(2, key);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? new IdentityBinding(rows.getString("deployment_id"),
+                        rows.getString("digest")) : null;
+            }
+        }
+    }
+
+    private void insertIdentityBinding(Connection connection, String tenant, String key,
+                                       String digest, String deploymentId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO deployment_identity_binding "
+                        + "(tenant_id, binding_key, digest, deployment_id) VALUES (?, ?, ?, ?)")) {
+            statement.setString(1, tenant);
+            statement.setString(2, key);
+            statement.setString(3, digest);
+            statement.setString(4, deploymentId);
+            statement.executeUpdate();
+        }
+    }
+
+    private Record loadCurrentRecord(Connection connection, String tenant, String deploymentId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(AGGREGATE_WITH_LEASE
+                + "WHERE d.tenant_id = ? AND d.deployment_id = ?")) {
+            statement.setString(1, tenant);
+            statement.setString(2, deploymentId);
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) throw failure(new FailureReason.NotFound());
+                return recordFromJoinedRow(rows, tenant, deploymentId);
+            }
+        }
+    }
+
     private LedgerEntry loadLedgerEntry(Connection connection, String tenant, String deploymentId,
                                         Action action, String key) throws SQLException {
         String sql = LEDGER_COLUMNS + " FROM deployment_command WHERE tenant_id = ? "
@@ -1574,5 +1654,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     /** One ledger row's recorded digest and the exact {@code Record} snapshot it produced. */
     private record LedgerEntry(String digest, Record record) {
+    }
+
+    /** Non-expiring tenant-scoped create identity, deliberately separate from the bounded ledger. */
+    private record IdentityBinding(String deploymentId, String digest) {
     }
 }

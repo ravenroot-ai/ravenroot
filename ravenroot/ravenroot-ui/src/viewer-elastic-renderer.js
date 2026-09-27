@@ -15,6 +15,26 @@ function markerId(key, color) {
   return `arr-${String(key).replace(/[^a-zA-Z0-9_-]/g, '-')}-${String(color).replace('#', '')}`;
 }
 
+// Convergence tuning for the Monitoring simulation.
+//
+// D3 decays alpha geometrically, so a settled layout keeps dispatching ticks -- and repainting -- for
+// hundreds of frames whose per-node motion is far below what a viewer can perceive. Instead of
+// waiting for that alpha tail, the renderer measures how far nodes actually move: it tracks the
+// largest single-node displacement on each tick over a bounded window and stops the simulation once
+// the total motion accumulated across that window is no longer materially significant.
+//
+// The window is a fixed count of consecutive ticks: long enough (~0.5s at 60fps) that one-off
+// jitter cannot trigger a premature freeze, and short enough that settling still feels immediate.
+// The accumulated metric sums each tick's largest displacement, so a long tail of tiny-but-nonzero
+// motion must still add up before it counts as settled.
+export const SETTLE_WINDOW_TICKS = 30;
+export const SETTLE_WINDOW_DISPLACEMENT_PX = 2;
+// D3 only ever decays alpha, so any rise can only come from a requested reheat.
+const ALPHA_REHEAT_EPSILON = 1e-6;
+// Collision padding is shared with radius-only runtime refreshes so a node resize never has to
+// restate the layout policy.
+const COLLISION_RADIUS_PADDING = 8;
+
 /**
  * Mount the shared, view-only D3 Elastic renderer into an existing SVG.
  *
@@ -37,6 +57,8 @@ export function mountD3ElasticRenderer({
   isLive = () => true,
   onViewportChange = () => {},
   initialTransform = null,
+  startSimulation = true,
+  idleRadius = null,
 }) {
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
@@ -49,6 +71,18 @@ export function mountD3ElasticRenderer({
 
   const viewportWidth = Math.max(1, finite(width, 800));
   const viewportHeight = Math.max(1, finite(height, 600));
+  // The idle silhouette `resetRuntime` restores: the zero-instance size the caller derives from the
+  // sizing helper, NOT the instance counts painted when this renderer mounted. A run -> Design ->
+  // Monitoring round-trip remounts the renderer without clearing `instances` (#494), so a
+  // mount-derived radius can be a run-derived one; capturing the caller's idle radius keeps the
+  // reset independent of what was on the canvas at mount. Captured once, before any runtime update
+  // can mutate `r`; the datum's own value is only a fallback for callers that supply none.
+  nodes.forEach(node => {
+    if (!Number.isFinite(node.baseR)) {
+      node.baseR = Number.isFinite(idleRadius) ? idleRadius : node.r;
+    }
+  });
+
   const nodeText = palette?.nodeText ?? '#e6edf3';
   const edgeLabel = palette?.edgeLabel ?? '#b1bac4';
   let destroyed = false;
@@ -202,6 +236,9 @@ export function mountD3ElasticRenderer({
   };
 
   const movementSpeed = Math.max(.1, Math.min(1, finite(speed, .5)));
+  // One factory for the collision force so a radius-only runtime refresh rebuilds exactly the same
+  // policy the initial mount used.
+  const createCollisionForce = () => d3.forceCollide().radius(node => node.r + COLLISION_RADIUS_PADDING);
   const simulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(links).id(node => node.id)
       .distance(link => link.restLen).strength(finite(attraction, .3)))
@@ -210,7 +247,7 @@ export function mountD3ElasticRenderer({
     // Centering in raw SVG coordinates would translate the whole model before the first useful
     // frame. Preserve the transferred model centroid; forces may rearrange shape, never its origin.
     .force('center', d3.forceCenter(initialCentroid.x, initialCentroid.y).strength(.04))
-    .force('collision', d3.forceCollide().radius(node => node.r + 8))
+    .force('collision', createCollisionForce())
     .alphaDecay(.012)
     .velocityDecay(.65 - movementSpeed * .45)
     // Speed controls damping, but a permanently non-zero alpha target prevents a monitoring
@@ -223,7 +260,52 @@ export function mountD3ElasticRenderer({
       }
       paintGeometry();
       onViewportChange();
+      observeMotion();
     });
+
+  // ---- settling monitor (see SETTLE_WINDOW_* above) ----
+  // Positions are snapshotted from the initial layout, so the first observed tick measures real
+  // motion instead of assuming the graph was already still.
+  const settleSamples = [];
+  const lastPositions = nodes.map(node => ({ x: node.x, y: node.y }));
+  let settleTotal = 0;
+  let lastObservedAlpha = simulation.alpha();
+  const observeMotion = () => {
+    const alpha = simulation.alpha();
+    // A rising alpha can only be a requested reheat, which voids any convergence evidence so far.
+    if (alpha > lastObservedAlpha + ALPHA_REHEAT_EPSILON) {
+      settleSamples.length = 0;
+      settleTotal = 0;
+    }
+    lastObservedAlpha = alpha;
+    let maxDisplacement = 0;
+    nodes.forEach((node, index) => {
+      const previous = lastPositions[index];
+      maxDisplacement = Math.max(maxDisplacement, Math.hypot(node.x - previous.x, node.y - previous.y));
+      previous.x = node.x;
+      previous.y = node.y;
+    });
+    settleSamples.push(maxDisplacement);
+    settleTotal += maxDisplacement;
+    if (settleSamples.length > SETTLE_WINDOW_TICKS) settleTotal -= settleSamples.shift();
+    // Freeze only after a full window of ticks whose total motion is imperceptible. A long tail of
+    // sub-pixel force motion must not keep repainting the layout indefinitely.
+    if (settleSamples.length === SETTLE_WINDOW_TICKS && settleTotal <= SETTLE_WINDOW_DISPLACEMENT_PX) {
+      simulation.stop();
+    }
+  };
+  // d3's timer advances the simulation through its own private stepper and dispatches `tick`; the
+  // public `simulation.tick()` advances it directly and dispatches nothing. Wrapping the manual
+  // entry point keeps manually stepped simulations under exactly the same convergence rule as
+  // timer-driven ones, so tests and any future manual stepping stay faithful to production.
+  const stepSimulation = simulation.tick;
+  simulation.tick = iterations => {
+    const stepped = stepSimulation.call(simulation, iterations);
+    observeMotion();
+    return stepped;
+  };
+
+  if (!startSimulation) simulation.stop();
 
   // D3's timer owns later frames, but the first frame is ours: never leave circles at SVG defaults
   // or paths without geometry while the simulation waits for its first asynchronous tick.
@@ -276,6 +358,59 @@ export function mountD3ElasticRenderer({
       Object.assign(datum, changes);
       refreshTooltip();
       visualGroups.refresh();
+    },
+    // Resizing a node is not a layout change. Re-initializing the collide force recomputes its
+    // cached per-node radii from the current `node.r`, so the NEXT legitimate reheat uses up-to-date
+    // sizes -- but installing a force never changes alpha nor restarts the simulation, so a settled
+    // graph stays settled and a running one picks the new radii up on its next tick.
+    refreshCollisionRadii() {
+      if (destroyed) return;
+      simulation.force('collision', createCollisionForce());
+    },
+    // Clears the previous run's painting on THIS renderer, in place. Launching a Test or Run resets
+    // the runtime projection, and the renderer used to be torn down and re-mounted for it: the fresh
+    // force simulation starts at full alpha, so it re-laid-out the graph, and the new SVG/host lost
+    // the viewport (#494). A reset is a paint operation, not a layout one, so it restores each node's
+    // mount-time silhouette and the idle edge decoration without touching coordinates, the zoom
+    // transform, or the simulation. It deliberately never calls alpha/alphaTarget/restart/stop and
+    // never rebuilds the simulation, so the #469 convergence rule still holds exactly: a settled
+    // Monitoring graph stays settled, and dragging a node, an explicit layout arrangement, or a
+    // force control remain the only reheat sources.
+    resetRuntime({ idleStroke = null, idleStrokeWidth = 1.5 } = {}) {
+      if (destroyed) return;
+      nodes.forEach(node => {
+        node.instances = 0;
+        node.arrivals = 0;
+        node.runtimeState = 'idle';
+        node.runtimeObserved = false;
+        node.lastEventType = null;
+        node.lastOccurredAt = null;
+        node.processingDuration = null;
+        node.fallback = false;
+        if (Number.isFinite(node.baseR)) node.r = node.baseR;
+        // The idle stroke is palette policy the renderer does not keep current across a theme change,
+        // so the caller supplies it; `null` leaves whatever the mount already painted.
+        if (idleStroke != null) node.stroke = idleStroke;
+        node.strokeWidth = idleStrokeWidth;
+      });
+      nodeSelection.attr('r', node => node.r)
+        .attr('stroke', node => node.stroke)
+        .attr('stroke-width', node => node.strokeWidth);
+      links.forEach(link => {
+        link.flow = { recent: 0, count: 0, lastEvent: null, lastOccurredAt: null, expiresAt: null };
+        edgeSelection.filter(candidate => candidate.id === link.id).interrupt('flow')
+          .classed('d3-edge--active', false)
+          .attr('stroke-dasharray', null)
+          .attr('stroke-dashoffset', null);
+        clearTimeout(pulseTimers.get(link.id));
+        pulseTimers.delete(link.id);
+      });
+      // Idle radii make the collide force's cached sizes stale for the NEXT legitimate reheat;
+      // recomputing them installs the same force policy without changing alpha or restarting (#469).
+      simulation.force('collision', createCollisionForce());
+      // Repaint restores the idle edge widths/opacity and geometry from the unchanged positions.
+      paintGeometry();
+      refreshTooltip();
     },
     updateEdgeFlow(edgeId, flow, { reducedMotion = false, decayMs = 1_400, onDecay = null } = {}) {
       const link = links.find(candidate => candidate.id === edgeId);

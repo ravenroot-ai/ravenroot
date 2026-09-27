@@ -10,6 +10,7 @@ Move from observable symptoms through bounded diagnosis and action to an explici
 - [Authentication and browser access](identity-browser.md) — Correct token, OIDC, origin, host, and SSE revalidation failures without weakening boundaries.
 - [AI, artifacts, plugins, and connectors](ai-extensions.md) — Classify unavailable adapters, provider verification outcomes, sandbox refusal, egress, and compatibility faults.
 - [Embed access, backup, and recovery](embed-backup.md) — Resolve gate and session failures, then execute verified backup and restoration procedures.
+- [Human Tasks](human-tasks.md) — Diagnose responder/override refusal, typed forms, registered callbacks, replay, restart, and administrative reconciliation.
 
 ## Authority boundary
 

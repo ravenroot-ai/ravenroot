@@ -1,0 +1,36 @@
+# Operator template, not a ready-to-install credential or image bundle. Replace every example
+# registry digest and bind the named ConfigMaps/Secrets before installing.
+auth:
+  issuer: https://identity.example.test
+  audience: ravenroot
+  jwksUri: https://identity.example.test/jwks
+runnerPlane:
+  enabled: true
+  configMap: runner-catalog
+  sharedEnvironmentSecret: runner-control-plane
+  artifactClaim: runner-artifacts
+  coordinatorReplicas: 2
+  workerPools:
+    - name: native
+      driver: kubernetes
+      replicas: 1
+      image: registry.example.test/ravenroot-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      configMap: native-worker
+      identitySecret: native-identities
+      modelSecret: native-model
+      nodeSelector: {}
+      stateSize: 1Gi
+      storageClass: ""
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits: { cpu: "1", memory: 1Gi }
+      kubernetes:
+        namespace: ravenroot-native-workloads
+        agentServiceAccount: ravenroot-agent
+        runtimeClassName: ""
+        runtimeImages:
+          - registry.example.test/ravenroot-agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        maxPods: 8
+        # Includes retained Workspaces and one permanent preflight claim per manager/runtime.
+        maxClaims: 17
+        storageQuota: 1088Mi

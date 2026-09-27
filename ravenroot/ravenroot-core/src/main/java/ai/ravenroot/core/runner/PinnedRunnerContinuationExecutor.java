@@ -40,10 +40,7 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
     private final ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private final ai.ravenroot.core.approval.ToolApprovalService approvals;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
-    private final java.util.concurrent.ExecutorService executor = new java.util.concurrent.ThreadPoolExecutor(
-            4, 4, 0, java.util.concurrent.TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue<>(16),
-            Thread.ofPlatform().daemon(true).name("runner-continuation-", 0).factory(),
-            new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+    private final java.util.concurrent.ExecutorService executor;
     private final java.util.Set<ExecutionKey> pending = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public PinnedRunnerContinuationExecutor(RunnerJobService jobs, GraphDefinitionStore definitions,
@@ -62,14 +59,49 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
         this.jobs = jobs; this.definitions = definitions; this.engine = engine; this.behaviors = behaviors;
         this.monitor = monitor; this.limits = limits; this.manifests = manifests;
         this.humanTasks = humanTasks; this.approvals = approvals; this.agentBudgets = agentBudgets;
+        var configuration = jobs.controlConfiguration();
+        executor = new java.util.concurrent.ThreadPoolExecutor(configuration.continuationThreads(),
+                configuration.continuationThreads(), 0, java.util.concurrent.TimeUnit.SECONDS,
+                new java.util.concurrent.ArrayBlockingQueue<>(configuration.continuationQueue()),
+                Thread.ofPlatform().daemon(true).name("runner-continuation-", 0).factory(),
+                new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     }
 
     public CompletionStage<Void> resume(ExecutionKey key, UUID jobId) {
+        try { if (alreadyDelivered(key, jobId)) return CompletableFuture.completedFuture(null); }
+        catch (RuntimeException failed) { return CompletableFuture.failedFuture(failed); }
         if (!pending.add(key)) return CompletableFuture.completedFuture(null);
         try {
             return CompletableFuture.runAsync(() -> resumeOwned(key, jobId), executor)
                     .whenComplete((ignored, failure) -> pending.remove(key));
         } catch (RuntimeException refused) { pending.remove(key); return CompletableFuture.failedFuture(refused); }
+    }
+    private boolean alreadyDelivered(ExecutionKey key, UUID jobId) {
+        var stored = jobs.store().load(key).toCompletableFuture().join();
+        var workspace = jobs.store().loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
+        var entry = workspace.jobs().get(jobId);
+        if (entry == null || entry.continuationUncertain() || !entry.job().state().terminal()) return false;
+        var job = entry.job();
+        var traversal = stored.state().traversals().get(job.identity().traversalId());
+        var invocation = traversal.invocations().get(job.identity().invocationId());
+        if (invocation.attempts().stream().noneMatch(attempt -> attempt.attemptId().equals(job.identity().attemptId())
+                && attempt.status().terminal())) return false;
+        if (traversal.status().terminal()) return true;
+        var children = traversal.invocations().values().stream()
+                .filter(value -> value.parentInvocationIds().contains(invocation.invocationId()))
+                .collect(java.util.stream.Collectors.groupingBy(ai.ravenroot.api.application.NodeInvocation::nodeId,
+                        java.util.stream.Collectors.counting()));
+        if (children.isEmpty()) return false;
+        var definition = definitions.load(new GraphDefinitionKey(key.tenantId(),
+                new GraphContentId(stored.graphVersionPin().reference()))).toCompletableFuture().join();
+        var policy = manifests == null ? null : manifests.graphPolicyForParsing(key,
+                ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+        var pinnedLimits = policy == null ? limits : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(policy);
+        try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(definition.canonical().bytes()), pinnedLimits.graphMl())) {
+            // Read-only duplicate detection takes no process lease. Partial dispatch still goes
+            // through the fenced uncertainty path below; no missing successor is invented here.
+            return children.equals(expectedSuccessors(manager, invocation.nodeId(), job));
+        }
     }
 
     /** Process RESUME and recovery deliver through the same fenced terminal-result path. */
@@ -84,7 +116,7 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
                 || expectedRevision < 1) throw new IllegalArgumentException("operator revision and tenant are required");
         var store = jobs.store();
         try (var recorder = ExecutionRecorder.open(store, key, "runner-resolution-" + UUID.randomUUID(),
-                Duration.ofSeconds(30), expectedRevision)) {
+                jobs.controlConfiguration().continuationLease(), expectedRevision)) {
             var stored = store.load(key).toCompletableFuture().join();
             if (stored.revision() != expectedRevision) throw new IllegalStateException("runner resolution revision is stale");
             if (stored.state().terminationReason() == ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED) {
@@ -147,7 +179,7 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
         var store = jobs.store();
         var stored = store.load(key).toCompletableFuture().join();
         try (var recorder = ExecutionRecorder.open(store, key, "runner-continuation-" + UUID.randomUUID(),
-                Duration.ofSeconds(30), stored.revision())) {
+                jobs.controlConfiguration().continuationLease(), stored.revision())) {
             // The admission read and every graph write share this exact process revision.
             // A later lifecycle command wins via CAS before any successor can be dispatched.
             if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, recorder.revision())) return;
@@ -200,7 +232,7 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
                 var operational = manifests == null ? null : manifests.resolvePolicyForNodes(key,
                         ai.ravenroot.api.application.ExecutionPolicy.STANDARD, manager.definition().nodes());
                 try (var runner = new GraphRunner(manager, snapshot, engine, behaviors, monitor,
-                        ExecutionIdentitySource.randomUuids(), Duration.ofSeconds(10), pinnedLimits,
+                        ExecutionIdentitySource.randomUuids(), jobs.controlConfiguration().nodeTimeout(), pinnedLimits,
                         invocation.nodeId(), operational)) {
                     if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, recorder.revision())) return;
                     Object payload = job.result() == null ? null : PayloadJson.read(job.result().payload().bytes(), PayloadLimits.DEFAULTS).toJava();

@@ -24,7 +24,9 @@ public record GovernedRunnerResource(Kind kind, String tenantId, String name, lo
         /** Immutable versioned specialist definition. */
         AGENT_DEFINITION,
         /** Exact designated runner advertisement. */
-        RUNNER
+        RUNNER,
+        /** Immutable placement, lifecycle, authorization and capacity policy. */
+        WORKSPACE_PROFILE
     }
     /** Maximum catalog entries retained per tenant. */
     public static final int MAX_RESOURCES_PER_TENANT = 256;
@@ -33,13 +35,18 @@ public record GovernedRunnerResource(Kind kind, String tenantId, String name, lo
         Objects.requireNonNull(kind); Objects.requireNonNull(document); Objects.requireNonNull(updatedAt);
         name = RunnerPolicy.identifier(name);
         if (revision < 0 || version < 1 || actor == null || actor.isBlank() || actor.length() > 1024
-                || tenantId == null || tenantId.isBlank() || tenantId.length() > 256 || document.size() > 1_048_576) {
+                || tenantId == null || tenantId.isBlank() || tenantId.length() > 256 || document.size() > RunnerCodec.MAX_PAYLOAD_BYTES) {
             throw new IllegalArgumentException("invalid governed runner resource");
         }
         if (kind == Kind.AGENT_DEFINITION) {
             var definition = RunnerCodec.definition(document.bytes());
             if (!definition.reference().equals(new AgentDefinition.Reference(tenantId, name, version))) {
                 throw new IllegalArgumentException("agent catalog key does not match its body");
+            }
+        } else if (kind == Kind.WORKSPACE_PROFILE) {
+            var profile = RunnerCodec.workspaceProfile(document.bytes());
+            if (!profile.reference().equals(new AgentDefinition.Reference(tenantId, name, version))) {
+                throw new IllegalArgumentException("workspace profile key does not match its body");
             }
         } else {
             var runner = RunnerCodec.registration(document.bytes());

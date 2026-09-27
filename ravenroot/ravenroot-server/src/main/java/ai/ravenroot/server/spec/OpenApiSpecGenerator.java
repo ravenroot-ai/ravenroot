@@ -32,6 +32,11 @@ public final class OpenApiSpecGenerator {
     private OpenApiSpecGenerator() {
     }
 
+    /** Writes the canonical checked-in document for release tooling. */
+    public static void main(String[] ignored) {
+        System.out.print(generate(RouteTable.ALL));
+    }
+
     private static final String NOT_A_STABILITY_PROMISE =
             "Ravenroot's HTTP API. This document is generated from the same route table the server "
                     + "registers its endpoints from (RouteTable, RouteDescriptor) and is checked and "
@@ -59,7 +64,10 @@ public final class OpenApiSpecGenerator {
         json.append("    },\n");
         String existingSchemas = humanTaskSchemas();
         json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\n    }"));
-        json.append(",\n").append(executionEventSchemas()).append("    }\n");
+        json.append(",\n").append(diagnosticSchemas()).append(",\n")
+                .append(deploymentSchemas()).append(",\n")
+                .append(processInventorySchemas()).append(",\n")
+                .append(executionEventSchemas()).append("    }\n");
         json.append("  }\n");
         json.append("}\n");
         return json.toString();
@@ -100,6 +108,15 @@ public final class OpenApiSpecGenerator {
             entry.append("        \"requestBody\": {\"required\": true, \"content\": "
                     + "{\"application/json\": {\"schema\": {\"$ref\": "
                     + "\"#/components/schemas/HumanTaskConfirmationRequest\"}}}},\n");
+        }
+        if (isHumanTaskSettlement(route, method)) {
+            entry.append(jsonRequestBody("HumanTaskSettlement"));
+        }
+        if (isHumanTaskInteractionRevocation(route, method)) {
+            entry.append(jsonRequestBody("HumanTaskCapabilityRevocation"));
+        }
+        if (isHumanTaskCapabilityCompletion(route, method)) {
+            entry.append(jsonRequestBody("HumanTaskCapabilityCompletion"));
         }
         entry.append("        \"responses\": {\n");
         var responses = new java.util.ArrayList<String>();
@@ -166,9 +183,39 @@ public final class OpenApiSpecGenerator {
                     + HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_PAGE_SIZE + ", \"default\": "
                     + HumanTaskPolicy.Confirmation.DEFAULTS.attentionDefaultPageSize() + "}}");
         }
-        if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)) {
+        if ("/v1/executions/inventory".equals(route.path()) && "GET".equals(method)) {
+            parameters.add(queryParameter("status", "string", "Comma-separated process statuses."));
+            parameters.add(queryParameter("ownerWorkerId", "string", "Exact lease-holder worker id."));
+            parameters.add(queryParameter("deploymentId", "string", "Exact hosting deployment id."));
+            parameters.add(queryParameter("includeTerminal", "boolean", "Include completed and failed rows."));
+            parameters.add(queryParameter("cursor", "string", "Opaque cursor from nextCursor."));
+            parameters.add(queryParameter("limit", "integer", "Page size, bounded by maxPageSize."));
+        }
+        if ("/v1/graphs/inspect".equals(route.path()) && "POST".equals(method)) {
+            parameters.add("          {\"name\": \"purpose\", \"in\": \"query\", \"required\": false, "
+                    + "\"schema\": {\"type\": \"string\", \"default\": \"EXECUTION\", \"enum\": "
+                    + enumValues(ai.ravenroot.api.application.GraphAdmissionPurpose.values()) + "}}");
+        }
+        if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)
+                || isHumanTaskSettlement(route, method) || isHumanTaskInteraction(route, method)) {
             parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
                     + "\"schema\": {\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1}}");
+        }
+        if (isDeploymentCommand(route, method)) {
+            parameters.add(deploymentHeader("Idempotency-Key", "string",
+                    "Required for a durable deployment; one unique key per operator intent."));
+            parameters.add(deploymentHeader("X-Ravenroot-Expected-Generation", "integer",
+                    "Required for a durable deployment; exact authoritative generation."));
+            if (route.path().endsWith("/stop") || route.path().endsWith("/pause")
+                    || route.path().endsWith("/cancel") || ("DELETE".equals(method)
+                    && "/v1/deployments/{id}".equals(route.path()))) {
+                parameters.add(deploymentHeader("X-Ravenroot-Reason", "string",
+                        "Required for durable Pause, Cancel, Stop and Undeploy; bounded operator reason."));
+            }
+            if ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path())) {
+                parameters.add(deploymentHeader("X-Ravenroot-Undeploy-Disposition", "string",
+                        "Required for durable Undeploy: DRAIN_FIRST, CANCEL_IN_FLIGHT, or REFUSE_IF_BUSY."));
+            }
         }
         return parameters.isEmpty() ? "" : parameters.stream()
                 .collect(Collectors.joining(",\n", "        \"parameters\": [\n", "\n        ],\n"));
@@ -187,10 +234,44 @@ public final class OpenApiSpecGenerator {
                 && "POST".equals(method);
     }
 
+    private static boolean isHumanTaskSettlement(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/{taskId}/settle".equals(route.path()) && "POST".equals(method);
+    }
+
+    private static boolean isHumanTaskInteraction(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/{taskId}/interaction".equals(route.path());
+    }
+
+    private static boolean isHumanTaskInteractionRevocation(RouteDescriptor route, String method) {
+        return isHumanTaskInteraction(route, method) && "DELETE".equals(method);
+    }
+
+    private static boolean isHumanTaskCapabilityCompletion(RouteDescriptor route, String method) {
+        return "/v1/human-task-interactions/complete".equals(route.path()) && "POST".equals(method);
+    }
+
+    private static String jsonRequestBody(String schema) {
+        return "        \"requestBody\": {\"required\": true, \"content\": "
+                + "{\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/"
+                + schema + "\"}}}},\n";
+    }
+
     private static String queryParameter(String name, String type, String description) {
         return "          {\"name\": \"" + name + "\", \"in\": \"query\", \"required\": false, "
                 + "\"description\": \"" + JsonStrings.escape(description) + "\", \"schema\": {\"type\": \""
                 + type + "\"}}";
+    }
+
+    private static String deploymentHeader(String name, String type, String description) {
+        return "          {\"name\": \"" + name + "\", \"in\": \"header\", \"required\": false, "
+                + "\"description\": \"" + JsonStrings.escape(description) + "\", \"schema\": {\"type\": \""
+                + type + "\"" + ("integer".equals(type) ? ", \"format\": \"int64\", \"minimum\": 0" : "")
+                + "}}";
+    }
+
+    private static boolean isDeploymentCommand(RouteDescriptor route, String method) {
+        return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/"))
+                || ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path()));
     }
 
     private static String successResponse(RouteDescriptor route, String method, int status) {
@@ -234,10 +315,63 @@ public final class OpenApiSpecGenerator {
             schema = "HumanTaskAttentionPage";
         } else if (isHumanTaskConfirmation(route, method)) {
             schema = "HumanTaskConfirmationResult";
+        } else if (isHumanTaskSettlement(route, method) || isHumanTaskCapabilityCompletion(route, method)) {
+            schema = "HumanTaskDecisionResult";
+        } else if (isHumanTaskInteraction(route, method) && "POST".equals(method)) {
+            schema = "HumanTaskInteractionLaunch";
+        } else if ("/v1/graphs/inspect".equals(route.path()) && "POST".equals(method)) {
+            schema = "GraphInspection";
+        } else if (("/v1/source-sessions".equals(route.path()) && "POST".equals(method))
+                || "/v1/source-sessions/{id}".equals(route.path())) {
+            schema = "SourceSessionStatus";
+        } else if ("/v1/deployments".equals(route.path()) && "GET".equals(method)) {
+            schema = "LocalDeploymentStatusList";
+        } else if ("/v1/executions/inventory".equals(route.path()) && "GET".equals(method)) {
+            schema = "ProcessInventoryPage";
+        } else if (("/v1/deployments".equals(route.path()) && "POST".equals(method))
+                || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))) {
+            schema = "LocalDeploymentStatus";
+        } else if (isDeploymentCommand(route, method)) {
+            schema = "DeploymentCommandResponse";
         }
         return "          \"" + status + "\": {\"description\": \"success\""
                 + (schema == null ? "}" : ", \"content\": {\"application/json\": "
                         + "{\"schema\": {\"$ref\": \"#/components/schemas/" + schema + "\"}}}}");
+    }
+
+    private static String diagnosticSchemas() {
+        String phases = enumValues(ai.ravenroot.api.application.GraphAdmissionPhase.values());
+        String reasons = enumValues(ai.ravenroot.api.application.GraphAdmissionReason.values());
+        return "      \"GraphAdmissionFinding\": {\"type\":\"object\",\"required\":[\"contract\",\"phase\",\"reason\",\"incidentId\"],\"additionalProperties\":false,\"properties\":{"
+                + "\"contract\":{\"type\":\"string\",\"enum\":[\"ravenroot.graph-admission/1\"]},\"phase\":{\"type\":\"string\",\"enum\":" + phases + "},\"reason\":{\"type\":\"string\",\"enum\":" + reasons + "},"
+                + "\"nodeId\":{\"type\":\"string\",\"maxLength\":128},\"nodeRef\":{\"type\":\"string\",\"pattern\":\"^sha256:[0-9a-f]{32}$\"},\"propertyName\":{\"type\":\"string\",\"maxLength\":64},\"incidentId\":{\"type\":\"string\",\"maxLength\":128,\"pattern\":\"^[A-Za-z0-9._:-]+$\"}}},\n"
+                + "      \"StartupFailure\": {\"type\":\"object\",\"required\":[\"contract\",\"phase\",\"reason\",\"incidentId\"],\"additionalProperties\":false,\"properties\":{"
+                + "\"contract\":{\"type\":\"string\",\"enum\":[\"ravenroot.startup-failure/1\"]},\"phase\":{\"type\":\"string\",\"enum\":" + phases + "},\"reason\":{\"oneOf\":[{\"type\":\"string\",\"enum\":[\"STARTUP_FAILED\"]},{\"type\":\"string\",\"pattern\":\"^[a-z][a-z0-9-]{0,63}$\"}]},\"nodeId\":{\"type\":\"string\",\"maxLength\":128},\"nodeRef\":{\"type\":\"string\",\"pattern\":\"^sha256:[0-9a-f]{32}$\"},\"incidentId\":{\"type\":\"string\",\"maxLength\":128,\"pattern\":\"^[A-Za-z0-9._:-]+$\"}}},\n"
+                + "      \"GraphInspection\": {\"type\":\"object\",\"required\":[\"nodes\",\"edges\",\"startNodes\",\"endNodes\",\"valid\",\"violations\",\"findings\"],\"properties\":{\"nodes\":{\"type\":\"integer\",\"minimum\":0},\"edges\":{\"type\":\"integer\",\"minimum\":0},\"startNodes\":{\"type\":\"integer\",\"minimum\":0},\"endNodes\":{\"type\":\"integer\",\"minimum\":0},\"valid\":{\"type\":\"boolean\"},\"violations\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"findings\":{\"type\":\"array\",\"maxItems\":1,\"items\":{\"$ref\":\"#/components/schemas/GraphAdmissionFinding\"}}}},\n"
+                + "      \"SourceSessionStatus\": {\"type\":\"object\",\"required\":[\"sessionId\",\"deploymentId\",\"state\",\"sourceCount\",\"scope\",\"diagnostic\",\"failure\"],\"properties\":{\"sessionId\":{\"type\":\"string\"},\"deploymentId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"STARTING\",\"LISTENING\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},\"sourceCount\":{\"type\":\"integer\",\"minimum\":1},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"failure\":{\"allOf\":[{\"$ref\":\"#/components/schemas/StartupFailure\"}],\"nullable\":true}}}";
+    }
+
+    private static String enumValues(Enum<?>[] values) {
+        return java.util.Arrays.stream(values).map(value -> "\"" + value.name() + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    }
+
+    private static String deploymentSchemas() {
+        return "      \"LifecycleCommandCapability\": {\"type\":\"object\",\"required\":[\"command\",\"available\",\"reasonRequired\",\"unavailableReason\"],\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"START\",\"PAUSE\",\"RESUME\",\"CANCEL\",\"DRAIN\",\"STOP\",\"RESTART\",\"UNDEPLOY\"]},\"available\":{\"type\":\"boolean\"},\"reasonRequired\":{\"type\":\"boolean\"},\"unavailableReason\":{\"type\":\"string\",\"nullable\":true}}},\n"
+                + "      \"LifecycleCapabilities\": {\"type\":\"object\",\"required\":[\"contractVersion\",\"scope\",\"commands\"],\"properties\":{\"contractVersion\":{\"type\":\"integer\",\"enum\":[1]},\"scope\":{\"type\":\"string\",\"enum\":[\"DEPLOYMENT\",\"PROCESS\"]},\"commands\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LifecycleCommandCapability\"}},\"drainBound\":{\"type\":\"string\"}}},\n"
+                + "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"tenantId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\",\"failure\",\"continuity\",\"deploymentRevision\",\"desiredState\",\"observedState\",\"recoveryFailure\",\"lifecycleCapabilities\"],\"properties\":{"
+                + "\"deploymentId\":{\"type\":\"string\"},\"tenantId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"REGISTERED\",\"STARTING\",\"READY\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},"
+                + "\"sourceCount\":{\"type\":\"integer\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\",\"nullable\":true},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},"
+                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"failure\":{\"allOf\":[{\"$ref\":\"#/components/schemas/StartupFailure\"}],\"nullable\":true},\"continuity\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]},\"deploymentRevision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1,\"nullable\":true},\"desiredState\":{\"type\":\"string\",\"nullable\":true},\"observedState\":{\"type\":\"string\",\"nullable\":true},\"recoveryFailure\":{\"type\":\"string\",\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
+                + "      \"LocalDeploymentStatusList\": {\"type\":\"object\",\"required\":[\"scope\",\"deployments\"],\"properties\":{\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"deployments\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"}}}},\n"
+                + "      \"DeploymentCommandOutcome\": {\"type\":\"object\",\"required\":[\"outcome\"],\"properties\":{\"outcome\":{\"type\":\"string\",\"enum\":[\"ACCEPTED\",\"CONVERGED\",\"REPLAYED\",\"IDEMPOTENCY_CONFLICT\",\"STALE_GENERATION\",\"SUPERSEDED\",\"REFUSED\",\"FAILED\",\"TERMINAL\"]},\"commandId\":{\"type\":\"string\"},\"fromGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"generation\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"expected\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"observed\":{\"type\":\"string\"},\"key\":{\"type\":\"string\"},\"by\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"cause\":{\"type\":\"string\"},\"original\":{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}}},\n"
+                + "      \"DeploymentCommandResponse\": {\"oneOf\":[{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"},{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}],\"description\":\"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome.\"}";
+    }
+
+    private static String processInventorySchemas() {
+        return "      \"ProcessInventoryEntry\": {\"type\":\"object\",\"required\":[\"tenantId\",\"processInstanceId\",\"status\",\"terminationReason\",\"cancelled\",\"disposition\",\"revision\",\"lifecycleGeneration\",\"graphVersion\",\"deploymentId\",\"workloadId\",\"correlationId\",\"ownerWorkerId\",\"fencingToken\",\"leaseExpiresAt\",\"traversalCount\",\"createdAt\",\"updatedAt\",\"retainedUntil\",\"controlState\",\"lifecycleCapabilities\"],\"properties\":{"
+                + "\"tenantId\":{\"type\":\"string\"},\"processInstanceId\":{\"type\":\"string\",\"format\":\"uuid\"},\"status\":{\"type\":\"string\"},\"terminationReason\":{\"type\":\"string\",\"nullable\":true},\"cancelled\":{\"type\":\"boolean\"},\"disposition\":{\"type\":\"string\"},\"revision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1},\"lifecycleGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\"},\"deploymentId\":{\"type\":\"string\",\"nullable\":true},\"workloadId\":{\"type\":\"string\",\"nullable\":true},\"correlationId\":{\"type\":\"string\",\"nullable\":true},\"ownerWorkerId\":{\"type\":\"string\",\"nullable\":true},\"fencingToken\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"leaseExpiresAt\":{\"type\":\"string\",\"format\":\"date-time\",\"nullable\":true},\"traversalCount\":{\"type\":\"integer\",\"minimum\":0},\"createdAt\":{\"type\":\"string\",\"format\":\"date-time\"},\"updatedAt\":{\"type\":\"string\",\"format\":\"date-time\"},\"retainedUntil\":{\"type\":\"string\",\"format\":\"date-time\",\"nullable\":true},\"controlState\":{\"type\":\"string\",\"nullable\":true},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
+                + "      \"ProcessInventoryPage\": {\"type\":\"object\",\"required\":[\"items\",\"nextCursor\",\"retainedFrom\",\"maxPageSize\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/ProcessInventoryEntry\"}},\"nextCursor\":{\"type\":\"string\",\"nullable\":true},\"retainedFrom\":{\"type\":\"string\",\"format\":\"date-time\"},\"maxPageSize\":{\"type\":\"integer\",\"minimum\":1}}}";
     }
 
     /** JSON data schemas for named SSE frames; unknown future members remain permitted. */
@@ -376,6 +510,12 @@ public final class OpenApiSpecGenerator {
                 + "\"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, "
                 + "\"outcome\": {\"type\": \"string\", \"enum\": [\"APPLIED\", \"ALREADY_APPLIED\"]}, "
                 + "\"task\": {\"$ref\": \"#/components/schemas/HumanTaskAttentionItem\"}}},\n"
+                + "      \"HumanTaskOpaqueResponse\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"contentType\", \"payloadBase64\"], \"properties\": {\"contentType\": {\"type\": \"string\"}, \"payloadBase64\": {\"type\": \"string\", \"format\": \"byte\"}}},\n"
+                + "      \"HumanTaskOverride\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"version\", \"reason\"], \"properties\": {\"version\": {\"type\": \"integer\", \"enum\": [1]}, \"reason\": {\"type\": \"string\", \"minLength\": 1, \"maxLength\": 1024}}},\n"
+                + "      \"HumanTaskSettlement\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"schemaVersion\", \"action\"], \"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"action\": {\"type\": \"string\", \"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}, \"comment\": {\"type\": \"string\"}, \"response\": {\"$ref\": \"#/components/schemas/HumanTaskOpaqueResponse\"}, \"override\": {\"$ref\": \"#/components/schemas/HumanTaskOverride\"}}},\n"
+                + "      \"HumanTaskCapabilityCompletion\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"schemaVersion\", \"capability\", \"action\"], \"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"capability\": {\"type\": \"string\"}, \"action\": {\"type\": \"string\", \"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}, \"comment\": {\"type\": \"string\"}, \"response\": {\"$ref\": \"#/components/schemas/HumanTaskOpaqueResponse\"}}},\n"
+                + "      \"HumanTaskCapabilityRevocation\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"schemaVersion\", \"capability\"], \"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"capability\": {\"type\": \"string\"}}},\n"
+                + "      \"HumanTaskInteractionLaunch\": {\"type\": \"object\", \"description\": \"Bounded registered-host launch data: capability metadata, exact task/generation/actions, authorized review presentation, and pinned response schema. It never contains a Ravenroot bearer token or provider signing credential.\"},\n"
                 + "      \"HumanTaskDecisionResult\": {\"type\": \"object\", \"required\": [\"outcome\", "
                 + "\"taskId\", \"generation\"], \"properties\": {\"outcome\": {\"type\": \"string\"}, "
                 + "\"taskId\": {\"type\": \"string\", \"format\": \"uuid\"}, \"generation\": "

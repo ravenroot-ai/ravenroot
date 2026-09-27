@@ -34,6 +34,60 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AgentNodeBehaviorTest {
 
     private static final String ENDPOINT = "https://model.example.test/v1/chat/completions";
+    private static String governedAnswer(String outcome) {
+        String answer = PayloadJson.write(PayloadValue.fromJava(Map.of("outcome", outcome,
+                "payload", Map.of("summary", "Reviewed")), PayloadLimits.DEFAULTS));
+        return PayloadJson.write(PayloadValue.fromJava(Map.of("choices", List.of(Map.of("finish_reason", "stop",
+                "message", Map.of("content", answer))), "usage", Map.of("prompt_tokens", 7, "completion_tokens", 11)), PayloadLimits.DEFAULTS));
+    }
+    private static String governedSkillRequest() {
+        String request = AiTestSupport.asksFor("s1", "load_skill", "{\"name\":\"rubric\"}");
+        return request.substring(0, request.length() - 1) + ",\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}";
+    }
+
+    private static ai.ravenroot.api.runner.AgentDefinition governed(int turns, int tools) {
+        var policy = new ai.ravenroot.api.runner.RunnerPolicy(java.util.Set.of(
+                ai.ravenroot.api.runner.RunnerPolicy.Capability.TOOL_CALL), java.util.Set.of("load-skill"),
+                java.util.Set.of(), java.util.Set.of(), java.util.Set.of(),
+                new ai.ravenroot.api.runner.RunnerPolicy.Limits(Duration.ofSeconds(20), 1024, 1, 1024, 1024, 1024, 16384));
+        var command = new ai.ravenroot.api.runner.AgentCommand("review", true, policy, java.util.Set.of("approved", "changes-requested"));
+        return new ai.ravenroot.api.runner.AgentDefinition(new ai.ravenroot.api.runner.AgentDefinition.Reference("tenant", "reviewer", 3),
+                "Use the approved review rubric.", "runtime", "local", Map.of("review", command), java.util.Set.of("rubric"),
+                java.util.Set.of(), policy, Duration.ZERO, "review-result",
+                new ai.ravenroot.api.runner.AgentDefinition.Budgets(turns, tools, 1000, 128), Map.of("rubric", "Check the stated invariant."));
+    }
+
+    @Test void namedAgentWithoutWorkspaceUsesManagedModelToolsAndDirectGovernedOutput() throws Exception {
+        var definition = governed(3, 2);
+        var http = new AiTestSupport.ScriptedHttp()
+                .then(governedSkillRequest())
+                .then(governedAnswer("approved"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+        var result = resultOf(behavior.createGoverned("agent", http, definition, definition.commands().get("review"), definition.policy()));
+        assertEquals("approved", result.outcome()); assertEquals(Map.of("summary", "Reviewed"), result.payload());
+        assertEquals("reviewer", result.attributes().get("agent.definition"));
+        assertEquals(3L, result.attributes().get("agent.definitionVersion"));
+        assertEquals(2, http.calls());
+        String first = new String(http.bodies().getFirst(), StandardCharsets.UTF_8);
+        assertTrue(first.contains("Use the approved review rubric."));
+        assertTrue(first.contains("No Workspace is attached")); assertTrue(first.contains("128"));
+        assertTrue(new String(http.bodies().getLast(), StandardCharsets.UTF_8).contains("Check the stated invariant."));
+    }
+
+    @Test void namedAgentRefusesWrongOutcomeAndEnforcesDefinitionToolBudget() {
+        var definition = governed(4, 1);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+        var wrong = new AiTestSupport.ScriptedHttp().then(governedAnswer("completed"));
+        assertThrows(ExecutionException.class, () -> resultOf(behavior.createGoverned("agent", wrong, definition,
+                definition.commands().get("review"), definition.policy())));
+        var loop = new AiTestSupport.ScriptedHttp().thenForever(governedSkillRequest());
+        assertThrows(ExecutionException.class, () -> resultOf(behavior.createGoverned("agent", loop, definition,
+                definition.commands().get("review"), definition.policy())));
+        assertEquals(2, loop.calls(), "the second requested tool is refused before a third model request");
+        var unaccounted = new AiTestSupport.ScriptedHttp().then(AiTestSupport.answers("unaccounted"));
+        assertEquals(AgentException.Code.RESPONSE_UNREADABLE, failureOf(behavior.createGoverned("agent", unaccounted,
+                definition, definition.commands().get("review"), definition.policy())).code());
+    }
 
     @Test
     @DisplayName("the descriptor declares both capabilities that make the runtime mark this output")

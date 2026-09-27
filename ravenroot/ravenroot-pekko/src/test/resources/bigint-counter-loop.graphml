@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="join-semantics" for="graph" attr.name="join.semantics" attr.type="string"/>
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="operation" for="node" attr.name="operation" attr.type="string"/>
+  <key id="left" for="node" attr.name="left" attr.type="string"/>
+  <key id="right" for="node" attr.name="right" attr.type="string"/>
+  <key id="target" for="node" attr.name="target" attr.type="string"/>
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/>
+  <key id="true-outcome" for="node" attr.name="trueOutcome" attr.type="string"/>
+  <key id="false-outcome" for="node" attr.name="falseOutcome" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="bigint-counter-loop" edgedefault="directed">
+    <data key="join-semantics">declared</data>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="decrement">
+      <data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data>
+      <data key="operation">subtract</data><data key="left">field:counter</data>
+      <data key="right">literal:1</data><data key="target">counter</data>
+    </node>
+    <node id="zero-test">
+      <data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data>
+      <data key="operation">equal</data><data key="left">field:counter</data>
+      <data key="right">literal:0</data><data key="target">isZero</data>
+    </node>
+    <node id="branch">
+      <data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data>
+      <data key="expression">payload.isZero</data>
+      <data key="true-outcome">done</data><data key="false-outcome">again</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="start-decrement" source="start" target="decrement"><data key="outcome">continue</data></edge>
+    <edge id="decrement-test" source="decrement" target="zero-test"><data key="outcome">continue</data></edge>
+    <edge id="test-branch" source="zero-test" target="branch"><data key="outcome">continue</data></edge>
+    <edge id="branch-done" source="branch" target="end"><data key="outcome">done</data></edge>
+    <edge id="branch-again" source="branch" target="decrement"><data key="outcome">again</data></edge>
+    <edge id="decrement-error" source="decrement" target="error"/>
+    <edge id="test-error" source="zero-test" target="error"/>
+    <edge id="branch-error" source="branch" target="error"/>
+  </graph>
+</graphml>

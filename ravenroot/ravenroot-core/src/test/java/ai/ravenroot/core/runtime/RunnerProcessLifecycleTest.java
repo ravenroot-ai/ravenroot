@@ -23,6 +23,7 @@ import java.util.concurrent.CompletionException;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerProcessLifecycleTest {
+    static final UUID WORKER_SESSION = UUID.randomUUID();
     @TempDir Path directory;
     static final SecurityContext ACTOR = new SecurityContext("request", "tenant", "operator", PrincipalType.USER, "test");
     static final RavenrootApplication APPLICATION = (RavenrootApplication) Proxy.newProxyInstance(
@@ -37,14 +38,18 @@ class RunnerProcessLifecycleTest {
               <key id="k" for="node" attr.name="kind" attr.type="string"/>
               <key id="b" for="node" attr.name="behavior" attr.type="string"/>
               <key id="d" for="node" attr.name="agentDefinition" attr.type="string"/>
-              <key id="r" for="node" attr.name="runner" attr.type="string"/>
+              <key id="w" for="node" attr.name="workspaceRef" attr.type="string"/>
+              <key id="p" for="node" attr.name="workspaceProfile" attr.type="string"/>
+              <key id="o" for="edge" attr.name="outcome" attr.type="string"/>
               <key id="c" for="edge" attr.name="command" attr.type="string"/>
               <graph edgedefault="directed">
                 <node id="start"><data key="k">START</data></node>
                 <node id="error"><data key="k">ERROR</data></node>
                 <node id="end"><data key="k">END</data></node>
-                <node id="agent"><data key="k">BEHAVIOR</data><data key="b">workspace-agent</data><data key="d">specialist</data><data key="r">local</data></node>
-                <edge source="start" target="agent"><data key="c">plan</data></edge>
+                <node id="repository"><data key="k">BEHAVIOR</data><data key="b">workspace</data><data key="p">development</data></node>
+                <node id="agent"><data key="k">BEHAVIOR</data><data key="b">agent</data><data key="d">specialist</data><data key="w">repository</data></node>
+                <edge source="start" target="repository"><data key="c">open</data></edge>
+                <edge source="repository" target="agent"><data key="c">plan</data><data key="o">ready</data></edge>
                 <edge source="agent" target="end"/>
               </graph>
             </graphml>
@@ -63,7 +68,7 @@ class RunnerProcessLifecycleTest {
             try (var store = shortJournalStore(database, clock); var engine = new JoinTestEngine()) {
                 var jobs = jobs(store, clock);
                 id = park(store, graphs, engine, jobs, key);
-                jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30)));
+                jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30), WORKER_SESSION));
                 var lifecycle = new ProcessLifecycleService(store, APPLICATION, null, clock);
                 assertEquals(ProcessLifecycleService.Code.APPLIED, command(lifecycle, store, key, hold, "hold").code());
                 var journal = store.readJournal("tenant", 0, 100).toCompletableFuture().join();
@@ -78,10 +83,10 @@ class RunnerProcessLifecycleTest {
                 var freshKey = new ExecutionKey("tenant", UUID.randomUUID());
                 var fresh = park(store, graphs, engine, jobs, freshKey);
                 assertEquals(RunnerJob.State.CLAIMED, jobs.mutate(ACTOR, freshKey,
-                        new RunnerJobOperation.Claim(fresh.runnerJobId(), "local", Duration.ofSeconds(30)))
+                        new RunnerJobOperation.Claim(fresh.runnerJobId(), "local", Duration.ofSeconds(30), WORKER_SESSION))
                         .jobs().get(fresh.runnerJobId()).job().state());
-                jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, result));
-                jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, result));
+                jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence(store, key, result)));
+                jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence(store, key, result)));
                 heldRevision = store.load(key).toCompletableFuture().join().revision();
                 try (var executor = executor(jobs, graphs, engine)) {
                     executor.resume(key, id.runnerJobId()).toCompletableFuture().join();
@@ -141,7 +146,7 @@ class RunnerProcessLifecycleTest {
             try (var store = new SqliteExecutionStore(database, clock); var engine = new JoinTestEngine()) {
                 var jobs = jobs(store, clock); id = park(store, graphs, engine, jobs, key);
                 if (before != RunnerJob.State.QUEUED) jobs.mutate(ACTOR, key,
-                        new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(10)));
+                        new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(10), WORKER_SESSION));
                 if (before == RunnerJob.State.UNKNOWN || before == RunnerJob.State.RECONCILING) {
                     clock.advance(11);
                     jobs.mutate(ACTOR, key, new RunnerJobOperation.Reconcile(id.runnerJobId()));
@@ -149,7 +154,7 @@ class RunnerProcessLifecycleTest {
                 if (before == RunnerJob.State.RECONCILING) jobs.mutate(ACTOR, key,
                         new RunnerJobOperation.ReconcileReport(id.runnerJobId(), "local", Duration.ofSeconds(10)));
                 if (before == RunnerJob.State.COMPLETED) {
-                    jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence));
+                    jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence(store, key, evidence)));
                     jobs.mutate(ACTOR, key, new RunnerJobOperation.ContinuationUncertain(id.runnerJobId()));
                 }
                 var lifecycle = new ProcessLifecycleService(store, APPLICATION, null, clock);
@@ -164,7 +169,7 @@ class RunnerProcessLifecycleTest {
                 var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
                 assertEquals(cancelledAt, workspace.processTerminalAt());
                 assertFalse(workspace.jobs().get(id.runnerJobId()).continuationUncertain());
-                if (before == RunnerJob.State.COMPLETED) assertEquals(evidence, workspace.jobs().get(id.runnerJobId()).job().result());
+                if (before == RunnerJob.State.COMPLETED) assertEquals(evidence(store, key, evidence), workspace.jobs().get(id.runnerJobId()).job().result());
                 else assertEquals(RunnerJob.StopReason.CANCEL, workspace.jobs().get(id.runnerJobId()).job().stopReason());
             }
             try (var store = new SqliteExecutionStore(database, clock); var engine = new JoinTestEngine()) {
@@ -186,8 +191,8 @@ class RunnerProcessLifecycleTest {
                         job = jobs.mutate(ACTOR, key, new RunnerJobOperation.ReconcileReport(id.runnerJobId(), "local", Duration.ofSeconds(30)))
                                 .jobs().get(id.runnerJobId()).job();
                         assertThrows(RuntimeException.class, () -> jobs.mutate(ACTOR, key,
-                                new RunnerJobOperation.Complete(id.runnerJobId(), "local", oldFence, evidence)));
-                        var report = new RunnerJobOperation.Complete(id.runnerJobId(), "local", job.fence(), evidence);
+                                new RunnerJobOperation.Complete(id.runnerJobId(), "local", oldFence, evidence(store, key, evidence))));
+                        var report = new RunnerJobOperation.Complete(id.runnerJobId(), "local", job.fence(), evidence(store, key, evidence));
                         jobs.mutate(ACTOR, key, report); jobs.mutate(ACTOR, key, report);
                         assertEquals(RunnerJob.State.CANCELLED, store.loadRunnerWorkspace(key).toCompletableFuture().join()
                                 .orElseThrow().jobs().get(id.runnerJobId()).job().state());
@@ -198,7 +203,8 @@ class RunnerProcessLifecycleTest {
                     assertEquals(cancelledAt, store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().processTerminalAt());
                     var journal = store.readJournal("tenant", 0, 500).toCompletableFuture().join();
                     assertEquals(1, journal.stream().filter(row -> row.envelope().eventType().equals("PROCESS_CANCEL")).count());
-                    assertEquals(1, journal.stream().filter(row -> row.envelope().eventType().equals("RUNNER_JOB_PROCESS_CANCELLED")).count());
+                    assertEquals(1, journal.stream().filter(row -> row.envelope().eventType().equals("RUNNER_JOB_PROCESS_CANCELLED")
+                            && id.attemptId().equals(row.envelope().attemptId())).count());
                     assertFalse(lifecycle.admitsReentry("tenant", key.processInstanceId()));
                 }
             }
@@ -215,8 +221,8 @@ class RunnerProcessLifecycleTest {
             ExecutionStore intercepted = intercept(store, batch -> batch.transitions().stream().anyMatch(transition ->
                     transition instanceof ExecutionTransition.ProcessTransitioned next && next.next() == ProcessInstanceStatus.RUNNING), beforeWrite);
             var jobs = jobs(intercepted, clock); var id = park(intercepted, graphs, engine, jobs, key);
-            jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30)));
-            jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, result()));
+            jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30), WORKER_SESSION));
+            jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence(store, key, result())));
             var lifecycle = new ProcessLifecycleService(store, APPLICATION, null, clock);
             beforeWrite.set(() -> assertEquals(ProcessLifecycleService.Code.APPLIED,
                     command(lifecycle, store, key, command, "race-winner").code()));
@@ -243,19 +249,20 @@ class RunnerProcessLifecycleTest {
             ExecutionStore intercepted = intercept(store, batch -> batch.runnerOperations().stream()
                     .anyMatch(operation -> operation instanceof RunnerJobOperation.Complete), beforeWrite);
             var jobs = jobs(intercepted, clock); var id = park(intercepted, graphs, engine, jobs, key);
-            jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30)));
+            jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30), WORKER_SESSION));
             var lifecycle = new ProcessLifecycleService(store, APPLICATION, null, clock);
             beforeWrite.set(() -> assertEquals(ProcessLifecycleService.Code.APPLIED,
                     command(lifecycle, store, key, command, "race-winner").code()));
-            var evidence = result(); var report = new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence);
+            var evidence = result(); var report = new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, evidence(store, key, evidence));
             assertThrows(RuntimeException.class, () -> jobs.mutate(ACTOR, key, report));
             assertNull(beforeWrite.get());
             jobs.mutate(ACTOR, key, report); jobs.mutate(ACTOR, key, report);
             var job = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().get(id.runnerJobId()).job();
-            assertEquals(evidence, job.result());
-            assertEquals(command == ProcessLifecycleService.Command.CANCEL ? RunnerJob.State.CANCELLED : RunnerJob.State.COMPLETED, job.state());
+            assertEquals(evidence(store, key, evidence), job.result());
+            assertEquals(command != ProcessLifecycleService.Command.PAUSE ? RunnerJob.State.CANCELLED : RunnerJob.State.COMPLETED, job.state());
             assertEquals(1, store.readJournal("tenant", 0, 500).toCompletableFuture().join().stream()
-                    .filter(row -> row.envelope().eventType().equals("RUNNER_JOB_TERMINAL_REPORTED")).count());
+                    .filter(row -> row.envelope().eventType().equals("RUNNER_JOB_TERMINAL_REPORTED")
+                            && id.attemptId().equals(row.envelope().attemptId())).count());
         }
     }
 
@@ -277,8 +284,14 @@ class RunnerProcessLifecycleTest {
         var definition = new AgentDefinition(new AgentDefinition.Reference("tenant", "specialist", 1), "Approved instructions",
                 "reference", "reference", Map.of("plan", new AgentCommand("plan", true, policy, AgentCommand.STANDARD_OUTCOMES)),
                 Set.of(), Set.of(), policy, Duration.ofDays(7), "result");
+        store.renewRunnerAvailability(new RunnerAvailability("tenant", "local", WORKER_SESSION, 7, 0, Set.of("reference"),
+                clock.instant(), clock.instant().plusSeconds(30)), Duration.ofSeconds(30)).toCompletableFuture().join();
+        var profile = new WorkspaceProfile(new AgentDefinition.Reference("tenant", "development", 1), WorkspaceProfile.Scope.PROCESS_INSTANCE,
+                WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE, "test", "reference", policy,
+                new WorkspaceProfile.Capacity(2, 7, 16, 16_000_000, 64, 1024, WorkspaceProfile.Admission.QUEUE),
+                Duration.ofDays(7), WorkspaceProfile.CompletionPolicy.ABORT, Set.of("specialist"));
         return new RunnerJobService(store, clock, List.of(definition),
-                List.of(new RunnerRegistration(1, "tenant", "local", "sandboxed", Set.of(), policy)), Map.of("tenant", policy));
+                List.of(new RunnerRegistration(1, "tenant", "local", "sandboxed", Set.of("test"), policy)), Map.of("tenant", policy), List.of(profile));
     }
 
     static RunnerJobIdentity park(ExecutionStore store, InMemoryGraphDefinitionStore graphs, JoinTestEngine engine,
@@ -297,7 +310,13 @@ class RunnerProcessLifecycleTest {
                     key.processInstanceId(), traversal, Map.of(), canonical.contentId().value(), null, null, recorder)
                     .toCompletableFuture().join()).getCause());
         }
-        return store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().iterator().next().job().identity();
+        var opened = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().iterator().next().job();
+        jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(opened.identity().runnerJobId(), "local", Duration.ofSeconds(30), WORKER_SESSION));
+        jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(opened.identity().runnerJobId(), "local", 1,
+                evidence(store, key, new RunnerResult("ready", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID()))));
+        try (var continuation = executor(jobs, graphs, engine)) { continuation.resume(key, opened.identity().runnerJobId()).toCompletableFuture().join(); }
+        return store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().stream()
+                .filter(entry -> entry.job().state() == RunnerJob.State.QUEUED).findFirst().orElseThrow().job().identity();
     }
     static PinnedRunnerContinuationExecutor executor(RunnerJobService jobs, InMemoryGraphDefinitionStore graphs, JoinTestEngine engine) {
         return new PinnedRunnerContinuationExecutor(jobs, graphs, engine, BehaviorRegistry.standard().withRunnerJobs(jobs),
@@ -309,6 +328,11 @@ class RunnerProcessLifecycleTest {
                 store.load(key).toCompletableFuture().join().revision(), idempotency, "");
     }
     static RunnerResult result() { return new RunnerResult("answered", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID()); }
+    static RunnerResult evidence(ExecutionStore store, ExecutionKey key, RunnerResult result) {
+        var resource = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().workspaces().get("repository");
+        return new RunnerResult(result.outcome(), result.payload(), result.artifacts(), result.quiescenceId(),
+                new RunnerResult.WorkspaceObservation(resource.workspaceId(), "fixture-runtime", null));
+    }
     static NodeAttempt attempt(ExecutionStore store, ExecutionKey key, RunnerJobIdentity id) {
         return store.load(key).toCompletableFuture().join().state().traversals().get(id.traversalId()).invocations()
                 .get(id.invocationId()).attempts().getFirst();

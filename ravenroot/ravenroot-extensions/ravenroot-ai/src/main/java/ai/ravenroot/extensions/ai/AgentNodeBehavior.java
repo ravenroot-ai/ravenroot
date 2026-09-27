@@ -89,7 +89,7 @@ import java.util.function.LongSupplier;
  * it and places it on the request. This bundle never holds a secret and has no code path that could
  * return one.</p>
  */
-public final class AgentNodeBehavior implements NodeBehavior {
+public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAgentCapable {
     private static final CancellationSignal NEVER_CANCELLED = new CancellationSignal() {
         @Override public boolean cancelled() { return false; }
         @Override public void onCancel(Runnable listener) { }
@@ -321,6 +321,50 @@ public final class AgentNodeBehavior implements NodeBehavior {
     }
 
     @Override
+    public NodeAction createGoverned(String nodeId, NodePackageServices services,
+            ai.ravenroot.api.runner.AgentDefinition definition, ai.ravenroot.api.runner.AgentCommand command,
+            ai.ravenroot.api.runner.RunnerPolicy authority) {
+        var profile = profiles.resolve(definition.modelProfile());
+        if (profile.isEmpty()) return refuse(AgentException.Code.PROFILE_UNKNOWN, definition.modelProfile());
+        var properties = new LinkedHashMap<String, Object>();
+        properties.put("instructions", definition.instructions()
+                + "\nExecute approved command " + command.name() + ". Return only a JSON object with exactly two fields:"
+                + " outcome (one of " + String.join(", ", new java.util.TreeSet<>(command.outcomes()))
+                + ") and payload (the direct JSON result for output contract " + definition.outputSchema() + ")."
+                + " No Workspace is attached. Do not claim repository access or executed filesystem tools.");
+        properties.put("objective", "{{payload}}");
+        properties.put("timeoutMs", Math.min(Integer.MAX_VALUE, authority.limits().wallTime().toMillis()));
+        properties.put("maxTurns", definition.budgets().modelTurns());
+        properties.put("maxTotalTokens", definition.budgets().modelTokens());
+        properties.put("maxTokens", definition.budgets().tokensPerTurn());
+        boolean toolsEnabled = authority.capabilities().contains(ai.ravenroot.api.runner.RunnerPolicy.Capability.TOOL_CALL)
+                && authority.tools().contains("load-skill");
+        int slot = 0;
+        for (String name : toolsEnabled ? new java.util.TreeSet<>(definition.skills()) : java.util.Set.<String>of()) {
+            String body = definition.skillInstructions().get(name);
+            if (body == null) throw new IllegalArgumentException("conversational Agent requires versioned skill instructions");
+            slot++;
+            properties.put(AgentSkill.nameProperty(slot), name);
+            properties.put(AgentSkill.descriptionProperty(slot), "Approved skill " + name);
+            properties.put(AgentSkill.instructionsProperty(slot), body);
+        }
+        var configuration = new NodeConfiguration(nodeId, BEHAVIOR, properties);
+        var compiled = Settings.compile(configuration, profile.orElseThrow(),
+                AgentSkill.declaredOn(configuration, operationalConfiguration), List.of(), operationalConfiguration);
+        var settings = new Settings(compiled.profile(), compiled.instructions(), compiled.objective(), compiled.model(),
+                compiled.deadlineMs(), compiled.maxTurns(), compiled.maxTotalTokens(), compiled.tuning(),
+                compiled.skills(), compiled.mcpServers(), definition, command, authority.limits().payloadBytes(), toolsEnabled);
+        return new NodeAction() {
+            @Override public CompletionStage<NodeResult> handle(NodeMessage message) {
+                return invoke(message, services, settings, NEVER_CANCELLED);
+            }
+            @Override public CompletionStage<NodeResult> handle(NodeMessage message, CancellationSignal cancellation) {
+                return invoke(message, services, settings, cancellation);
+            }
+        };
+    }
+
+    @Override
     public Optional<ToolCallContinuationAction> createToolCallContinuation(
             NodeConfiguration configuration, NodePackageServices services) {
         List<AgentSkill> skills = AgentSkill.declaredOn(configuration, operationalConfiguration);
@@ -386,7 +430,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
     record Settings(LlmProfile profile, String instructions, String objective, String model,
                     int deadlineMs, int maxTurns, long maxTotalTokens,
                     OpenAiCompatibleChat.Tuning tuning, List<AgentSkill> skills,
-                    List<McpProfile> mcpServers) {
+                    List<McpProfile> mcpServers, ai.ravenroot.api.runner.AgentDefinition governedDefinition,
+                    ai.ravenroot.api.runner.AgentCommand governedCommand, int governedPayloadBytes, boolean governedToolsEnabled) {
 
         Settings {
             skills = List.copyOf(skills);
@@ -420,7 +465,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     model.isEmpty() ? profile.model() : model,
                     Math.max(1, Math.min(profile.timeoutMs(), requestedDeadline)),
                     Math.max(1, Math.min(policy.maxTurns(), maxTurns)),
-                    maxTotalTokens, tuning, skills, mcpServers);
+                    maxTotalTokens, tuning, skills, mcpServers, null, null, 0, true);
         }
 
         // GraphML properties arrive as text, so a declared value may be a Number or a String. A
@@ -1186,6 +1231,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
             effectiveMaximumOutputBytes = Math.min(effectiveMaximumOutputBytes,
                     response.effectiveMaximumOutputBytes());
             AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
+            if (settings.governedDefinition() != null && (turn.promptTokens().isEmpty() || turn.completionTokens().isEmpty()))
+                throw new AgentException(AgentException.Code.RESPONSE_UNREADABLE);
             turnBudget.settle(turn.promptTokens(), turn.completionTokens());
             var modelOutput = new LinkedHashMap<String, Object>();
             modelOutput.put("answer", turn.answer());
@@ -1206,8 +1253,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
             // conversation on every turn and bills for it, so this is what the run costs. A budget
             // that counted only new tokens would let a long conversation run far past what an
             // operator thought they had allowed.
-            turn.promptTokens().ifPresent(count -> tokens += count);
-            turn.completionTokens().ifPresent(count -> tokens += count);
+            turn.promptTokens().ifPresent(count -> tokens = Math.addExact(tokens, count));
+            turn.completionTokens().ifPresent(count -> tokens = Math.addExact(tokens, count));
             if (settings.maxTotalTokens() > UNBOUNDED_TOKENS && tokens > settings.maxTotalTokens()) {
                 throw new AgentException(AgentException.Code.TOKEN_BUDGET_EXHAUSTED);
             }
@@ -1245,6 +1292,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             AgentTurn.ToolCall call = requested.get(index);
+            if (settings.governedDefinition() != null && (!settings.governedToolsEnabled()
+                    || toolCalls >= settings.governedDefinition().budgets().toolCalls())) {
+                result.completeExceptionally(new IllegalStateException("governed Agent tool budget exhausted"));
+                return;
+            }
             toolCalls++;
             CompletionStage<String> answering;
             try {
@@ -1423,6 +1475,20 @@ public final class AgentNodeBehavior implements NodeBehavior {
                                 "attributes", Map.copyOf(attributes)));
             } catch (RuntimeException oversized) {
                 throw new AgentException(AgentException.Code.RESPONSE_TOO_LARGE);
+            }
+            if (settings.governedDefinition() != null) {
+                byte[] bytes = turn.answer().getBytes(StandardCharsets.UTF_8);
+                if (bytes.length > settings.governedPayloadBytes()) throw new IllegalArgumentException("governed Agent result quota exceeded");
+                Object parsed = PayloadJson.read(bytes, PayloadLimits.DEFAULTS).toJava();
+                if (!(parsed instanceof Map<?, ?> value) || !value.keySet().equals(Set.of("outcome", "payload"))
+                        || !(value.get("outcome") instanceof String outcome)
+                        || !settings.governedCommand().outcomes().contains(outcome))
+                    throw new IllegalArgumentException("governed Agent output contract refused");
+                attributes.put("agent.definition", settings.governedDefinition().reference().name());
+                attributes.put("agent.definitionVersion", settings.governedDefinition().reference().version());
+                attributes.put("agent.sessionId", settings.governedDefinition().reference().sessionId(message.processInstanceId()).toString());
+                attributes.put("agent.outputSchema", settings.governedDefinition().outputSchema());
+                return new NodeResult(outcome, value.get("payload"), Map.copyOf(attributes));
             }
             return new NodeResult("continue", turn.answer(), Map.copyOf(attributes));
         }

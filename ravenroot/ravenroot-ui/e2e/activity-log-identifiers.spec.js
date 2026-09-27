@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
 
+import { respondWithSuccessfulGraphInspection } from './graph-inspection-fixture.mjs';
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 
 // Process, traversal and invocation must be distinguishable in the UI and in
@@ -56,6 +57,7 @@ let releaseSubmission;
 function startService() {
   return new Promise((resolve, reject) => {
     service = createServer((request, response) => {
+      if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
       // `runtime-client.js#start` POSTs with `Content-Type: application/graphml+xml`, not a "simple"
       // CORS content type, so the browser sends an OPTIONS preflight before the real request. Missing
       // omitting this response makes the POST fail with a plain "Failed to fetch" and no server-side
@@ -150,6 +152,17 @@ async function submitAndAwaitBinding(page) {
   await page.locator('#btn-play').click();
   await expect.poll(() => pushEvent !== null, { timeout: 10_000 }).toBe(true);
   await expect(page.locator('#activity-log')).toContainText('accepted');
+  await selectTraceLevel(page);
+}
+
+// Every test below is about the TECHNICAL rendering: the four identifier levels, bypass classification,
+// the `output=` projection, cursor replay. Since issue #458 the panel opens at the Output level, whose
+// whole purpose is to keep that technical detail out of the way — so each of these selects Trace first
+// and then asserts exactly what it always asserted. The level is a view over one code path; it is not a
+// second rendering that could drift from this one, and nothing here was weakened to accommodate it.
+async function selectTraceLevel(page) {
+  await page.locator('.activity-modes [data-mode="trace"]').click();
+  await expect(page.locator('.activity-modes [data-mode="trace"]')).toHaveAttribute('aria-checked', 'true');
 }
 
 test.beforeEach(async () => {
@@ -280,7 +293,7 @@ test.afterEach(async () => {
   await new Promise(resolve => service.close(resolve));
 });
 
-test('Monitoring preserves the Design viewport and paints only authoritative edge flow', async ({ page }) => {
+test('Monitoring preserves its own viewport and paints only authoritative edge flow', async ({ page }) => {
   await submitAndAwaitBinding(page);
   const before = await page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();
@@ -352,7 +365,8 @@ test('Monitoring preserves the Design viewport and paints only authoritative edg
   });
   await page.locator('#btn-monitoring').click();
   await expect(page.locator('.doc-elastic-host.active .d3-zoom-group')).toHaveAttribute('transform',
-    `translate(${repeated.pan.x},${repeated.pan.y}) scale(${repeated.zoom})`);
+    `translate(${before.pan.x},${before.pan.y}) scale(${before.zoom})`);
+  expect(repeated).not.toEqual({ zoom: before.zoom, pan: before.pan });
 });
 
 test('a real invocation event carries process, traversal, invocation and attempt distinctly into the activity log', async ({ page }) => {

@@ -1,3 +1,5 @@
+import { catalogNodeSymbol } from './catalog-node-symbol.js';
+
 // A catalog descriptor and the canvas node it becomes must agree on ONE thing: which visual node
 // type it is. `resolveDescriptorNodeType` is that single formula, extracted so every place that
 // turns a descriptor into a node — the catalog palette, the "Add catalog node" form (`app.js`), and
@@ -21,6 +23,7 @@ export function resolveDescriptorNodeType(descriptor) {
   // fallback ahead of `visualType` so a current editor connected to an older server repairs the
   // former generic `flow`/`handler` declarations instead of reproducing the shipped mismatch.
   if (descriptor?.behavior === 'human-task') return 'human-task';
+  if (descriptor?.behavior === 'workspace') return 'workspace';
   if (/^(trace|log|logger)$/i.test(descriptor?.behavior || '')) return 'trace';
   if (descriptor?.visualType) return descriptor.visualType;
   return descriptor?.agentic ? 'agent' : 'actor';
@@ -36,6 +39,7 @@ export function nodeTypeCardShape(nodeType) {
 // These semantic types share the ordinary node card. Their plain glyphs, not a bespoke silhouette,
 // provide the non-colour cue consistently in the catalog and every Design renderer.
 export const COMMON_NODE_GLYPHS = Object.freeze({
+  workspace: '▣',
   trace: '▤',
   'human-task': '👤',
 });
@@ -47,5 +51,5 @@ export const COMMON_NODE_GLYPHS = Object.freeze({
 // otherwise map to. Every other resolved type keeps the plain per-type glyph.
 export function catalogNodeIcon(descriptor, nodeIcons) {
   const nodeType = resolveDescriptorNodeType(descriptor);
-  return nodeType === 'agent' ? '🧠' : (nodeIcons[nodeType] || '•');
+  return nodeType === 'agent' ? '🧠' : (nodeIcons[nodeType] || catalogNodeSymbol(nodeType));
 }

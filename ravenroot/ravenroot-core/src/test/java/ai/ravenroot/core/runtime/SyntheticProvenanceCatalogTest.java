@@ -95,7 +95,7 @@ class SyntheticProvenanceCatalogTest {
             assertTrue(SyntheticProvenance.mint("n1", descriptor, "text").isEmpty(),
                     descriptor.behavior() + " must have no code path that mints a marker");
         }
-        assertEquals(Set.of("boundary-guard", "cel-decision", "cel-transform", "delay", "human-task",
+        assertEquals(Set.of("bigint-op", "boundary-guard", "cel-decision", "cel-transform", "delay", "human-task",
                         "http-request", "json-parse", "json-path", "log", "program", "template"),
                 shipped.stream().map(NodeTypeDescriptor::behavior).collect(java.util.stream.Collectors.toSet()),
                 "the core catalog changed shape; the loop above says nothing about a catalog that is "

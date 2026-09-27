@@ -38,6 +38,10 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            {{- if .Values.runnerPlane.enabled }}
+            - name: RAVENROOT_RUNNER_CONFIG
+              value: /etc/ravenroot/runner-plane/control-plane.json
+            {{- end }}
             - name: RAVENROOT_PORT
               value: "8080"
             # Managed ingress is process-local and validates this actual workload setting before bind.
@@ -172,6 +176,10 @@ spec:
               value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxModelInputProvenanceEntries }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultResponseBytes }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED
+              value: {{ .Values.humanTask.responderEnforcementEnabled | quote }}
+            - name: RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG
+              value: {{ ternary "/etc/ravenroot/human-task-interactions/config.json" "" (ne .Values.humanTask.interactionConfigSecret "") | quote }}
             - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxResponseBytes }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS
@@ -293,8 +301,10 @@ spec:
             # durable audit trail and must never be placed on the read-only root filesystem or /tmp.
             - name: RAVENROOT_AUDIT_DIR
               value: /opt/ravenroot/data/audit
+            {{- if not .Values.runnerPlane.enabled }}
             - name: RAVENROOT_EXECUTION_STORE_DIR
               value: /opt/ravenroot/data/execution-store
+            {{- end }}
             - name: RAVENROOT_ARTIFACT_STORE_DIR
               value: /opt/ravenroot/data/artifact-store
             - name: RAVENROOT_AUTH_ISSUER
@@ -330,11 +340,44 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
+            {{- if ne .Values.humanTask.interactionConfigSecret "" }}
+            - name: human-task-interactions
+              mountPath: /etc/ravenroot/human-task-interactions
+              readOnly: true
+            {{- end }}
+            {{- if .Values.runnerPlane.enabled }}
+            - name: runner-plane-config
+              mountPath: /etc/ravenroot/runner-plane
+              readOnly: true
+            - name: runner-artifacts
+              mountPath: /var/lib/ravenroot/runner-artifacts
+            {{- end }}
             - name: temporary-files
               mountPath: /tmp
             - name: ravenroot-data
               mountPath: /opt/ravenroot/data
+          {{- if .Values.runnerPlane.enabled }}
+          envFrom:
+            - secretRef:
+                name: {{ required "runnerPlane.sharedEnvironmentSecret is required" .Values.runnerPlane.sharedEnvironmentSecret }}
+          {{- end }}
       volumes:
+        {{- if ne .Values.humanTask.interactionConfigSecret "" }}
+        - name: human-task-interactions
+          secret:
+            secretName: {{ .Values.humanTask.interactionConfigSecret | quote }}
+            items:
+              - key: config.json
+                path: config.json
+        {{- end }}
+        {{- if .Values.runnerPlane.enabled }}
+        - name: runner-plane-config
+          configMap:
+            name: {{ required "runnerPlane.configMap is required" .Values.runnerPlane.configMap }}
+        - name: runner-artifacts
+          persistentVolumeClaim:
+            claimName: {{ required "runnerPlane.artifactClaim is required" .Values.runnerPlane.artifactClaim }}
+        {{- end }}
         - name: temporary-files
           emptyDir:
             medium: Memory

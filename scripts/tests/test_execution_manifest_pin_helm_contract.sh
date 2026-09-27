@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# The current chart supports its SQLite deployment only; PostgreSQL pin repair stays a direct Java env contract.
+# Default SQLite topology has no PostgreSQL values carrier; runnerPlane forwards operator-owned env.
 set -eu
 
 PROJECT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -28,7 +28,7 @@ template = (root / "deploy/helm/ravenroot/templates/deployment.yaml").read_text(
 if "manifestPinAttempts" in values or "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS" in template:
     raise SystemExit("the SQLite-only Helm chart must not render the PostgreSQL manifest-pin carrier")
 documentation = (root / "docs/reference/postgresql-persistence.md").read_text()
-if "current Helm chart deploys the SQLite store only" not in documentation:
+if "default Helm topology deploys the SQLite store only" not in documentation:
     raise SystemExit("PostgreSQL documentation must state the current Helm support boundary")
 PY
 

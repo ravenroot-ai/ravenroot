@@ -10,10 +10,16 @@ final class EmbedRequestJson {
     private EmbedRequestJson() { }
 
     static Map<String, String> parse(byte[] bytes, Set<String> expected) {
+        return parseOneOf(bytes, Set.of(expected));
+    }
+
+    static Map<String, String> parseOneOf(byte[] bytes, Set<Set<String>> expected) {
         var parser = new Parser(new String(bytes, StandardCharsets.UTF_8));
         Map<String, String> result = parser.object();
         parser.space();
-        if (!parser.end() || !result.keySet().equals(expected)) throw new IllegalArgumentException("schema");
+        if (!parser.end() || expected.stream().noneMatch(result.keySet()::equals)) {
+            throw new IllegalArgumentException("schema");
+        }
         return Map.copyOf(result);
     }
 

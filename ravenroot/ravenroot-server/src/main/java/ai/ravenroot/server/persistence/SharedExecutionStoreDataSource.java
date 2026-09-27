@@ -51,9 +51,9 @@ public final class SharedExecutionStoreDataSource {
         connection.password().ifPresent(config::setPassword);
         config.setMaximumPoolSize(connection.poolSize());
         config.setConnectionTimeout(connection.poolTimeout().toMillis());
-        // Off, because every store operation runs inside a transaction the adapter opens and commits
-        // itself. Leaving it on would let a statement the adapter believes is inside a transaction
-        // commit on its own, which is the failure mode that makes a compare-and-set stop being one.
+        // Conservative pool default; each adapter establishes its own transaction boundary.
+        // The execution adapter resets borrowed state before session SETs, then begins every
+        // write/fold explicitly. Single-statement reads use autocommit by contract.
         config.setAutoCommit(false);
         // Named so a thread dump, a pg_stat_activity row and a Hikari diagnostic all say which pool.
         // Not derived from the URL or the role: both are secret-bearing and this name is printed.

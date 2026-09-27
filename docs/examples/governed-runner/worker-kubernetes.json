@@ -1,0 +1,33 @@
+{
+  "driver": "kubernetes",
+  "tenantId": "example-tenant",
+  "registration": {
+    "protocolVersion": 1, "runnerId": "workspace-{instance}", "trustProfile": "kubernetes-pod-v1", "labels": ["development"],
+    "capabilities": {
+      "capabilities": ["WORKSPACE_READ", "WORKSPACE_WRITE", "PROCESS_EXECUTE"],
+      "tools": [], "network": [], "secrets": [], "mounts": [],
+      "limits": {"wallTime": "PT5M", "memoryBytes": 134217728, "processes": 256, "workspaceBytes": 67108864,
+        "artifactBytes": 131072, "logBytes": 8192, "payloadBytes": 16384}
+    }
+  },
+  "endpoint": "https://ravenroot.example.test",
+  "tokenFile": "/run/identities/{instance}",
+  "stateDirectory": "/var/lib/ravenroot-runner",
+  "kubernetes": {
+    "kubectl": "/usr/local/bin/kubectl", "kubeconfig": "/etc/ravenroot/kubernetes/kubeconfig",
+    "cluster": "approved-cluster", "namespace": "ravenroot-native-workloads", "storageClass": "ravenroot-fixed-ext4",
+    "serviceAccount": "ravenroot-agent", "runtimeClass": "", "nodeSelector": {},
+    "creationTimeout": "PT2M", "terminationGraceSeconds": 10,
+    "networkControlHost": "native-ravenroot-agent-native-network-control.default.svc",
+    "placement": {"priorityClass": "", "requiredAffinity": {}, "tolerations": [], "topologyKey": "", "maxSkew": 1}
+  },
+  "runtimeImages": {"agent": "registry.example.test/ravenroot-agent@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+  "worker": {"maxConcurrentJobs": 2, "pollInterval": "PT1S", "heartbeatInterval": "PT10S", "cleanupTimeout": "PT1M", "shutdownTimeout": "PT20S"},
+  "agentRuntime": {
+    "modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048,
+    "protocolBytes": 262144, "toolOutputBytes": 8192, "listedFiles": 128,
+    "testCommand": ["python3", "-m", "unittest", "discover", "-v"], "skills": {}, "connectTimeout": "PT10S",
+    "models": {"governed-model": {"endpoint": "https://models.example.test/v1/chat/completions", "model": "operator-approved-model",
+      "credentialReference": "runner-model", "maxConcurrency": 2, "maxRequestBytes": 262144, "maxResponseBytes": 65536}}
+  }
+}

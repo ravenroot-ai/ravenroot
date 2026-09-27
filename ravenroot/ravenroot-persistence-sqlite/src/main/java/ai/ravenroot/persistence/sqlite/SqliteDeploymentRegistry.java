@@ -206,8 +206,26 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
             Objects.requireNonNull(content, "content");
             Objects.requireNonNull(command, "command");
             return inWriteTransaction(() -> {
+                IdentityBinding binding = command.retainIdentity()
+                        ? loadIdentityBinding(command.tenantId(), command.key()) : null;
+                if (binding != null) {
+                    if (!binding.digest().equals(command.digest())) {
+                        throw failure(new FailureReason.Conflict());
+                    }
+                    Aggregate current = loadAggregate(command.tenantId(), binding.deploymentId());
+                    if (current == null) throw failure(new FailureReason.NotFound());
+                    return current.record();
+                }
                 CreateLedgerEntry prior = loadCreateLedgerEntry(command.tenantId(), command.key());
                 if (prior != null) {
+                    if (command.retainIdentity()) {
+                        replay(new LedgerEntry(prior.digest(), prior.record()), command.digest());
+                        insertIdentityBinding(command.tenantId(), command.key(), command.digest(),
+                                prior.deploymentId());
+                        Aggregate current = loadAggregate(command.tenantId(), prior.deploymentId());
+                        if (current == null) throw failure(new FailureReason.NotFound());
+                        return current.record();
+                    }
                     return replay(new LedgerEntry(prior.digest(), prior.record()), command.digest());
                 }
                 Instant now = now();
@@ -225,11 +243,24 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                         now, now);
                 insertDeploymentRow(command.tenantId(), deploymentId, now);
                 insertVersionRow(command.tenantId(), deploymentId, 1, content);
+                if (command.retainIdentity()) {
+                    insertIdentityBinding(command.tenantId(), command.key(), command.digest(), deploymentId);
+                }
                 insertLedgerEntry(command.tenantId(), deploymentId, Action.CREATE, command.key(),
                         command.digest(), result, now, now.plus(commandRetention));
                 return result;
             });
         });
+    }
+
+    @Override
+    public CompletionStage<Optional<Record>> retainedIdentity(String tenantId, String bindingKey) {
+        return async(() -> inReadTransaction(() -> {
+            IdentityBinding binding = loadIdentityBinding(tenantId, bindingKey);
+            if (binding == null) return Optional.empty();
+            Aggregate aggregate = loadAggregate(tenantId, binding.deploymentId());
+            return aggregate == null ? Optional.empty() : Optional.of(aggregate.record());
+        }));
     }
 
     @Override
@@ -915,6 +946,32 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     // ---------------------------------------------------------------- rows: command ledger
 
+    private IdentityBinding loadIdentityBinding(String tenant, String key) throws SQLException {
+        String sql = "SELECT deployment_id, digest FROM deployment_identity_binding "
+                + "WHERE tenant_id = ? AND binding_key = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenant);
+            statement.setString(2, key);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? new IdentityBinding(rows.getString("deployment_id"),
+                        rows.getString("digest")) : null;
+            }
+        }
+    }
+
+    private void insertIdentityBinding(String tenant, String key, String digest, String deploymentId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO deployment_identity_binding "
+                        + "(tenant_id, binding_key, digest, deployment_id) VALUES (?, ?, ?, ?)")) {
+            statement.setString(1, tenant);
+            statement.setString(2, key);
+            statement.setString(3, digest);
+            statement.setString(4, deploymentId);
+            statement.executeUpdate();
+        }
+    }
+
     private LedgerEntry loadLedgerEntry(String tenant, String deploymentId, Action action, String key)
             throws SQLException {
         String sql = ledgerColumns() + " FROM deployment_command WHERE tenant_id = ? AND deployment_id = ? "
@@ -1338,5 +1395,9 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     /** A create-ledger row: the minted deployment id, alongside what {@link LedgerEntry} already carries. */
     private record CreateLedgerEntry(String deploymentId, String digest, Record record) {
+    }
+
+    /** Non-expiring tenant-scoped create identity, deliberately separate from the bounded ledger. */
+    private record IdentityBinding(String deploymentId, String digest) {
     }
 }

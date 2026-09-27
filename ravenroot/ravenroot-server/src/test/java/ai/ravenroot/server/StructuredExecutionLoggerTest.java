@@ -109,10 +109,11 @@ class StructuredExecutionLoggerTest {
         Set<String> sseKeys = topLevelKeys(RavenrootServer.executionEventJson(event));
         auditOnly.removeAll(sseKeys);
 
-        // `deploymentId` deliberately left this set: it is the identity a browser needs to attribute
-        // its own source session's events, so the SSE frame carries it too. See the logger's Javadoc.
+        // Deployment and workload deliberately left this set: together they are the restored origin
+        // a browser needs to attribute its own source session's re-entry events, so the SSE frame
+        // carries both too. See the logger's Javadoc.
         assertEquals(Set.of("tenantId", "requestId", "attemptOrdinal", "connectorAttempts", "event",
-                        "joinWaitDuration", "nodeCatalogKey", "workloadId", "detail"),
+                        "joinWaitDuration", "nodeCatalogKey", "detail"),
                 auditOnly,
                 "the audit projection gained or lost a key without this class's Javadoc being "
                         + "updated to say which side it belongs on");

@@ -33,10 +33,12 @@ import java.util.Optional;
  * @param deploymentId  the deployment hosting this execution, when it is deployment-hosted; absent for
  *                      a transient submission, which is the distinction the inventory has to preserve
  *                      without conflating either with a graph version
+ * @param deploymentIncarnationId physical deployment incarnation that admitted the execution
  * @param workloadId    the workload the execution belongs to, when the caller models one
  * @param correlationId the caller's correlation identity for the request that produced this execution
  */
-public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> workloadId,
+public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> deploymentIncarnationId,
+                              Optional<String> workloadId,
                               Optional<String> correlationId) {
 
     /**
@@ -49,11 +51,12 @@ public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> wo
     public static final int MAX_COMPONENT_LENGTH = 256;
 
     private static final ExecutionOrigin NONE =
-            new ExecutionOrigin(Optional.empty(), Optional.empty(), Optional.empty());
+            new ExecutionOrigin(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
 
     /** Normalises absent components and rejects blank or oversized ones. */
     public ExecutionOrigin {
         deploymentId = require(deploymentId, "deploymentId");
+        deploymentIncarnationId = require(deploymentIncarnationId, "deploymentIncarnationId");
         workloadId = require(workloadId, "workloadId");
         correlationId = require(correlationId, "correlationId");
     }
@@ -75,7 +78,21 @@ public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> wo
      * @return the corresponding origin.
      */
     public static ExecutionOrigin of(String deploymentId, String workloadId, String correlationId) {
-        return new ExecutionOrigin(Optional.ofNullable(deploymentId), Optional.ofNullable(workloadId),
+        return of(deploymentId, null, workloadId, correlationId);
+    }
+
+    /**
+     * Builds an origin with an exact physical deployment incarnation.
+     * @param deploymentId hosting deployment, or {@code null}
+     * @param deploymentIncarnationId physical deployment incarnation, or {@code null}
+     * @param workloadId owning workload, or {@code null}
+     * @param correlationId caller correlation identity, or {@code null}
+     * @return corresponding normalized origin
+     */
+    public static ExecutionOrigin of(String deploymentId, String deploymentIncarnationId,
+                                     String workloadId, String correlationId) {
+        return new ExecutionOrigin(Optional.ofNullable(deploymentId),
+                Optional.ofNullable(deploymentIncarnationId), Optional.ofNullable(workloadId),
                 Optional.ofNullable(correlationId));
     }
 
@@ -84,7 +101,8 @@ public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> wo
      * @return {@code true} when every component is absent.
      */
     public boolean isEmpty() {
-        return deploymentId.isEmpty() && workloadId.isEmpty() && correlationId.isEmpty();
+        return deploymentId.isEmpty() && deploymentIncarnationId.isEmpty()
+                && workloadId.isEmpty() && correlationId.isEmpty();
     }
 
     /**
@@ -101,6 +119,7 @@ public record ExecutionOrigin(Optional<String> deploymentId, Optional<String> wo
             return this;
         }
         return new ExecutionOrigin(update.deploymentId.or(() -> deploymentId),
+                update.deploymentIncarnationId.or(() -> deploymentIncarnationId),
                 update.workloadId.or(() -> workloadId),
                 update.correlationId.or(() -> correlationId));
     }

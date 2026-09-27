@@ -27,14 +27,14 @@ public final class BehaviorRegistry {
     /** Explicit composition opt-in; existing bounded Agent and embedding behavior remain unchanged. */
     public BehaviorRegistry withRunnerJobs(ai.ravenroot.core.runner.RunnerJobService service) {
         if (runnerJobs != null) throw new IllegalStateException("runner jobs already configured");
-        registerFactory(new ai.ravenroot.core.runner.WorkspaceAgentBehavior(service), NodeCatalogSource.core());
+        registerFactory(new ai.ravenroot.core.runner.WorkspaceBehavior(service), NodeCatalogSource.core());
         runnerJobs = service;
         return this;
     }
 
     public ai.ravenroot.core.runner.RunnerJobService runnerJobs() { return runnerJobs; }
     private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
-            "log", "delay", "human-task", "template", "json-parse", "cel-transform",
+            "log", "delay", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
             "cel-decision", "json-path", "boundary-guard");
     private final Map<String, NodeBehaviorFactory> factories = new ConcurrentHashMap<>();
     /**
@@ -45,6 +45,7 @@ public final class BehaviorRegistry {
      */
     private final Map<String, NodeTypeDescriptor> resolvedDescriptors = new ConcurrentHashMap<>();
     private final Map<String, NodeCatalogSource> catalogSources = new ConcurrentHashMap<>();
+    private final Map<String, java.util.Set<String>> sourceStartFailureCodes = new ConcurrentHashMap<>();
     /**
      * The full identity of every node package that registered a behavior here, keyed by package id.
      *
@@ -189,6 +190,7 @@ public final class BehaviorRegistry {
         // Resolved before insertion, so a contradiction refuses registration rather than
         // landing a catalog entry whose declaration disagrees with its own code.
         NodeTypeDescriptor resolved = resolveNature(factory);
+        java.util.Set<String> declaredSourceFailures = declaredSourceFailures(factory);
         // The same anchor, the same reasoning -- see this method's own Javadoc.
         NodeBehaviorFactory existing = factories.putIfAbsent(name, factory);
         if (existing != null) {
@@ -199,7 +201,21 @@ public final class BehaviorRegistry {
         }
         resolvedDescriptors.put(name, resolved);
         catalogSources.put(name, source);
+        sourceStartFailureCodes.put(name, declaredSourceFailures);
         return this;
+    }
+
+    private static java.util.Set<String> declaredSourceFailures(NodeBehaviorFactory factory) {
+        if (!(factory instanceof NodePackages.SdkNodeBehaviorFactory sdk)
+                || !(sdk.behavior() instanceof InboundSourceCapable capable)) return java.util.Set.of();
+        java.util.Set<String> declared = java.util.Objects.requireNonNull(
+                capable.sourceStartFailureCodes(), "sourceStartFailureCodes");
+        var validated = new java.util.TreeSet<String>();
+        for (String code : declared) {
+            String safe = ai.ravenroot.api.deployment.SourceStartFailureCode.requireValid(code);
+            if (!validated.add(safe)) throw new IllegalArgumentException("Duplicate source-start failure code");
+        }
+        return java.util.Set.copyOf(validated);
     }
 
     /**
@@ -274,7 +290,12 @@ public final class BehaviorRegistry {
 
     public Optional<NodeHandler> create(GraphNode node) {
         if (node == null || node.behavior() == null) return Optional.empty();
+        if (ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)) {
+            if (runnerJobs == null) throw new IllegalStateException("governed runner plane unavailable");
+            return Optional.of(ai.ravenroot.core.runner.GovernedAgent.create(runnerJobs, node));
+        }
         var factory = factories.get(node.behavior());
+        if (ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) return Optional.of(namedAgent(node, factory));
         return factory == null ? Optional.empty() : Optional.of(factory.create(node));
     }
 
@@ -282,6 +303,8 @@ public final class BehaviorRegistry {
     Optional<NodeHandler> create(GraphNode node,
             java.util.Optional<ai.ravenroot.api.node.service.NodeExternalIoCapacity> externalIo) {
         if (node == null || node.behavior() == null) return Optional.empty();
+        if (ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)
+                || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) return create(node);
         var factory = factories.get(node.behavior());
         if (factory == null) return Optional.empty();
         if (factory instanceof NodePackages.SdkNodeBehaviorFactory sdk) {
@@ -291,6 +314,44 @@ public final class BehaviorRegistry {
             throw new IllegalStateException("non-package behavior received external-I/O capacity");
         }
         return Optional.of(factory.create(node));
+    }
+
+    private NodeHandler namedAgent(GraphNode node, NodeBehaviorFactory factory) {
+        if (runnerJobs == null || !(factory instanceof NodePackages.SdkNodeBehaviorFactory sdk)
+                || !(sdk.behavior() instanceof ai.ravenroot.api.node.GovernedAgentCapable capable))
+            throw new IllegalStateException("named conversational Agent requires the governed AI package");
+        if (sdk.behavior() instanceof ai.ravenroot.api.node.ExecutionIoCapacityCapable)
+            throw new IllegalStateException("governed Agent adapter does not support node-specific external-I/O capacity");
+        record Binding(ai.ravenroot.api.runner.AgentDefinition definition,
+                       Map<String, ai.ravenroot.api.node.NodeAction> actions) { }
+        var bindings = new java.util.HashMap<String, Binding>();
+        for (var definition : runnerJobs.definitions(node)) {
+            var actions = new java.util.HashMap<String, ai.ravenroot.api.node.NodeAction>();
+            definition.commands().forEach((name, command) -> actions.put(name, capable.createGoverned(
+                    node.id(), sdk.services(), definition, command, runnerJobs.ordinaryAuthority(definition, command))));
+            bindings.put(definition.reference().tenantId(), new Binding(definition, Map.copyOf(actions)));
+        }
+        var snapshot = Map.copyOf(bindings);
+        return new NodeHandler() {
+            @Override public java.util.concurrent.CompletionStage<ai.ravenroot.api.execution.NodeResult> handle(
+                    ai.ravenroot.api.execution.NodeMessage message) {
+                return handle(message, new ai.ravenroot.api.execution.CancellationSignal() {
+                    public boolean cancelled() { return false; }
+                    public void onCancel(Runnable listener) { }
+                });
+            }
+            @Override public java.util.concurrent.CompletionStage<ai.ravenroot.api.execution.NodeResult> handle(
+                    ai.ravenroot.api.execution.NodeMessage message, ai.ravenroot.api.execution.CancellationSignal cancellation) {
+                try {
+                    Binding binding = snapshot.get(message.tenantId());
+                    if (binding == null) throw new IllegalArgumentException("Agent definition is not approved for this tenant");
+                    runnerJobs.requireApproved(binding.definition());
+                    var action = binding.actions().get(message.command().name());
+                    if (action == null) throw new IllegalArgumentException("Agent command is not approved");
+                    return action.handle(message, cancellation);
+                } catch (RuntimeException failure) { return java.util.concurrent.CompletableFuture.failedFuture(failure); }
+            }
+        };
     }
 
     /** Canonical constrained identity for one node/package/behavior capacity binding. */
@@ -329,6 +390,7 @@ public final class BehaviorRegistry {
     }
 
     public boolean requiresExternalIoCapacity(GraphNode node) {
+        if (ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)) return false;
         if (node == null || node.behavior() == null
                 || ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())) return false;
         var factory = factories.get(node.behavior());
@@ -495,6 +557,8 @@ public final class BehaviorRegistry {
     /** Runs the registered factory's side-effect-free admission check for one configured node. */
     public void validate(GraphNode node) {
         if (node == null || node.behavior() == null) return;
+        if (ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)
+                || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) return;
         var factory = factories.get(node.behavior());
         if (factory != null) factory.validate(node);
     }
@@ -515,9 +579,27 @@ public final class BehaviorRegistry {
      * claim a capability.</p>
      */
     public Optional<NodeTypeDescriptor> descriptor(String behavior) {
+        if ("agent".equals(behavior) && runnerJobs != null) {
+            return Optional.of(ai.ravenroot.core.runner.GovernedAgent.descriptor(resolvedDescriptors.get(behavior)));
+        }
         // The resolved entry, not the factory's raw one, so every consumer -- schema validation,
         // the nature validator, the catalog API -- sees the same nature the registry decided at load.
         return behavior == null ? Optional.empty() : Optional.ofNullable(resolvedDescriptors.get(behavior));
+    }
+
+    /** Runtime command/property authority remains the ordinary descriptor unless access is explicit. */
+    public Optional<NodeTypeDescriptor> descriptor(GraphNode node) {
+        if ((ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)
+                || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && runnerJobs != null) {
+            var descriptor = ai.ravenroot.core.runner.GovernedAgent.descriptor(null);
+            var outcomes = new java.util.TreeMap<String, ai.ravenroot.api.catalog.NodeOutcomeDescriptor>();
+            descriptor.outcomes().forEach(value -> outcomes.put(value.name(), value));
+            runnerJobs.definitions(node).forEach(definition -> definition.commands().values().forEach(command ->
+                    command.outcomes().forEach(name -> outcomes.putIfAbsent(name,
+                            ai.ravenroot.api.catalog.NodeOutcomeDescriptor.literal(name, "Approved definition outcome.")))));
+            return Optional.of(descriptor.withOutcomes(outcomes.values().toArray(ai.ravenroot.api.catalog.NodeOutcomeDescriptor[]::new)));
+        }
+        return node == null ? Optional.empty() : Optional.ofNullable(resolvedDescriptors.get(node.behavior()));
     }
 
     /**
@@ -554,8 +636,17 @@ public final class BehaviorRegistry {
         return Optional.empty();
     }
 
+    /** Trusted codes registered for one source-capable behavior. */
+    public java.util.Set<String> sourceStartFailureCodes(String behaviorName) {
+        return sourceStartFailureCodes.getOrDefault(behaviorName, java.util.Set.of());
+    }
+
     public List<NodeTypeDescriptor> descriptors() {
-        return resolvedDescriptors.values().stream()
+        var values = new java.util.ArrayList<>(resolvedDescriptors.values());
+        if (runnerJobs != null) {
+            values.removeIf(value -> value.behavior().equals("agent")); values.add(descriptor("agent").orElseThrow());
+        }
+        return values.stream()
                 .sorted(java.util.Comparator.comparing(NodeTypeDescriptor::category)
                         .thenComparing(NodeTypeDescriptor::displayName))
                 .toList();

@@ -43,6 +43,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
@@ -65,6 +66,7 @@ import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
+import ai.ravenroot.api.persistence.HumanTaskInteractionRevocation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -224,6 +226,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tenant that lost no record.</p>
  */
 public abstract class ExecutionStoreContract {
+
+    @Test
+    final void humanTaskInteractionRevocationIsTenantScopedIdempotentAndExpires() {
+        UUID capabilityId = UUID.randomUUID();
+        Instant revokedAt = clock().instant();
+        Instant expiresAt = revokedAt.plus(Duration.ofMinutes(5));
+        var revocation = new HumanTaskInteractionRevocation(
+                capabilityId, UUID.randomUUID(), 3, revokedAt, expiresAt);
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, revokedAt)));
+        await(store().revokeHumanTaskInteraction("tenant-a", revocation));
+        await(store().revokeHumanTaskInteraction("tenant-a", revocation));
+        assertTrue(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, revokedAt)));
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-b", capabilityId, revokedAt)),
+                "a capability identifier must not become a cross-tenant revocation oracle");
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, expiresAt)),
+                "expiry is exclusive so an old revocation cannot grow without bound");
+    }
 
     @Test
     final void runnerWorkspaceSurvivesLaterTraversalWhileIndependentProcessesStayIsolated() {
@@ -513,6 +532,30 @@ public abstract class ExecutionStoreContract {
         long revision = await(store().load(key)).revision();
         await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).runner(operation).build()));
     }
+    @Test final void runnerWorkerIncarnationIsTenantExactStoreClockFencedAndDurable() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var key = newKey();
+        var now = clock().instant();
+        UUID session = UUID.randomUUID();
+        var proposed = new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "worker", session, 7, 2,
+                Set.of("runtime"), now.minusSeconds(100), now.minusSeconds(50));
+        var accepted = await(store().renewRunnerAvailability(proposed, TTL));
+        assertEquals(now, accepted.observedAt());
+        assertEquals(now.plus(TTL), accepted.leaseUntil());
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(List.of(accepted), await(store().runnerAvailability(key.tenantId())));
+        assertTrue(await(store().runnerAvailability("other-tenant")).isEmpty());
+        var competing = new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "worker", UUID.randomUUID(), 2, 0,
+                Set.of("runtime"), now, now.plusSeconds(1));
+        assertThrows(RuntimeException.class, () -> await(store().renewRunnerAvailability(competing, TTL)));
+        assertEquals(List.of(accepted), await(store().runnerAvailability(key.tenantId())));
+        clock().advance(TTL.plusSeconds(1));
+        var replacement = await(store().renewRunnerAvailability(competing, TTL));
+        assertEquals(competing.sessionId(), replacement.sessionId());
+        assertEquals(2, replacement.capacity());
+        assertThrows(RuntimeException.class, () -> await(store().renewRunnerAvailability(proposed, TTL)));
+        assertEquals(List.of(replacement), await(store().runnerAvailability(key.tenantId())));
+    }
 
     private ai.ravenroot.api.runner.RunnerJobOperation.Submit runnerSubmission(ExecutionKey key) {
         var policy = new ai.ravenroot.api.runner.RunnerPolicy(
@@ -533,11 +576,128 @@ public abstract class ExecutionStoreContract {
                 UUID.randomUUID(), OpaquePayload.empty("application/vnd.ravenroot.runner-continuation.v1"));
     }
 
+    @Test final void explicitWorkspacesStopIndependentlyAndRetainUnknownOwnershipPastProcessRetention() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        var key = newKey();
+        UUID session = UUID.randomUUID();
+        await(store().renewRunnerAvailability(new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "runner", session,
+                7, 0, Set.of("reference"), clock().instant(), clock().instant().plus(TTL)), TTL));
+        var first = explicitRunnerSubmission(key, "repository-a", null, "open");
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(first), new GraphVersionPin("runner-graph-v1")))
+                .runner(first).build()));
+        var second = explicitRunnerSubmission(key, "repository-b", null, "open");
+        appendRunnerTraversal(second);
+        for (var opening : List.of(first, second)) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(opening.jobId(), "runner", TTL, session));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(opening.jobId(), "runner", 1,
+                    new ai.ravenroot.api.runner.RunnerResult("ready", opening.input(), List.of(), UUID.randomUUID(),
+                            new ai.ravenroot.api.runner.RunnerResult.WorkspaceObservation(opening.workspaceId(), "runtime-" + opening.workspace().nodeId(), null))));
+        }
+        var a = explicitRunnerSubmission(key, "repository-a", first.workspace(), "implement");
+        var b = explicitRunnerSubmission(key, "repository-b", second.workspace(), "implement");
+        appendRunnerTraversal(a); appendRunnerTraversal(b);
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(a.jobId(), "runner", TTL, session));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceStop(a.jobId(), "repository-a"));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(b.jobId(), "runner", TTL, session));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var resources = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        assertTrue(resources.workspaces().get("repository-a").stopRequested());
+        assertFalse(resources.workspaces().get("repository-b").stopRequested());
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CANCELLING, resources.jobs().get(a.jobId()).job().state());
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CLAIMED, resources.jobs().get(b.jobId()).job().state());
+        assertNotEquals(resources.workspaces().get("repository-a").workspaceId(), resources.workspaces().get("repository-b").workspaceId());
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED)).build()));
+        clock().advance(store().terminalRetention().plusDays(8));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(a.jobId()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(b.jobId()));
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())));
+        assertTrue(await(store().loadRunnerWorkspace(key)).isPresent(), "uncertain physical ownership must outlive ordinary process TTL");
+        for (var work : List.of(a, b)) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ReconcileReport(work.jobId(), "runner", TTL));
+            long fence = await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(work.jobId()).job().fence();
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(work.jobId(), "runner", fence,
+                    new ai.ravenroot.api.runner.RunnerResult("completed", work.input(), List.of(), UUID.randomUUID(),
+                            new ai.ravenroot.api.runner.RunnerResult.WorkspaceObservation(work.workspaceId(), "runtime-" + work.workspace().nodeId(), null))));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceStopped(work.jobId(), work.workspace().nodeId(), work.workspaceId(), "runner"));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceRelease(work.jobId(), work.workspace().nodeId(), work.workspaceId(), "runner"));
+            assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())), "cleanup reservation alone must not free ownership");
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceReleased(work.jobId(), work.workspace().nodeId(), work.workspaceId(), "runner"));
+        }
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(key.tenantId())));
+    }
+
+    @Test final void kubernetesIdentityAndUsageSurviveHeartbeatCompletionAndStoreRestart() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var key = newKey();
+        var base = explicitRunnerSubmission(key, "repository", null, "open");
+        var p = base.workspace().profile();
+        var profile = new ai.ravenroot.api.runner.WorkspaceProfile(p.reference(), p.workspaceScope(), p.runtimeLifecycle(),
+                p.runnerPool(), p.runtimeProfile(), p.policy(), p.capacity(), p.retention(), p.completionPolicy(), p.allowedAgents(),
+                p.fleetLimits(), p.cpuMillicores(), ai.ravenroot.api.runner.WorkspaceProfile.Driver.KUBERNETES);
+        var resource = new ai.ravenroot.api.runner.WorkspaceResource("repository", base.workspaceId(), profile, "runner",
+                ai.ravenroot.api.runner.WorkspaceResource.State.UNMATERIALIZED, null, null, false, clock().instant());
+        var runner = new ai.ravenroot.api.runner.RunnerRegistration(1, key.tenantId(), "runner", "kubernetes-pod-v1", Set.of(), base.deployment());
+        var submit = new ai.ravenroot.api.runner.RunnerJobOperation.Submit(base.identity(), base.definition(), base.command(), base.deployment(),
+                runner, base.input(), base.deadline(), base.workspaceId(), base.continuation(), resource, "open");
+        var session = UUID.randomUUID();
+        await(store().renewRunnerAvailability(new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "runner", session,
+                2, 0, Set.of("reference"), clock().instant(), clock().instant().plus(TTL)), TTL));
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(submit), new GraphVersionPin("native-graph-v1"))).runner(submit).build()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL, session));
+        var physical = new ai.ravenroot.api.runner.KubernetesWorkload(1, "logical-cluster", "workloads", "rr-pod", UUID.randomUUID(),
+                "rr-volume", UUID.randomUUID(), "fixed-volume", 1, ai.ravenroot.api.runner.KubernetesWorkload.Phase.RUNNING,
+                1_000_000, 900_000, "sha256:" + "a".repeat(64), ai.ravenroot.api.runner.KubernetesWorkload.Condition.READY,
+                ai.ravenroot.api.runner.KubernetesWorkload.Reason.NONE, null, 3, 7, 100);
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Heartbeat(submit.jobId(), "runner", 1, TTL, session, physical));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var restored = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        assertEquals(physical, restored.jobs().get(submit.jobId()).kubernetes());
+        assertEquals(physical, restored.workspaces().get("repository").kubernetes());
+        var result = new ai.ravenroot.api.runner.RunnerResult("ready", submit.input(), List.of(), submit.jobId(),
+                new ai.ravenroot.api.runner.RunnerResult.WorkspaceObservation(submit.workspaceId(), physical.podUid().toString(), null, physical));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(result, await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(submit.jobId()).job().result());
+        assertTrue(await(store().loadRunnerWorkspace(new ExecutionKey("other", key.processInstanceId()))).isEmpty());
+    }
+
+    private void appendRunnerTraversal(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit) {
+        var key = submit.identity().execution();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.TraversalAdded(runnerInitial(submit).traversals().get(submit.identity().traversalId())))
+                .runner(submit).build()));
+    }
+    private ai.ravenroot.api.runner.RunnerJobOperation.Submit explicitRunnerSubmission(ExecutionKey key, String node,
+            ai.ravenroot.api.runner.WorkspaceResource existing, String command) {
+        var base = runnerSubmission(key);
+        var policy = base.deployment();
+        var profile = new ai.ravenroot.api.runner.WorkspaceProfile(new ai.ravenroot.api.runner.AgentDefinition.Reference(key.tenantId(), "profile", 1),
+                ai.ravenroot.api.runner.WorkspaceProfile.Scope.PROCESS_INSTANCE,
+                ai.ravenroot.api.runner.WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE, "development", "reference", policy,
+                new ai.ravenroot.api.runner.WorkspaceProfile.Capacity(1, 7, 16, 16_000_000, 64, 1024,
+                        ai.ravenroot.api.runner.WorkspaceProfile.Admission.QUEUE), Duration.ZERO,
+                ai.ravenroot.api.runner.WorkspaceProfile.CompletionPolicy.ABORT, Set.of("developer"));
+        var resource = existing == null ? new ai.ravenroot.api.runner.WorkspaceResource(node, UUID.randomUUID(), profile, "runner",
+                ai.ravenroot.api.runner.WorkspaceResource.State.UNMATERIALIZED, null, null, false, clock().instant()) : existing;
+        var definition = command.equals("open") ? new ai.ravenroot.api.runner.AgentDefinition(base.definition().reference(),
+                "Conformance lifecycle operation", "reference", "reference", Map.of("open", new ai.ravenroot.api.runner.AgentCommand(
+                "open", false, policy, Set.of("ready"))), Set.of(), Set.of(), policy, Duration.ZERO, "object") : base.definition();
+        return new ai.ravenroot.api.runner.RunnerJobOperation.Submit(base.identity(), definition, command, policy, base.runner(), base.input(),
+                base.deadline(), resource.workspaceId(), base.continuation(), resource, command.equals("open") ? "open" : null);
+    }
+
     private static ProcessInstance runnerInitial(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit) {
         var identity = submit.identity();
         var invocation = new NodeInvocation(identity.invocationId(), "agent", Set.of(), NodeInvocationStatus.WAITING,
                 List.of(new NodeAttempt(identity.attemptId(), 1, NodeAttemptStatus.WAITING)),
-                ai.ravenroot.api.execution.NodeCommand.application("implement"));
+                ai.ravenroot.api.execution.NodeCommand.application(submit.command()));
         var traversal = new Traversal(identity.traversalId(), "agent", TraversalStatus.WAITING,
                 Map.of(identity.invocationId(), invocation));
         return new ProcessInstance(identity.execution().processInstanceId(), ProcessInstanceStatus.WAITING,
@@ -3816,8 +3976,10 @@ public abstract class ExecutionStoreContract {
                 .mapToLong(count -> count.pending()).sum(),
                 "aggregate per-node counts must be complete rather than truncated");
         assertEquals(first.registration().taskId(), page.items().getFirst().taskId());
-        assertEquals(orderedActions, page.items().getFirst().availableActions(),
-                "the safe projection must preserve pinned authored action order");
+        assertEquals(List.of(HumanTaskConfirmationAction.DENY,
+                        HumanTaskConfirmationAction.RESOLVE),
+                page.items().getFirst().availableActions(),
+                "the safe projection must preserve authored order while keeping cancel requester-only");
         assertTrue(page.items().getFirst().reviewPresentation().isEmpty(),
                 "collection projections must never disclose review content");
         assertEquals(4096, page.items().getFirst().promptMaxUtf8Bytes());
@@ -3884,9 +4046,26 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.of("deployment-c"), recovered.deploymentId());
         assertEquals(fixture.key().processInstanceId(), recovered.processInstanceId());
         assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), recovered.availableActions());
-        assertEquals("Mail body\nsecond line", recovered.reviewPresentation().orElseThrow().text());
+        assertTrue(recovered.reviewPresentation().isEmpty(),
+                "requester-only cancellation must not disclose review content in enforced mode");
+
+        var permissive = new HumanTaskAttentionAuthorization("issuer|USER|other",
+                Set.of(), Set.of(), false);
+        var permissiveDetail = await(store().findHumanTaskAttention(tenant, locator, permissive))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), permissiveDetail.availableActions());
+        assertEquals("Mail body\nsecond line",
+                permissiveDetail.reviewPresentation().orElseThrow().text());
+
+        var override = new HumanTaskAttentionAuthorization("issuer|USER|administrator",
+                Set.of(), Set.of(), true, true);
+        var overrideDetail = await(store().findHumanTaskAttention(tenant, locator, override))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), overrideDetail.availableActions());
         assertEquals(HumanTaskReviewPresentation.TEXT_PLAIN,
-                recovered.reviewPresentation().orElseThrow().contentType());
+                overrideDetail.reviewPresentation().orElseThrow().contentType());
         assertTrue(await(store().findHumanTaskAttention(tenant,
                 new HumanTaskAttentionLocator(fixture.registration().taskId(), 2L), requester)).isEmpty(),
                 "a stale generation must be indistinguishable from an absent task");
@@ -4577,6 +4756,68 @@ public abstract class ExecutionStoreContract {
                 "committedAtRevision is what makes the shared boundary observable rather than merely "
                         + "asserted: it names the exact transition the event was written beside");
         assertEquals(ProcessInstanceStatus.RUNNING, applied.state().status());
+    }
+
+    @Test
+    final void processJournalReadNeverWidensToASiblingInstance() {
+        assumeCapability(StoreCapability.EVENT_JOURNAL);
+        var selected = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        var sibling = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID selectedTraversal = UUID.randomUUID();
+        UUID siblingTraversal = UUID.randomUUID();
+        StoredProcessInstance selectedCreated = await(store().apply(
+                creationBatch(selected, selectedTraversal, "graph-v1")));
+        StoredProcessInstance siblingCreated = await(store().apply(
+                creationBatch(sibling, siblingTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(selected)
+                .expecting(RevisionExpectation.exactly(selectedCreated.revision()))
+                .publish(event(selected, selectedTraversal, "selected.one"))
+                .publish(event(selected, selectedTraversal, "selected.two")).build()));
+        await(store().apply(ExecutionBatch.to(sibling)
+                .expecting(RevisionExpectation.exactly(siblingCreated.revision()))
+                .publish(event(sibling, siblingTraversal, "sibling.one")).build()));
+
+        List<JournalRecord> selectedOnly = await(store().readProcessJournal(selected, 0, 10));
+        assertEquals(List.of("selected.one", "selected.two"), selectedOnly.stream()
+                .map(row -> row.envelope().eventType()).toList());
+        assertEquals(2L, selectedOnly.getLast().streamSequence());
+        assertEquals(List.of("selected.two"), await(store().readProcessJournal(selected, 1, 10)).stream()
+                .map(row -> row.envelope().eventType()).toList());
+    }
+
+    @Test
+    final void processJournalBoundaryRejectsFullyCompactedAndInterPageGaps() {
+        assumeCapability(StoreCapability.JOURNAL_COMPACTION);
+        var key = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .publish(event(key, traversal, "one"))
+                .publish(event(key, traversal, "two"))
+                .publish(event(key, traversal, "three")).build()));
+
+        ProcessJournalPage first = await(store().readProcessJournalPage(key, 0, 1));
+        assertEquals(1L, first.retainedFromSequence());
+        assertEquals(4L, first.nextSequence());
+        assertEquals(1L, first.records().getFirst().streamSequence());
+
+        List<JournalRecord> tenant = await(store().readJournal(DEFAULT_TENANT, 0, 10));
+        await(store().advanceOutboxCursor(await(store().outboxCursor(DEFAULT_TENANT, "process-replay")),
+                tenant.getLast().journalOffset()));
+        clock().advance(store().journalRetention().plusMinutes(1));
+        assertEquals(3L, await(store().compactJournal(DEFAULT_TENANT)));
+
+        var interPage = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 1, 1))));
+        assertEquals(4L, interPage.retainedFrom());
+        var fullyCompacted = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 0, 10))));
+        assertEquals(4L, fullyCompacted.retainedFrom());
+        ProcessJournalPage current = await(store().readProcessJournalPage(key, 3, 10));
+        assertTrue(current.records().isEmpty());
+        assertEquals(4L, current.retainedFromSequence());
+        assertEquals(4L, current.nextSequence());
     }
 
     @Test
@@ -5478,13 +5719,15 @@ public abstract class ExecutionStoreContract {
                 .expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(acceptedInstance(key.processInstanceId(), traversalId),
                         new GraphVersionPin("graph-v7")))
-                .recordOrigin(ExecutionOrigin.of("deployment-9", "workload-3", "corr-42"))
+                .recordOrigin(ExecutionOrigin.of("deployment-9", "incarnation-4",
+                        "workload-3", "corr-42"))
                 .build()));
 
         ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
         assertEquals(key, entry.key());
         assertEquals(new GraphVersionPin("graph-v7"), entry.graphVersionPin());
         assertEquals(Optional.of("deployment-9"), entry.deploymentId());
+        assertEquals(Optional.of("incarnation-4"), entry.deploymentIncarnationId());
         assertEquals(Optional.of("workload-3"), entry.workloadId());
         assertEquals(Optional.of("corr-42"), entry.correlationId());
         assertNotEquals(entry.deploymentId(), entry.workloadId());
@@ -5507,6 +5750,7 @@ public abstract class ExecutionStoreContract {
                 .build()));
         ProcessInventoryEntry updated = await(store().findProcessInstance(key)).orElseThrow();
         assertEquals(Optional.of("deployment-9"), updated.deploymentId(), "absent components leave values untouched");
+        assertEquals(Optional.of("incarnation-4"), updated.deploymentIncarnationId());
         assertEquals(Optional.of("workload-3"), updated.workloadId());
         assertEquals(Optional.of("corr-updated"), updated.correlationId(), "a present component is written");
     }

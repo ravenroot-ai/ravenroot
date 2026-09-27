@@ -37,6 +37,7 @@ Kubernetes commands (Helm and cluster access are required only for these command
   k8s-status               Show the configured Helm release status
 
 Options for start/up/restart (the default command is restart):
+  --runner                 Enable the tokenless supervised local worker and governed control plane
   -si, --skipimage         Skip image, source/UI builds, and tests; recreate using the existing image
   -sb, --skipbuild         Skip source/UI builds and tests; build only the OCI image
   -st, --skiptest          Build source/UI and the OCI image, but do not run tests
@@ -71,6 +72,11 @@ Configuration:
                                     uses ./.ravenroot-local/compose.override.yaml if it exists. Set
                                     this variable to an empty value to disable the automatic override.
   RAVENROOT_COMPOSE_WAIT_TIMEOUT  Compose health wait timeout in seconds (default: 60)
+  RAVENROOT_LOCAL_RUNNER_DIR      Operator-approved control-plane.json and tokenless worker.json
+                                    (default: ./.ravenroot-local/runner); see governed-runner docs
+  RAVENROOT_DOCKER_CLI_IMAGE      Operator-pinned Docker CLI image@sha256 for --runner builds
+  RAVENROOT_LOCAL_DOCKER_SOCKET   Trusted local Docker socket (default: /var/run/docker.sock)
+  RAVENROOT_LOCAL_RUNNER_STOP_GRACE Compose shutdown bound including Workspace cleanup (default: 5m)
   RAVENROOT_HOST_PORT              Local Compose port (default: 8080)
   RAVENROOT_HELM_RELEASE          Helm release name (default: ravenroot)
   RAVENROOT_HELM_NAMESPACE        Kubernetes namespace (default: default)
@@ -118,6 +124,9 @@ fi
 
 compose() {
   require_command docker
+  if [ "$LOCAL_RUNNER" = true ]; then
+    set -- --file "$PROJECT_DIR/deploy/dev/compose.runner.yaml" "$@"
+  fi
   if [ -n "$COMPOSE_OVERRIDE_FILE" ]; then
     if [ -r "$COMPOSE_OVERRIDE_FILE" ]; then
       set -- --file "$COMPOSE_FILE" --file "$COMPOSE_OVERRIDE_FILE" "$@"
@@ -176,6 +185,35 @@ require_loopback_compose_contract() {
     echo "Compose local-security contract requires exactly one 127.0.0.1:$LOCAL_HOST_PORT -> 8080/tcp publication; refusing startup." >&2
     exit 2
   fi
+}
+
+prepare_local_runner() {
+  [ "$LOCAL_RUNNER" = true ] || return 0
+  case "$command" in deploy|upgrade|undeploy|k8s-status)
+    echo '--runner is a trusted-local Compose mode; production OIDC is unchanged.' >&2; exit 2 ;;
+  esac
+  require_command jq
+  if ! printf '%s' "${RAVENROOT_DOCKER_CLI_IMAGE:-}" | jq -Re 'test("^.+@sha256:[0-9a-f]{64}$")' >/dev/null; then
+    echo 'RAVENROOT_DOCKER_CLI_IMAGE must name an operator-approved immutable Docker CLI image.' >&2; exit 2
+  fi
+  RAVENROOT_LOCAL_RUNNER_DIR=${RAVENROOT_LOCAL_RUNNER_DIR:-"$PROJECT_DIR/.ravenroot-local/runner"}
+  for file in control-plane.json worker.json; do
+    if [ ! -r "$RAVENROOT_LOCAL_RUNNER_DIR/$file" ]; then
+      echo "--runner requires operator-approved $RAVENROOT_LOCAL_RUNNER_DIR/$file; no bearer token is used." >&2; exit 2
+    fi
+  done
+  if ! jq -e '(.tenantId == "local") and (has("endpoint") | not) and (has("tokenFile") | not)' \
+      "$RAVENROOT_LOCAL_RUNNER_DIR/worker.json" >/dev/null; then
+    echo 'Local worker configuration must use tenant local and no endpoint/tokenFile.' >&2; exit 2
+  fi
+  RAVENROOT_LOCAL_DOCKER_SOCKET=${RAVENROOT_LOCAL_DOCKER_SOCKET:-/var/run/docker.sock}
+  if [ ! -S "$RAVENROOT_LOCAL_DOCKER_SOCKET" ]; then
+    echo 'The explicit local runner requires a local Docker Unix socket.' >&2; exit 2
+  fi
+  RAVENROOT_LOCAL_DOCKER_GID=$(stat -c %g "$RAVENROOT_LOCAL_DOCKER_SOCKET" 2>/dev/null \
+    || stat -f %g "$RAVENROOT_LOCAL_DOCKER_SOCKET")
+  case "$RAVENROOT_LOCAL_DOCKER_GID" in ''|*[!0-9]*) echo 'Invalid Docker socket group.' >&2; exit 2 ;; esac
+  export RAVENROOT_LOCAL_RUNNER_DIR RAVENROOT_LOCAL_DOCKER_SOCKET RAVENROOT_LOCAL_DOCKER_GID
 }
 
 run_source_build() {
@@ -266,9 +304,11 @@ command_set=false
 SKIP_IMAGE=false
 SKIP_BUILD=false
 SKIP_TEST=false
+LOCAL_RUNNER=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --runner) LOCAL_RUNNER=true ;;
     -si|-skipimage|--skipimage|skipimage) SKIP_IMAGE=true; SKIP_BUILD=true; SKIP_TEST=true ;;
     -sb|-skipbuild|--skipbuild|skipbuild) SKIP_BUILD=true; SKIP_TEST=true ;;
     -st|-skiptest|--skiptest|skiptest) SKIP_TEST=true ;;
@@ -285,6 +325,8 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$command" != help ]; then prepare_local_runner; fi
 
 case "$command" in
   start|up|restart) start_compose ;;

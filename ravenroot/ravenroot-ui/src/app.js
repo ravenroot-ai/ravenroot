@@ -2,9 +2,14 @@ import cytoscape from 'cytoscape';
 import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
 import { createVisualGroup, editVisualGroups } from './graph-editing.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
+import { visualGroupLayoutInput } from './visual-group-projection.js';
 import {
   DESIGN_ARRANGEMENTS,
+  documentModeViewStates,
+  graphHasPersistedLayout,
+  loadedGraphLayoutPlan,
   normalizedCanvasState,
+  normalizedMonitoringForces,
   visualGroupPresentation,
 } from './graph-view-state.js';
 import cytoscapeDagre from 'cytoscape-dagre';
@@ -12,7 +17,8 @@ import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
 import { isLayeredMode, layeredLabelSide } from './layered-drawing.js';
 import {
-  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, copyLayeredDrawing,
+  layeredDrawingOf, registerLayeredLayout,
 } from './layered-layout.js';
 import * as d3 from 'd3';
 import {
@@ -65,12 +71,16 @@ import { catalogEmptyState } from './catalog-empty-state.js';
 import {
   catalogNodeIcon,
   COMMON_NODE_GLYPHS,
-  nodeTypeCardShape,
   resolveDescriptorNodeType,
 } from './catalog-node-icon.js';
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
+import { namedAgentPresets } from './named-agent-presets.js';
+import {
+  availableRegisterMachinePresets,
+  insertRegisterMachinePreset,
+} from './register-machine-presets.js';
 import {
   canvasInteractionState,
   isAdditiveSelection,
@@ -100,6 +110,7 @@ import { createRunnerWindow } from './runner-panel.js';
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
 // part of `RavenrootRuntimeClient`. The Deployments window owns registration and control.
 import { createDeploymentsWindow } from './deployment-panel.js';
+import { deploymentProjectionDocument } from './deployment-viewer-document.js';
 import { humanTaskContext, humanTaskServiceOrigin } from './human-task-attention.js';
 import { createHumanTaskController } from './human-task-controller.js';
 import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from './human-task-ui.js';
@@ -115,6 +126,18 @@ import {
   applyViewerUnbundledRoute,
 } from './viewer-edge-style.js';
 import { mountD3ElasticRenderer } from './viewer-elastic-renderer.js';
+import {
+  VIEWER_NODE_ICONS,
+  createViewerStylesheet,
+  viewerDesignNodeStyle,
+  viewerNodeSize,
+} from './viewer-presentation.js';
+import {
+  applyDeploymentViewFrame,
+  applyDeploymentViewStateToRenderer,
+  createDeploymentViewState,
+  resetDeploymentViewRuntime,
+} from './deployment-view-state.js';
 import {
   edgeFlowSnapshot,
   FLOW_PULSE_MS,
@@ -179,6 +202,10 @@ import {
 } from './execution-reconciliation.js';
 import { publicExecutionDescription } from './execution-event-description.js';
 import { runtimeActivityMessage, runtimeActivityOutput } from './runtime-activity-data.js';
+import {
+  DEFAULT_ACTIVITY_MODE, activityEventVisible, isLogEmission, logEmissionPresentation,
+  normalizeActivityMode, usesConciseLogRendering,
+} from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
 import {
@@ -224,6 +251,7 @@ import {
   documentForRuntimeEvent,
   forkDocumentRecord,
   hasUnsavedWork,
+  retireSourceSessionProcessBindings,
 } from './workspace.js';
 import {
   canonicalGraphSnapshot,
@@ -377,18 +405,13 @@ const contextualHelp = createContextualHelp({
 });
 
 function nodeSize(n) {
-  if (n.nodeType === 'start' || n.nodeType === 'end') return [84, 84];
-  if (n.nodeType === 'error')                          return [72, 72];
-  const w = Math.max(90, Math.min(230, n.name.length * 7.8 + 52));
-  return [w, 52];
+  return viewerNodeSize(n);
 }
 
 const NODE_ICONS = {
-  start:    '▶ ', end:      '⏹ ', error:    '⚠ ',
-  terminal: '⊙ ',
-  consumer: '⩓ ', handler:  '↩ ',
-  agent:    '⬡ ', flow:     '⚙ ',
-  actor:    '◉ ', system:   '▪ ', trace: `${COMMON_NODE_GLYPHS.trace} `,
+  ...VIEWER_NODE_ICONS,
+  workspace: `${COMMON_NODE_GLYPHS.workspace} `,
+  trace: `${COMMON_NODE_GLYPHS.trace} `,
   'human-task': `${COMMON_NODE_GLYPHS['human-task']} `
 };
 
@@ -559,6 +582,9 @@ function createStylesheet(palette = rendererPalette) {
   { selector: 'node[nodeType="agent"]', style: {
     'background-color': surface.agent,
     'border-color': node.agent, 'border-width': 2,
+  }},
+  { selector: 'node[nodeType="workspace"]', style: {
+    'background-color': surface.workspace, 'border-color': node.workspace, 'border-width': 3,
   }},
   { selector: 'node[nodeType="terminal"]', style: {
     shape: 'ellipse', 'background-color': surface.terminal,
@@ -755,6 +781,7 @@ let workspacePersistenceRevision = 0;
 let workspacePersistedRevision = 0;
 let workspaceSnapshotReader = readWorkspaceSnapshot;
 let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scope: null, generation: 0 });
+const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
   workspaceAuthority = Object.freeze({ state, client, scope: null,
@@ -797,6 +824,25 @@ function tenantAuthorityAllows(owner, client = runtimeClient) {
   if (owner.tenantId === null) return workspaceAuthority.scope === null;
   return workspaceAuthority.scope?.key === activeWorkspaceScope?.key
     && owner.tenantId === workspaceAuthority.scope?.tenantId;
+}
+
+function runtimeEventScope(client) {
+  if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
+      || workspaceAuthority.client !== client) return null;
+  return workspaceAuthority.scope || SESSION_ONLY_RUNTIME_EVENT_SCOPE;
+}
+
+async function deliverRuntimeEventAfterAuthority(event, client, authorityRequest) {
+  // The transport advances Last-Event-ID only after this promise resolves. A frame can arrive while
+  // configuration is still proving the exact client's workspace tenant or restoring its documents;
+  // hold that frame here so it is neither routed without authority nor silently acknowledged. A
+  // failed or superseded authority rejects delivery, leaving the cursor at the last accepted frame.
+  await authorityRequest;
+  if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
+      || workspaceAuthority.client !== client) {
+    throw new Error('Runtime event authority is unavailable');
+  }
+  handleRuntimeEvent(event, client);
 }
 
 function normalizedWorkspaceServiceUrl(client) {
@@ -973,6 +1019,7 @@ let activeSourceSession = null;
 let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
 let nodeTypeCatalog = [];
+let namedAgentCatalog = [];
 // Why the palette is empty, kept apart from the catalog itself: a failed request and a service
 // that legitimately has nothing to offer are different states and are shown differently.
 let nodeCatalogFailure = null;
@@ -1721,6 +1768,15 @@ function selectedRealNodeIds(owner = workspace.active, captured = null) {
     .filter(id => Object.hasOwn(owner?.graph?.nodeMap || {}, id));
 }
 
+function selectedCanonicalElementIds(owner = workspace.active) {
+  const canonical = new Set([
+    ...(owner?.graph?.nodes || []).map(node => node.id),
+    ...(owner?.graph?.edges || []).map(edge => edge.id),
+  ]);
+  return (owner?.cy?.$(':selected').map(element => element.id()) || [])
+    .filter(id => canonical.has(id));
+}
+
 function finishVisualGroups(owner = workspace.active) {
   // Finishing an already-settled transition repaints its last projection. That projection owns a
   // selection snapshot from the last group refresh, not the live selection a user may have made
@@ -1787,6 +1843,12 @@ function refreshVisualGroups(owner = workspace.active, { animate = false, select
       focusGroupId: owner === workspace.active
         ? owner.restoredVisualGroupFocus ?? owner.focusedVisualGroupId ?? null : null,
       onToggle: (id, collapsed) => toggleVisualGroup(id, collapsed, owner),
+      onGroupMove: id => {
+        owner.selectedVisualGroupId = id;
+        owner.focusedVisualGroupId = id;
+        captureDocumentModeView(owner, 'monitoring');
+        scheduleWorkspacePersistence();
+      },
       onUpdate: () => scheduleMinimap(owner) });
     owner.restoredVisualGroupSelection = null;
     owner.restoredVisualGroupFocus = null;
@@ -2361,6 +2423,77 @@ function allocateDocumentDisplayName(name) {
   return count === 1 ? name : `${name} (${count})`;
 }
 
+function ensureModeViewStates(owner) {
+  if (!owner) return { design: null, monitoring: null };
+  if (!owner.viewStates || typeof owner.viewStates !== 'object') {
+    owner.viewStates = documentModeViewStates(owner);
+  }
+  owner.viewStates.design ??= null;
+  owner.viewStates.monitoring ??= null;
+  owner.monitoringForces = normalizedMonitoringForces(owner.monitoringForces
+    ?? owner.viewStates.monitoring?.forces);
+  return owner.viewStates;
+}
+
+function captureDocumentModeView(owner, mode = owner?.renderMode) {
+  if (!owner?.cy || owner.cy.destroyed()) return null;
+  const semanticMode = normalizeRenderMode(mode);
+  const elastic = elasticRendererFor(owner);
+  const transform = elastic?.svg ? d3.zoomTransform(elastic.svg) : null;
+  const canvasState = normalizedCanvasState({
+    zoom: semanticMode === 'monitoring' && transform ? transform.k : owner.cy.zoom(),
+    pan: semanticMode === 'monitoring' && transform
+      ? { x: transform.x, y: transform.y } : owner.cy.pan(),
+    selectedIds: selectedCanonicalElementIds(owner),
+    focusNodeId: owner.cursorId,
+    selectedGroupId: selectedVisualGroup(owner)?.id || owner.selectedVisualGroupId || null,
+    focusGroupId: owner.focusedVisualGroupId || null,
+    positions: Object.fromEntries(semanticMode === 'monitoring' && elastic?.nodes
+      ? elastic.nodes.map(node => [node.id, { x: node.x, y: node.y }])
+      : owner.cy.nodes().filter(node => Object.hasOwn(owner.graph?.nodeMap || {}, node.id()))
+        .map(node => [node.id(), node.position()])),
+  }, owner.graph);
+  const state = {
+    canvasState,
+    visualGroupState: structuredClone(owner.visualGroupState || {}),
+    forces: normalizedMonitoringForces(owner.monitoringForces),
+    layoutMode: owner.layoutMode,
+  };
+  ensureModeViewStates(owner)[semanticMode] = state;
+  owner.canvasState = canvasState;
+  return state;
+}
+
+function restoreDesignView(owner) {
+  const state = ensureModeViewStates(owner).design;
+  if (!state?.canvasState || !owner?.cy) return false;
+  owner.visualGroupState = structuredClone(state.visualGroupState || {});
+  const saved = normalizedCanvasState(state.canvasState, owner.graph);
+  owner.cy.batch(() => Object.entries(saved.positions)
+    .forEach(([id, position]) => owner.cy.getElementById(id).position(position)));
+  if (saved.zoom && saved.pan) owner.cy.viewport({ zoom: saved.zoom, pan: saved.pan });
+  applyStableSelection(owner.cy, saved.selectedIds);
+  owner.cursorId = saved.focusNodeId;
+  owner.selectedVisualGroupId = saved.selectedGroupId;
+  owner.focusedVisualGroupId = saved.focusGroupId;
+  owner.restoredVisualGroupSelection = saved.selectedGroupId;
+  owner.restoredVisualGroupFocus = saved.focusGroupId;
+  return true;
+}
+
+function restoreMonitoringView(owner) {
+  const state = ensureModeViewStates(owner).monitoring;
+  if (!state?.canvasState || !owner?.cy) return false;
+  const saved = normalizedCanvasState(state.canvasState, owner.graph);
+  applyStableSelection(owner.cy, saved.selectedIds);
+  owner.cursorId = saved.focusNodeId;
+  owner.selectedVisualGroupId = saved.selectedGroupId;
+  owner.focusedVisualGroupId = saved.focusGroupId;
+  owner.restoredVisualGroupSelection = saved.selectedGroupId;
+  owner.restoredVisualGroupFocus = saved.focusGroupId;
+  return true;
+}
+
 function captureActiveDocument() {
   const document_ = workspace.active;
   if (!document_) return;
@@ -2389,24 +2522,18 @@ function captureActiveDocument() {
   document_.execution.finished = finishedExecutions;
   document_.execution.events = recentRuntimeEvents;
   document_.execution.reconciliationState = activeExecutionReconciliation;
-  if (cy && !cy.destroyed()) {
-    const elastic = elasticRendererFor(document_);
-    const transform = elastic?.svg ? d3.zoomTransform(elastic.svg) : null;
-    document_.canvasState = normalizedCanvasState({
-      zoom: transform?.k ?? cy.zoom(), pan: transform ? { x: transform.x, y: transform.y } : cy.pan(),
-      selectedIds: selectedRealNodeIds(document_), focusNodeId: graphCursorId,
-      selectedGroupId: selectedVisualGroup(document_)?.id || null,
-      focusGroupId: selectedVisualGroup(document_)?.id || null,
-      positions: Object.fromEntries(elastic?.nodes ? elastic.nodes.map(node => [node.id, { x: node.x, y: node.y }])
-        : cy.nodes().filter(node => Object.hasOwn(graphData?.nodeMap || {}, node.id())).map(node => [node.id(), node.position()])),
-    }, graphData);
-  }
+  if (cy && !cy.destroyed()) captureDocumentModeView(document_, renderMode);
 }
 
 function cancelRetiredLayouts(cancelled = []) {
   cancelled.forEach(item => {
+    const job = layoutJobs.get(item.generation);
     layoutJobs.delete(item.generation);
     if (typeof item.nativeCancel === 'function') item.nativeCancel();
+    // ELK's controller stop is a no-op, but its published Cytoscape animations are stoppable.
+    // Freeze them at retirement so a mode restore cannot be overwritten by stale tween frames.
+    (job?.isolatedLayoutCy || item.cy)?.nodes().stop(true, false);
+    releaseInitialLayoutExposure(job);
   });
 }
 
@@ -2440,7 +2567,10 @@ function invalidateDocumentLayouts(owner) {
   clearLayoutDeferredWork(owner);
   cancelRetiredLayouts(layoutSessions.invalidate(owner.id).cancelled);
   layoutJobs.forEach((job, generation) => {
-    if (job.owner.id === owner.id) layoutJobs.delete(generation);
+    if (job.owner.id === owner.id) {
+      releaseInitialLayoutExposure(job);
+      layoutJobs.delete(generation);
+    }
   });
   syncOwnedLayoutBusy(owner);
   owner.layoutSessionToken = null;
@@ -2468,6 +2598,13 @@ function applyActiveDocument() {
   designArrangement = presentation.designArrangement;
   visualStyle = presentation.visualStyle;
   if (document_) Object.assign(document_, presentation);
+  if (document_) {
+    const views = ensureModeViewStates(document_);
+    const view = views[renderMode];
+    document_.canvasState = view?.canvasState ?? document_.canvasState;
+    document_.visualGroupState = structuredClone(view?.visualGroupState
+      ?? document_.visualGroupState ?? {});
+  }
   layoutBusy = document_?.layoutBusy ?? false;
   filterActive = document_?.filterActive ?? null;
   traceActive = document_?.traceActive ?? false;
@@ -2557,6 +2694,8 @@ window.ravenroot = {
   }),
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
+  // Browser parity tests drive the same paint-only transition exposed by renderer controls.
+  setVisualStyle: style => setVisualStyle(style),
   _setWorkspaceSnapshotReaderForTest: reader => {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
@@ -2739,6 +2878,10 @@ function syncPaneHeaders() {
     const active = document_.id === activeId;
     const name = paneDisplayName(document_);
     const dirty = paneIsDirty(document_);
+    const deployment = document_.deploymentView;
+    const deploymentStatus = deployment
+      ? `read-only deployment ${deployment.state.lifecycle.toLowerCase()}, ${deployment.state.continuity.toLowerCase()}`
+      : '';
 
     const label = header.querySelector('.doc-pane-name');
     label.textContent = name;
@@ -2771,14 +2914,24 @@ function syncPaneHeaders() {
 
     header.querySelector('.doc-pane-state').textContent =
       [active ? 'active document' : '', documentModeLabel(document_), dirty ? 'modified' : '',
-        document_.layoutBusy ? 'layout in progress' : '']
+        document_.layoutBusy ? 'layout in progress' : '', deploymentStatus]
         .filter(Boolean).join(', ');
 
     pane.classList.toggle('doc-pane--active', active);
     if (active) pane.setAttribute('aria-current', 'true');
     else pane.removeAttribute('aria-current');
     pane.setAttribute('aria-label', `${name}, ${documentModeLabel(document_)}${dirty ? ', modified' : ''}`
-      + `${document_.layoutBusy ? ', layout in progress' : ''}`);
+      + `${document_.layoutBusy ? ', layout in progress' : ''}`
+      + `${deploymentStatus ? `, ${deploymentStatus}` : ''}`);
+    if (deployment) {
+      pane.dataset.viewerSource = 'deployment';
+      pane.dataset.deploymentLifecycle = deployment.state.lifecycle;
+      pane.dataset.deploymentContinuity = deployment.state.continuity;
+    } else {
+      delete pane.dataset.viewerSource;
+      delete pane.dataset.deploymentLifecycle;
+      delete pane.dataset.deploymentContinuity;
+    }
   });
 }
 
@@ -3213,6 +3366,16 @@ function addDocumentRecord(name = defaultDocumentName(), displayName = allocateD
   }));
   nextDocumentId += 1;
   if (options.presentation) Object.assign(document_, options.presentation);
+  // The record does not own its graph until initCy binds it below. Preserve supplied workspace
+  // snapshots verbatim here; reconciling them against a null graph would erase every group state.
+  document_.viewStates = options.presentation?.viewStates
+    ? structuredClone(options.presentation.viewStates) : documentModeViewStates(document_);
+  document_.monitoringForces = normalizedMonitoringForces(options.presentation?.monitoringForces
+    ?? document_.viewStates.monitoring?.forces);
+  const restoredView = document_.viewStates[normalizeRenderMode(document_.renderMode)];
+  document_.canvasState = restoredView?.canvasState ?? document_.canvasState;
+  document_.visualGroupState = structuredClone(restoredView?.visualGroupState
+    ?? document_.visualGroupState ?? {});
   document_.restoredVisualGroupSelection = document_.canvasState?.selectedGroupId || null;
   document_.restoredVisualGroupFocus = document_.canvasState?.focusGroupId || null;
   applyActiveDocument();
@@ -3235,8 +3398,16 @@ function defaultDocumentName() {
 }
 
 function initLoadedGraph(graph, currentStyle) {
+  const owner = workspace.active;
+  const needsInitialDesignLayout = owner?.renderMode === 'design'
+    && !graphHasPersistedLayout(graph)
+    && !graph.nodes.every(node => Number.isFinite(owner.canvasState?.positions?.[node.id]?.x)
+      && Number.isFinite(owner.canvasState?.positions?.[node.id]?.y));
+  const initialLayoutPlan = needsInitialDesignLayout
+    ? loadedGraphLayoutPlan(graph, owner.layoutMode, owner.designArrangement) : null;
   initCy(buildElements(graph), graph, {
     visualStyle: currentStyle,
+    initialLayoutPlan,
   });
 }
 
@@ -3267,10 +3438,67 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
   return document_.id;
 }
 
+async function openDeploymentDocument(deploymentId, client = runtimeClient) {
+  if (!client) throw new Error('Connect to a Ravenroot service before opening a deployment.');
+  const envelope = await client.deploymentView(deploymentId);
+  const graph = deploymentProjectionDocument(envelope);
+  const id = openDocument({
+    name: `${deploymentId}.deployment`,
+    displayName: allocateDocumentDisplayName(`${deploymentId} (deployment)`),
+    graph,
+    mode: DOCUMENT_MODES.DEPLOYED,
+    provenance: {
+      originMode: DOCUMENT_MODES.DEPLOYED,
+      sourceGraphVersion: graph.viewerBinding.graphVersion,
+      deploymentId,
+    },
+    // Deployment Design uses the same default authoring cards and artwork as Workbench Design.
+    // Renderer implementation names remain internal to this native presentation state.
+    presentation: {
+      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto', designArrangement: null,
+    },
+  });
+  const owner = workspace.find(id);
+  if (!owner) throw new Error('The deployment canvas could not be created.');
+  const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
+  const repaint = frame => {
+    const result = applyDeploymentViewFrame(state, frame);
+    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    syncPaneHeaders();
+    if (workspace.active === owner) {
+      addActivityMessage('deployment', result.reason === 'execution'
+        ? `Observed ${frame.event.type} on ${deploymentId}`
+        : `Deployment ${deploymentId}: ${state.continuity.toLowerCase()}`,
+      result.terminal ? 'failed' : 'completed');
+    }
+  };
+  const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message) => {
+    if (connectionState === 'revoked') {
+      resetDeploymentViewRuntime(state, 'DETACHED', 'AUTHORITY_CHANGED');
+    } else if (connectionState === 'error') {
+      resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+    } else {
+      state.continuity = connectionState === 'connected' ? 'LIVE'
+        : connectionState === 'reconnecting' ? 'RECONNECTING' : connectionState.toUpperCase();
+    }
+    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    syncPaneHeaders();
+    if (workspace.active === owner) addActivityMessage('deployment', message,
+      ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
+  });
+  owner.deploymentView = { envelope, state, disconnect };
+  applyDeploymentViewStateToRenderer(owner.cy, state);
+  syncPaneHeaders();
+  setModifyMode(false);
+  syncActiveDocumentChrome();
+  return id;
+}
+
 function forkActiveDocument() {
   captureActiveDocument();
   const source = workspace.active;
-  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph) return false;
+  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph
+      || source.graph.format === 'deployment') return false;
   const graph = structuredClone(source.graph);
   graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
   const fork = forkDocumentRecord(source, {
@@ -3323,6 +3551,8 @@ function completeReplaceActiveDocument(target, graph, name) {
   target.incarnation = createDocumentIncarnation();
   target.visualGroupState = {};
   target.canvasState = null;
+  target.viewStates = { design: null, monitoring: null };
+  target.monitoringForces = normalizedMonitoringForces();
   target.visualGroupPresentationDirty = false;
   activeDocumentIncarnation = target.incarnation;
   graphName = name;
@@ -3419,6 +3649,9 @@ function teardownDocument(target) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
+  retireSourceSessionProcessBindings(target);
+  target.deploymentView?.disconnect?.();
+  target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
   destroyDocumentRenderer(target, 'closed');
@@ -3546,7 +3779,7 @@ function syncActiveDocumentChrome() {
   // Read through the working view rather than through `workspace.active`: `applyActiveDocument` has
   // just loaded the record into these variables, and reading the record again here would be a second
   // answer to a question that must only have one.
-  syncLayoutChrome(hasDocument ? layoutMode : null);
+  syncLayoutChrome(hasDocument ? workspace.active : null);
   syncFontChrome(hasDocument ? fontSize : DEFAULT_FONT_SIZE);
   window.document.getElementById('b-zoom').textContent = hasDocument && cy
     ? `${Math.round(cy.zoom() * 100)}%` : '—';
@@ -3586,9 +3819,22 @@ function syncExecutionReconciliationChrome(hasDocument) {
 // has to repaint them: without this the toolbar goes on claiming the layout of the document the user
 // has just left — highlighting Elastic, and offering its force sliders, over a document laid out by
 // something else entirely.
-function syncLayoutChrome() {
+function syncLayoutChrome(owner = null) {
   const elasticCtrl = document.getElementById('elastic-ctrl');
   if (elasticCtrl) elasticCtrl.classList.toggle('visible', renderMode === 'monitoring');
+  const forces = normalizedMonitoringForces(owner?.monitoringForces);
+  const repulsion = document.getElementById('rep-slider');
+  const attraction = document.getElementById('attr-slider');
+  const speed = document.getElementById('speed-slider');
+  if (repulsion) repulsion.value = forces.repulsion;
+  if (attraction) attraction.value = Math.round(forces.attraction * 100);
+  if (speed) speed.value = Math.round(forces.speed * 100);
+  const repulsionValue = document.getElementById('rep-val');
+  const attractionValue = document.getElementById('attr-val');
+  const speedValue = document.getElementById('speed-val');
+  if (repulsionValue) repulsionValue.textContent = forces.repulsion;
+  if (attractionValue) attractionValue.textContent = forces.attraction.toFixed(2);
+  if (speedValue) speedValue.textContent = Math.round(forces.speed * 100);
   refreshCommands();
   requestAnimationFrame(syncCommandBarDensity);
 }
@@ -3773,13 +4019,14 @@ function initCy(elements, gd, options = {}) {
   }
 
   const canvasContainer = documentContainer(workspace.active);
+  setInitialLayoutExposure(workspace.active, Boolean(options.initialLayoutPlan));
   const zoomBridge = installCanvasZoomBridge(canvasContainer);
   try {
     cy = cytoscape({
     // The active document's own element, not the shared host: a second document is a second canvas.
     container: canvasContainer,
     elements,
-    style: createStylesheet(),
+    style: createViewerStylesheet(rendererPalette, 'cyto', { includeNodeSelection: false }),
     layout: { name: 'preset' },
     minZoom: 0.05, maxZoom: 5,
     wheelSensitivity: 0.25,
@@ -3790,6 +4037,7 @@ function initCy(elements, gd, options = {}) {
     selectionType: 'additive',
     });
   } catch (error) {
+    setInitialLayoutExposure(workspace.active, false);
     zoomBridge.destroy();
     throw error;
   }
@@ -4117,9 +4365,9 @@ function initCy(elements, gd, options = {}) {
     });
   });
 
-  // This internal paint path is synchronous and position-neutral: loading, activation and rebuilding
-  // never move coordinates. Explicit render-mode commands use setRenderMode and do run their owned
-  // layout before the renderer-specific routing pass.
+  // This internal paint path is synchronous and position-neutral: loading, activation, mode restore
+  // and rebuilding never move coordinates. Only the separate Render command deliberately runs the
+  // active mode's layout.
   setVisualStyle(options.visualStyle || visualStyle, { target: cy, owner: rendererOwner });
   updateStats();
   buildLegend();
@@ -4157,6 +4405,23 @@ function initCy(elements, gd, options = {}) {
       applyStableSelection(instance, [id]); setGraphCursor(id);
     }
   }
+  // An imported Design document without coordinates has no geometry to restore. Its persisted
+  // arrangement is therefore the one initialization layout. This call is still in the load task,
+  // after collapsed-group projection exists and before the browser can paint the preset seed.
+  if (options.initialLayoutPlan) {
+    try {
+      setLayout(options.initialLayoutPlan.name, {
+        preservePositions: options.initialLayoutPlan.preservePositions,
+        recordPositions: false,
+        fitAfterLayout: !options.initialLayoutPlan.preservePositions,
+        animate: false,
+        revealInitialLayout: true,
+      });
+    } catch (error) {
+      setInitialLayoutExposure(workspace.active, false);
+      throw error;
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4166,86 +4431,6 @@ function initCy(elements, gd, options = {}) {
 // ═══════════════════════════════════════════════════════════════
 // N8N VISUAL MODE
 // ═══════════════════════════════════════════════════════════════
-
-const N8N_ICONS_CHAR = {
-  start:    '▶', end:      '■', error:    '⚠',
-  terminal: '⊙',
-  consumer: '⧒', handler:  '↩',
-  agent:    '🧠', flow:     '⚙',
-  actor:    '◎', system:   '▤',
-  trace:    COMMON_NODE_GLYPHS.trace, 'human-task': COMMON_NODE_GLYPHS['human-task'],
-};
-let N8N_BG = rendererPalette.nodeSurfaceByType;
-let N8N_BORDER = rendererPalette.nodeType;
-
-// Digital circuit-brain SVG — front view, two hemispheres, PCB traces
-function agentBrainSvg() { return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' width='80' height='80'>
- <g fill='none' stroke='${rendererPalette.nodeType.agent}' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'>
-
-    <!-- Left outer profile (restored to its original smooth curves) -->
-    <path d='M 200 45
-             C 170 45, 155 60, 140 75
-             C 115 65, 90 85, 95 115
-             C 70 120, 75 160, 90 170
-             C 70 185, 75 225, 95 230
-             C 80 250, 90 285, 115 290
-             C 110 320, 145 340, 170 330
-             C 185 345, 195 355, 200 355' />
-
-    <!-- Right outer profile (mirrored, with smooth curves) -->
-    <path d='M 200 45
-             C 230 45, 245 60, 260 75
-             C 285 65, 310 85, 305 115
-             C 330 120, 325 160, 310 170
-             C 330 185, 325 225, 305 230
-             C 320 250, 310 285, 285 290
-             C 290 320, 255 340, 230 330
-             C 215 345, 205 355, 200 355' />
-
-    <!-- Central separator line -->
-    <line x1='200' y1='65' x2='200' y2='335' />
-
-    <!-- LEFT-HEMISPHERE CIRCUITS (segmented geometric lines) -->
-    <!-- Upper circuit -->
-    <path d='M 185 290 L 185 175 L 145 135 L 145 110' />
-    <!-- Middle circuit -->
-    <path d='M 170 260 L 170 215 L 125 185 L 125 165' />
-    <!-- Lower circuit -->
-    <path d='M 155 295 L 125 295 L 125 255 L 140 255' />
-
-    <!-- RIGHT-HEMISPHERE CIRCUITS (segmented geometric lines) -->
-    <!-- Upper circuit -->
-    <path d='M 215 290 L 215 175 L 255 135 L 255 110' />
-    <!-- Middle circuit -->
-    <path d='M 230 260 L 230 215 L 275 185 L 275 165' />
-    <!-- Lower circuit -->
-    <path d='M 245 295 L 275 295 L 275 255 L 260 255' />
-
-    <!-- TERMINAL CIRCLES (all with uniform radius R=9) -->
-    <!-- Left -->
-    <circle cx='145' cy='110' r='9' />
-    <circle cx='125' cy='165' r='9' />
-    <circle cx='140' cy='255' r='9' />
-
-    <!-- Right -->
-    <circle cx='255' cy='110' r='9' />
-    <circle cx='275' cy='165' r='9' />
-    <circle cx='260' cy='255' r='9' />
-
-  </g>
-</svg>`; }
-
-function makeN8nSVG(char, nodeType) {
-  if (nodeType === 'agent') {
-    return 'data:image/svg+xml,' + encodeURIComponent(agentBrainSvg());
-  }
-  // Transparent-bg SVG with centered icon glyph — overlaid on background-color
-  const s = `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>`
-    + `<text x='40' y='40' text-anchor='middle' dominant-baseline='central' `
-    + `font-size='32' fill='${rendererPalette.nodeText}' `
-    + `font-family='system-ui,-apple-system,sans-serif'>${char}</text></svg>`;
-  return 'data:image/svg+xml,' + encodeURIComponent(s);
-}
 
 let n8nActive = false;
 function rendererFor(owner = workspace.active) {
@@ -4379,14 +4564,13 @@ function applyApplicationTheme(theme) {
   rendererPalette = getRendererPalette(applicationTheme);
   EDGE_TYPE_COLORS = rendererPalette.edgeType;
   NODE_TYPE_COLORS = rendererPalette.nodeType;
-  N8N_BG = rendererPalette.nodeSurfaceByType;
-  N8N_BORDER = rendererPalette.nodeType;
 
   workspace.documents.forEach(owner => {
     const target = owner.cy;
     if (!target || target.destroyed()) return;
     target.batch(() => {
-      target.style().fromJson(createStylesheet()).update();
+      target.style().fromJson(createViewerStylesheet(
+        rendererPalette, 'cyto', { includeNodeSelection: false })).update();
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(target, owner);
       else target.nodes().forEach(applyRuntimeVisual);
     });
@@ -4419,20 +4603,30 @@ function resumeDocumentRenderer(owner) {
         renderer.svg.setAttribute('height', String(renderer.host.clientHeight));
       }
       rehydrateD3RuntimeEdges(owner);
-      renderer.simulation?.alpha(0.18).restart();
     }
   }
   resumePendingElasticLayout(owner);
 }
 
-function startD3Elastic(owner = workspace.active, target = cy, token = owner?.layoutSessionToken) {
-  if (!target || !owner?.pane?.classList.contains('doc-pane--shown') || !layoutRequestIsCurrent(token)) return;
+function startD3Elastic(owner = workspace.active, target = cy, token = owner?.layoutSessionToken,
+  { startSimulation = true } = {}) {
+  const eligible = token ? layoutRequestIsCurrent(token)
+    : workspace.find(owner?.id) === owner && owner?.cy === target;
+  if (!target || !owner?.pane?.classList.contains('doc-pane--shown') || !eligible) return;
   destroyDocumentRenderer(owner, 'restarted');
   const renderer = registerElasticRenderer(owner, target, token);
 
   // ---- collect data from Cytoscape elements ----
+  const monitoringState = ensureModeViewStates(owner).monitoring;
+  const monitoringPositions = monitoringState?.canvasState?.positions || {};
   const nodeRange = metricExtent(target.nodes(), n => Number(n.data('instances')));
   const fontPx = owner.fontSize || DEFAULT_FONT_SIZE;
+  // The idle silhouette a fully-idle graph paints: the sizing helper's zero-instance size. A runtime
+  // reset must restore THIS, not whatever instance counts happened to be on the canvas when the
+  // renderer mounted -- a run -> Design -> Monitoring round-trip remounts the renderer without
+  // clearing `instances`, so a mount-derived radius can be a painted one (#494). Derived from the
+  // same helper and bounds as the live sizing rather than hardcoded, so the two cannot drift.
+  const idleRadius = scaleMetric(0, { min: 0, max: 0 }, 12, 44, 18) / 2;
 
   const idIndex = {};
   const d3nodes = target.nodes().map((n, i) => {
@@ -4443,7 +4637,8 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     const obj = {
       id: n.id(), label: n.data('name') || n.id(),
       r: size / 2, color,
-      x: n.position().x, y: n.position().y,
+      x: monitoringPositions[n.id()]?.x ?? n.position().x,
+      y: monitoringPositions[n.id()]?.y ?? n.position().y,
       instances: Number.isFinite(inst) ? inst : null,
       runtimeState,
       runtimeObserved: Boolean(n.data('runtimeObserved')),
@@ -4496,10 +4691,12 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
   const svgEl = renderer.svg;
   svgEl.classList.add('active');
 
-  const initAttr = parseInt(document.getElementById('attr-slider')?.value || '30', 10) / 100;
-  const initRep  = parseInt(document.getElementById('rep-slider')?.value  || '320', 10);
-  const initSpeed = parseInt(document.getElementById('speed-slider')?.value || '50', 10) / 100;
-  const designViewport = { k: target.zoom(), x: target.pan().x, y: target.pan().y };
+  const forces = normalizedMonitoringForces(owner.monitoringForces ?? monitoringState?.forces);
+  owner.monitoringForces = forces;
+  const savedViewport = monitoringState?.canvasState;
+  const designViewport = savedViewport?.zoom && savedViewport?.pan
+    ? { k: savedViewport.zoom, x: savedViewport.pan.x, y: savedViewport.pan.y }
+    : { k: target.zoom(), x: target.pan().x, y: target.pan().y };
   const elasticMount = mountD3ElasticRenderer({
     svg: svgEl,
     tooltip: renderer.tooltip,
@@ -4510,10 +4707,12 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     palette: rendererPalette,
     markerKey: renderer.token.generation,
     fontSize: fontPx,
-    attraction: initAttr,
-    repulsion: initRep,
-    speed: initSpeed,
+    idleRadius,
+    attraction: forces.attraction,
+    repulsion: forces.repulsion,
+    speed: forces.speed,
     initialTransform: designViewport,
+    startSimulation,
     // Mount eligibility belongs to the layout request; a mounted simulation belongs to the
     // renderer generation. Presentation toggles may retire pending layouts without retiring it.
     isLive: () => rendererSessions.isLive(renderer.token) && workspace.find(owner.id) === owner && owner.cy === target,
@@ -4625,40 +4824,13 @@ function applyElasticVisualStyle() {
 
 function applyN8nNodeStyle(target = cy, owner = workspace.active) {
   if (!target) return;
-  const fontPx = `${owner?.fontSize || DEFAULT_FONT_SIZE}px`;
   target.nodes().forEach(n => {
-    const t  = n.data('nodeType');
-    const ic = N8N_ICONS_CHAR[t] || '◎';
-    const bg = N8N_BG[t]         || rendererPalette.nodeSurface;
-    const bd = N8N_BORDER[t]     || rendererPalette.nodeBorder;
-    n.style({
-      shape:                  nodeTypeCardShape(t),
-      width:                   80,
-      height:                  80,
-      'background-color':      bg,
-      'border-width':          2.5,
-      // This family includes the DEFAULT `cyto` style, so this is the border most authors
-      // actually see. The neutral ring is restated here because the per-type `bd` written inline
-      // would otherwise beat the stylesheet; the per-type icon tile is untouched, so the node stays
-      // identifiable. `border-style` is deliberately absent so the data selector remains authoritative.
-      'border-color':          n.data('bypassed') ? rendererPalette.nodeType.system : bd,
-      'border-opacity':        1,
-      'background-image':      makeN8nSVG(ic, t),
-      'background-width':     '100%',
-      'background-height':    '100%',
-      'background-fit':       'none',
-      'background-clip':      'none',
-      label:                   runtimeNodeLabel(n),
-      'font-size':             fontPx,
-      'font-weight':          '500',
-      color:                  rendererPalette.nodeText,
-      'text-valign':          'bottom',
-      'text-halign':          'center',
-      'text-margin-y':         10,
-      'text-background-opacity': 0,
-      padding:                '0px',
-      'text-wrap':            'none',
-    });
+    n.style(viewerDesignNodeStyle(n.data('nodeType'), rendererPalette, {
+      label: runtimeNodeLabel(n),
+      fontSize: owner?.fontSize || DEFAULT_FONT_SIZE,
+      bypassed: Boolean(n.data('bypassed')),
+      labelSide: layeredLabelSide(owner?.layoutMode),
+    }));
     applyRuntimeVisual(n);
   });
   // Restated after the per-node style above, which writes this family's placement inline: a
@@ -5052,7 +5224,7 @@ function setVisualStyle(name, options = {}) {
     owner.layoutMode = 'preset';
     if (owner === workspace.active) layoutMode = 'preset';
     syncPaneLayout();
-    syncLayoutChrome('preset');
+    syncLayoutChrome(owner);
   }
   target.batch(() => applyVisualStyle(name, target, owner));
 }
@@ -5126,6 +5298,52 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // while the replacement layout is already registered and about to start.
 const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
+const INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS = 15000;
+
+function setInitialLayoutExposure(owner, pending) {
+  const container = owner?.container;
+  if (!container) return;
+  container.classList.toggle('doc-canvas--initial-layout-pending', pending);
+  container.inert = pending;
+  if (pending) container.setAttribute('aria-hidden', 'true');
+  else container.removeAttribute('aria-hidden');
+}
+
+function releaseInitialLayoutExposure(job) {
+  if (!job?.revealInitialLayout) return;
+  job.revealInitialLayout = false;
+  if (job.initialExposureTimeout != null) clearTimeout(job.initialExposureTimeout);
+  job.initialExposureTimeout = null;
+  job.isolatedLayoutCy?.destroy();
+  job.isolatedLayoutCy = null;
+  setInitialLayoutExposure(job.owner, false);
+}
+
+function applyInitialLayoutFallback(job) {
+  const nodes = job.liveLayoutElements.nodes().filter(node => !node.isParent());
+  const columns = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
+  job.target.batch(() => nodes.forEach((node, index) => node.position({
+    x: 120 + (index % columns) * 180,
+    y: 100 + Math.floor(index / columns) * 130,
+  })));
+  applyProjectedGroupMoves(job);
+  job.target.resize();
+  job.target.fit(undefined, 65);
+  clampAutomaticFitZoom(job.owner);
+}
+
+function retireInitialLayoutWithFallback(job, diagnostic) {
+  if (!job?.revealInitialLayout || layoutJobs.get(job.token.generation) !== job) return;
+  if (layoutRequestIsCurrent(job.token)) applyInitialLayoutFallback(job);
+  if (diagnostic) console.error(diagnostic);
+  cancelRetiredLayouts(layoutSessions.invalidate(job.owner.id).cancelled);
+  job.owner.layoutSessionToken = null;
+  syncOwnedLayoutBusy(job.owner);
+  if (job.owner.cy === job.target) {
+    captureDocumentModeView(job.owner, 'design');
+    scheduleWorkspacePersistence();
+  }
+}
 
 function renderModeLabel(mode) {
   const semanticMode = normalizeRenderMode(mode);
@@ -5154,6 +5372,7 @@ function syncOwnedLayoutBusy(owner) {
 function completeOwnedLayout(job) {
   const { owner, token } = job;
   const current = layoutRequestIsCurrent(token);
+  if (current) applyProjectedGroupMoves(job);
   if (job.fitAfterLayout && layoutRequestIsCurrent(token)) {
     if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
     else {
@@ -5164,9 +5383,10 @@ function completeOwnedLayout(job) {
   }
   if (job.recordPositions && layoutRequestIsCurrent(token)
       && documentIsEditable(owner) && owner.graph?.format !== 'graphify' && owner.cy === job.target) {
-    const positions = job.target.nodes().map(node => ({
-      id: node.id(), ox: node.position('x'), oy: node.position('y'),
-    }));
+    const positions = owner.graph.nodes.map(node => {
+      const rendered = job.target.getElementById(node.id);
+      return { id: node.id, ox: rendered.position('x'), oy: rendered.position('y') };
+    });
     if (moveNodesTo(owner.graph, positions, owner.history, job.commandLabel)) {
       if (workspace.active === owner) updateHistoryUi();
       else {
@@ -5177,17 +5397,53 @@ function completeOwnedLayout(job) {
   }
   layoutJobs.delete(token.generation);
   const released = token.kind === 'elk' ? layoutSessions.complete(token).start : null;
+  releaseInitialLayoutExposure(job);
   syncOwnedLayoutBusy(owner);
   if (current && !released && owner.layoutMode !== 'elastic') refreshVisualGroups(owner);
   if (released) runOwnedLayout(released);
 }
 
+function applyProjectedGroupMoves(job) {
+  if (!job.projectedGroupMoves?.length) return;
+  const { target } = job;
+  target.batch(() => job.projectedGroupMoves.forEach(group => {
+    const summary = target.getElementById(group.summaryId);
+    if (summary.empty()) return;
+    const end = summary.position();
+    const dx = end.x - group.start.x;
+    const dy = end.y - group.start.y;
+    group.members.forEach(member => target.getElementById(member.id)
+      .position({ x: member.position.x + dx, y: member.position.y + dy }));
+  }));
+}
+
+function publishIsolatedLayout(job) {
+  if (!job.isolatedLayoutCy) return;
+  job.target.batch(() => job.isolatedLayoutCy.nodes().forEach(source => {
+    const target = job.target.getElementById(source.id());
+    if (target.nonempty()) target.position(source.position());
+  }));
+  if (isLayeredMode(job.token.mode)) copyLayeredDrawing(job.isolatedLayoutCy, job.target);
+}
+
+/*
+ * Layout completion below publishes positions only after the owning generation is still current.
+ * Initial imports run on an isolated core, so even an uncancellable late ELK promise has no route
+ * back into the visible document after timeout, replacement, or a newer request.
+ */
 function finishOwnedLayout(token) {
   const job = layoutJobs.get(token.generation);
   if (!job) return;
   const { owner, target } = job;
   const publish = layoutRequestIsCurrent(token);
+  if (publish && job.revealInitialLayout && isLayeredMode(token.mode)
+      && !layeredDrawingOf(job.isolatedLayoutCy)) {
+    retireInitialLayoutWithFallback(job,
+      'Initial layered arrangement failed; deterministic fallback positions were restored.');
+    return;
+  }
   if (publish) {
+    publishIsolatedLayout(job);
     if (target.scratch('_rrRefitAfterLayout') && !job.fitAfterLayout) {
       if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
       else {
@@ -5204,7 +5460,7 @@ function finishOwnedLayout(token) {
         : owner.visualStyle === 'n8n4' ? scheduleN8n4EdgeCurves
           : owner.visualStyle === 'cyto' ? scheduleCytoEdgeCurves : null;
     // Positioning and renderer-specific routing are one operation. A pointer edit must not land
-    // between `layoutstop` and the final route callback and then be restyled by stale work.
+    // between publication and the final route callback and then be restyled by stale work.
     if (deferredRouting) {
       deferredRouting(owner, target, token, () => completeOwnedLayout(job));
       return;
@@ -5268,6 +5524,7 @@ function runOwnedLayout(token) {
     return;
   }
   const { owner, target, preservePositions, keepPositions, fitAfterLayout } = job;
+  const layoutTarget = job.layoutElements?.length ? job.layoutElements : target.elements(':visible');
 
   if (keepPositions) {
     // A running native layout can move nodes between the command click and cancellation, while an
@@ -5317,53 +5574,67 @@ function runOwnedLayout(token) {
     return;
   }
 
-  const animate = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
+  const animate = job.animate
+    ?? globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
+  const fail = error => {
+    if (job.revealInitialLayout) {
+      retireInitialLayoutWithFallback(job,
+        `Initial graph arrangement failed; deterministic fallback positions were restored. ${error}`);
+    } else {
+      console.error('Graph arrangement failed; positions are unchanged.', error);
+      settleOwnedLayout(token);
+    }
+  };
   let nativeLayout;
-  if (token.mode === 'dagre') nativeLayout = target.layout({
-    name: 'dagre', rankDir: 'LR', rankSep: 110, nodeSep: 55, edgeSep: 20,
-    animate, animationDuration: animate ? 450 : 0, animationEasing: 'ease-in-out',
-    fit: !fitAfterLayout, padding: 60,
-  });
-  else if (token.mode === 'cose') nativeLayout = target.layout({
-    name: 'cose', animate, animationDuration: animate ? 800 : 0, fit: !fitAfterLayout, padding: 60,
-    nodeOverlap: 24, idealEdgeLength: 140, nodeRepulsion: () => 10000, gravity: 1.2,
-  });
-  else if (ELK_LAYOUT_MODES.has(token.mode)) nativeLayout = target.layout(elkOptions(token.mode, {
-    fit: !fitAfterLayout,
-    animate,
-  }));
-  else if (isLayeredMode(token.mode)) nativeLayout = target.layout({
-    name: LAYERED_LAYOUT_NAME, mode: token.mode,
-    animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
-    fit: !fitAfterLayout, padding: 70,
-    prepareLabels: side => applyLayeredLabelSide(target, side, owner),
-    isCurrent: () => layoutRequestIsCurrent(token),
-    onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
-  });
-  else if (token.mode === 'preset') {
-    target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
-    target.fit(60);
-    settleOwnedLayout(token);
-    return;
-  }
-  if (!nativeLayout) {
-    settleOwnedLayout(token);
-    return;
-  }
-  job.nativeLayout = nativeLayout;
-  nativeLayout.one('layoutstop', () => finishOwnedLayout(token));
-  if (token.kind === 'elk') {
-    // `cytoscape-elk` defers its own start and its `stop()` is a no-op. Give same-turn close,
-    // replace, and newer requests a real pre-start cancellation point instead of destroying an
-    // instance underneath plugin work that has already escaped onto its task queue.
-    queueMicrotask(() => {
-      if (!layoutRequestIsCurrent(token)) {
-        settleOwnedLayout(token);
-        return;
-      }
-      nativeLayout.run();
+  try {
+    if (token.mode === 'dagre') nativeLayout = layoutTarget.layout({
+      name: 'dagre', rankDir: 'LR', rankSep: 110, nodeSep: 55, edgeSep: 20,
+      animate, animationDuration: animate ? 450 : 0, animationEasing: 'ease-in-out',
+      fit: !fitAfterLayout, padding: 60,
     });
-  } else nativeLayout.run();
+    else if (token.mode === 'cose') nativeLayout = layoutTarget.layout({
+      name: 'cose', animate, animationDuration: animate ? 800 : 0, fit: !fitAfterLayout, padding: 60,
+      nodeOverlap: 24, idealEdgeLength: 140, nodeRepulsion: () => 10000, gravity: 1.2,
+    });
+    else if (ELK_LAYOUT_MODES.has(token.mode)) nativeLayout = layoutTarget.layout(elkOptions(token.mode, {
+      fit: !fitAfterLayout,
+      animate,
+    }));
+    else if (isLayeredMode(token.mode)) nativeLayout = layoutTarget.layout({
+      name: LAYERED_LAYOUT_NAME, mode: token.mode,
+      animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
+      fit: !fitAfterLayout, padding: 70,
+      prepareLabels: side => applyLayeredLabelSide(layoutTarget, side, owner),
+      isCurrent: () => layoutRequestIsCurrent(token),
+      onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
+    });
+    else if (token.mode === 'preset') {
+      target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
+      target.fit(60);
+      settleOwnedLayout(token);
+      return;
+    }
+    if (!nativeLayout) {
+      settleOwnedLayout(token);
+      return;
+    }
+    job.nativeLayout = nativeLayout;
+    nativeLayout.one('layoutstop', () => finishOwnedLayout(token));
+    if (token.kind === 'elk') {
+      // `cytoscape-elk` defers its own start and its `stop()` is a no-op. Give same-turn close,
+      // replace, and newer requests a real pre-start cancellation point instead of destroying an
+      // instance underneath plugin work that has already escaped onto its task queue.
+      queueMicrotask(() => {
+        if (!layoutRequestIsCurrent(token)) {
+          settleOwnedLayout(token);
+          return;
+        }
+        try { nativeLayout.run(); } catch (error) { fail(error); }
+      });
+    } else nativeLayout.run();
+  } catch (error) {
+    fail(error);
+  }
 }
 
 function resumePendingElasticLayout(owner) {
@@ -5405,7 +5676,8 @@ function setLayout(name, options = {}) {
     }
   }
   finishVisualGroups(owner);
-  owner?.visualGroupsRenderer?.suspend();
+  if (name === 'elastic') owner?.visualGroupsRenderer?.suspend();
+  else refreshVisualGroups(owner);
   // Native `stop()` may synchronously publish a final frame, so Keep must capture the canvas before
   // the session request invokes cancellation callbacks for the layout it replaces.
   const retainedPositions = options.keepPositions && target ? target.nodes().map(node => ({
@@ -5432,7 +5704,7 @@ function setLayout(name, options = {}) {
     owner.fontSize = fontSize;
     owner.n8nActive = n8nActive;
   }
-  syncLayoutChrome(name);
+  syncLayoutChrome(owner);
   updateModifyAvailability();
   if (!owner || !target) return;
 
@@ -5442,6 +5714,18 @@ function setLayout(name, options = {}) {
   syncPaneLayout();
 
   let job;
+  const projectionInput = name === 'elastic' ? null : visualGroupLayoutInput(groupProjection(owner));
+  let layoutElements = target.collection();
+  for (const id of [...(projectionInput?.nodeIds || []), ...(projectionInput?.edgeIds || [])]) {
+    const element = target.getElementById(id);
+    if (element.nonempty()) layoutElements = layoutElements.union(element);
+  }
+  if (!layoutElements.length) layoutElements = target.elements(':visible');
+  const projectedGroupMoves = (projectionInput?.collapsedGroups || []).map(group => ({
+    ...group,
+    start: { ...target.getElementById(group.summaryId).position() },
+    members: group.memberNodeIds.map(id => ({ id, position: { ...target.getElementById(id).position() } })),
+  }));
   // Layered drawings share the ELK serialisation contract: one asynchronous engine run per
   // document at a time, cancelled before it starts and otherwise allowed to settle.
   const kind = ELK_LAYOUT_MODES.has(name) || isLayeredMode(name) ? 'elk' : 'native';
@@ -5455,10 +5739,19 @@ function setLayout(name, options = {}) {
       // Dagre/CoSE animate node positions separately from the layout controller. Stopping only the
       // controller can leave those animations publishing retired frames after Keep restores its
       // click-time snapshot.
-      job?.target?.nodes().stop(true, false);
+      job?.layoutElements?.nodes().stop(true, false);
     } : null,
   });
   cancelRetiredLayouts(request.cancelled);
+  const liveLayoutElements = layoutElements;
+  const isolatedLayoutCy = options.revealInitialLayout ? cytoscape({
+    headless: true,
+    styleEnabled: true,
+    elements: liveLayoutElements.jsons(),
+    style: target.style().json(),
+    layout: { name: 'preset' },
+  }) : null;
+  if (isolatedLayoutCy) layoutElements = isolatedLayoutCy.elements();
   job = {
     owner,
     target,
@@ -5469,10 +5762,24 @@ function setLayout(name, options = {}) {
     recordPositions: Boolean(options.recordPositions),
     fitAfterLayout: Boolean(options.fitAfterLayout),
     commandLabel: options.commandLabel || null,
+    animate: typeof options.animate === 'boolean' ? options.animate : null,
+    revealInitialLayout: Boolean(options.revealInitialLayout),
+    initialExposureTimeout: null,
+    layoutElements,
+    liveLayoutElements,
+    isolatedLayoutCy,
+    projectedGroupMoves,
     nativeLayout: null,
   };
   owner.layoutSessionToken = request.token;
   layoutJobs.set(request.token.generation, job);
+  if (job.revealInitialLayout) {
+    job.initialExposureTimeout = setTimeout(() => {
+      if (layoutJobs.get(request.token.generation) !== job) return;
+      retireInitialLayoutWithFallback(job,
+        'Initial graph arrangement exceeded its visibility deadline; deterministic fallback positions were restored.');
+    }, INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS);
+  }
   syncOwnedLayoutBusy(owner);
   if (request.start) runOwnedLayout(request.token);
 }
@@ -5482,20 +5789,42 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const target = cy;
   if (!owner || !target) return;
   const semanticMode = normalizeRenderMode(name);
+  if (semanticMode === renderMode) return true;
   if (!skipDraftGuard && semanticMode !== renderMode) {
     return runAfterInspectorDraft(() => setRenderMode(name, { skipDraftGuard: true }));
   }
+  invalidateDocumentLayouts(owner);
+  captureDocumentModeView(owner, renderMode);
+  if (dragSnapshot?.owner === owner) cancelNodeMoveGesture();
+  if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
   renderMode = semanticMode;
   owner.renderMode = semanticMode;
-  // Product choices project onto existing internal engines. Design restores its exact selected
-  // arrangement; Monitoring owns the continuous D3 lifecycle.
-  const style = 'cyto';
-  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
-  target.batch(() => applyVisualStyle(style, target, owner));
-  setLayout(semanticMode === 'design' ? (arrangement?.layout || 'cyto') : 'elastic',
-    semanticMode === 'design' && designArrangement === 'keep'
-      ? { preservePositions: true, keepPositions: true } : {});
+  const incoming = ensureModeViewStates(owner)[semanticMode];
+  owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
+  if (semanticMode === 'design') {
+    stopElasticRendering(owner, 'mode-restored');
+    target.nodes().unlock();
+    layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
+      ? incoming.layoutMode : (DESIGN_ARRANGEMENTS[designArrangement]?.layout || 'cyto');
+    owner.layoutMode = layoutMode;
+    restoreDesignView(owner);
+    target.batch(() => applyVisualStyle('cyto', target, owner, { preserveEdgeGeometry: true }));
+    refreshVisualGroups(owner, { selection: incoming?.canvasState?.selectedIds,
+      focus: incoming?.canvasState?.focusNodeId });
+  } else {
+    finishVisualGroups(owner);
+    owner.visualGroupsRenderer?.suspend();
+    layoutMode = 'elastic';
+    owner.layoutMode = 'elastic';
+    restoreMonitoringView(owner);
+    target.nodes().lock();
+    startD3Elastic(owner, target, null, { startSimulation: false });
+  }
+  syncPaneLayout();
+  syncLayoutChrome(owner);
+  updateModifyAvailability();
   scheduleWorkspacePersistence();
+  return true;
 }
 
 function arrangeDesign(name, { skipDraftGuard = false } = {}) {
@@ -5504,6 +5833,14 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!arrangement || renderMode !== 'design' || !owner || !cy) return false;
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
+  }
+  if (designArrangement === name) {
+    designArrangement = null;
+    owner.designArrangement = null;
+    setGraphPresentation(owner.graph, { designArrangement: null });
+    refreshCommands();
+    scheduleWorkspacePersistence();
+    return true;
   }
   designArrangement = name;
   owner.designArrangement = name;
@@ -5518,6 +5855,31 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   return true;
 }
 
+function renderActiveMode({ skipDraftGuard = false } = {}) {
+  const owner = workspace.active;
+  if (!owner || !cy) return false;
+  if (!skipDraftGuard) {
+    return runAfterInspectorDraft(() => renderActiveMode({ skipDraftGuard: true }));
+  }
+  if (renderMode === 'monitoring') {
+    const renderer = elasticRendererFor(owner);
+    if (!renderer) startD3Elastic(owner, cy, null, { startSimulation: true });
+    else renderer.simulation?.alpha(.7).restart();
+    return true;
+  }
+  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
+  setLayout(arrangement?.layout || 'cyto', {
+    preservePositions: arrangement?.preservePositions,
+    keepPositions: designArrangement === 'keep',
+    recordPositions: !arrangement?.preservePositions,
+    fitAfterLayout: !arrangement?.preservePositions,
+    commandLabel: designArrangement
+      ? commandRegistry.get(`layout.arrange.${designArrangement}`)?.label || 'Render graph'
+      : 'Render graph',
+  });
+  return true;
+}
+
 // Activation normally resumes the renderer already owned by the document. A legacy split record,
 // however, may name Elastic while still owning only its old Cytoscape renderer (or the inverse).
 // Normalizing the fields without reconciling that handle makes the radio truthful about state but
@@ -5527,8 +5889,17 @@ function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
   const kind = rendererFor(owner)?.kind;
-  if (renderMode === 'monitoring' && kind !== 'elastic') setLayout('elastic');
-  else if (renderMode === 'design' && kind === 'elastic') setLayout('cyto');
+  if (renderMode === 'monitoring' && kind !== 'elastic') {
+    owner.layoutMode = 'elastic';
+    layoutMode = 'elastic';
+    owner.cy.nodes().lock();
+    startD3Elastic(owner, owner.cy, null, { startSimulation: false });
+  } else if (renderMode === 'design' && kind === 'elastic') {
+    stopElasticRendering(owner, 'mode-restored');
+    owner.cy.nodes().unlock();
+    restoreDesignView(owner);
+    refreshVisualGroups(owner);
+  }
 }
 
 function fitGraph() {
@@ -5608,28 +5979,44 @@ function onFontSize(val, target = cy, writeChrome = target === cy) {
 function onElasticRepulsion(val) {
   const v = parseInt(val);
   document.getElementById('rep-val').textContent = v;
-  const renderer = elasticRendererFor(workspace.active);
-  if (!renderer?.simulation) return;
-  renderer.simulation.force('charge', d3.forceManyBody().strength(-v));
-  renderer.simulation.alpha(0.5).restart();
+  const owner = workspace.active;
+  if (owner) owner.monitoringForces = normalizedMonitoringForces({
+    ...owner.monitoringForces, repulsion: v,
+  });
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.simulation) {
+    renderer.simulation.force('charge', d3.forceManyBody().strength(-v));
+    renderer.simulation.alpha(0.5).restart();
+  }
+  scheduleWorkspacePersistence();
 }
 
 function onElasticAttraction(val) {
   const v = parseInt(val);
   const strength = v / 100;
   document.getElementById('attr-val').textContent = strength.toFixed(2);
-  const renderer = elasticRendererFor(workspace.active);
-  if (!renderer?.simulation) return;
-  renderer.simulation.force('link').strength(strength);
-  renderer.simulation.alpha(0.5).restart();
+  const owner = workspace.active;
+  if (owner) owner.monitoringForces = normalizedMonitoringForces({
+    ...owner.monitoringForces, attraction: strength,
+  });
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.simulation) {
+    renderer.simulation.force('link').strength(strength);
+    renderer.simulation.alpha(0.5).restart();
+  }
+  scheduleWorkspacePersistence();
 }
 
 function onElasticSpeed(val) {
   const speed = Math.max(0.1, Math.min(1, parseInt(val, 10) / 100));
   document.getElementById('speed-val').textContent = Math.round(speed * 100);
-  const renderer = elasticRendererFor(workspace.active);
-  if (!renderer?.simulation) return;
-  renderer.simulation.velocityDecay(0.65 - speed * 0.45).alphaTarget(0).restart();
+  const owner = workspace.active;
+  if (owner) owner.monitoringForces = normalizedMonitoringForces({
+    ...owner.monitoringForces, speed,
+  });
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.simulation) renderer.simulation.velocityDecay(0.65 - speed * 0.45).alphaTarget(0).restart();
+  scheduleWorkspacePersistence();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -6649,7 +7036,9 @@ function renderNodeForm(model, creating) {
 }
 
 function catalogDescriptor(behavior) {
-  return nodeTypeCatalog.find(type => type.behavior === behavior) || null;
+  return nodeTypeCatalog.find(type => type.behavior === behavior)
+    || namedAgentCatalog.find(type => type.presetId === behavior)
+    || availableRegisterMachinePresets(nodeTypeCatalog).find(type => type.presetId === behavior) || null;
 }
 
 function programCatalogEditorDescriptor(descriptor) {
@@ -6959,6 +7348,14 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // HTML placeholder label option and `required` still stops the save until the author decides.
       control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
         `<option value="${escapeAttribute(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
+    } else if (property.type === 'WORKSPACE_REFERENCE') {
+      const choices = (graphData?.nodes || []).filter(node => node.kind === 'BEHAVIOR' && node.behavior === 'workspace');
+      const missing = String(value) !== '' && !choices.some(node => node.id === String(value));
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="WORKSPACE_REFERENCE"${accessibility} ${nativeRequired ? 'required' : ''}>`
+        + `<option value="" ${String(value) === '' ? 'selected' : ''}>No Workspace (ordinary Agent)</option>`
+        + (missing ? `<option value="${escapeAttribute(value)}" selected>Missing Workspace: ${escapeHtml(value)}</option>` : '')
+        + choices.map(node => `<option value="${escapeAttribute(node.id)}" ${node.id === String(value) ? 'selected' : ''}>${escapeHtml(node.label || node.id)} · ${escapeHtml(node.id)}</option>`).join('')
+        + '</select>';
     } else if (property.type === 'SECRET_REFERENCE') {
       // CHOOSE, NEVER TYPE.
       //
@@ -9023,11 +9420,15 @@ function renderNodeCatalog() {
     container.innerHTML = `<div class="catalog-empty" data-catalog-state="${escapeAttribute(state.kind)}">${escapeHtml(state.message)}</div>`;
     return;
   }
-  renderNodeCatalogItems(container, nodeTypeCatalog, {
+  renderNodeCatalogItems(container, [...nodeTypeCatalog, ...availableRegisterMachinePresets(nodeTypeCatalog), ...namedAgentCatalog], {
     iconFor: type => catalogNodeIcon(type, NODE_ICONS),
     selectedBehavior: selectedCatalogBehavior,
     onActivate: selectCatalogNodeType,
     onDragStart: (event, behavior) => {
+      if (availableRegisterMachinePresets(nodeTypeCatalog).some(preset => preset.presetId === behavior)) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer?.setData('application/x-ravenroot-node', behavior);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
     },
@@ -9041,7 +9442,11 @@ function selectCatalogNodeType(behavior) {
   renderNodeCatalog();
   // Keep the established inspector-first configuration route while making the type persistent for
   // stage clicks and drag-and-drop. Authors may configure-and-submit immediately or place copies.
-  showAddCatalogNodeForm(behavior);
+  if (availableRegisterMachinePresets(nodeTypeCatalog).some(preset => preset.presetId === behavior)) {
+    showRegisterMachinePresetForm(behavior);
+  } else {
+    showAddCatalogNodeForm(behavior);
+  }
 }
 
 function toggleLegendFilter(elType, type) {
@@ -9407,6 +9812,57 @@ function showAddNodeForm({ skipDraftGuard = false } = {}) {
   renderNodeForm(createNode(id, 'New node', 'PASSTHROUGH'), true);
 }
 
+function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard) {
+    return runAfterInspectorDraft(() => showRegisterMachinePresetForm(presetId, { skipDraftGuard: true }));
+  }
+  if (!graphData) newWorkflow();
+  if (!modifyEnabled) return showInspectorMessage('Turn Modify ON before inserting a register-machine preset.');
+  if (graphData.format === 'graphify') return showInspectorMessage(
+    'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
+  const preset = availableRegisterMachinePresets(nodeTypeCatalog).find(candidate => candidate.presetId === presetId);
+  if (!preset) return showInspectorMessage('Unknown register-machine preset.');
+  revealInspector();
+  document.getElementById('info-title').textContent = `Insert ${preset.displayName}`;
+  const needsBoolean = presetId === 'register-zero-test' || presetId === 'register-decjz';
+  const needsValue = presetId === 'register-set';
+  const needsTargets = presetId === 'register-decjz';
+  const targetOptions = graphData.nodes.map(node =>
+    `<option value="${escapeAttribute(node.id)}">${escapeHtml(node.name || node.id)} · ${escapeHtml(node.id)}</option>`).join('');
+  document.getElementById('info-body').innerHTML = `
+    <form id="register-machine-preset-editor" class="editor-form" data-tooltip-exempt="persistent-form-labels">
+      <p>${escapeHtml(preset.description)} The expansion remains ordinary editable GraphML.</p>
+      <div class="editor-grid">
+        <div class="editor-field full"><label>Register</label><input name="register" value="counter"
+          pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>
+        ${needsValue ? '<div class="editor-field full"><label>Exact decimal value</label><textarea name="decimal" spellcheck="false" required>0</textarea></div>' : ''}
+        ${needsBoolean ? '<div class="editor-field full"><label>Boolean temporary</label><input name="boolean" value="isZero" pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>' : ''}
+        ${needsTargets ? `<div class="editor-field"><label>Zero destination</label><select name="zeroTarget" required>${targetOptions}</select></div>
+          <div class="editor-field"><label>Nonzero destination</label><select name="nonzeroTarget" required>${targetOptions}</select></div>` : ''}
+      </div>
+      <div class="editor-actions"><button class="btn primary" type="submit">Insert expansion</button></div>
+    </form>`;
+  const form = document.getElementById('register-machine-preset-editor');
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (layoutBusy) return showFormError(form, 'Layout in progress');
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
+    const values = Object.fromEntries(new FormData(form));
+    let inserted;
+    try {
+      inserted = insertRegisterMachinePreset(graphData, presetId, values,
+        { x: 120 + graphData.nodes.length * 16, y: 120 + graphData.nodes.length * 8 }, editHistory);
+    } catch (error) {
+      return showFormError(form, error?.message || 'Cannot insert register-machine expansion');
+    }
+    retireInspectorDraft(form);
+    rebuildGraph({ syncPositions: false });
+    updateHistoryUi();
+    showNodeInfo(cy.getElementById(inserted.primary.id));
+    addActivityMessage('editor', `Inserted ${preset.displayName} as ordinary nodes and edges`, 'completed');
+  });
+}
+
 function showAddCatalogNodeForm(behavior, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => showAddCatalogNodeForm(behavior, { skipDraftGuard: true }));
@@ -9719,10 +10175,7 @@ function applyNodeGrabPolicy(targetCy, state = canvasInteractionState({
   navigating: navigationEnabled,
 })) {
   if (!targetCy || targetCy.destroyed()) return;
-  const owner = workspace.documents.find(document_ => document_.cy === targetCy);
-  const projection = groupProjection(owner);
   targetCy.nodes().forEach(node => {
-    if (projection?.syntheticIds.has(node.id()) && !groupAuthoringAllowed(owner)) { node.ungrabify(); return; }
     if (node.data('rrVisualRole') === 'ghost' || node.data('rrVisualRole') === 'header' || !node.visible()) { node.ungrabify(); return; }
     if (nodeIsGrabbable(state, node.selected())) node.grabify();
     else node.ungrabify();
@@ -10985,6 +11438,7 @@ async function connectRuntime(atBoot = false) {
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
   });
+  namedAgentCatalog = [];
   // The assistant reaches THE SAME Ravenroot service with THE SAME user authentication, and
   // nothing else — it has no base URL of its own to be pointed elsewhere. That is what makes "a
   // denial to the user is a denial to the panel" true here rather than merely intended, and it is
@@ -11037,15 +11491,24 @@ async function connectRuntime(atBoot = false) {
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
-    runtimeDisconnect = runtimeClient.connect(handleRuntimeEvent, (status, message) => {
-      setRuntimeConnectionState(status, message);
-      if (status === 'connected') void configureHumanTasks();
-    });
+    runtimeDisconnect = runtimeClient.connect(
+      event => deliverRuntimeEventAfterAuthority(event, connectedClient, connectedConfigurationRequest),
+      (status, message) => {
+        setRuntimeConnectionState(status, message);
+        if (status === 'connected') void configureHumanTasks();
+      });
     connectedClient.nodeTypes().then(async catalog => {
       await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = catalog;
+      namedAgentCatalog = [];
+      if (catalog.some(type => type.behavior === 'workspace')) {
+        connectedClient.runnerCatalog().then(result => {
+          if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient || workspaceAuthority.state !== 'ready') return;
+          namedAgentCatalog = namedAgentPresets(catalog, result.items); renderNodeCatalog();
+        }).catch(() => { /* A denied runner catalog never hides the ordinary node catalog. */ });
+      }
       nodeCatalogFailure = null;
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
@@ -11057,6 +11520,7 @@ async function connectRuntime(atBoot = false) {
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = [];
+      namedAgentCatalog = [];
       nodeCatalogFailure = error;
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
@@ -11119,6 +11583,7 @@ async function revokeRuntimeAccess() {
   deploymentsWindow?.close();
   void deploymentsWindow?.setClient(null);
   nodeTypeCatalog = [];
+  namedAgentCatalog = [];
   nodeCatalogFailure = null;
   nodeCatalogLoaded = false;
   nodeCatalogPending = false;
@@ -11225,7 +11690,7 @@ async function executionLifecycleCommand(action) {
 // can carry a deployment identity, and only the first can prove one is missing: warning on a local
 // STARTING placeholder would report the runtime for something the runtime was never asked.
 function updateSourceSession(owner, status, token = null,
-  { observationUnavailable = false, fromRuntime = false } = {}) {
+  { observationUnavailable = false, fromRuntime = false, silentActivity = false } = {}) {
   if (token && !sourceSessionCommandIsCurrent(owner, token)) return false;
   const session = owner.sourceSession;
   const changed = session.state !== status.state || session.diagnostic !== (status.diagnostic || '')
@@ -11233,6 +11698,7 @@ function updateSourceSession(owner, status, token = null,
   // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
   // the recovery states above) carry no deploymentId and must not erase the one the server gave.
   if (typeof status.deploymentId === 'string' && status.deploymentId) {
+    if (session.deploymentId !== status.deploymentId) retireSourceSessionProcessBindings(owner);
     session.deploymentId = status.deploymentId;
     // The projection accumulates across every traversal this deployment produces, instead of being
     // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
@@ -11257,13 +11723,21 @@ function updateSourceSession(owner, status, token = null,
     }
   }
   session.state = status.state;
+  if (status.state === 'STOPPED' || status.state === 'FAILED') {
+    retireSourceSessionProcessBindings(owner);
+  }
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
+  session.failure = status.failure || null;
   session.observationUnavailable = observationUnavailable;
   if (owner === workspace.active) {
     syncSourceSessionChrome(owner);
     refreshCommands();
-    if (changed) {
+    if (status.state === 'FAILED' && status.failure
+        && session.lastFailureIncident !== status.failure.incidentId) {
+      session.lastFailureIncident = status.failure.incidentId;
+      void presentRuntimeRefusal(owner, status.failure, 'Source session refused');
+    } else if (changed && !silentActivity) {
       const detail = status.diagnostic || `${status.sourceCount} source node${status.sourceCount === 1 ? '' : 's'} · local process only`;
       addActivityMessage(`Source session ${status.state.toLowerCase()}`, detail,
         status.state === 'FAILED' || status.state === 'DEGRADED' || status.state === 'UNKNOWN'
@@ -11326,6 +11800,7 @@ function nextSourceSessionId(owner) {
 
 async function startSourceSession(owner, client, graphMl, sourceCount) {
   const session = owner.sourceSession;
+  retireSourceSessionProcessBindings(owner);
   session.pollController?.abort();
   if (!session.sessionId || session.state === 'STOPPED' || session.state === 'FAILED') {
     session.sessionId = nextSourceSessionId(owner);
@@ -11337,9 +11812,7 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
   const token = captureSourceSessionToken(session);
   updateSourceSession(owner, {
     sessionId, state: 'STARTING', sourceCount, scope: 'LOCAL_PROCESS', diagnostic: null,
-  }, token);
-  if (owner === workspace.active) addActivityMessage('Source session request',
-    'Starting listeners in this server process. No initial payload or traversal was submitted.');
+  }, token, { silentActivity: true });
   const startPromise = client.startSourceSession(sessionId, graphMl);
   session.startPromise = startPromise;
   try {
@@ -11357,12 +11830,12 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
     updateSourceSession(owner, {
       state: explicitFailure ? 'FAILED' : 'UNKNOWN', sourceCount,
       diagnostic: explicitFailure ? 'The server rejected the source session start.' : '',
-    }, token, { observationUnavailable: !explicitFailure });
-    if (owner === workspace.active) addActivityMessage('Source session request failed',
+      failure: error?.finding || null,
+    }, token, { observationUnavailable: !explicitFailure, silentActivity: explicitFailure });
+    if (owner === workspace.active && !error?.finding) addActivityMessage('Source session request failed',
       explicitFailure
-        ? 'The server rejected the local listener start. Correct the graph or runtime issue, then retry.'
-        : 'The start response was lost. The editor will observe the existing id before allowing another Run.',
-      'failed');
+        ? `The server rejected the local listener start${error?.incidentId ? ` · incident ${error.incidentId}` : ''}.`
+        : 'The start response was lost. The editor will observe the existing id before allowing another Run.', 'failed');
     if (!explicitFailure && !session.stopRequested) void observeSourceSession(owner, token);
     return false;
   } finally {
@@ -11570,6 +12043,66 @@ async function preflightUnknownExecution(owner, flight) {
   return result.allowed;
 }
 
+async function diagnosticNodeRef(value) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  const hex = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return `sha256:${hex.slice(0, 32)}`;
+}
+
+async function focusRuntimeFinding(owner, finding) {
+  if (owner !== workspace.active || !owner.cy || !finding?.nodeRef) return;
+  let node = finding.nodeId && owner.graph?.nodeMap?.[finding.nodeId]
+    ? owner.cy.getElementById(finding.nodeId) : null;
+  if (!node?.nonempty?.()) {
+    for (const candidate of owner.graph?.nodes || []) {
+      if (await diagnosticNodeRef(candidate.id) === finding.nodeRef) {
+        node = owner.cy.getElementById(candidate.id);
+        break;
+      }
+    }
+  }
+  if (!node?.nonempty?.()) return;
+  owner.cy.elements().unselect();
+  node.select();
+  if (finding.propertyName && !modifyEnabled && canModifyGraph(owner.graph, layoutMode)) {
+    setModifyMode(true);
+  }
+  showNodeInfo(node);
+  if (finding.propertyName) {
+    [...document.querySelectorAll('[data-catalog-property]')]
+      .find(control => control.dataset.catalogProperty === finding.propertyName)?.focus();
+  }
+}
+
+const REFUSAL_REMEDIATION = Object.freeze({
+  INVALID_STRUCTURE: 'Correct the graph structure and retry.',
+  REQUIRED_PROPERTY_MISSING: 'Provide the required property and retry.',
+  PROPERTY_TYPE_INVALID: 'Use the property type declared by the trusted catalog.',
+  PROPERTY_VALUE_NOT_ALLOWED: 'Choose a value allowed by the trusted catalog.',
+  PROPERTY_OUT_OF_RANGE: 'Choose a value inside the catalog bounds.',
+  PROPERTY_TOO_LARGE: 'Reduce the property to the catalog size bound.',
+  PROPERTY_NAME_NEAR_MISS: 'Correct the property spelling to match the trusted catalog.',
+  SOURCE_REQUIRED: 'Add and configure an inbound source before starting a listener session.',
+  SOURCE_CAPABILITY_MISMATCH: 'Install or enable the trusted source package for this node.',
+  STARTUP_FAILED: 'Quote the incident handle to an operator, then retry after the runtime issue is resolved.',
+});
+
+async function presentRuntimeRefusal(owner, finding, title = 'Start refused') {
+  if (!finding || owner !== workspace.active) return;
+  const location = [finding.nodeId && `node ${finding.nodeId}`,
+    finding.propertyName && `property ${finding.propertyName}`].filter(Boolean).join(' · ');
+  const remediation = REFUSAL_REMEDIATION[finding.reason]
+    || (String(finding.reason || '').includes('-')
+      ? 'Correct the source configuration or runtime authority named by this declared reason, then retry.'
+      : 'Correct the graph admission issue and retry.');
+  const handle = finding.incidentId ? ` · incident ${finding.incidentId}` : '';
+  addActivityMessage(title,
+    `${finding.phase} · ${finding.reason}${location ? ` · ${location}` : ''}. ${remediation}${handle}`,
+    'failed');
+  await focusRuntimeFinding(owner, finding);
+}
+
 async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
@@ -11610,12 +12143,10 @@ async function playGraph(mode = 'test') {
   const ownerVisualStyle = visualStyle;
   const violations = validateWorkflow(ownerGraph);
   if (violations.length) {
-    releaseExecutionCommand(flight);
     document.getElementById('info-title').textContent = 'Validation';
-    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>Cannot execute</h4>
+    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>Local advisory</h4>
+      <p>The runtime admission service is checking the exact GraphML that will be submitted.</p>
       <ul class="validation-list">${violations.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
-    addActivityMessage('validation', `${violations.length} violation(s)`, 'failed');
-    return;
   }
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
@@ -11626,6 +12157,27 @@ async function playGraph(mode = 'test') {
     return;
   }
   const sourceCount = mode === 'run' ? effectiveSourceCount(ownerGraph, nodeTypeCatalog) : 0;
+  if (!runtimeClient) connectRuntime();
+  const executionClient = runtimeClient;
+  try {
+    const inspection = await executionClient.inspectGraph(graphMl,
+      sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
+    if (!inspection.valid && inspection.findings[0]) {
+      releaseExecutionCommand(flight);
+      await presentRuntimeRefusal(owner, inspection.findings[0], 'Graph admission refused');
+      return;
+    }
+  } catch (error) {
+    // Inspection is an advisory early answer, not an availability dependency. Only a validated
+    // structured finding is authoritative enough to refuse here; an older, unavailable, or
+    // malformed inspection response falls through to the mutation path, which revalidates the
+    // exact bytes and returns the same safe finding when it actually refuses them.
+    if (error?.finding) {
+      releaseExecutionCommand(flight);
+      await presentRuntimeRefusal(owner, error.finding, 'Graph admission refused');
+      return;
+    }
+  }
   // Run has two meanings. A graph with an
   // effective SOURCE starts a local listener session (unchanged below). Every other graph gets
   // a real one-shot execution with effects (mode=run). The deployments panel lets that graph also be
@@ -11638,8 +12190,6 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  if (!runtimeClient) connectRuntime();
-  const executionClient = runtimeClient;
   if (!await preflightUnknownExecution(owner, flight)) {
     releaseExecutionCommand(flight);
     return;
@@ -11718,17 +12268,22 @@ async function playGraph(mode = 'test') {
     setDocumentExecution(owner, null, null);
     if (workspace.activeId !== owner.id) return;
     refreshCommands();
-    addActivityMessage('request failed', error.message, 'failed');
-    showInspectorMessage(error.message);
+    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, 'Execution refused');
+    else {
+      addActivityMessage('request failed', error.message, 'failed');
+      showInspectorMessage(error.message);
+    }
   }
 }
 
 // One stream serves every open document, so the first question is which document the event is
 // about. An event that matches no open document is dropped: painting it on whichever graph happens
 // to be in front of the user is how a run in one document used to light up another.
-function handleRuntimeEvent(event) {
-  const target = documentForRuntimeEvent(workspace, event);
-  if (!target || !tenantAuthorityAllows(target)) return;
+function handleRuntimeEvent(event, client = runtimeClient) {
+  const streamScope = runtimeEventScope(client);
+  if (!streamScope) return;
+  const target = documentForRuntimeEvent(workspace, event, streamScope);
+  if (!target || !tenantAuthorityAllows(target, client)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
@@ -11874,6 +12429,23 @@ function flushRuntimeNodePaint(owner, queue) {
   }
 }
 
+// Launching a Test or Run clears the previous run's painting. On the elastic (Monitoring) renderer
+// that used to mean tearing the renderer down and mounting a new one, which re-laid-out the graph
+// and reset the viewport because a fresh force simulation starts at full alpha (#494). A reset is a
+// paint operation, so it happens on the renderer already on the canvas: the run state is cleared in
+// place, node coordinates and zoom/pan are preserved, and the simulation is never restarted. Only
+// the genuine mount/reheat entry points -- setRenderMode, renderActiveMode, the explicit elastic
+// layout job and reconcileActiveRenderModeRenderer -- still call startD3Elastic, so the reheats #469
+// allows (a node drag, an explicit layout arrangement, the force controls) remain the only ones. The
+// idle labels and their human-task attention classes are a document projection, so they are
+// re-projected from the now-idle model exactly as a mount would have done.
+function resetElasticRuntimePaint(owner) {
+  const renderer = elasticRendererFor(owner);
+  if (!renderer?.resetRuntime || !rendererSessions.isLive(renderer.token)) return;
+  renderer.resetRuntime({ idleStroke: runtimeColor('idle') });
+  applyHumanTaskProjection(owner);
+}
+
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
@@ -11896,7 +12468,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   });
   if (targetLayoutMode === 'elastic') {
-    startD3Elastic(owner, targetCy, owner.layoutSessionToken);
+    resetElasticRuntimePaint(owner);
   } else if (isN8nFamilyLayout(targetVisualStyle)) {
     applyN8nNodeStyle(targetCy, owner);
   }
@@ -11988,6 +12560,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   // Sized by instances, which is the workload of the node AS A ROLE. A resident node
   // therefore keeps a constant radius under any load instead of swelling with its queue -- that
   // swelling was the visible symptom of the wrong number, not a feature being lost here.
+  const previousRadius = datum.r;
   datum.r = Math.max(9, Math.min(34, 10 + Math.sqrt(Math.max(0, activeInstances)) * 7));
   renderer.nodeSelection.filter(node => node.id === nodeId)
     .transition().duration(180)
@@ -11998,9 +12571,13 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
     renderer.nodeLabelSelection.filter(node => node.id === nodeId)
       .text(() => runtimeNodeLabel(owner.cy.getElementById(nodeId)));
   }
-  if (renderer.simulation && rendererSessions.isLive(renderer.token)) {
-    renderer.simulation.force('collision', d3.forceCollide().radius(node => node.r + 8));
-    renderer.simulation.alpha(0.22).restart();
+  // A runtime instance-count change resizes a node, but resizing is not a layout change. Refresh the
+  // collision force's cached radii so the NEXT legitimate reheat uses the new sizes, yet never
+  // reheat or restart here: a settled Monitoring graph must stay settled with fixed coordinates (its
+  // visuals still update), and a running one picks the radii up on its next tick. Drag and explicit
+  // layout/force-control changes remain the only reheat sources.
+  if (datum.r !== previousRadius && rendererSessions.isLive(renderer.token)) {
+    renderer.refreshCollisionRadii?.();
   }
   renderer.updateNode?.(nodeId, datum);
 }
@@ -12063,12 +12640,67 @@ function activityIdentifiersHtml(event) {
   ).join('');
 }
 
+// ── OBSERVATION LEVEL ───────────────────────────────────────────────────────────────────────────
+//
+// How much of the event stream the panel renders. Module state, never persisted and never
+// serialized: it is an observer preference, not an execution input, and a reload deliberately starts
+// quiet again. `setActivityMode` is the only writer, and the level is consulted on the ONE path that
+// appends a row to `#activity-log` — after the same event has already been offered to the monitoring
+// projection that paints nodes and edges (`observeNodeActivity`/`observeEdgeTraversal` in
+// `handleRuntimeEvent`). A quieter panel therefore cannot make the graph's runtime state untrue.
+// The classification itself, and why it is catalog semantics rather than a guess, lives in
+// `src/activity-visibility.js`.
+let activityMode = DEFAULT_ACTIVITY_MODE;
+
+function activityModeRadios() {
+  return [...document.querySelectorAll('.activity-modes[role="radiogroup"] > [role="radio"]')];
+}
+
+// One Tab stop for the whole group: the selected level, or the first level when nothing is selected.
+// Roving tabindex is what keeps a radiogroup from multiplying the panel's tab stops while leaving
+// every level arrow-reachable.
+function syncActivityModeChrome() {
+  const radios = activityModeRadios();
+  const tabStop = radios.find(control => control.dataset.mode === activityMode) || radios[0];
+  radios.forEach(control => {
+    const checked = control.dataset.mode === activityMode;
+    control.setAttribute('aria-checked', checked ? 'true' : 'false');
+    control.classList.toggle('active', checked);
+    control.tabIndex = control === tabStop ? 0 : -1;
+  });
+}
+
+function setActivityMode(mode) {
+  const next = normalizeActivityMode(mode);
+  if (next === activityMode) return;
+  activityMode = next;
+  syncActivityModeChrome();
+  // Deliberately no re-render and no replay. The panel shows the events that ARRIVE while a level is
+  // selected: buffering what a quieter level hid would put those rows back inside the 400-row budget
+  // the filter exists to protect, and rebuilding the list would re-announce the entire live region
+  // to assistive technology. The choice changes what arrives next, which is what an observer
+  // preference means. (Four rows are not removed either — nothing already shown is taken away.)
+}
+
 function appendActivityEvent(event) {
+  // FIRST, before any per-row work exists to do. A hidden event must not consume one of the panel's
+  // 400 rows, must not build a row, and must not move the scroll position; classification plus this
+  // return is the entire cost it pays.
+  if (!activityEventVisible(event, activityMode)) return;
+
   const type = String(event.type || 'EVENT');
   const css = type.includes('FAILED') ? 'failed'
     : type.includes('DEFAULTED') ? 'fallback'
     : type.includes('BYPASSED') ? 'bypassed'
     : type.includes('COMPLETED') ? 'completed' : '';
+  // `isLogEmission` is exactly the old `Object.hasOwn(event, 'output')` test, named for what the
+  // member means: the trusted typed author projection, present only for a `log`-catalog completion.
+  const output = isLogEmission(event) ? runtimeActivityOutput(event.output, {
+    redacted: event.outputRedacted,
+    truncated: event.outputTruncated,
+  }) : null;
+  if (appendLogEmissionRow(event, css, output)) return;
+
   const title = event.nodeId ? `${type} · ${event.nodeId}` : type;
   // Named for what each number is. `active=` was the old label and it named neither.
   const counts = event.nodeId
@@ -12080,16 +12712,33 @@ function appendActivityEvent(event) {
     redacted: event.messageRedacted,
     truncated: event.messageTruncated,
   });
-  const output = Object.hasOwn(event, 'output') ? runtimeActivityOutput(event.output, {
-    redacted: event.outputRedacted,
-    truncated: event.outputTruncated,
-  }) : null;
   const diagnosticFlags = projection => [projection.redacted ? 'redacted' : '', projection.truncated ? 'truncated' : '']
     .filter(Boolean).join(', ');
   const detail = `${publicExecutionDescription(event.description, type, event.publicReason)}${counts}`
     + (message.value ? ` · ${message.value}${diagnosticFlags(message) ? ` (${diagnosticFlags(message)})` : ''}` : '')
     + (output ? ` · output=${output.displayValue}${diagnosticFlags(output) ? ` (${diagnosticFlags(output)})` : ''}` : '');
   appendActivity(title, detail, css, event.occurredAt, activityIdentifiersHtml(event));
+  noteActivitySummary(event);
+}
+
+// A successful log emission reads as the workflow output the author asked for: the emitted value is
+// the row. The generic `NODE_COMPLETED · <node-id>` title, the instance counts and the
+// process/traversal/invocation/attempt identifiers are exactly what made the value hard to find, so
+// Output and Nodes drop all three; Trace keeps them, because preserving the full technical rendering
+// is what Trace is for. Returns whether it drew the row, so the caller keeps one path.
+function appendLogEmissionRow(event, css, output) {
+  if (!output || !usesConciseLogRendering(event, activityMode)) return false;
+  const presentation = logEmissionPresentation(output);
+  appendActivity(presentation.title, presentation.detail, `${css} output-value`.trim(), event.occurredAt);
+  noteActivitySummary(event);
+  return true;
+}
+
+// The header's one-line "which execution am I looking at", written only for a row that was actually
+// shown, so it always names an event the reader can find. It stays put under Output mode during a
+// stretch that shows nothing (a long arithmetic loop), which is the accepted cost of doing no DOM
+// work at all for a hidden event.
+function noteActivitySummary(event) {
   document.getElementById('activity-summary').textContent =
     `${event.engineId || 'engine'} · execution ${shortId(event.executionId)}`;
   if (activeExecutionReconciliation === 'unknown') syncExecutionReconciliationChrome(true);
@@ -14238,6 +14887,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   setWorkspaceLayout: mode => setWorkspaceLayoutMode(mode),
   resetWorkspaceLayout: () => resetWorkspaceLayout(),
   setRenderMode: name => setRenderMode(name),
+  render: () => renderActiveMode(),
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
@@ -14275,9 +14925,13 @@ function commandContext() {
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
     hasOpenDocuments: workspace.size > 0,
-    editable: Boolean(graphData && graphData.format !== 'graphify'),
+    // Preserve every existing public format's command behavior. Only the new safe deployment
+    // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
+    editable: Boolean(graphData && graphData.format !== 'graphify'
+      && graphData.format !== 'deployment'),
     documentEditable: Boolean(documentIsEditable(workspace.active)),
     documentMode: workspace.find(workspace.activeId)?.mode ?? null,
+    documentFormat: graphData?.format ?? null,
     tenantAuthority: tenantAuthorityAllows(workspace.active),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
@@ -14486,7 +15140,7 @@ function syncCommandBarDensity() {
   // widths. Secondary view and file mirrors collapse first; the application menus remain as their
   // textual counterpart.
   const densityClasses = [
-    'density-hide-view', 'density-hide-file', 'density-hide-monitoring-controls',
+    'density-hide-view', 'density-hide-file',
   ];
   topbar.classList.remove(...densityClasses);
   for (const className of densityClasses) {
@@ -14754,6 +15408,7 @@ document.addEventListener('click', event => {
   else if (action === 'zoom') zoomBy(Number(control.dataset.value));
   else if (action === 'close-info') closeInfo();
   else if (action === 'clear-activity') clearActivity();
+  else if (action === 'activity-mode') setActivityMode(control.dataset.mode);
   else if (action === 'clear-assistant') clearAssistantConversation();
   else if (action === 'confirm-assistant-proposal') confirmAssistantProposal(control.dataset.proposalId);
   else if (action === 'reject-assistant-proposal') rejectAssistantProposal(control.dataset.proposalId);
@@ -14838,6 +15493,30 @@ document.querySelector('.layout-mirrors[role="radiogroup"]')?.addEventListener('
 document.documentElement.style.setProperty('--stage-min-h', `${STAGE_MIN_HEIGHT}px`);
 document.documentElement.style.setProperty('--stage-min-w', `${PANE_MIN_WIDTH}px`);
 
+// The observation-level group uses the topbar view control's own keyboard model rather than a second
+// convention: arrows move between levels and select as they go, Home/End jump to the ends, and the
+// group stays a single Tab stop. `stopPropagation` keeps these keys away from the canvas/panel
+// shortcuts, which is why the handler is bound here rather than delegated globally.
+document.querySelector('.activity-modes[role="radiogroup"]')?.addEventListener('keydown', event => {
+  const current = event.target.closest('[role="radio"]');
+  if (!current) return;
+  const radios = activityModeRadios();
+  const currentIndex = radios.indexOf(current);
+  if (currentIndex < 0) return;
+  let nextIndex = currentIndex;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % radios.length;
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + radios.length) % radios.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = radios.length - 1;
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+  const next = radios[nextIndex];
+  next.focus();
+  next.click();
+});
+syncActivityModeChrome();
+
 document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter => {
   splitter.addEventListener('keydown', onLayoutSplitterKeydown);
   splitter.addEventListener('pointerdown', onLayoutSplitterPointerDown);
@@ -14857,7 +15536,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // that browser step instead of returning to a detached opener.
     requestAnimationFrame(focusHumanTaskInspector);
   },
-  onSubmit: async ({ task, action, comment, isCurrent }) => {
+  onSubmit: async ({ task, action, comment, response, isCurrent }) => {
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     const owner = workspace.active;
@@ -14870,8 +15549,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       throw new Error('Reconnect to this document workspace before deciding this task.');
     }
     try {
-      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
-        { capability });
+      const result = await client.settleHumanTask(task, action, comment, response, { capability });
       if (!current()) return result;
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
@@ -14885,6 +15563,52 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       if (current()) void humanTaskController.refresh();
       throw error;
     }
+  },
+  onLaunch: async task => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect to this document workspace before opening this presentation.');
+    }
+    return client.issueHumanTaskInteraction(task, { capability });
+  },
+  onInteractionSubmit: async (task, launch, action, comment, response) => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect before completing this presentation.');
+    }
+    let typedResponse = null;
+    if (action === 'RESOLVE') {
+      if (response?.contentType !== 'application/vnd.ravenroot.payload+json'
+          || typeof response?.payloadBase64 !== 'string') {
+        throw new Error('The custom presentation returned an invalid typed response.');
+      }
+      try {
+        const binary = atob(response.payloadBase64);
+        const bytes = Uint8Array.from(binary, unit => unit.charCodeAt(0));
+        typedResponse = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      } catch {
+        throw new Error('The custom presentation returned malformed response bytes.');
+      }
+    }
+    // Custom hosts never receive or consume the delegated external-provider capability. The
+    // parent settles through its current authenticated session, so authorization loss is checked
+    // at completion instead of replaying issuance-time identity claims.
+    const result = await client.settleHumanTask(task, action, comment, typedResponse, { capability });
+    clearHumanTaskSelection();
+    addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+      'completed');
+    await humanTaskController.refresh();
+    return result;
+  },
+  onExternalReconcile: async task => {
+    await humanTaskController.refresh();
+    addActivityMessage('human task', `reconciled external response · task ${shortId(task.taskId)}`, 'completed');
+  },
+  onRevoke: async (task, launch) => {
+    const client = runtimeClient;
+    if (client) await client.revokeHumanTaskInteraction(task, launch);
   },
 });
 
@@ -14913,13 +15637,15 @@ credentialsWindow = createCredentialsWindow({
 deploymentsWindow = createDeploymentsWindow({
   dialog: document.getElementById('deployments-dialog'),
   currentDocument: () => {
-    if (!workspace.active || !graphData || !tenantAuthorityAllows(workspace.active)) return null;
+    if (!workspace.active || !graphData || graphData.format === 'deployment'
+        || !tenantAuthorityAllows(workspace.active)) return null;
     if (documentIsEditable(workspace.active)) syncGraphPositions();
     return { documentId: workspace.activeId, displayName: graphDisplayName,
       incarnation: activeDocumentIncarnation,
       authorityGeneration: workspaceAuthority.generation,
       graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
   },
+  onOpenDeployment: (deploymentId, client) => openDeploymentDocument(deploymentId, client),
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
     if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion

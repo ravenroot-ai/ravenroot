@@ -257,6 +257,17 @@ refusal would be stamped as model-generated content that no model generated.
 
 ## Building and testing this module alone
 
+When the governed runner plane is enabled, the Agent catalog also exposes `agentDefinition`,
+`agentVersion` and optional typed `workspaceRef`. The approved version owns its instructions,
+model profile, command subset, tools, skills, budgets and output contract. Graph-level provider,
+instruction and tool properties cannot override those authorities. Without `workspaceRef`, the
+managed AI extension runs the named definition with no filesystem authority; absent both selectors,
+the existing conversational Agent contract remains unchanged. With a Workspace reference, the
+runner plane performs durable dispatch and returns the Agent's structured result directly.
+See the [published variant](../../../docs/reference/node-contracts.md#governed-workspace-and-named-agent-variant) and
+[operator guide](../../../docs/operator-guide/governed-runners.md). Deterministic protocol fixtures are not
+evidence of a real model run.
+
 ```sh
 JAVA_HOME=/path/to/jdk21 mvn -f ../../pom.xml -pl ravenroot-extensions/ravenroot-ai -am test
 ```

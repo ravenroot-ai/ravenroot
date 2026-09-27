@@ -3,7 +3,46 @@ import { resolve as resolvePath } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { mountD3ElasticRenderer } from '../src/viewer-elastic-renderer.js';
+import {
+  SETTLE_WINDOW_DISPLACEMENT_PX,
+  SETTLE_WINDOW_TICKS,
+  mountD3ElasticRenderer,
+} from '../src/viewer-elastic-renderer.js';
+
+// A small connected Monitoring graph with distinct radii; used to exercise convergence and the
+// distinction between reheating gestures and radius-only runtime updates deterministically.
+function monitoringSettleGraph() {
+  return {
+    nodes: [
+      { id: 'n0', label: 'N0', r: 12, color: '#fff', x: -200, y: -60 },
+      { id: 'n1', label: 'N1', r: 16, color: '#fff', x: -80, y: 70 },
+      { id: 'n2', label: 'N2', r: 20, color: '#fff', x: 60, y: -80 },
+      { id: 'n3', label: 'N3', r: 14, color: '#fff', x: 220, y: 30 },
+      { id: 'n4', label: 'N4', r: 24, color: '#fff', x: 0, y: 0 },
+      { id: 'n5', label: 'N5', r: 10, color: '#fff', x: 140, y: 120 },
+    ],
+    links: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [0, 5], [1, 4]].map(([a, b], index) => ({
+      id: `e${index}`, source: `n${a}`, target: `n${b}`, baseWidth: 1.8, restLen: 130,
+      color: '#fff', flow: { recent: 0 },
+    })),
+  };
+}
+
+// Drive an explicit tick until the renderer stops the simulation (or the cap is reached), so a
+// convergence decision is observed rather than assumed.
+function tickUntilStopped(renderer, stop, cap = 900) {
+  let steps = 0;
+  while (steps < cap && stop.mock.calls.length === 0) { renderer.simulation.tick(1); steps += 1; }
+  return steps;
+}
+
+// d3.drag reads `event.view`; jsdom rejects `view` in the MouseEvent init dict, so it is attached
+// afterwards. Coordinates resolve through getBoundingClientRect (jsdom returns zeros), i.e. clientX/Y.
+function mouseEvent(type, clientX, clientY) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX, clientY });
+  Object.defineProperty(event, 'view', { value: window });
+  return event;
+}
 
 describe('shared D3 Elastic renderer', () => {
   it('projects groups without replacing, reheating or stopping the canonical simulation and restores temporary pins', () => {
@@ -174,6 +213,206 @@ describe('shared D3 Elastic renderer', () => {
     expect(tooltip.textContent).toContain('State: active');
     expect(tooltip.textContent).toContain('Active instances: 2');
     expect(tooltip.textContent).toContain('In-flight arrivals: 3');
+    renderer.destroy();
+  });
+
+  it('settles on measured displacement rather than d3\'s alpha tail, then keeps the view fixed', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const { nodes, links } = monitoringSettleGraph();
+    const renderer = mountD3ElasticRenderer({ svg: document.querySelector('#elastic'),
+      nodes, links, width: 900, height: 500, palette: {} });
+    // Neutralise the timer so every step is explicit and deterministic.
+    renderer.simulation.stop();
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const steps = tickUntilStopped(renderer, stop);
+    expect(stop).toHaveBeenCalledTimes(1);
+    // A window of quiet ticks cannot complete before it has been filled.
+    expect(steps).toBeGreaterThanOrEqual(SETTLE_WINDOW_TICKS);
+    // The stop happened while alpha was still far above d3's alphaMin: this is the displacement
+    // decision, not the geometric alpha tail (which only reaches alphaMin after ~570 ticks).
+    expect(renderer.simulation.alpha()).toBeGreaterThan(renderer.simulation.alphaMin());
+    expect(steps).toBeLessThan(570);
+    // Continuing to step moves the layout by less than the material window, so the settled view is
+    // visually fixed rather than merely paused.
+    const settled = renderer.nodes.map(node => ({ x: node.x, y: node.y }));
+    let drift = 0;
+    for (let i = 0; i < SETTLE_WINDOW_TICKS; i += 1) {
+      renderer.simulation.tick(1);
+      renderer.nodes.forEach((node, index) => {
+        drift = Math.max(drift, Math.hypot(node.x - settled[index].x, node.y - settled[index].y));
+      });
+    }
+    expect(drift).toBeLessThan(SETTLE_WINDOW_DISPLACEMENT_PX);
+    renderer.destroy();
+  });
+
+  it('refreshes collision radii for the next reheat without reheating or moving a settled graph', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const { nodes, links } = monitoringSettleGraph();
+    const renderer = mountD3ElasticRenderer({ svg: document.querySelector('#elastic'),
+      nodes, links, width: 900, height: 500, palette: {} });
+    renderer.simulation.stop().alpha(0);
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const collisionBefore = renderer.simulation.force('collision');
+    const coordinates = renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }));
+    const paddedRadius = node => renderer.simulation.force('collision').radius()(node);
+    // Mimic a runtime instance-count update: the datum's drawn/visual size grows.
+    renderer.nodes[0].r = 25;
+    renderer.updateNode('n0', { r: 25, runtimeObserved: true, runtimeState: 'active', instances: 5 });
+    renderer.refreshCollisionRadii();
+    // The collide force is rebuilt, so its radii cache is recomputed from the new node.r for the
+    // next legitimate reheat, and the accessor reports the enlarged radius.
+    expect(renderer.simulation.force('collision')).not.toBe(collisionBefore);
+    expect(paddedRadius(renderer.nodes[0])).toBe(25 + 8);
+    // ... but nothing reheated and no settled coordinate moved.
+    expect(restart).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(renderer.simulation.alpha()).toBe(0);
+    expect(renderer.nodes[0].r).toBe(25);
+    expect(renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }))).toEqual(coordinates);
+    renderer.destroy();
+  });
+
+  it('reheats when a node is dragged and released, then settles again', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const svg = document.querySelector('#elastic');
+    const { nodes, links } = monitoringSettleGraph();
+    const renderer = mountD3ElasticRenderer({ svg, nodes, links, width: 900, height: 500, palette: {} });
+    renderer.simulation.stop();
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    expect(tickUntilStopped(renderer, stop)).toBeGreaterThanOrEqual(SETTLE_WINDOW_TICKS);
+    expect(stop).toHaveBeenCalledTimes(1);
+    stop.mockClear();
+
+    const dragged = renderer.nodes[0];
+    const circle = renderer.nodeSelection.nodes()[0];
+    const startX = dragged.x;
+    const startY = dragged.y;
+    circle.dispatchEvent(mouseEvent('mousedown', startX, startY));
+    // Dragging reheats the layout so it can adjust around the new position.
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(renderer.simulation.alphaTarget()).toBeCloseTo(0.3);
+    expect(dragged.fx).toBe(startX);
+    window.dispatchEvent(mouseEvent('mousemove', startX + 80, startY + 30));
+    expect(dragged.fx).toBe(startX + 80);
+    expect(dragged.fy).toBe(startY + 30);
+    window.dispatchEvent(mouseEvent('mouseup', startX + 80, startY + 30));
+    expect(dragged.fx).toBeNull();
+    expect(renderer.simulation.alphaTarget()).toBe(0);
+
+    // Neighbours adjust, then the graph returns to the settled state.
+    const afterDrag = tickUntilStopped(renderer, stop);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(afterDrag).toBeLessThan(900);
+    renderer.destroy();
+  });
+
+  it('never reheats the Monitoring simulation for a runtime radius-only update', () => {
+    const source = readFileSync(resolvePath(import.meta.dirname, '..', 'src', 'app.js'), 'utf8');
+    const start = source.indexOf('function updateD3RuntimeNode(');
+    expect(start).toBeGreaterThan(-1);
+    const next = source.indexOf('\nfunction ', start + 1);
+    const body = source.slice(start, next === -1 ? undefined : next);
+    // The runtime resize refreshes collision radii through the renderer and keeps animating the
+    // visible size, but must not call alpha/restart itself.
+    expect(body).toContain('refreshCollisionRadii');
+    expect(body).toContain(".transition().duration(180)");
+    expect(body).not.toContain('.restart()');
+    expect(body).not.toMatch(/alpha\(\s*[\d.]/);
+  });
+
+  it('clears a previous run in place without reheating, moving a settled graph or resetting the viewport', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const svg = document.querySelector('#elastic');
+    const { nodes, links } = monitoringSettleGraph();
+    const baseRadius = nodes.map(node => node.r);
+    const renderer = mountD3ElasticRenderer({ svg, nodes, links, width: 900, height: 500,
+      palette: {}, initialTransform: { k: 1.4, x: 33, y: -12 } });
+    renderer.simulation.stop().alpha(0);
+
+    // Paint a run: one node grows and goes active, one edge pulses.
+    renderer.updateNode('n0', { r: 25, instances: 5, arrivals: 7, runtimeState: 'active',
+      runtimeObserved: true, stroke: '#ff0000', strokeWidth: 5, lastEventType: 'NODE_STARTED' });
+    renderer.nodeSelection.filter(node => node.id === 'n0').attr('r', 25)
+      .attr('stroke', '#ff0000').attr('stroke-width', 5);
+    renderer.updateEdgeFlow('e0', { recent: 4, count: 4 }, { reducedMotion: true });
+    expect(Number(svg.querySelector('.d3-edges path').getAttribute('stroke-width'))).toBeGreaterThan(1.8);
+
+    const coordinates = renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }));
+    const transform = svg.querySelector('.d3-zoom-group').getAttribute('transform');
+    const simulationNodes = renderer.simulation.nodes();
+    // Spy only now, so painting the run cannot mask a reheat caused by the reset itself.
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const alpha = vi.spyOn(renderer.simulation, 'alpha');
+
+    renderer.resetRuntime({ idleStroke: '#8c959f' });
+
+    // The node returns to its mount-time silhouette and idle datum (a reset is not a re-layout).
+    const node = renderer.nodes[0];
+    expect(node.r).toBe(baseRadius[0]);
+    expect(node.runtimeState).toBe('idle');
+    expect(node.runtimeObserved).toBe(false);
+    expect(node.instances).toBe(0);
+    expect(node.arrivals).toBe(0);
+    expect(node.stroke).toBe('#8c959f');
+    expect(node.strokeWidth).toBe(1.5);
+    const circle = svg.querySelectorAll('.d3-nodes circle')[0];
+    expect(Number(circle.getAttribute('r'))).toBe(baseRadius[0]);
+    expect(circle.getAttribute('stroke')).toBe('#8c959f');
+    expect(Number(circle.getAttribute('stroke-width'))).toBe(1.5);
+    // The edge flow, its dash, its active class and its pulse timer are all cleared in place.
+    const edge = svg.querySelector('.d3-edges path');
+    expect(renderer.links[0].flow.recent).toBe(0);
+    expect(Number(edge.getAttribute('stroke-width'))).toBe(1.8);
+    expect(edge.getAttribute('stroke-dasharray')).toBeNull();
+    expect(edge.classList.contains('d3-edge--active')).toBe(false);
+    // Coordinates, viewport, simulation and SVG survive unchanged: no remount and no new simulation.
+    expect(renderer.nodes.map(item => ({ id: item.id, x: item.x, y: item.y }))).toEqual(coordinates);
+    expect(svg.querySelector('.d3-zoom-group').getAttribute('transform')).toBe(transform);
+    expect(renderer.simulation.nodes()).toBe(simulationNodes);
+    // The reset itself never reheats or stops the simulation (#469 preserved, #494 fixed).
+    expect(restart).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(alpha).not.toHaveBeenCalled();
+    expect(renderer.simulation.alpha()).toBe(0);
+    renderer.destroy();
+  });
+
+  it('resets to the caller idle silhouette, not the painted radius the renderer mounted with', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const svg = document.querySelector('#elastic');
+    const { nodes, links } = monitoringSettleGraph();
+    // A renderer mounted mid-run: every datum carries a run-painted radius, exactly as a
+    // run -> Design -> Monitoring round-trip remounts without clearing `instances` (#494). The idle
+    // silhouette the caller derives from the sizing helper is uniform, and reset must restore it
+    // rather than the radius that happened to be on the canvas at mount.
+    const painted = nodes.map((node, index) => ({ ...node, r: index % 2 ? 16 : 6 }));
+    const idleSilhouette = 14;
+    const renderer = mountD3ElasticRenderer({ svg, nodes: painted, links, width: 900, height: 500,
+      palette: {}, idleRadius: idleSilhouette, initialTransform: { k: 1.2, x: 12, y: 9 } });
+    renderer.simulation.stop().alpha(0);
+    const coordinates = renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }));
+    const transform = svg.querySelector('.d3-zoom-group').getAttribute('transform');
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const alpha = vi.spyOn(renderer.simulation, 'alpha');
+
+    renderer.resetRuntime({ idleStroke: '#8c959f' });
+
+    expect(renderer.nodes.map(node => node.r))
+      .toEqual(new Array(renderer.nodes.length).fill(idleSilhouette));
+    expect([...svg.querySelectorAll('.d3-nodes circle')].map(circle => Number(circle.getAttribute('r'))))
+      .toEqual(new Array(renderer.nodes.length).fill(idleSilhouette));
+    // ... and the reset is still a paint operation: same coordinates, same viewport, no reheat.
+    expect(renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }))).toEqual(coordinates);
+    expect(svg.querySelector('.d3-zoom-group').getAttribute('transform')).toBe(transform);
+    expect(restart).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(alpha).not.toHaveBeenCalled();
+    expect(renderer.simulation.alpha()).toBe(0);
     renderer.destroy();
   });
 

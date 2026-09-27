@@ -11,6 +11,38 @@ beforeEach(() => {
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 const click = text => [...dialog.querySelectorAll('button')].find(button => button.textContent === text).click();
 
+it('shows native physical authority and bounded usage separately from Agent output', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const kubernetes = { cluster: 'approved', namespace: 'agents', podName: 'rr-pod', podUid: id,
+    claimName: 'rr-volume', claimUid: id, phase: 'RUNNING', reason: 'NONE', modelTurns: 3, toolCalls: 7, modelTokens: 100 };
+  const panel = createRunnerWindow({ dialog });
+  panel.setClient({ runnerWorkspace: vi.fn(async () => ({ revision: 1,
+    workspaces: [{ nodeId: 'source', workspaceId: id, state: 'READY', driver: 'KUBERNETES', kubernetes }],
+    jobs: [{ runnerJobId: id, definition: 'reviewer', command: 'review', state: 'CLAIMED', driver: 'KUBERNETES', kubernetes, result: { result: 'reviewed' } }] })) });
+  dialog.querySelector('input').value = id; click('Inspect workspace'); await flush();
+  for (const text of ['KUBERNETES', 'approved', 'agents', 'rr-pod', 'rr-volume', 'reviewed', '100']) expect(dialog.textContent).toContain(text);
+  expect(dialog.textContent).not.toContain('kubeconfig');
+});
+
+it('shows direct Agent output safely and stops only the selected Workspace at the observed revision', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const client = {
+    runnerWorkspace: vi.fn(async () => ({ revision: 42, workspaces: [
+      { nodeId: 'source-tree', workspaceId: id, state: 'READY', runtimeId: 'physical-a', profile: { runtimeLifecycle: 'PER_WORKSPACE' } },
+      { nodeId: 'docs', workspaceId: id, state: 'READY', runtimeId: 'physical-b' },
+    ], jobs: [{ command: 'review', state: 'COMPLETED', result: { result: '<img src=x onerror=alert(1)>' } }] })),
+    stopRunnerWorkspace: vi.fn(async () => ({})),
+  };
+  const panel = createRunnerWindow({ dialog }); panel.setClient(client);
+  dialog.querySelector('input').value = id; click('Inspect workspace'); await flush();
+  expect(dialog.textContent).toContain('physical-a');
+  expect(dialog.textContent).toContain('Agent result');
+  expect(dialog.textContent).toContain('<img src=x');
+  expect(dialog.querySelector('img')).toBeNull();
+  click('Stop this Workspace'); await flush(); await flush();
+  expect(client.stopRunnerWorkspace).toHaveBeenCalledExactlyOnceWith(id, 'source-tree', 42);
+});
+
 it.each([
   ['RESUME', 'Resume undispatched successors'],
   ['ACKNOWLEDGE', 'Acknowledge complete successors'],

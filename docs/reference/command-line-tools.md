@@ -39,6 +39,16 @@ image assembly, verification, update, and removal.
 
 ## `service.sh`
 
+`start --runner` and `restart --runner` enable the genuine tokenless trusted-local control plane
+and in-process supervised worker; public UI remains USER and the private worker channel WORKLOAD.
+`stop` includes retained Workspaces and worker shutdown. This mode only accepts exact 127.0.0.1
+publication and preserves native Linux quota/confinement requirements. Configure
+`RAVENROOT_LOCAL_RUNNER_DIR` (default `.ravenroot-local/runner`, operator-approved JSON files),
+`RAVENROOT_DOCKER_CLI_IMAGE` (approved immutable CLI image), `RAVENROOT_LOCAL_DOCKER_SOCKET`
+(default `/var/run/docker.sock`), and `RAVENROOT_LOCAL_RUNNER_STOP_GRACE` (default `5m`, must cover
+HTTP drain and Workspace cleanup). No bearer token is generated or handled. See the
+[complete local runner setup](../operator-guide/governed-runners.md#tokenless-trusted-local-service).
+
 Purpose: operate the repository Compose service or the Helm release. The default command is
 `restart`. Docker is required only for Compose commands; Helm and cluster access are required only
 for Kubernetes commands.
@@ -148,7 +158,7 @@ listings. `--help` and `help` print usage.
 | `runtime` | Active executions and active arrivals by node. |
 | `node-types` | Effective running catalog; use it to verify enabled bundles. |
 | `inspect FILE` | Read and inspect local GraphML without executing it. |
-| `validate FILE` | Validate the local GraphML profile; runs locally even with `--server`. |
+| `validate [--register-machine] FILE` | Validate the local GraphML profile; the optional flag also runs the bounded static Register Machine Profile v1 linter with separate errors and warnings. Runs locally even with `--server`. |
 | `events decode` | Decode a captured execution SSE body from standard input into JSON lines; runs locally without a backend or credentials. |
 | `run FILE [PAYLOAD]` | Submit Run and print process, traversal, execution, graph-version, and execution-policy identifiers. |
 | `result EXECUTION-ID` | Read live or durable terminal evidence and qualified failure/cancellation fields. |
@@ -158,13 +168,15 @@ listings. `--help` and `help` print usage.
 | `cancel TRAVERSAL-ID` | Request cancellation and print the recorded outcome and note. |
 | `drain` | Stop new admission and begin controlled drain. |
 | `process PROCESS-INSTANCE-ID pause\|resume\|cancel\|drain\|stop EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Remote-only durable process control across every traversal in the instance. Use the inventory `revision` as the expected generation; the result reports the typed outcome, current generation, state, and retained reason. |
+| `human-tasks list` | List the authenticated tenant's outstanding task summaries without review or response content. |
+| `human-tasks settle TASK-ID GENERATION resolve\|deny\|cancel [--response-file PATH] [--content-type TYPE] [--comment TEXT] [--override-reason TEXT]` | Use the canonical settlement model. Resolve requires the pinned typed response; override requires the server-side admin role/scope and records its reason. |
 | `deployments list` | List process-local deployment registrations. |
 | `deployments register ID FILE` | Reserve an ID and validate its graph; does not start it. |
 | `deployments inspect ID` | Read one registration. |
-| `deployments start ID` | Start a registered deployment and wait for `READY` or truthful `FAILED`. |
-| `deployments stop ID` | Stop it but keep it registered. |
-| `deployments restart ID` | Stop and start the registration. |
-| `deployments undeploy ID` | Stop and remove the process-local registration. |
+| `deployments start ID` | Start a registered deployment. A durable remote target sends its displayed generation and a unique intent key, then reconciles the authoritative state. |
+| `deployments stop ID [--reason TEXT]` | Stop it but keep it registered. `--reason` is required when the inspected target exposes a durable generation. |
+| `deployments restart ID` | Stop and start the registration. Durable Restart has no reason option. |
+| `deployments undeploy ID [--disposition DRAIN_FIRST\|CANCEL_IN_FLIGHT\|REFUSE_IF_BUSY --reason TEXT]` | Stop and remove the process-local registration. Both options are required for a durable target; disposition is never defaulted. A durable tombstoned ID cannot be reused. |
 | `credentials list` | Remote-only metadata listing; secret values are never returned. |
 | `credentials add` | Remote-only creation with `--label TEXT --scheme api-key|basic|oauth-token [--username TEXT] --value-file PATH`. `basic` requires a username; other schemes reject one. `--value-file -` reads standard input. The rejected `--value` option never carries a secret. |
 | `backup DIRECTORY` | Create an offline recovery bundle from configured durable stores. |
@@ -179,17 +191,37 @@ argument misuse returns 2, and `stream-truncated` or `stream-overrun` is emitted
 Diagnostics go to standard error without raw input. See [Decoding execution streams](../integrator-guide/application-http.md)
 for framing limits, legacy compatibility and control-frame semantics.
 
+Deployment listings print `generation=` only for deployments governed by durable lifecycle authority.
+Commands against those rows also print `command-outcome=` and bounded outcome detail. Accepted,
+converged, replayed, and terminal outcomes return 0; stale, superseded, refused, failed, and
+idempotency-conflict outcomes return 1 after the CLI refreshes authoritative state. The client never
+automatically resubmits those decisions. Only an ambiguous transport delivery is retried once, with
+the identical key, generation, reason, and disposition. If both responses are lost, the CLI performs
+one authoritative read, prints `command-detail=delivery=AMBIGUOUS,reconciliation=...` without
+inventing `command-outcome=`, and returns 1. Rows without a generation retain the legacy process-local
+command behavior for embedded and source-session compatibility; their Undeploy confirmation says the
+local ID can be registered again, while a durable row warns that its tombstone and identity are
+permanent.
+
 `embed-registration show`, `embed-registration provision`, and `embed-registration revoke` operate a
 local registration store and never use `--server`. All take `--store-dir`, `--tenant`, and
 `--registration-id`. Provision and revoke also require `--audit-dir` and the compare-and-set
-`--expected-revision`; there is no force option. Provision additionally takes `--graphml`,
-`--graph-id`, `--graph-version-id`, `--snapshot-state`, `--issuer`, `--subject`, `--parent-origin`,
-`--resource-id`, `--deployment-id`, `--deployment-version`, `--policy-revision`, and every explicit
-attestation: `--gate-deployment`, `--gate-provenance`, `--gate-classification`, `--gate-retention`,
-`--gate-dsr-suppression`, `--gate-takedown`, and `--gate-eea`. Optional `--theme` is `dark` or
-`light`; optional `--operator` supplies the audit subject. Read the current revision with `show`
-before a mutation. See [Embed and extension contracts](embed-extension-contracts.md) for the exact
-registration contract.
+`--expected-revision`; there is no force option. Provision always takes `--issuer`, `--subject`, and
+`--parent-origin`, then selects exactly one source:
+
+- A live source uses `--deployment-id` and rejects snapshot-only flags.
+- A snapshot source uses `--graphml`, `--graph-id`, `--graph-version-id`, `--snapshot-state`,
+  `--resource-id`, `--deployment-id` (or its explicit `--snapshot-deployment-id` alias),
+  `--deployment-version`, `--policy-revision`, and every
+  explicit attestation: `--gate-deployment`, `--gate-provenance`, `--gate-classification`,
+  `--gate-retention`, `--gate-dsr-suppression`, `--gate-takedown`, and `--gate-eea`.
+
+Existing snapshot commands that combine `--graphml` and `--deployment-id` remain valid; the alias is
+available when an operator wants the snapshot meaning to be explicit. Omitting `--graphml` makes
+`--deployment-id` mean a live source. Supplying both deployment-coordinate spellings with different
+values is refused. Optional `--theme` is `dark` or `light`; optional `--operator` supplies the audit
+subject. Read the current revision with `show` before a mutation. See
+[Embed and extension contracts](embed-extension-contracts.md) for the exact registration contract.
 
 Application CLI help, an unknown command, and command parsers that classify argument misuse return 2.
 Two current parser paths instead return 1: a missing value for a global option is thrown before the

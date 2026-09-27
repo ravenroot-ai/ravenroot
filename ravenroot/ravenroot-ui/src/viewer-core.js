@@ -1,16 +1,12 @@
 import { createReadOnlyRendererAdapter } from './viewer-renderer-adapter.js';
+import { viewerProjectionElements } from './viewer-presentation.js';
 
 const CONTRACT_VERSION = '1.0';
 export const VIEWER_BUDGET = Object.freeze({ nodes: 5_000, edges: 10_000, renderMilliseconds: 5_000 });
 const NODE_KINDS = new Set(['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR']);
-const NODE_ICONS = Object.freeze({
-  START: '▶ ',
-  PASSTHROUGH: '• ',
-  BEHAVIOR: '⚙ ',
-  END: '⏹ ',
-  ERROR: '⚠ ',
-});
-
+const DESIGN_ARRANGEMENTS = new Set([
+  'hierarchical', 'flow', 'organic', 'keep', 'hierarchical-new', 'layered-down',
+]);
 function requireText(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
     throw new TypeError(`Invalid viewer projection: ${field}.`);
@@ -35,13 +31,20 @@ function projectionNode(node) {
   if (layout && Object.values(layout).some(value => value == null)) {
     throw new TypeError('Invalid viewer projection: node.layout.');
   }
-  return Object.freeze({ id, kind, layout });
+  const visualType = typeof node?.visualType === 'string' && node.visualType
+    ? node.visualType : kind.toLowerCase();
+  const label = typeof node?.label === 'string' && node.label ? node.label : id;
+  return Object.freeze({ id, kind, visualType, label, bypassed: Boolean(node?.bypassed), layout });
 }
 
 function projectionEdge(edge) {
   return Object.freeze({
+    id: typeof edge?.id === 'string' && edge.id ? edge.id : null,
     source: requireText(edge?.source, 'edge.source'),
     target: requireText(edge?.target, 'edge.target'),
+    label: typeof edge?.label === 'string' ? edge.label : '',
+    visualType: typeof edge?.visualType === 'string' && edge.visualType
+      ? edge.visualType : 'continue',
   });
 }
 
@@ -50,6 +53,9 @@ function projectionEdge(edge) {
  * renderer snapshot, DOM, accessibility tree, or parent messaging surface.
  */
 export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
+  if (['1', '2'].includes(projection?.viewerSourceVersion) && projection.projection) {
+    projection = projection.projection;
+  }
   if (projection?.viewerContractVersion !== CONTRACT_VERSION) {
     throw new TypeError('Incompatible viewer projection.');
   }
@@ -66,31 +72,22 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
     throw new TypeError('Invalid viewer projection topology.');
   }
 
-  const elements = [
-    ...nodes.map(node => Object.freeze({
-      data: Object.freeze({
-        id: node.id,
-        label: `${NODE_ICONS[node.kind]}${node.id}`,
-        nodeType: node.kind.toLowerCase(),
-        nw: node.layout?.width ?? 100,
-        nh: node.layout?.height ?? 56,
-      }),
-      ...(node.layout ? { position: Object.freeze({ x: node.layout.x, y: node.layout.y }) } : {}),
-    })),
-    ...edges.map((edge, index) => Object.freeze({
-      data: Object.freeze({
-        id: `viewer-edge-${index}`,
-        source: edge.source,
-        target: edge.target,
-      }),
-    })),
-  ];
+  const elements = viewerProjectionElements(nodes, edges).map(element => Object.freeze({
+    data: Object.freeze(element.data),
+    ...(element.position ? { position: Object.freeze(element.position) } : {}),
+  }));
+  const designArrangement = projection.designArrangement == null ? null
+    : requireText(projection.designArrangement, 'designArrangement');
+  if (designArrangement != null && !DESIGN_ARRANGEMENTS.has(designArrangement)) {
+    throw new TypeError('Invalid viewer projection: designArrangement.');
+  }
 
   return Object.freeze({
     viewerContractVersion: CONTRACT_VERSION,
     graphId: requireText(projection.graphId, 'graphId'),
     graphVersionId: requireText(projection.graphVersionId, 'graphVersionId'),
     canonicalDigest: requireText(projection.canonicalDigest, 'canonicalDigest'),
+    designArrangement,
     nodes: Object.freeze(nodes),
     edges: Object.freeze(edges),
     elements: Object.freeze(elements),

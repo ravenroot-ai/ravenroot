@@ -24,6 +24,7 @@ CORE_FACTORY_IDS = {
     "HumanTaskNodeBehaviorFactory": "human-task",
     "TemplateNodeBehaviorFactory": "template",
     "JsonParseNodeBehaviorFactory": "json-parse",
+    "BigIntOpNodeBehaviorFactory": "bigint-op",
     "CelTransformNodeBehaviorFactory": "cel-transform",
     "CelDecisionNodeBehaviorFactory": "cel-decision",
     "JsonPathNodeBehaviorFactory": "json-path",

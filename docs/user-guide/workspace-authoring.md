@@ -24,6 +24,23 @@ Inspector saves change graph content without choosing a presentation for you. **
 valid autosaves, undo, and redo retain the active document's Design arrangement, positions, viewport, and
 compatible edge routes. Use an explicit **Arrange** command when you want to reposition the graph.
 
+## Governed Workspace resources and named Agents
+
+The browser's document workspace is distinct from an execution Workspace resource. When the
+operator enables the runner plane, add the **Workspace** palette node and select its approved
+profile. Its Inspector shows independent filesystem scope/runtime lifecycle, pool and runtime
+profile selectors; their values must agree with the approved version. Add approved named Agent
+presets, then use their typed `workspaceRef` control to select a Workspace in this graph. Multiple
+Workspace nodes remain separate resources, not visual groups.
+
+Connect Workspace `open`/`ready` to the Agents and route `close`/`closed` before END. The
+[minimal team](../examples/governed-runner/three-agents.graphml) is a complete starting graph.
+Inspect **Run → Agents and runners** for placement, active jobs, capacity, logs, artifacts and audit
+history. Stop one Workspace there without waiting for the graph to reach its node; other resources
+may continue. Stopping the process stops all its resources. Agent output appears directly as the
+execution result, with technical job details separate. See the
+[governed runner guide](../operator-guide/governed-runners.md) for setup and recovery.
+
 ## Visual groups
 
 In editable **Design**, select two or more real nodes and choose **Group selection** in the node

@@ -6,6 +6,7 @@ import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
+import ai.ravenroot.api.persistence.HumanTaskPresentation;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -20,7 +21,22 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
                                   HumanTaskReentryMapping reentryMapping,
                                   HumanTaskExecutionLimits executionLimits,
                                   HumanTaskConfirmationPresentation confirmationPresentation,
-                                  HumanTaskReviewDefinition reviewDefinition) {
+                                  HumanTaskReviewDefinition reviewDefinition,
+                                  HumanTaskPresentation presentation) {
+    /** Compatibility constructor retaining the definition shape before presentation profiles. */
+    public HumanTaskDefinition(HumanTaskMetadata metadata,
+                               HumanTaskResponseSchema responseSchema,
+                               HandlerAuthorization responderRequirements,
+                               Optional<Duration> escalationDelay,
+                               Duration expiryDelay,
+                               HumanTaskReentryMapping reentryMapping,
+                               HumanTaskExecutionLimits executionLimits,
+                               HumanTaskConfirmationPresentation confirmationPresentation,
+                               HumanTaskReviewDefinition reviewDefinition) {
+        this(metadata, responseSchema, responderRequirements, escalationDelay, expiryDelay,
+                reentryMapping, executionLimits, confirmationPresentation, reviewDefinition,
+                HumanTaskPresentation.compatibility(confirmationPresentation));
+    }
     /** Compatibility constructor retaining the definition shape before review presentations. */
     public HumanTaskDefinition(HumanTaskMetadata metadata,
                                HumanTaskResponseSchema responseSchema,
@@ -32,7 +48,8 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
                                HumanTaskConfirmationPresentation confirmationPresentation) {
         this(metadata, responseSchema, responderRequirements, escalationDelay, expiryDelay,
                 reentryMapping, executionLimits, confirmationPresentation,
-                HumanTaskReviewDefinition.none());
+                HumanTaskReviewDefinition.none(),
+                HumanTaskPresentation.compatibility(confirmationPresentation));
     }
     /** Compatibility constructor using the legacy response and retry budgets. */
     public HumanTaskDefinition(HumanTaskMetadata metadata,
@@ -43,7 +60,8 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
                                HumanTaskReentryMapping reentryMapping) {
         this(metadata, responseSchema, responderRequirements, escalationDelay, expiryDelay,
                 reentryMapping, HumanTaskExecutionLimits.legacy(responseSchema.maxBytes()),
-                HumanTaskConfirmationPresentation.none(), HumanTaskReviewDefinition.none());
+                HumanTaskConfirmationPresentation.none(), HumanTaskReviewDefinition.none(),
+                HumanTaskPresentation.classic());
     }
 
     /** Compatibility constructor retaining execution limits before embedded confirmations. */
@@ -73,8 +91,17 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
         confirmationPresentation = Objects.requireNonNull(confirmationPresentation,
                 "confirmationPresentation");
         reviewDefinition = Objects.requireNonNull(reviewDefinition, "reviewDefinition");
+        presentation = Objects.requireNonNull(presentation, "presentation");
         if (reviewDefinition.version() != 0 && !confirmationPresentation.embedded()) {
             throw new IllegalArgumentException("review presentation requires embedded confirmation");
+        }
+        if (presentation.kind() == ai.ravenroot.api.persistence.HumanTaskPresentationKind.CLASSIC
+                && confirmationPresentation.embedded()) {
+            throw new IllegalArgumentException("classic presentation cannot carry embedded controls");
+        }
+        if (presentation.kind() != ai.ravenroot.api.persistence.HumanTaskPresentationKind.CLASSIC
+                && !confirmationPresentation.embedded()) {
+            throw new IllegalArgumentException("interactive presentation requires embedded controls");
         }
         if (executionLimits.responsePayload().maxEncodedBytes() != responseSchema.maxBytes()) {
             throw new IllegalArgumentException(

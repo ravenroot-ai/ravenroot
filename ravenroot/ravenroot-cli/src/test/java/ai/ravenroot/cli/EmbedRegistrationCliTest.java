@@ -56,6 +56,47 @@ class EmbedRegistrationCliTest {
     Path root;
 
     @Test
+    void liveDeploymentProvisionUsesExclusiveSourceContractAndNoGraphMlFlags() {
+        var provisioned = run("embed-registration", "provision", "--store-dir", storeDir(),
+                "--audit-dir", auditDir(), "--tenant", "tenant-a", "--registration-id", "live-reg",
+                "--expected-revision", "0", "--issuer", "https://issuer.example", "--subject",
+                "workload-1", "--parent-origin", "https://parent.example", "--deployment-id", "orders");
+        assertEquals(0, provisioned.status(), provisioned.err());
+        assertTrue(provisioned.out().contains("source=deployment"), provisioned.out());
+        assertTrue(provisioned.out().contains("deployment-id=orders"), provisioned.out());
+
+        var shown = run("embed-registration", "show", "--store-dir", storeDir(), "--tenant", "tenant-a",
+                "--registration-id", "live-reg");
+        assertEquals(0, shown.status(), shown.err());
+        assertTrue(shown.out().contains("viewer-source-version=1"), shown.out());
+        assertTrue(shown.out().contains("source=deployment"), shown.out());
+        assertFalse(shown.out().contains("graph-id="), shown.out());
+        assertFalse(shown.out().contains("canonical-digest="), shown.out());
+    }
+
+    @Test
+    void legacyDeploymentIdRemainsAcceptedAsTheSnapshotCoordinateWithGraphMl() throws Exception {
+        Path graph = writeGraph();
+        var provisioned = run(renamed(provisionArgs(graph, 0),
+                "--snapshot-deployment-id", "--deployment-id"));
+
+        assertEquals(0, provisioned.status(), provisioned.err());
+        assertTrue(provisioned.out().contains("source=snapshot"), provisioned.out());
+        assertTrue(provisioned.out().contains("graph-id=graph-a"), provisioned.out());
+    }
+
+    @Test
+    void snapshotDeploymentCoordinateAliasesCannotBothBeSupplied() throws Exception {
+        Path graph = writeGraph();
+        var mixed = run(Stream.concat(Stream.of(provisionArgs(graph, 0)),
+                Stream.of("--deployment-id", "deployment-a")).toArray(String[]::new));
+        assertEquals(2, mixed.status());
+        assertTrue(mixed.err().contains("not both"), mixed.err());
+        assertTrue(mixed.err().contains("--deployment-id"), mixed.err());
+        assertTrue(mixed.err().contains("--snapshot-deployment-id"), mixed.err());
+    }
+
+    @Test
     void theRunbookProvisionsShowsAndRevokesInThatOrder() throws Exception {
         Path graph = writeGraph();
 
@@ -153,7 +194,7 @@ class EmbedRegistrationCliTest {
                 "--expected-revision", "0", "--graphml", graph.toString(), "--graph-id", "graph-a",
                 "--graph-version-id", "v1", "--snapshot-state", "retired", "--issuer",
                 "https://issuer.example", "--subject", "workload-1", "--parent-origin",
-                "https://parent.example", "--resource-id", "resource-a", "--deployment-id",
+                "https://parent.example", "--resource-id", "resource-a", "--snapshot-deployment-id",
                 "deployment-a", "--deployment-version", "1", "--policy-revision", "policy-1",
                 "--gate-deployment", "true", "--gate-provenance", "true", "--gate-classification", "true", "--gate-retention", "true", "--gate-dsr-suppression", "true", "--gate-takedown", "true", "--gate-eea", "true");
         assertEquals(2, retired.status());
@@ -165,7 +206,7 @@ class EmbedRegistrationCliTest {
                 "--expected-revision", "0", "--graphml", graph.toString(), "--graph-id", "graph-a",
                 "--graph-version-id", "v1", "--issuer", "https://issuer.example", "--subject",
                 "workload-1", "--parent-origin", "https://parent.example", "--resource-id",
-                "resource-a", "--deployment-id", "deployment-a", "--deployment-version", "1",
+                "resource-a", "--snapshot-deployment-id", "deployment-a", "--deployment-version", "1",
                 "--policy-revision", "policy-1",
                 "--gate-deployment", "true", "--gate-provenance", "true", "--gate-classification", "true", "--gate-retention", "true", "--gate-dsr-suppression", "true", "--gate-takedown", "true", "--gate-eea", "true");
         assertEquals(2, missing.status());
@@ -261,7 +302,7 @@ class EmbedRegistrationCliTest {
                 "--expected-revision", Long.toString(expectedRevision), "--graphml", graph.toString(),
                 "--graph-id", "graph-a", "--graph-version-id", "v1", "--snapshot-state", "published",
                 "--issuer", "https://issuer.example", "--subject", "workload-1", "--parent-origin",
-                "https://parent.example", "--resource-id", "resource-a", "--deployment-id",
+                "https://parent.example", "--resource-id", "resource-a", "--snapshot-deployment-id",
                 "deployment-a", "--deployment-version", "1", "--policy-revision", "policy-1",
                 "--gate-deployment", "true", "--gate-provenance", "true", "--gate-classification", "true", "--gate-retention", "true", "--gate-dsr-suppression", "true", "--gate-takedown", "true", "--gate-eea", "true"};
     }
@@ -277,6 +318,14 @@ class EmbedRegistrationCliTest {
             kept.add(args[index]);
         }
         return kept.toArray(String[]::new);
+    }
+
+    private static String[] renamed(String[] args, String from, String to) {
+        String[] renamed = args.clone();
+        for (int index = 0; index < renamed.length; index++) {
+            if (renamed[index].equals(from)) renamed[index] = to;
+        }
+        return renamed;
     }
 
     private static String[] replace(String[] args, String flag, String value) {

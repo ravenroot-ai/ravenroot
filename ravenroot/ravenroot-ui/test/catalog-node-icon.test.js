@@ -40,7 +40,7 @@ describe('default Design card shapes', () => {
   });
 
   it('identifies Human Task with a person and Trace with a document glyph', () => {
-    expect(COMMON_NODE_GLYPHS).toEqual({ 'human-task': '👤', trace: '▤' });
+    expect(COMMON_NODE_GLYPHS).toEqual({ 'human-task': '👤', trace: '▤', workspace: '▣' });
     expect(Object.values(COMMON_NODE_GLYPHS)).not.toContain('⇢');
     expect(Object.values(COMMON_NODE_GLYPHS)).not.toContain('♙');
   });
@@ -68,7 +68,7 @@ describe('catalogNodeIcon', () => {
     expect(catalogNodeIcon({ visualType: 'actor' }, NODE_ICONS)).toBe('◉ ');
   });
 
-  it('falls back to the bullet placeholder for an unmapped type', () => {
-    expect(catalogNodeIcon({ visualType: 'unknown-future-type' }, NODE_ICONS)).toBe('•');
+  it('falls back to a stable visible initial for an unmapped type', () => {
+    expect(catalogNodeIcon({ visualType: 'unknown-future-type' }, NODE_ICONS)).toBe('U');
   });
 });

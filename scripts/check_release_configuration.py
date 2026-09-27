@@ -144,6 +144,11 @@ def check_workflows() -> None:
         raise ValueError(
             f"OCI, Central, and GitHub Release reconciliation tests must run in {contracts_job}"
         )
+    if "python3 -m unittest scripts.tests.test_github_release" not in block:
+        raise ValueError(
+            f"the GitHub Release step rehearsal must run in {contracts_job}: it is the only place "
+            "that step is exercised before a release depends on it"
+        )
     if "python3 -m unittest scripts.tests.test_extension_pack" not in block:
         raise ValueError(f"the extension-pack membership contract must run in {contracts_job}")
 
@@ -187,6 +192,7 @@ def check_workflows() -> None:
         "python3 -m unittest scripts.tests.test_release_registries -v",
         "SOURCE_DATE_EPOCH",
         "image_digest",
+        "docker login ghcr.io",
         "push-to-registry: true",
         "image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8",
         'test "$version" = v0.32.2',

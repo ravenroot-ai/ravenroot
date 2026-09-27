@@ -22,6 +22,7 @@ export const NODE_VISUAL_TYPES = Object.freeze([
   { type: 'agent', label: 'Agent' }, { type: 'flow', label: 'Flow' },
   { type: 'actor', label: 'Actor' }, { type: 'system', label: 'System' },
   { type: 'trace', label: 'Trace' }, { type: 'human-task', label: 'Human task' },
+  { type: 'workspace', label: 'Workspace' },
 ].map(Object.freeze));
 
 const NODE_VISUAL_TYPE_NAMES = new Set(NODE_VISUAL_TYPES.map(entry => entry.type));
@@ -322,8 +323,9 @@ export function setGraphPresentation(graph, { renderMode, layoutMode, designArra
   graph.graphProperties = { ...(graph.graphProperties || {}) };
   if (renderMode != null) graph.graphProperties[GRAPH_RENDER_MODE_PROPERTY] = String(renderMode);
   if (layoutMode != null) graph.graphProperties[GRAPH_LAYOUT_MODE_PROPERTY] = String(layoutMode);
-  if (designArrangement != null) {
-    graph.graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY] = String(designArrangement);
+  if (designArrangement !== undefined) {
+    if (designArrangement == null) delete graph.graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY];
+    else graph.graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY] = String(designArrangement);
   }
   return graph;
 }

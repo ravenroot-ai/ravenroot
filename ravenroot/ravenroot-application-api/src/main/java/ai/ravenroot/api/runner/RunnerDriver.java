@@ -8,10 +8,26 @@ import java.util.concurrent.CompletionStage;
  */
 public interface RunnerDriver extends AutoCloseable {
     /**
+     * Fails closed when the selected substrate cannot currently admit attested work.
+     * Implementations may use bounded read-only observations; success grants no job authority.
+     */
+    default void verifyAvailability() { }
+    /**
      * Returns enforceable capabilities, not a grant of control-plane approval.
      * @return exact tenant-scoped runner advertisement
      */
     RunnerRegistration registration();
+    /**
+     * Installed immutable runtime profile names; an empty set cannot receive explicit Workspace work.
+     * @return operator-installed profile identifiers, not image names or graph-provided grants
+     */
+    default java.util.Set<String> runtimeProfiles() { return java.util.Set.of(); }
+    /**
+     * Adds an observed physical identity to a heartbeat without granting execution authority.
+     * @param assignment current accepted fenced assignment
+     * @return the same logical assignment with bounded physical observations
+     */
+    default RunnerAssignment observe(RunnerAssignment assignment) { return assignment; }
     /**
      * Executes once under the accepted live execution fence and seals a quiescent result.
      * @param assignment authenticated claimed job; never an unknown or report-only job
@@ -24,6 +40,14 @@ public interface RunnerDriver extends AutoCloseable {
      * @return acknowledgement after stopping, or failure if quiescence is unproven
      */
     CompletionStage<Void> cancel(RunnerAssignment assignment);
+    /**
+     * Stops a resource under its sticky control-plane stop request, including an idle runtime.
+     * @param assignment accepted resource ownership carrying a sticky stop request
+     * @return physical stop acknowledgement, or failure preserving unknown ownership
+     */
+    default CompletionStage<Void> stopWorkspace(RunnerAssignment assignment) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new UnsupportedOperationException("Workspace stop is not supported"));
+    }
     /**
      * Retrieves sealed evidence, or fails unknown. Must not repeat work to manufacture a result.
      * @param assignment authenticated job with current report-only authority

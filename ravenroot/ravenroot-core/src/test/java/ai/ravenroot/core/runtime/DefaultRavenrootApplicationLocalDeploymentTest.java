@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,7 +76,8 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
 
     @Test
     void durableRegistrationKeepsTheLocalAliasButPublishesTheAuthorityIdentity() {
-        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+        var monitor = new ExecutionMonitor();
+        var application = application(new SameThreadExecutionEngine(), monitor,
                 new RecordingSourceBehavior());
         try {
             DeploymentId authorityId = DeploymentId.of("registry-42");
@@ -90,6 +92,16 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
                     target.observe().toCompletableFuture().join().state());
             assertTrue(application.localDeploymentTargets()
                     .resolve(TENANT_A.tenantId(), DeploymentId.of("friendly-name")).isEmpty());
+
+            var view = application.localDeploymentView("tenant-a", "friendly-name").orElseThrow();
+            var execution = new ExecutionMonitor.ExecutionIdentity(TENANT_A, authorityId.value(),
+                    view.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), authorityId.value(), null);
+            monitor.executionStarted(execution);
+            var observed = application.localDeploymentEventsAfter("tenant-a", "friendly-name",
+                    view.source().incarnationId(), view.source().graphVersion(), 0);
+            assertEquals(1, observed.events().size());
+            assertEquals(execution.traversalId(), observed.events().getFirst().traversalId());
         } finally {
             application.close();
         }
@@ -160,6 +172,51 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
     }
 
     @Test
+    void durableUndeployRemovesTheLocalRuntimeButRetainsTerminalReplay() {
+        var clock = java.time.Clock.systemUTC();
+        var behavior = new ReleaseDistinguishingSourceBehavior();
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(), behavior);
+        var registry = new ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry(
+                clock, tenant -> DeploymentId.of("authority-" + tenant));
+        var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(
+                registry, application.localDeploymentTargets(),
+                new ai.ravenroot.core.deployment.DeploymentSingleFlight(),
+                ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING, "owner",
+                Duration.ofMinutes(1), Duration.ofSeconds(1), clock);
+        var control = new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
+                application, registry, coordinator, clock);
+        try {
+            control.register(TENANT_A, "removed", SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8));
+            control.submit("tenant-a", "removed",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Start(
+                            "start", 1, ai.ravenroot.api.deployment.registry.DeploymentRegistry
+                            .UpdateStrategy.STOP_FIRST),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(0));
+
+            var command = new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Undeploy(
+                    "remove", ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Undeploy
+                    .Disposition.CANCEL_IN_FLIGHT, "retired");
+            var removed = control.submit("tenant-a", "removed", command,
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(1)).orElseThrow();
+            assertTrue(removed instanceof ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Terminal);
+            assertTrue(application.localDeployment("tenant-a", "removed").isEmpty());
+            assertEquals(List.of("start", "stop", "shutdown"), behavior.lifecycle,
+                    "authority termination uses restartable stop, then local removal pays the terminal release");
+
+            var replay = control.submit("tenant-a", "removed", command,
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(1)).orElseThrow();
+            assertTrue(replay instanceof ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Replayed);
+            assertEquals(List.of("start", "stop", "shutdown"), behavior.lifecycle,
+                    "terminal replay must not release the local runtime twice");
+            assertThrows(IllegalStateException.class, () -> control.register(
+                    TENANT_A, "removed", SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8)));
+        } finally {
+            control.close();
+            application.close();
+        }
+    }
+
+    @Test
     void missingDurableHumanTaskCapabilityRefusesLocalAdmissionBeforeRegistration() {
         var engine = new SameThreadExecutionEngine();
         var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
@@ -171,6 +228,190 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             assertTrue(application.localDeployments(TENANT_A.tenantId()).isEmpty(),
                     "capability refusal must happen before deployment registration has a side effect");
         } finally {
+            application.close();
+        }
+    }
+
+    @Test
+    void viewerSourceIsTenantScopedFilteredBoundedAndRejectsRedeploymentAba() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var application = application(new SameThreadExecutionEngine(), monitor, new RecordingSourceBehavior());
+        try {
+            application.registerLocalDeployment(TENANT_A, "observed", graph(NO_SOURCE_GRAPH));
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "observed"),
+                    "a cold registration has no successfully opened immutable definition yet");
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "observed")));
+            var first = application.localDeploymentView("tenant-a", "observed").orElseThrow();
+            assertEquals("observed", first.source().deploymentId());
+            assertEquals(first.source().graphVersion(), first.projection().graphVersionId());
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-b", "observed"),
+                    "a sibling tenant must be indistinguishable from an unknown deployment");
+
+            String publishedDeploymentId = "observed";
+            var accepted = new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
+                    first.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), publishedDeploymentId, null);
+            var sibling = new ExecutionMonitor.ExecutionIdentity(TENANT_B, publishedDeploymentId,
+                    first.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), publishedDeploymentId, null);
+            var wrongVersion = new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
+                    "wrong-version", java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), publishedDeploymentId, null);
+            monitor.executionStarted(sibling);
+            monitor.executionStarted(wrongVersion);
+            monitor.executionStarted(accepted);
+
+            var page = application.localDeploymentEventsAfter("tenant-a", "observed",
+                    first.source().incarnationId(), first.source().graphVersion(), 0);
+            assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.AVAILABLE, page.status());
+            assertEquals(1, page.events().size(),
+                    "tenant and version filters must run before an adapter receives the page");
+            assertEquals(accepted.traversalId(), page.events().getFirst().traversalId());
+
+            var staleDeliveries = new AtomicInteger();
+            AutoCloseable staleSubscription = application.subscribeToLocalDeploymentEvents(
+                    "tenant-a", "observed", first.source().incarnationId(),
+                    first.source().graphVersion(), ignored -> staleDeliveries.incrementAndGet());
+            command(application.undeployLocalDeployment("tenant-a", "observed"));
+            application.registerLocalDeployment(TENANT_A, "observed", graph(NO_SOURCE_GRAPH));
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "observed"));
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "observed")));
+            var replacement = application.localDeploymentView("tenant-a", "observed").orElseThrow();
+            assertEquals(first.canonicalDigest(), replacement.canonicalDigest(), "the bytes are intentionally equal");
+            assertNotEquals(first.source().incarnationId(), replacement.source().incarnationId(),
+                    "an identical-byte replacement must still be a new authority incarnation");
+            assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.SOURCE_CHANGED,
+                    application.localDeploymentEventsAfter("tenant-a", "observed",
+                            first.source().incarnationId(), first.source().graphVersion(), 0).status());
+
+            monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
+                    replacement.source().graphVersion(), java.util.UUID.randomUUID(),
+                    java.util.UUID.randomUUID(), java.util.Map.of(), publishedDeploymentId, null));
+            assertEquals(0, staleDeliveries.get(),
+                    "incarnation A listener must not receive identical-byte incarnation B events");
+            staleSubscription.close();
+
+            for (int index = 0; index < 2_050; index++) {
+                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
+                        replacement.source().graphVersion(), java.util.UUID.randomUUID(),
+                        java.util.UUID.randomUUID(), java.util.Map.of(), publishedDeploymentId, null));
+            }
+            assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.GAP,
+                    application.localDeploymentEventsAfter("tenant-a", "observed",
+                            replacement.source().incarnationId(), replacement.source().graphVersion(), 1).status(),
+                    "a cursor older than the bounded ring must produce an explicit gap");
+        } finally {
+            application.close();
+        }
+    }
+
+    @Test
+    void viewerSourceRemainsPinnedAndObservableAcrossASlowRestart() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var behavior = new ConfigurableSourceBehavior();
+        var application = application(new SameThreadExecutionEngine(), monitor, behavior);
+        var release = new CountDownLatch(1);
+        try {
+            application.registerLocalDeployment(TENANT_A, "restarting-view", graph(SOURCE_GRAPH));
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "restarting-view")));
+            var published = application.localDeploymentView("tenant-a", "restarting-view").orElseThrow();
+            var deliveries = new AtomicInteger();
+            try (var observation = application.subscribeToLocalDeploymentEvents(
+                    "tenant-a", "restarting-view", published.source().incarnationId(),
+                    published.source().graphVersion(), ignored -> deliveries.incrementAndGet())) {
+                assertEquals(LocalDeploymentState.STOPPED,
+                        command(application.stopLocalDeployment("tenant-a", "restarting-view")));
+
+                var entered = new CountDownLatch(1);
+                behavior.beforeStart = () -> {
+                    entered.countDown();
+                    try {
+                        release.await(20, TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                };
+                CompletionStage<Optional<LocalDeploymentStatus>> starting =
+                        application.startLocalDeployment(TENANT_A, "restarting-view");
+                assertTrue(entered.await(20, TimeUnit.SECONDS), "the restart must actually be in flight");
+
+                var duringRestart = application.localDeploymentView(
+                        "tenant-a", "restarting-view").orElseThrow();
+                assertEquals(published.source(), duringRestart.source(),
+                        "restart must not mint a new source binding");
+                assertEquals(published.canonicalDigest(), duringRestart.canonicalDigest());
+                assertEquals(LocalDeploymentState.STARTING, duringRestart.lifecycle());
+                assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.AVAILABLE,
+                        application.localDeploymentEventsAfter("tenant-a", "restarting-view",
+                                published.source().incarnationId(), published.source().graphVersion(), 0).status(),
+                        "an established observation must not be terminally invalidated during restart");
+
+                release.countDown();
+                assertEquals(LocalDeploymentState.READY,
+                        starting.toCompletableFuture().get(30, TimeUnit.SECONDS).orElseThrow().state());
+                var restarted = application.localDeploymentView(
+                        "tenant-a", "restarting-view").orElseThrow();
+                assertEquals(published.source(), restarted.source());
+                assertEquals(LocalDeploymentState.READY, restarted.lifecycle());
+
+                String publishedDeploymentId = "restarting-view";
+                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
+                        restarted.source().graphVersion(), java.util.UUID.randomUUID(),
+                        java.util.UUID.randomUUID(), java.util.Map.of(), publishedDeploymentId, null));
+                assertEquals(1, deliveries.get(),
+                        "the pre-restart filtered subscription must remain bound after READY returns");
+
+                assertEquals(LocalDeploymentState.STOPPED,
+                        command(application.stopLocalDeployment("tenant-a", "restarting-view")));
+                behavior.beforeStart = () -> { };
+                behavior.failNextStart = true;
+                assertEquals(LocalDeploymentState.FAILED,
+                        command(application.startLocalDeployment(TENANT_A, "restarting-view")));
+                var failedRestart = application.localDeploymentView(
+                        "tenant-a", "restarting-view").orElseThrow();
+                assertEquals(published.source(), failedRestart.source());
+                assertEquals(LocalDeploymentState.FAILED, failedRestart.lifecycle(),
+                        "a failed replacement runtime is lifecycle state, not source invalidation");
+            }
+        } finally {
+            release.countDown();
+            application.close();
+        }
+    }
+
+    @Test
+    void viewerSourceIsUnavailableDuringTheFirstSlowStart() throws Exception {
+        var behavior = new ConfigurableSourceBehavior();
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(), behavior);
+        var release = new CountDownLatch(1);
+        try {
+            application.registerLocalDeployment(TENANT_A, "first-start", graph(SOURCE_GRAPH));
+            var entered = new CountDownLatch(1);
+            behavior.beforeStart = () -> {
+                entered.countDown();
+                try {
+                    release.await(20, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            };
+            CompletionStage<Optional<LocalDeploymentStatus>> starting =
+                    application.startLocalDeployment(TENANT_A, "first-start");
+            assertTrue(entered.await(20, TimeUnit.SECONDS), "the first start must actually be in flight");
+            assertEquals(LocalDeploymentState.STARTING,
+                    application.localDeployment("tenant-a", "first-start").orElseThrow().state());
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "first-start"),
+                    "STARTING alone cannot publish a definition that has never reached READY");
+
+            release.countDown();
+            assertEquals(LocalDeploymentState.READY,
+                    starting.toCompletableFuture().get(30, TimeUnit.SECONDS).orElseThrow().state());
+            assertTrue(application.localDeploymentView("tenant-a", "first-start").isPresent());
+        } finally {
+            release.countDown();
             application.close();
         }
     }

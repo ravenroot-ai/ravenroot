@@ -137,8 +137,8 @@ class RateLimitDeploymentConfigurationContractTest {
         String nestedShadowOnly = addPrecedingRootShadow(missingDirect);
         assertThrows(AssertionError.class, () -> rateSchema(nestedShadowOnly, settings));
         String duplicateDirect = replaceOne(schema,
-                "  \"properties\": {\n    \"replicaCount\"",
-                "  \"properties\": {\n    \"rateLimit\": {},\n    \"replicaCount\"");
+                "\n  \"properties\": {\n",
+                "\n  \"properties\": {\n    \"rateLimit\": {},\n");
         assertThrows(IllegalStateException.class, () -> rateSchema(duplicateDirect, settings));
 
         String precedingNestedShadow = addPrecedingRootShadow(schema);
@@ -393,8 +393,8 @@ class RateLimitDeploymentConfigurationContractTest {
 
     private static String addPrecedingRootShadow(String schema) {
         return replaceOne(schema,
-                "  \"properties\": {\n    \"replicaCount\"",
-                "  \"properties\": {\n    \"shadow\": {\"rateLimit\": {}},\n    \"replicaCount\"");
+                "\n  \"properties\": {\n",
+                "\n  \"properties\": {\n    \"shadow\": {\"rateLimit\": {}},\n");
     }
 
     private static Map<String, String> yamlScalars(String yaml) {

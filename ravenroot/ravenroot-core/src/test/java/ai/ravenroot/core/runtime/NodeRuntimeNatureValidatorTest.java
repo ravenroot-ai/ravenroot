@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NodeRuntimeNatureValidatorTest {
 
     private static final String WORKER_ONLY = "worker-only";
+    private static final String LEGACY_WORKER = "legacy-worker";
     private static final String CHOICE = "worker-or-source";
     private static final String AUTHORITY_BY_DEFAULT = "authority-by-default";
 
@@ -52,6 +53,13 @@ class NodeRuntimeNatureValidatorTest {
     @Test
     void admitsAChoiceTheCatalogPermits() {
         assertDoesNotThrow(() -> validator.validate(graph(CHOICE, nature("SOURCE"))));
+    }
+
+    @Test
+    void admitsTraversalForALegacyWorkerDescriptor() {
+        assertDoesNotThrow(() -> validator.validate(graph(LEGACY_WORKER, nature("TRAVERSAL"))));
+        assertEquals(NodeRuntimeNatureException.Reason.NATURE_NOT_PERMITTED,
+                refusal(graph(WORKER_ONLY, nature("TRAVERSAL"))).reason());
     }
 
     // ------------------------------------------------------------------ the escalation refusal
@@ -263,8 +271,11 @@ class NodeRuntimeNatureValidatorTest {
 
     private static BehaviorRegistry registry() {
         return new BehaviorRegistry()
-                // Says nothing about nature: every descriptor in the real catalog looks like this.
+                // Explicit allowlist keeps this fixture genuinely worker-only.
                 .registerFactory(factory(new NodeTypeDescriptor(WORKER_ONLY, "Worker only", "Test",
+                        "d", "actor", false, List.of(), Set.of(), NodeRuntimeNature.WORKER,
+                        Set.of(NodeRuntimeNature.WORKER))))
+                .registerFactory(factory(new NodeTypeDescriptor(LEGACY_WORKER, "Legacy worker", "Test",
                         "d", "actor", false, List.of(), Set.of())))
                 .registerFactory(factory(new NodeTypeDescriptor(CHOICE, "Choice", "Test", "d", "actor",
                         false, List.of(), Set.of(), NodeRuntimeNature.WORKER,

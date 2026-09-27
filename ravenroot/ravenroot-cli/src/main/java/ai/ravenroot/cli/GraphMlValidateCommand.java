@@ -2,6 +2,7 @@ package ai.ravenroot.cli;
 
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphMlProfileReport;
+import ai.ravenroot.core.graph.RegisterMachineProfile;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -51,14 +52,19 @@ final class GraphMlValidateCommand {
     }
 
     static int run(String[] args, PrintStream output, PrintStream errors) {
-        if (args.length != 2) {
-            errors.println("Usage: ravenroot validate <graph.graphml>");
+        boolean registerMachine = args.length == 3 && "--register-machine".equals(args[1]);
+        if (args.length != 2 && !registerMachine) {
+            errors.println("Usage: ravenroot validate [--register-machine] <graph.graphml>");
             return 2;
         }
-        return run(Path.of(args[1]), output, errors);
+        return run(Path.of(args[registerMachine ? 2 : 1]), output, errors, registerMachine);
     }
 
     static int run(Path file, PrintStream output, PrintStream errors) {
+        return run(file, output, errors, false);
+    }
+
+    private static int run(Path file, PrintStream output, PrintStream errors, boolean registerMachine) {
         byte[] bytes;
         try {
             bytes = Files.readAllBytes(file);
@@ -97,7 +103,27 @@ final class GraphMlValidateCommand {
         }
         output.println("verdict=accepted");
         print(report, output);
+        if (registerMachine) {
+            RegisterMachineProfile.Report profile;
+            try (var manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(bytes))) {
+                profile = RegisterMachineProfile.validate(manager.definition());
+            }
+            output.println("register-machine-profile=" + RegisterMachineProfile.VERSION);
+            output.println("register-machine-verdict=" + (profile.conforms() ? "accepted" : "invalid"));
+            for (var diagnostic : profile.errors()) printDiagnostic("error", diagnostic, output);
+            for (var diagnostic : profile.warnings()) printDiagnostic("warning", diagnostic, output);
+            output.println("register-machine-diagnostics-truncated=" + profile.truncated());
+            if (!profile.conforms()) return 1;
+        }
         return 0;
+    }
+
+    private static void printDiagnostic(String severity, RegisterMachineProfile.Diagnostic diagnostic,
+                                        PrintStream output) {
+        output.println("register-machine-" + severity
+                + " code=" + diagnostic.code()
+                + " location=" + RavenrootCli.sanitizeForConsole(diagnostic.location())
+                + " message=" + RavenrootCli.sanitizeForConsole(diagnostic.message()));
     }
 
     private static void print(GraphMlProfileReport report, PrintStream output) {

@@ -10,6 +10,7 @@ import ai.ravenroot.api.catalog.NodeRetryProperty;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.EdgeTraversalEventData;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.provenance.SyntheticProvenance;
@@ -939,10 +940,10 @@ public final class GraphRunner implements AutoCloseable {
         var residents = new LinkedHashMap<String, NodeRef>();
         graph.nodes().forEach(node -> {
             NodeRuntimeNature nature = NodeRuntimeNatureProperty.effectiveNature(
-                    node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node.behavior()).orElse(null) : null,
+                    node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node).orElse(null) : null,
                     node.properties());
             NodeTypeDescriptor descriptor = node.kind() == NodeKind.BEHAVIOR
-                    ? behaviors.descriptor(node.behavior()).orElse(null) : null;
+                    ? behaviors.descriptor(node).orElse(null) : null;
             int maxConcurrency = NodeRuntimeMaxConcurrencyProperty.effectiveValue(descriptor, node.properties());
             RavenNode runtime = runtimeNode(node);
             // Read once, here, from the same pinned definition every other precomputation reads, and
@@ -1012,7 +1013,7 @@ public final class GraphRunner implements AutoCloseable {
             if (node.kind() != NodeKind.BEHAVIOR || node.behavior() == null) {
                 return;
             }
-            behaviors.descriptor(node.behavior())
+            behaviors.descriptor(node)
                     .ifPresent(descriptor -> keys.put(node.id(), descriptor.behavior()));
         });
         return Map.copyOf(keys);
@@ -1249,8 +1250,8 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(action, "action");
         java.util.Objects.requireNonNull(effectCompletion, "effectCompletion");
         GraphNode node = graph.node(nodeId);
-        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
-                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var identity = durableReentryIdentity(security, processInstanceId, traversalId, graphVersion,
+                recorder);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
@@ -1445,8 +1446,8 @@ public final class GraphRunner implements AutoCloseable {
                                                        UUID terminalEventId) {
         java.util.Objects.requireNonNull(result, "result");
         GraphNode node = graph.node(nodeId);
-        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
-                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var identity = durableReentryIdentity(security, processInstanceId, traversalId, graphVersion,
+                recorder);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
@@ -1622,8 +1623,8 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalArgumentException(
                     "the invocation a hold sat behind is not in traversal " + traversalId));
         }
-        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
-                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var identity = durableReentryIdentity(security, processInstanceId, traversalId, graphVersion,
+                recorder);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
@@ -1703,6 +1704,18 @@ public final class GraphRunner implements AutoCloseable {
         } else {
             monitor.executionFailed(identity, outcome);
         }
+    }
+
+    /** Restores deployment observability from the durable process inventory for every re-entry. */
+    private ExecutionMonitor.ExecutionIdentity durableReentryIdentity(SecurityContext security,
+                                                                       UUID processInstanceId,
+                                                                       UUID traversalId,
+                                                                       String graphVersion,
+                                                                       ExecutionRecorder recorder) {
+        ExecutionOrigin origin = recorder.origin();
+        return new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
+                processInstanceId, traversalId, nodeCatalogKeys,
+                origin.deploymentId().orElse(null), origin.workloadId().orElse(null));
     }
 
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {
@@ -2791,7 +2804,7 @@ public final class GraphRunner implements AutoCloseable {
         NodeMessage delivered = new NodeMessage(identity.security(), identity.processInstanceId(),
                 identity.traversalId(), invocationId, attemptId, parentInvocationIds, node.id(), payload, attributes,
                 command);
-        if ("workspace-agent".equals(node.behavior()) && behaviors.runnerJobs() != null) {
+        if (("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null) {
             behaviors.runnerJobs().bindLive(attemptId, state.recorder, this, startedEventId);
         }
         // ADR 0024 §3's dispatch sequence, and the one place demand-driven workers change each message:
@@ -3658,7 +3671,7 @@ public final class GraphRunner implements AutoCloseable {
                 // payload -- which is right, because a bypass does not change the payload and so
                 // cannot invalidate a claim made about it upstream.
                 && !authoredBypassNodes.contains(node.id())
-                ? behaviors.descriptor(node.behavior())
+                ? behaviors.descriptor(node)
                 : Optional.empty();
         Optional<Map<String, Object>> marker = descriptor
                 .flatMap(entry -> SyntheticProvenance.mint(node.id(), entry, result.payload()))
@@ -4305,9 +4318,9 @@ public final class GraphRunner implements AutoCloseable {
                             message.attributes()));
                 }
                 if (message.command().directive() == NodeDirective.APPLICATION) {
-                    boolean admitted = "workspace-agent".equals(node.behavior()) && behaviors.runnerJobs() != null
+                    boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
                             ? behaviors.runnerJobs().declaresCommand(message.security().tenantId(), node, message.command().name())
-                            : behaviors.descriptor(node.behavior())
+                            : behaviors.descriptor(node)
                             .map(descriptor -> descriptor.commands().contains(message.command().name()))
                             .orElse(false);
                     if (!admitted) {
@@ -4357,12 +4370,7 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(executionLimits, "executionLimits");
         java.util.function.Predicate<GraphNode> requiresCurrentAdmission =
                 node -> !node.id().equals(completedHumanTaskNode);
-        new BehaviorPropertySchema(behaviors).validate(graph, requiresCurrentAdmission);
-        new BehaviorCapabilityPreflight(behaviors).validate(graph, requiresCurrentAdmission);
-        new NodeRuntimeNatureValidator(behaviors).validate(graph);
-        new NodeBypassValidator().validate(graph);
-        new NodeRuntimeConcurrencyValidator(behaviors).validate(graph);
-        new GraphComplexityAdmission(behaviors, executionLimits).validate(graph);
+        new GraphAdmissionValidator(behaviors, executionLimits).validateLegacy(graph, requiresCurrentAdmission);
     }
 
     private static String validateCompletedHumanTaskNode(GraphDefinition graph, String nodeId) {
@@ -4422,9 +4430,9 @@ public final class GraphRunner implements AutoCloseable {
             GraphNode node = graph.node(current.nodeId());
             if (node.kind() == NodeKind.BEHAVIOR
                     && current.command().directive() == NodeDirective.APPLICATION) {
-                boolean admitted = "workspace-agent".equals(node.behavior()) && behaviors.runnerJobs() != null
+                boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
                         ? behaviors.runnerJobs().declaresCommand(null, node, current.command().name())
-                        : behaviors.descriptor(node.behavior())
+                        : behaviors.descriptor(node)
                         .map(descriptor -> descriptor.commands().contains(current.command().name()))
                         .orElse(false);
                 if (!admitted) {

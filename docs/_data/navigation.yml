@@ -25,6 +25,12 @@
       url: /user-guide/human-task-confirmations.html
     - title: Governed agents and runners
       url: /operator-guide/governed-runners.html
+    - title: Kubernetes-native runners
+      url: /operator-guide/kubernetes-runners.html
+    - title: Disposable Agent example repository
+      url: /examples/governed-runner/disposable-repository/
+    - title: Register Machine example library
+      url: /examples/register-machine/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -40,6 +46,8 @@
       url: /operator-guide/identity-browser.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
+    - title: Global lifecycle console
+      url: /operator-guide/lifecycle-console.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle
@@ -48,6 +56,8 @@
       url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations
       url: /operator-guide/embed-operations.html
+    - title: Human Task operations
+      url: /operator-guide/human-tasks.html
 
 - title: Integrator guide
   items:
@@ -67,6 +77,8 @@
       url: /integrator-guide/ai-programs.html
     - title: Governed runner protocol
       url: /integrator-guide/runner-protocol.html
+    - title: Workspace acceptance evidence
+      url: /integrator-guide/workspace-acceptance.html
 
 - title: Architecture and security
   items:
@@ -88,6 +100,10 @@
       url: /architecture/execution-results.html
     - title: AI, programs, and extensions
       url: /architecture/ai-extension-boundaries.html
+    - title: Finite automata v1 contract
+      url: /architecture/finite-automata-v1.html
+    - title: Finite-automata program evidence
+      url: /examples/finite-automata/
     - title: Embedded projection security model
       url: /architecture/embed-security-model.html
     - title: Security guide
@@ -109,6 +125,8 @@
       url: /reference/
     - title: GraphML profile
       url: /reference/graphml.html
+    - title: Register Machine Profile v1
+      url: /reference/register-machine-profile.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
     - title: Core node reference
@@ -203,6 +221,8 @@
       url: /troubleshooting/ai-extensions.html
     - title: Embed access, backup, and recovery
       url: /troubleshooting/embed-backup.html
+    - title: Human Tasks
+      url: /troubleshooting/human-tasks.html
 
 - title: Contributing and governance
   items:
@@ -210,6 +230,8 @@
       url: /developer-guide/
     - title: Build, harness, and tests
       url: /developer-guide/build-test.html
+    - title: Embedded-viewer parity evidence
+      url: /developer-guide/embed-viewer-verification.html
     - title: Extensions and adapters
       url: /developer-guide/extension-development.html
     - title: API, documentation, and releases
@@ -218,6 +240,8 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.5.0-alpha.1 release notes
+      url: /releases/v0.5.0-alpha.1.html
     - title: Ravenroot 0.4.1-alpha.1 release notes
       url: /releases/v0.4.1-alpha.1.html
     - title: Ravenroot 0.4.0-alpha.1 release notes

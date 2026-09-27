@@ -70,6 +70,10 @@ public final class RavenrootCliMain {
             System.exit(runRemote(parsed, args));
             return;
         }
+        if (args.length > 0 && args[0].equals("runner")) {
+            System.err.println("runner operations require --server and an operator token");
+            System.exit(1); return;
+        }
         var embeddedRuntime = embeddedRuntime(System.getenv(), ExecutionEngines::create);
         try (var engine = embeddedRuntime.engine()) {
             // Same operator-named node packages as the server, same prohibition — the
@@ -229,6 +233,8 @@ public final class RavenrootCliMain {
             // bounded enough that a CLI invocation never hangs indefinitely on a stalled connection.
             var backend = new ai.ravenroot.cli.remote.RemoteBackend(
                     java.net.URI.create(options.serverUrl()).normalize(), token, java.time.Duration.ofSeconds(10));
+            if (commandArgs.length > 0 && commandArgs[0].equals("runner"))
+                return RunnerPlaneCommand.run(commandArgs, backend, System.out, System.err);
             return new RavenrootCli(backend, System.out, System.err).run(commandArgs);
         } catch (RuntimeException | java.io.IOException failure) {
             System.err.println("Error: " + RavenrootCli.sanitizeForConsole(failure.getMessage()));

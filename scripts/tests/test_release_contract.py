@@ -334,13 +334,14 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
         self,
         *,
         promoted_dev: str | None = None,
+        merge_commit: str | None = None,
         labels: tuple[str, ...] = ("release:minor",),
         base_ref: str = "main",
         head_ref: str = "dev",
         repository: str = "ravenroot-ai/ravenroot",
     ):
         return [{
-            "merge_commit_sha": self.base,
+            "merge_commit_sha": merge_commit or self.base,
             "merged_at": "2026-09-27T00:00:00Z",
             "base": {"ref": base_ref},
             "head": {
@@ -439,6 +440,8 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
             self.prior_promotion(base_ref="develop"),
             self.prior_promotion(head_ref="feature/recovery"),
             self.prior_promotion(repository="foreign/ravenroot"),
+            self.prior_promotion(merge_commit="foreign-main"),
+            self.prior_promotion(labels=()),
             self.prior_promotion(labels=("release:patch",)),
             self.prior_promotion(labels=("release:minor", "release:patch")),
             self.prior_promotion() * 2,
@@ -623,6 +626,12 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
             )
             self.assertEqual(0, authorization.returncode, authorization.stderr)
             self.assertEqual("v0.5.0-alpha.1", json.loads(authorization.stdout)["tag"])
+            missing_authorization = self.contract(
+                fixture, "authorize-main", "--before", prepared_main, "--head", synthetic,
+                "--prs-json", str(current_path),
+            )
+            self.assertNotEqual(0, missing_authorization.returncode)
+            self.assertIn("requires prior promotion evidence", missing_authorization.stderr)
 
             self.git(
                 fixture, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
@@ -634,6 +643,18 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
             )
             self.assertNotEqual(0, already_tagged.returncode)
             self.assertIn("already exists", already_tagged.stderr)
+            pre_promotion_tagged = self.contract(
+                fixture, "check-promotion", "--base", prepared_main, "--head", synthetic,
+                "--labels", '["release:minor"]', "--prior-prs-json", str(prior_path),
+            )
+            self.assertNotEqual(0, pre_promotion_tagged.returncode)
+            self.assertIn("already exists", pre_promotion_tagged.stderr)
+            missing_tag_proof = self.contract(
+                fixture, "validate-tag-authorization", "--tag", f"v{self.target}",
+                "--prs-json", str(current_path),
+            )
+            self.assertNotEqual(0, missing_tag_proof.returncode)
+            self.assertIn("requires prior promotion evidence", missing_tag_proof.stderr)
             post_tag = self.contract(
                 fixture, "validate-tag-authorization", "--tag", f"v{self.target}",
                 "--prs-json", str(current_path), "--prior-prs-json", str(prior_path),
@@ -656,6 +677,12 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
             )
             self.assertNotEqual(0, mismatched.returncode)
             self.assertIn("already exists", mismatched.stderr)
+            mismatched_post_tag = self.contract(
+                fixture, "validate-tag-authorization", "--tag", f"v{self.target}",
+                "--prs-json", str(current_path), "--prior-prs-json", str(prior_path),
+            )
+            self.assertNotEqual(0, mismatched_post_tag.returncode)
+            self.assertIn("checked-out commit differs", mismatched_post_tag.stderr)
 
 
 class PreparedRecoveryCallerTest(unittest.TestCase):

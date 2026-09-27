@@ -196,7 +196,9 @@ def release_transition(
     return matching[0]
 
 
-def check_promotion(*, base: str, head: str, labels: set[str]) -> dict[str, str]:
+def check_promotion(
+    *, base: str, head: str, labels: set[str], prior_prs_json: Path | None = None
+) -> dict[str, str]:
     """Refuse, before it merges, a promotion whose version is not the one its label authorizes.
 
     Authorization applies the same rule after the merge, when a refusal leaves a promotion merged into
@@ -214,11 +216,9 @@ def check_promotion(*, base: str, head: str, labels: set[str]) -> dict[str, str]
     findings = version_errors(new_version)
     if findings:
         raise ReleaseContractError("; ".join(findings))
-    immutable_intent = release_transition(
-        old_version=old_version,
-        new_version=new_version,
-        changed=run_git("diff", "--no-renames", "--name-only", base, head).splitlines(),
-        published=release_tags_merged_into(base),
+    immutable_intent = authorized_release_intent(
+        base=base, head=head, label_intent=label_intent, old_version=old_version,
+        new_version=new_version, prior_prs_json=prior_prs_json,
     )
     if label_intent != immutable_intent:
         raise ReleaseContractError(
@@ -237,7 +237,8 @@ def check_promotion(*, base: str, head: str, labels: set[str]) -> dict[str, str]
 
 
 def authorize_main(
-    *, before: str, head: str, prs_json: Path, allow_existing_exact_tag: bool = False
+    *, before: str, head: str, prs_json: Path, prior_prs_json: Path | None = None,
+    allow_existing_exact_tag: bool = False
 ) -> dict[str, str]:
     if run_git("rev-parse", "HEAD") != head:
         raise ReleaseContractError("the checked-out commit differs from the main push commit")
@@ -252,12 +253,10 @@ def authorize_main(
     if findings:
         raise ReleaseContractError("; ".join(findings))
 
-    changed = run_git("diff", "--no-renames", "--name-only", before, head).splitlines()
-    immutable_intent = release_transition(
-        old_version=old_version,
-        new_version=new_version,
-        changed=changed,
-        published=release_tags_merged_into(before),
+    immutable_intent = authorized_release_intent(
+        base=before, head=head, label_intent=label_intent, old_version=old_version,
+        new_version=new_version, prior_prs_json=prior_prs_json,
+        allow_existing_exact_tag=allow_existing_exact_tag,
     )
 
     if label_intent != immutable_intent:
@@ -268,19 +267,14 @@ def authorize_main(
         return {"intent": "none", "should_release": "false", "tag": ""}
 
     tag = f"v{new_version}"
-    tag_exists = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"], cwd=ROOT
-    ).returncode == 0
-    if tag_exists:
-        if not allow_existing_exact_tag:
-            raise ReleaseContractError(f"{tag} already exists and release versions are immutable")
-        if run_git("rev-parse", f"refs/tags/{tag}^{{commit}}") != head:
-            raise ReleaseContractError(f"{tag} identifies different immutable content")
+    require_target_tag_available(tag, head, allow_existing_exact_tag)
     require_release_notes(new_version)
     return {"intent": immutable_intent, "should_release": "true", "tag": tag}
 
 
-def validate_tag_authorization(tag: str, prs_json: Path) -> dict[str, str]:
+def validate_tag_authorization(
+    tag: str, prs_json: Path, prior_prs_json: Path | None = None
+) -> dict[str, str]:
     parse_tag(tag)
     head = run_git("rev-parse", f"refs/tags/{tag}^{{commit}}")
     parents = run_git("show", "-s", "--format=%P", head).split()
@@ -290,6 +284,7 @@ def validate_tag_authorization(tag: str, prs_json: Path) -> dict[str, str]:
         before=parents[0],
         head=head,
         prs_json=prs_json,
+        prior_prs_json=prior_prs_json,
         allow_existing_exact_tag=True,
     )
     if result["tag"] != tag:
@@ -338,16 +333,19 @@ def parser() -> argparse.ArgumentParser:
     authorize.add_argument("--before", required=True)
     authorize.add_argument("--head", required=True)
     authorize.add_argument("--prs-json", type=Path, required=True)
+    authorize.add_argument("--prior-prs-json", type=Path)
     validate = commands.add_parser("validate-tag")
     validate.add_argument("--tag", required=True)
     validate.add_argument("--main-ref", default="origin/main")
     tag_authorization = commands.add_parser("validate-tag-authorization")
     tag_authorization.add_argument("--tag", required=True)
     tag_authorization.add_argument("--prs-json", type=Path, required=True)
+    tag_authorization.add_argument("--prior-prs-json", type=Path)
     promotion = commands.add_parser("check-promotion")
     promotion.add_argument("--base", required=True)
     promotion.add_argument("--head", required=True)
     promotion.add_argument("--labels", required=True, help="The pull request's labels as JSON.")
+    promotion.add_argument("--prior-prs-json", type=Path)
     event = commands.add_parser("validate-event")
     event.add_argument("--event-name", required=True)
     event.add_argument("--ref-type", required=True)
@@ -361,16 +359,24 @@ def main() -> int:
     try:
         if arguments.command == "authorize-main":
             values = authorize_main(
-                before=arguments.before, head=arguments.head, prs_json=arguments.prs_json
+                before=arguments.before,
+                head=arguments.head,
+                prs_json=arguments.prs_json,
+                prior_prs_json=arguments.prior_prs_json,
             )
         elif arguments.command == "validate-tag":
             values = validate_tag(arguments.tag, arguments.main_ref)
         elif arguments.command == "check-promotion":
             values = check_promotion(
-                base=arguments.base, head=arguments.head, labels=parse_labels(arguments.labels)
+                base=arguments.base,
+                head=arguments.head,
+                labels=parse_labels(arguments.labels),
+                prior_prs_json=arguments.prior_prs_json,
             )
         elif arguments.command == "validate-tag-authorization":
-            values = validate_tag_authorization(arguments.tag, arguments.prs_json)
+            values = validate_tag_authorization(
+                arguments.tag, arguments.prs_json, arguments.prior_prs_json
+            )
         else:
             values = validate_event(
                 arguments.event_name,
@@ -384,6 +390,80 @@ def main() -> int:
     print(json.dumps(values, sort_keys=True))
     write_outputs(values)
     return 0
+
+
+def require_target_tag_available(tag: str, head: str, allow_existing_exact_tag: bool) -> None:
+    """Reject a published target, allowing only the tag that triggered its own validation."""
+    tag_exists = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"], cwd=ROOT
+    ).returncode == 0
+    if not tag_exists:
+        return
+    if not allow_existing_exact_tag:
+        raise ReleaseContractError(f"{tag} already exists and release versions are immutable")
+    if run_git("rev-parse", f"refs/tags/{tag}^{{commit}}") != head:
+        raise ReleaseContractError(f"{tag} identifies different immutable content")
+
+
+def require_prior_minor_promotion(path: Path, base: str, promoted_dev: str) -> None:
+    """Bind recovery to the exact reviewed minor promotion that prepared ``base``."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ReleaseContractError("prior associated pull requests response is not a list")
+    candidates = [
+        item for item in payload
+        if item.get("merge_commit_sha") == base and item.get("merged_at")
+        and item.get("base", {}).get("ref") == "main"
+        and item.get("head", {}).get("ref") == "dev"
+        and item.get("head", {}).get("sha") == promoted_dev
+        and item.get("head", {}).get("repo", {}).get("full_name") == "ravenroot-ai/ravenroot"
+    ]
+    if len(candidates) != 1:
+        raise ReleaseContractError("the prepared main base must map to one exact merged internal dev promotion")
+    labels = {label.get("name") for label in candidates[0].get("labels", []) if isinstance(label, dict)}
+    if sorted(RELEASE_LABELS.intersection(labels)) != ["release:minor"]:
+        raise ReleaseContractError("the prior prepared promotion must carry exactly release:minor")
+
+
+def prepared_unreleased_minor_recovery(
+    *, base: str, head: str, prior_prs_json: Path | None, allow_existing_exact_tag: bool = False
+) -> str:
+    """Authorize only an untagged minor that was already prepared by one exact main promotion."""
+    if prior_prs_json is None:
+        raise ReleaseContractError("prepared-release recovery requires prior promotion evidence")
+    published = release_tags_merged_into(base)
+    if not published:
+        raise ReleaseContractError("prepared-release recovery requires an immutable prior release")
+    previous = published[-1][0]
+    target = str(expected_next(previous, "minor"))
+    if version_at(base) != target or version_at(head) != target:
+        raise ReleaseContractError("prepared-release recovery must retain the exact expected minor version")
+    parents = run_git("show", "-s", "--format=%P", base).split()
+    if len(parents) != 2:
+        raise ReleaseContractError("prepared-release recovery base is not a main merge commit")
+    if version_at(parents[0]) != str(previous) or version_at(parents[1]) != target:
+        raise ReleaseContractError("prepared-release recovery base does not bridge the immutable minor")
+    run_git("cat-file", "-e", f"{base}:docs/releases/v{target}.md")
+    require_prior_minor_promotion(prior_prs_json, base, parents[1])
+    require_target_tag_available(f"v{target}", head, allow_existing_exact_tag)
+    return "minor"
+
+
+def authorized_release_intent(
+    *, base: str, head: str, label_intent: str, old_version: str, new_version: str,
+    prior_prs_json: Path | None, allow_existing_exact_tag: bool = False,
+) -> str:
+    published = release_tags_merged_into(base)
+    if label_intent == "minor" and old_version == new_version and published:
+        return prepared_unreleased_minor_recovery(
+            base=base, head=head, prior_prs_json=prior_prs_json,
+            allow_existing_exact_tag=allow_existing_exact_tag,
+        )
+    return release_transition(
+        old_version=old_version, new_version=new_version,
+        changed=run_git("diff", "--no-renames", "--name-only", base, head).splitlines(),
+        published=published,
+    )
 
 
 if __name__ == "__main__":

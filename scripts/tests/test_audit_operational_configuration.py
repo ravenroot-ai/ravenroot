@@ -7267,6 +7267,89 @@ class EmbedEnabledAuditTest(unittest.TestCase):
                 self.entries, self.discovered, {}))
 
 
+class SagaOutboxCapacityAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        for relative in audit.SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS:
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "ravenroot"], cwd=self.root, check=True)
+        self.discovered = {candidate.id: candidate for candidate in audit.discover(self.root)}
+
+    def fixture(self, setting):
+        authority = audit.saga_outbox_capacity_authority(
+            self.root, setting, self.discovered)
+        self.assertIsNotNone(authority)
+        specification = audit.SAGA_OUTBOX_CAPACITY_SETTINGS[setting]
+        contract = {
+            "bindingAuthority": authority["bindingAuthority"],
+            "defaultAuthority": authority["defaultAuthority"],
+            "field": specification["field"],
+            "owner": audit.SAGA_OUTBOX_CAPACITY_PATH + "#SagaOutboxCapacity",
+            "bindings": [specification["property"]],
+            "default": specification["default"],
+            "defaultEvidence": authority["defaultAuthority"]["candidateIds"],
+        }
+        entries = {
+            identifier: dict(self.discovered[identifier].source_fields(), setting=setting)
+            for identifier in authority["candidateIds"]
+        }
+        return contract, entries
+
+    def errors(self, setting, contract, entries):
+        return [
+            *audit.binding_authority_errors(
+                self.root, setting, contract, list(entries.values()), entries,
+                self.discovered, {}),
+            *audit.default_authority_errors(
+                self.root, setting, contract, entries, self.discovered),
+        ]
+
+    def test_property_only_capacity_settings_have_closed_typed_authority(self):
+        all_ids = set()
+        for setting in audit.SAGA_OUTBOX_CAPACITY_SETTINGS:
+            contract, entries = self.fixture(setting)
+            self.assertEqual([], self.errors(setting, contract, entries))
+            self.assertFalse(all_ids.intersection(entries))
+            all_ids.update(entries)
+        self.assertEqual(10, len(all_ids))
+
+    def test_metadata_source_consumers_and_atomic_refusal_proof_cannot_drift(self):
+        setting = "saga.outbox.maximum-outstanding-commands"
+        contract, entries = self.fixture(setting)
+        for field, value in (
+                ("owner", "foreign/Owner.java#Owner"), ("field", "maximumOutstandingBytes"),
+                ("bindings", []), ("default", "unbounded"), ("defaultEvidence", []),
+                ("bindingAuthority", None), ("defaultAuthority", None)):
+            with self.subTest(metadata=field):
+                changed = copy.deepcopy(contract); changed[field] = value
+                self.assertTrue(self.errors(setting, changed, entries))
+        mutations = (
+            (audit.SAGA_OUTBOX_CAPACITY_PATH,
+             "ravenroot.saga.outbox.maxOutstandingCommands", "ravenroot.saga.outbox.unbounded"),
+            (audit.SAGA_OUTBOX_CAPACITY_PATH, "new SagaOutboxCapacity(128,", "new SagaOutboxCapacity(129,"),
+            (audit.SAGA_OUTBOX_CAPACITY_PATH,
+             "maximumOutstandingCommands > 1_000_000", "maximumOutstandingCommands > 2_000_000"),
+            ("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
+             "InMemoryExecutionStore.java", "SagaOutboxCapacity.configured()", "SagaOutboxCapacity.DEFAULTS"),
+            ("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
+             "ExecutionStoreContract.java", "assertThrows", "removedAssertion"),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(source=relative):
+                path = self.root / relative; original = path.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    self.assertTrue(self.errors(setting, contract, entries))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+
 class RunnerCoordinatorBindingAuditTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

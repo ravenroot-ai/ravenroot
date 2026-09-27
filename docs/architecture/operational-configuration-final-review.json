@@ -4730,7 +4730,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
+          "digest": "36151a76115e6026f0d2f28f321afe251fb5f7d701a23fb679ed3a50e91c9cc2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5201,7 +5201,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
+          "digest": "36151a76115e6026f0d2f28f321afe251fb5f7d701a23fb679ed3a50e91c9cc2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5538,7 +5538,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
+          "digest": "36151a76115e6026f0d2f28f321afe251fb5f7d701a23fb679ed3a50e91c9cc2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5658,7 +5658,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -5761,7 +5761,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
           "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "478cb51523eb6851a5d1c90ed7cacc200a263023a82cffbb32481863e6d3bd70",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
@@ -11434,7 +11434,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "d56501bf95f759b50519b9eed75e4fcfd7c39c1f52835ef8f7c3807552901554",
+          "digest": "48aa7ef5db2665f458724e40dc621491ce80ca2a637548fa3a0293276608ca2b",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],

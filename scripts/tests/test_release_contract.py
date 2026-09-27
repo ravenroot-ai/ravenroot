@@ -30,6 +30,9 @@ from scripts.central_registry import (
 )
 
 
+RECOVERY_PRIOR_ARGUMENT = "--prior-prs-json"
+
+
 class ReleaseVersionTest(unittest.TestCase):
     def test_accepts_current_alpha(self):
         self.assertEqual(str(parse_tag("v0.1.0-alpha.1")), INITIAL_VERSION)
@@ -735,7 +738,7 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
             )
             already_tagged = self.contract(
                 fixture, "authorize-main", "--before", intervening_main, "--head", synthetic,
-                "--prs-json", str(current_path), "--prior-prs-json", str(prior_path),
+                "--prs-json", str(current_path), RECOVERY_PRIOR_ARGUMENT, str(prior_path),
             )
             self.assertNotEqual(0, already_tagged.returncode)
             self.assertIn("already exists", already_tagged.stderr)

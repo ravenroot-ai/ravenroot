@@ -188,6 +188,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
             chart.write_text(
                 source.replace(
+                    "version: 0.5.0-alpha.1", "version: 0.5.0-alpha.2", 1),
+                encoding="utf-8",
+            )
+            errors = audit.check(
+                root,
+                root / "scripts/operational-configuration-inventory.json",
+                root / "docs/architecture/operational-configuration-audit.md",
+            )
+            self.assertTrue(any("Helm values, schema, templates, runtime, or executable tests" in error
+                                for error in errors), errors)
+            chart.write_text(
+                source.replace(
                     "Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
                     "Changed deployment metadata.",
                     1,
@@ -363,8 +375,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "apiVersion": "v2", "name": "ravenroot", "type": "application",
         }, {field: authority["chartMetadata"][field]
             for field in ("apiVersion", "name", "type")})
-        self.assertEqual(authority["chartMetadata"]["version"],
-                         authority["chartMetadata"]["appVersion"])
+        self.assertNotIn("version", authority["chartMetadata"])
+        self.assertNotIn("appVersion", authority["chartMetadata"])
+        self.assertEqual(
+            ["version", "appVersion"], authority["releaseVersionEvidence"]["fields"])
         chart_candidate_ids = {
             candidate.id for candidate in candidates if candidate.path == audit.HELM_CHART_PATH}
         contract_candidate_ids = {
@@ -456,8 +470,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         chart_metadata = audit.helm_chart_metadata(ROOT)
         self.assertIsNotNone(chart_metadata)
         assert chart_metadata is not None
-        chart_version = str(chart_metadata["version"])
-        chart_app_version = str(chart_metadata["appVersion"])
+        chart_fields = dict(
+            line.split(": ", 1) for line in (ROOT / audit.HELM_CHART_PATH).read_text(
+                encoding="utf-8").splitlines() if ": " in line)
+        chart_version = chart_fields["version"]
+        chart_app_version = json.loads(chart_fields["appVersion"])
         chart_mutations = (
             ("apiVersion: v2", "apiVersion: v1"),
             ("name: ravenroot", "name: another-chart"),

@@ -91,7 +91,8 @@ class GraphMlCapabilityEscalationTest {
      * descriptor under test, because deriving the expected value from the subject asserts nothing.
      */
     private static final java.util.Set<String> HTTP_REQUEST_CAPABILITIES =
-            java.util.Set.of("network", "credential-reference", "side-effect");
+            java.util.Set.of("network", "credential-reference", "side-effect",
+                    "saga-adapter:ravenroot.http-idempotency.v1");
 
     /**
      * The trusted evaluator, and it refuses.

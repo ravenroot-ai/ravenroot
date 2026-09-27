@@ -34,6 +34,27 @@ class JdbcExecutorTest {
      */
     private static final long CLEANUP_DEADLINE_SECONDS = 30;
 
+    @Test void sagaBindingRequiresOperatorEffectAndReceiptProfilesBoundToTheStableIdentity() {
+        var effect = new JdbcStatementProfile("effect", JdbcStatementProfile.Kind.INSERT,
+                NamedSql.parse("INSERT INTO effect(operation_id,fingerprint) VALUES "
+                        + "(:sagaOperationId,:sagaPayloadFingerprint)"), java.util.Set.of());
+        var receipt = new JdbcStatementProfile("receipt", JdbcStatementProfile.Kind.QUERY,
+                NamedSql.parse("SELECT operation_id FROM effect WHERE operation_id=:sagaOperationId "
+                        + "AND fingerprint=:sagaPayloadFingerprint"), java.util.Set.of());
+        JdbcProfile profile = profile(Map.of(effect.id(), effect, receipt.id(), receipt));
+        var state = new FakeJdbc.State();
+        executor(profile, state).verifySagaBinding(JdbcTestSupport.message("tenant-a", Map.of()),
+                "main", "effect", "receipt").join();
+
+        var unbound = new JdbcStatementProfile("ordinary", JdbcStatementProfile.Kind.INSERT,
+                NamedSql.parse("INSERT INTO effect(name) VALUES (:name)"), java.util.Set.of());
+        JdbcProfile unsafe = profile(Map.of(unbound.id(), unbound, receipt.id(), receipt));
+        CompletionException rejected = assertThrows(CompletionException.class, () -> executor(unsafe, state)
+                .verifySagaBinding(JdbcTestSupport.message("tenant-a", Map.of()),
+                        "main", "ordinary", "receipt").join());
+        assertEquals(JdbcFailure.Code.PROFILE_UNAVAILABLE, JdbcTestSupport.failure(rejected).code());
+    }
+
     @Test void queryUsesOneCredentialExactBindingsReadOnlyRollbackAndBoundedOrderedRows() {
         JdbcStatementProfile statement = JdbcTestSupport.query("SELECT id,name FROM users WHERE name=:name");
         JdbcProfile profile = JdbcTestSupport.profile(statement);
@@ -487,6 +508,15 @@ class JdbcExecutorTest {
     private static JdbcExecutor executor(JdbcProfile profile, FakeJdbc.State state) {
         return new JdbcExecutor((tenant, name) -> tenant.equals(profile.tenant()) && name.equals(profile.name())
                 ? Optional.of(profile) : Optional.empty(), ignored -> new FakeJdbc(state), new JdbcRuntime(System::nanoTime));
+    }
+
+    private static JdbcProfile profile(Map<String, JdbcStatementProfile> statements) {
+        JdbcProfile base = JdbcTestSupport.profile(statements.values().iterator().next());
+        return new JdbcProfile(base.tenant(), base.name(), base.driverId(), base.driverClass(),
+                base.driverSha256(), base.url(), base.username(), base.credentialRef(), base.schema(),
+                base.isolation(), base.deadlineMs(), base.maxConcurrency(), base.maxParameters(),
+                base.maxParameterBytes(), base.maxRows(), base.maxColumns(), base.maxCellBytes(),
+                base.maxTotalBytes(), base.maxGeneratedKeyRows(), statements);
     }
 
     private static JdbcExecutor executorWithoutAutomaticDeadline(JdbcProfile profile, FakeJdbc.State state) {

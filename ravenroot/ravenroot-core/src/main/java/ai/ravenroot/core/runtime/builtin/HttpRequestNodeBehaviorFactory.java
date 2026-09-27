@@ -95,7 +95,8 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                                 + "Required for methods that change state.",
                         ai.ravenroot.api.catalog.PropertyCondition.oneOf("method",
                                 "POST", "PUT", "PATCH", "DELETE"))),
-                Set.of("network", "credential-reference", "side-effect"))
+                Set.of("network", "credential-reference", "side-effect",
+                        "saga-adapter:ravenroot.http-idempotency.v1"))
                 // Parameterized, not fixed: the author names these. Note that the failure outcome is a
                 // non-2xx RESPONSE, which is a completed request — a transport error produces no
                 // outcome at all and fails the node, which is a different route (see the failure
@@ -110,6 +111,10 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
 
     @Override
     public NodeHandler create(GraphNode node) {
+        if ("http-idempotency-v1".equals(node.properties().get("saga.participant"))
+                && !"ravenroot.http-idempotency.v1".equals(node.properties().get("saga.adapter"))) {
+            throw new IllegalArgumentException("HTTP saga participant requires the trusted idempotency adapter");
+        }
         String urlTemplate = NodeProperties.required(node, "url");
         String method = NodeProperties.string(node, "method", "GET").toUpperCase(Locale.ROOT);
         if (!Set.of("GET", "POST", "PUT", "PATCH", "DELETE").contains(method)) {

@@ -23,7 +23,13 @@ by the registered behavior descriptor. `pure` requires a trusted `saga-pure` des
 and a descriptor that is not effectful. Writing
 `saga.participant=pure` on an arbitrary custom node grants nothing. The supported effect contracts
 are `jdbc-receipt-v1` on `jdbc.insert`, `amqp-inbox-v1` on `amqp.publish`, and
-`http-idempotency-v1` on `http-request`.
+`http-idempotency-v1` on `http-request`. Effectful contracts additionally require the exact trusted
+`saga.adapter` advertised by the registered implementation; a behavior name plus the generic
+`side-effect` capability is insufficient. JDBC nodes bind an operator-owned
+`saga.receiptStatement`, whose effect and lookup profiles must both accept the frozen operation id
+and payload fingerprint. AMQP nodes bind an operator-governed `saga.inboxBinding`, require durable
+publication and wait for business completion. These bindings are frozen in the command envelope and
+the recovery worker revalidates them with current authority before delivery or lookup.
 
 Each accepted definition freezes the canonical graph digest, the participant-contract digest, and
 the forward/compensation bindings in the durable saga snapshot. Recovery refuses a changed
@@ -42,7 +48,10 @@ claim process survival. Application admission requires both `DURABLE` and `DURAB
 configuration is rejected before dispatch.
 
 A JDBC participant still owns its local guarantee. Its approved single statement must atomically
-write the business effect and a receipt, for example with an engine-supported CTE or trigger. The
+write the business effect and its operation-bound receipt row, for example by making the business
+row itself the receipt under a unique operation-id constraint. The separately approved receipt query
+must bind both `sagaOperationId` and `sagaPayloadFingerprint`; the JDBC adapter refuses the effect
+before opening a connection when that operator profile binding is absent or malformed. The
 ordinary `jdbc.insert` node opens and commits one connection per invocation; Ravenroot never groups
 two JDBC nodes into one transaction. An HTTP participant must persist the idempotency key and expose
 outcome lookup. Ravenroot propagates the trusted saga operation id as `Idempotency-Key`; forward and

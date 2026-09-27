@@ -28,11 +28,31 @@ class AmqpNodePackageTest {
                 // AmqpRecoveryRepeatabilityTest for what each of the two tells the recovery loop.
                 "recovery.repeatable"), names);
         assertTrue(descriptor.capabilities().containsAll(java.util.Set.of("network", "credential-reference", "side-effect")));
+        assertTrue(descriptor.capabilities().contains("saga-adapter:ravenroot.amqp-inbox.v1"));
         assertFalse(names.stream().anyMatch(name -> name.matches("(?i).*(host|port|password|credential|tls|vhost).*")));
         var consume = nodePackage.behaviors().stream()
                 .filter(behavior -> behavior.descriptor().behavior().equals(AmqpConsumeNodeBehavior.BEHAVIOR))
                 .findFirst().orElseThrow().descriptor();
         assertTrue(consume.capabilities().contains("inbound-source"));
+    }
+
+    @Test
+    void sagaInboxContractRequiresTrustedBindingBeforePublishing() {
+        var protocol = new AmqpTestSupport.FakeProtocol(AmqpTestSupport.Event.CONFIRM);
+        var behavior = AmqpTestSupport.behavior(protocol);
+        var forged = behavior.create(AmqpTestSupport.configuration(Map.of(
+                "saga.participant", "amqp-inbox-v1", "persistent", true,
+                "saga.businessCompletionRequired", true)));
+        assertEquals("REJECTED", AmqpTestSupport.output(forged, AmqpTestSupport.payload()).get("status"));
+        assertEquals(0, protocol.connects.get());
+
+        var governed = behavior.create(AmqpTestSupport.configuration(Map.of(
+                "saga.participant", "amqp-inbox-v1",
+                "saga.adapter", "ravenroot.amqp-inbox.v1",
+                "saga.inboxBinding", "orders-v1", "persistent", true,
+                "saga.businessCompletionRequired", true)));
+        assertEquals("CONFIRMED", AmqpTestSupport.output(governed, AmqpTestSupport.payload()).get("status"));
+        assertEquals(1, protocol.connects.get());
     }
 
     @Test

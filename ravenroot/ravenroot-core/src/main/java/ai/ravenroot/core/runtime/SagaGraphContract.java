@@ -31,6 +31,9 @@ final class SagaGraphContract {
     static final String IRREVERSIBLE = "saga.irreversible";
     static final String BUSINESS_COMPLETION = "saga.businessCompletionRequired";
     static final String DEADLINE_MS = "saga.deadlineMs";
+    static final String ADAPTER = "saga.adapter";
+    static final String RECEIPT_STATEMENT = "saga.receiptStatement";
+    static final String INBOX_BINDING = "saga.inboxBinding";
     private static final long MAX_DEADLINE_MS = Duration.ofDays(30).toMillis();
 
     private SagaGraphContract() { }
@@ -174,15 +177,16 @@ final class SagaGraphContract {
     private static void requireSupportedParticipant(GraphNode node, String participant,
                                                     BehaviorRegistry behaviors) {
         var descriptor = behaviors.descriptor(node.behavior()).orElse(null);
+        String adapter = text(node, ADAPTER, false);
         boolean accepted = switch (participant) {
             case "pure" -> descriptor != null && descriptor.capabilities().contains("saga-pure")
                     && !descriptor.capabilities().contains("side-effect");
-            case "jdbc-receipt-v1" -> descriptor != null && "jdbc.insert".equals(node.behavior())
-                    && descriptor.capabilities().contains("side-effect");
-            case "amqp-inbox-v1" -> descriptor != null && "amqp.publish".equals(node.behavior())
-                    && descriptor.capabilities().contains("side-effect");
-            case "http-idempotency-v1" -> descriptor != null && "http-request".equals(node.behavior())
-                    && descriptor.capabilities().contains("side-effect");
+            case "jdbc-receipt-v1" -> trusted(descriptor, adapter, "ravenroot.jdbc-receipt.v1")
+                    && "jdbc.insert".equals(node.behavior());
+            case "amqp-inbox-v1" -> trusted(descriptor, adapter, "ravenroot.amqp-inbox.v1")
+                    && "amqp.publish".equals(node.behavior());
+            case "http-idempotency-v1" -> trusted(descriptor, adapter, "ravenroot.http-idempotency.v1")
+                    && "http-request".equals(node.behavior());
             default -> false;
         };
         if (!accepted) throw invalid(node.id(), "participant contract '" + participant
@@ -191,6 +195,26 @@ final class SagaGraphContract {
                 && text(node, "saga.outcomeLookupUrl", false) == null) {
             throw invalid(node.id(), "http-idempotency-v1 requires saga.outcomeLookupUrl");
         }
+        if ("jdbc-receipt-v1".equals(participant) && text(node, RECEIPT_STATEMENT, false) == null) {
+            throw invalid(node.id(), "jdbc-receipt-v1 requires an operator-owned saga.receiptStatement");
+        }
+        if ("amqp-inbox-v1".equals(participant)) {
+            if (text(node, INBOX_BINDING, false) == null) {
+                throw invalid(node.id(), "amqp-inbox-v1 requires an operator-governed saga.inboxBinding");
+            }
+            if (!flag(node, BUSINESS_COMPLETION)) {
+                throw invalid(node.id(), "amqp-inbox-v1 requires saga.businessCompletionRequired=true");
+            }
+            if (!flag(node, "persistent")) {
+                throw invalid(node.id(), "amqp-inbox-v1 requires persistent=true");
+            }
+        }
+    }
+
+    private static boolean trusted(ai.ravenroot.api.catalog.NodeTypeDescriptor descriptor,
+                                   String configuredAdapter, String requiredAdapter) {
+        return descriptor != null && requiredAdapter.equals(configuredAdapter)
+                && descriptor.capabilities().contains("saga-adapter:" + requiredAdapter);
     }
 
     private static void visit(String scope, String step, Map<String, SagaStepDefinition> steps,

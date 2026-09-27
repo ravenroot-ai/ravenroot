@@ -106,6 +106,16 @@ class SagaGraphRunnerIntegrationTest {
     }
 
     @Test
+    void authoredParticipantStringsCannotUpgradeOrdinaryJdbcOrAmqpAdapters() {
+        assertUntrustedParticipantRejected("jdbc.insert", "jdbc-receipt-v1", Map.of(
+                "saga.adapter", "ravenroot.jdbc-receipt.v1",
+                "saga.receiptStatement", "lookup-effect"));
+        assertUntrustedParticipantRejected("amqp.publish", "amqp-inbox-v1", Map.of(
+                "saga.adapter", "ravenroot.amqp-inbox.v1", "saga.inboxBinding", "orders-v1",
+                "saga.businessCompletionRequired", true, "persistent", true));
+    }
+
+    @Test
     void parallelEffectsMustBothFinishBeforeJoinCanCompleteTheSaga(@TempDir Path directory) {
         var graph = new GraphDefinition(List.of(GraphNode.start("start"),
                 sagaNode("left", "left"), sagaNode("right", "right"),
@@ -140,14 +150,15 @@ class SagaGraphRunnerIntegrationTest {
             throws Exception {
         var publish = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
                 "saga.scope", "order", "saga.step", "created", "saga.participant", "amqp-inbox-v1",
-                "saga.businessCompletionRequired", true, "saga.commandType", "order.created",
+                "saga.adapter", "ravenroot.amqp-inbox.v1", "saga.inboxBinding", "orders-v1",
+                "persistent", true, "saga.businessCompletionRequired", true, "saga.commandType", "order.created",
                 "saga.irreversible", true));
         var graph = new GraphDefinition(List.of(GraphNode.start("start"), publish, GraphNode.end("end")),
                 List.of(GraphEdge.to("start", "publish"), GraphEdge.to("publish", "end")));
         var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
             @Override public NodeTypeDescriptor descriptor() {
                 return new NodeTypeDescriptor("amqp.publish", "AMQP", "Test", "Test AMQP",
-                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+                        "actor", false, List.of(), java.util.Set.of("side-effect", "saga-adapter:ravenroot.amqp-inbox.v1"));
             }
             @Override public NodeHandler create(GraphNode ignored) {
                 return message -> CompletableFuture.completedFuture(new NodeResult("continue",
@@ -196,14 +207,15 @@ class SagaGraphRunnerIntegrationTest {
     void businessCompletionPastInlineBoundBecomesRestartSafeWaitingInsteadOfFailure(@TempDir Path directory) {
         var publish = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
                 "saga.scope", "order", "saga.step", "created", "saga.participant", "amqp-inbox-v1",
-                "saga.businessCompletionRequired", true, "saga.commandType", "order.created",
+                "saga.adapter", "ravenroot.amqp-inbox.v1", "saga.inboxBinding", "orders-v1",
+                "persistent", true, "saga.businessCompletionRequired", true, "saga.commandType", "order.created",
                 "saga.irreversible", true));
         var graph = new GraphDefinition(List.of(GraphNode.start("start"), publish, GraphNode.end("end")),
                 List.of(GraphEdge.to("start", "publish"), GraphEdge.to("publish", "end")));
         var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
             @Override public NodeTypeDescriptor descriptor() {
                 return new NodeTypeDescriptor("amqp.publish", "AMQP", "Test", "Test AMQP",
-                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+                        "actor", false, List.of(), java.util.Set.of("side-effect", "saga-adapter:ravenroot.amqp-inbox.v1"));
             }
             @Override public NodeHandler create(GraphNode ignored) {
                 return message -> CompletableFuture.completedFuture(new NodeResult("continue",
@@ -379,14 +391,14 @@ class SagaGraphRunnerIntegrationTest {
     void trustedParticipantNoEffectFailureIsNotParkedAsUnknown(@TempDir Path directory) {
         var node = new GraphNode("effect", NodeKind.BEHAVIOR, "http-request", Map.of(
                 "saga.scope", "order", "saga.step", "notify",
-                "saga.participant", "http-idempotency-v1", "saga.irreversible", true,
-                "saga.outcomeLookupUrl", "https://participant.test/operations/{{attributes.sagaOperationId}}"));
+                "saga.participant", "http-idempotency-v1", "saga.adapter", "ravenroot.http-idempotency.v1",
+                "saga.irreversible", true, "saga.outcomeLookupUrl", "https://participant.test/operations/{{attributes.sagaOperationId}}"));
         var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
                 List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
         var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
             @Override public NodeTypeDescriptor descriptor() {
                 return new NodeTypeDescriptor("http-request", "HTTP", "Test", "Test HTTP",
-                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+                        "actor", false, List.of(), java.util.Set.of("side-effect", "saga-adapter:ravenroot.http-idempotency.v1"));
             }
             @Override public NodeHandler create(GraphNode ignored) {
                 return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
@@ -415,6 +427,31 @@ class SagaGraphRunnerIntegrationTest {
     private static NodeMessage message(UUID process, UUID traversal, UUID invocation) {
         return new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal, invocation,
                 UUID.randomUUID(), "effect", Map.of("order", "A-1"), Map.of());
+    }
+
+    private static void assertUntrustedParticipantRejected(String behavior, String participant,
+                                                            Map<String, Object> protocol) {
+        var properties = new java.util.LinkedHashMap<String, Object>(protocol);
+        properties.put("saga.scope", "order");
+        properties.put("saga.step", "effect");
+        properties.put("saga.participant", participant);
+        properties.put("saga.irreversible", true);
+        var node = new GraphNode("effect", NodeKind.BEHAVIOR, behavior, Map.copyOf(properties));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor(behavior, behavior, "Test", "Ordinary effect adapter",
+                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+        });
+        try (var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new GraphRunner(manager, engine, registry, new ExecutionMonitor()));
+        }
     }
 
     private static GraphNode sagaNode(String id, String step) {

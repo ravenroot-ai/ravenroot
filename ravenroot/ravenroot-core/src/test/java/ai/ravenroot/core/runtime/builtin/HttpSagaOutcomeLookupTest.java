@@ -105,6 +105,7 @@ class HttpSagaOutcomeLookupTest {
                 "body", "{\"orderId\":\"486\"}",
                 "credentialRef", "participant-token",
                 "saga.participant", "http-idempotency-v1",
+                "saga.adapter", "ravenroot.http-idempotency.v1",
                 "saga.outcomeLookupUrl", "http://localhost:" + port + "/operations/"
                         + "{{attributes.sagaOperationId}}")));
     }

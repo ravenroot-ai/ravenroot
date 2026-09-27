@@ -58,6 +58,7 @@ export function mountD3ElasticRenderer({
   onViewportChange = () => {},
   initialTransform = null,
   startSimulation = true,
+  idleRadius = null,
 }) {
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
@@ -70,11 +71,17 @@ export function mountD3ElasticRenderer({
 
   const viewportWidth = Math.max(1, finite(width, 800));
   const viewportHeight = Math.max(1, finite(height, 600));
-  // A node's mount-time silhouette is its idle look. `resetRuntime` restores it so a cleared
-  // Monitoring graph cannot be mistaken for a stale run (#494), and on a graph that was idle when
-  // the renderer mounted this is exactly the size the viewer last saw settled. Captured once here,
-  // before any runtime update can mutate `r`.
-  nodes.forEach(node => { if (!Number.isFinite(node.baseR)) node.baseR = node.r; });
+  // The idle silhouette `resetRuntime` restores: the zero-instance size the caller derives from the
+  // sizing helper, NOT the instance counts painted when this renderer mounted. A run -> Design ->
+  // Monitoring round-trip remounts the renderer without clearing `instances` (#494), so a
+  // mount-derived radius can be a run-derived one; capturing the caller's idle radius keeps the
+  // reset independent of what was on the canvas at mount. Captured once, before any runtime update
+  // can mutate `r`; the datum's own value is only a fallback for callers that supply none.
+  nodes.forEach(node => {
+    if (!Number.isFinite(node.baseR)) {
+      node.baseR = Number.isFinite(idleRadius) ? idleRadius : node.r;
+    }
+  });
 
   const nodeText = palette?.nodeText ?? '#e6edf3';
   const edgeLabel = palette?.edgeLabel ?? '#b1bac4';

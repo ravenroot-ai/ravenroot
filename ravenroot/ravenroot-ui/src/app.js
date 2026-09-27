@@ -4621,6 +4621,12 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
   const monitoringPositions = monitoringState?.canvasState?.positions || {};
   const nodeRange = metricExtent(target.nodes(), n => Number(n.data('instances')));
   const fontPx = owner.fontSize || DEFAULT_FONT_SIZE;
+  // The idle silhouette a fully-idle graph paints: the sizing helper's zero-instance size. A runtime
+  // reset must restore THIS, not whatever instance counts happened to be on the canvas when the
+  // renderer mounted -- a run -> Design -> Monitoring round-trip remounts the renderer without
+  // clearing `instances`, so a mount-derived radius can be a painted one (#494). Derived from the
+  // same helper and bounds as the live sizing rather than hardcoded, so the two cannot drift.
+  const idleRadius = scaleMetric(0, { min: 0, max: 0 }, 12, 44, 18) / 2;
 
   const idIndex = {};
   const d3nodes = target.nodes().map((n, i) => {
@@ -4701,6 +4707,7 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     palette: rendererPalette,
     markerKey: renderer.token.generation,
     fontSize: fontPx,
+    idleRadius,
     attraction: forces.attraction,
     repulsion: forces.repulsion,
     speed: forces.speed,

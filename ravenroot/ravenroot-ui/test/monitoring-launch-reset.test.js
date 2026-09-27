@@ -102,9 +102,20 @@ describe('the launch reset clears Monitoring paint without remounting the render
   it('keeps the genuine mount, mode-switch and arrangement entry points on startD3Elastic', () => {
     // Positive control: a rename or an over-broad change would break these loudly.
     expect(APP_SOURCE).toContain('function startD3Elastic(');
-    for (const name of ['setRenderMode', 'renderActiveMode', 'reconcileActiveRenderModeRenderer']) {
+    for (const name of ['runOwnedLayout', 'setRenderMode', 'renderActiveMode',
+      'reconcileActiveRenderModeRenderer']) {
       expect(functionBody(APP_SOURCE, name), `${name} still mounts/reheats in place`).toContain('startD3Elastic(');
     }
+  });
+
+  it('derives the Monitoring idle silhouette from the sizing helper, not from mounted instances', () => {
+    const body = functionBody(APP_SOURCE, 'startD3Elastic');
+    expect(body).toContain('idleRadius');
+    // The idle radius is the sizing helper's zero-instance value, so it tracks the live sizing
+    // bounds instead of a hardcoded literal and cannot be a run-painted size (#494).
+    expect(body).toMatch(/scaleMetric\(0,\s*\{\s*min:\s*0,\s*max:\s*0\s*\}/);
+    expect(body).toContain('idleRadius,');
+    expect(RENDERER_SOURCE).toContain('idleRadius');
   });
 });
 

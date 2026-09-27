@@ -381,6 +381,41 @@ describe('shared D3 Elastic renderer', () => {
     renderer.destroy();
   });
 
+  it('resets to the caller idle silhouette, not the painted radius the renderer mounted with', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const svg = document.querySelector('#elastic');
+    const { nodes, links } = monitoringSettleGraph();
+    // A renderer mounted mid-run: every datum carries a run-painted radius, exactly as a
+    // run -> Design -> Monitoring round-trip remounts without clearing `instances` (#494). The idle
+    // silhouette the caller derives from the sizing helper is uniform, and reset must restore it
+    // rather than the radius that happened to be on the canvas at mount.
+    const painted = nodes.map((node, index) => ({ ...node, r: index % 2 ? 16 : 6 }));
+    const idleSilhouette = 14;
+    const renderer = mountD3ElasticRenderer({ svg, nodes: painted, links, width: 900, height: 500,
+      palette: {}, idleRadius: idleSilhouette, initialTransform: { k: 1.2, x: 12, y: 9 } });
+    renderer.simulation.stop().alpha(0);
+    const coordinates = renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }));
+    const transform = svg.querySelector('.d3-zoom-group').getAttribute('transform');
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const alpha = vi.spyOn(renderer.simulation, 'alpha');
+
+    renderer.resetRuntime({ idleStroke: '#8c959f' });
+
+    expect(renderer.nodes.map(node => node.r))
+      .toEqual(new Array(renderer.nodes.length).fill(idleSilhouette));
+    expect([...svg.querySelectorAll('.d3-nodes circle')].map(circle => Number(circle.getAttribute('r'))))
+      .toEqual(new Array(renderer.nodes.length).fill(idleSilhouette));
+    // ... and the reset is still a paint operation: same coordinates, same viewport, no reheat.
+    expect(renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y }))).toEqual(coordinates);
+    expect(svg.querySelector('.d3-zoom-group').getAttribute('transform')).toBe(transform);
+    expect(restart).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(alpha).not.toHaveBeenCalled();
+    expect(renderer.simulation.alpha()).toBe(0);
+    renderer.destroy();
+  });
+
   it('is the one Elastic implementation imported by editor and embed entry', () => {
     const root = resolvePath(import.meta.dirname, '..', 'src');
     for (const file of ['app.js', 'embed-viewer-entry.js']) {

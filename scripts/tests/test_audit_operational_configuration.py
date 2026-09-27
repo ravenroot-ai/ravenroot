@@ -194,8 +194,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def test_prepared_release_tree_uses_source_derived_chart_release_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as location:
-            def fixture_git(root: Path, *arguments: str) -> None:
-                subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+            def fixture_git(root: Path, *arguments: str) -> str:
+                return subprocess.run(
+                    ["git", *arguments], cwd=root, check=True, capture_output=True, text=True,
+                ).stdout.strip()
 
             def seed_future_fragment(root: Path) -> None:
                 fragments = [path for path in (root / ".changes").glob("*.md")
@@ -210,11 +212,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                             "commit", "-qm", "fixture future fragment")
 
             def isolated_tree(name: str, source: Path, revision: str) -> Path:
-                """Clone a complete audit fixture with independent local refs and no source config."""
+                """Clone an audit fixture with source-ancestry refs and no source config."""
                 root = Path(location) / name
                 subprocess.run(
                     ["git", "clone", "--quiet", "--no-local", str(source), str(root)], check=True)
                 fixture_git(root, "checkout", "--quiet", revision)
+                unrelated_tags = fixture_git(root, "tag", "--no-merged", "HEAD").splitlines()
+                if unrelated_tags:
+                    fixture_git(root, "tag", "--delete", *unrelated_tags)
                 fixture_git(root, "remote", "remove", "origin")
                 return root
 
@@ -248,12 +253,23 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                         break
                 else:
                     self.fail("no ordinary product source is reachable from the latest release tag")
+
+            source_fixture = isolated_tree("source", ROOT, source_revision)
+            source_revision = fixture_git(source_fixture, "rev-parse", "HEAD")
+            future_version = str(expected_next(parse_tag(f"v{source_version}"), "minor"))
+            future_commit = fixture_git(
+                source_fixture,
+                "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "unrelated future release",
+            )
+            fixture_git(source_fixture, "tag", f"v{future_version}", future_commit)
+            source_future_tag = fixture_git(source_fixture, "rev-parse", f"v{future_version}")
             for intent in ("patch", "minor"):
-                ordinary = isolated_tree(f"ordinary-{intent}", ROOT, source_revision)
+                ordinary = isolated_tree(f"ordinary-{intent}", source_fixture, source_revision)
                 seed_future_fragment(ordinary)
                 prepared_tree(ordinary, intent, source_version)
 
-            prepared_source = isolated_tree("prepared-source", ROOT, source_revision)
+            prepared_source = isolated_tree("prepared-source", source_fixture, source_revision)
             seed_future_fragment(prepared_source)
             prepared_version = prepare(prepared_source, "minor")["version"]
             fixture_git(prepared_source, "add", ".")
@@ -282,6 +298,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             )
             self.assertTrue(any("Helm values, schema, templates, runtime, or executable tests" in error
                                 for error in errors), errors)
+            self.assertEqual(
+                source_future_tag,
+                fixture_git(source_fixture, "rev-parse", f"v{future_version}"),
+            )
             chart.write_text(
                 source.replace(
                     f"version: {final_version}", "version: mismatched-version", 1),

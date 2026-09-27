@@ -8175,7 +8175,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'dbfee4ea16c5730eb2b4dcd20da2c73ff02bca76820160fab0aa07e75a7e5b9f',
+  '0f02724c231b07c1b004a99e847d045ab914ab36986b046b6afd1eef668e430c',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -14057,22 +14057,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-2eb120df7224207a3a99": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-711b799bdd1ab2e67421":
+    "oc-06083e4f062b3189d1e6": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-f480b45c656767a8f640":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-bb0dd8ec10288abbf2fa": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-268f33e38727c0d6ffb8": (
+    "oc-0e1ded5eeedb3a7a26cc": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-9555571d6df8626c4557": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-4f8926edd008856f9cfd": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-c953b96f5e9299b31148": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-2eb120df7224207a3a99": "/v1/events",
-    "oc-711b799bdd1ab2e67421": "/v1/events",
-    "oc-bb0dd8ec10288abbf2fa": "/v1/events",
-    "oc-268f33e38727c0d6ffb8": "/v1/events/recent",
-    "oc-4f8926edd008856f9cfd": "/v1/events/recent",
+    "oc-06083e4f062b3189d1e6": "/v1/events",
+    "oc-f480b45c656767a8f640": "/v1/events",
+    "oc-0e1ded5eeedb3a7a26cc": "/v1/events",
+    "oc-9555571d6df8626c4557": "/v1/events/recent",
+    "oc-c953b96f5e9299b31148": "/v1/events/recent",
 }
 
 

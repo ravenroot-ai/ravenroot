@@ -94,8 +94,13 @@ final class SagaGraphContract {
                             + "' is absent or is not saga.role=compensation in the same scope");
                 }
                 if (step.compensationNodeId() != null) {
-                    requireSupportedParticipant(nodesById.get(step.compensationNodeId()),
-                            step.participantContract(), behaviors);
+                    GraphNode compensationNode = nodesById.get(step.compensationNodeId());
+                    String compensationParticipant = text(compensationNode, PARTICIPANT, false);
+                    if (!step.participantContract().equals(compensationParticipant)) {
+                        throw invalid(compensationNode.id(), "compensation participant contract must equal '"
+                                + step.participantContract() + "'");
+                    }
+                    requireSupportedParticipant(compensationNode, step.participantContract(), behaviors);
                 }
             }
             rejectDependencyCycles(scope.getKey(), scope.getValue());

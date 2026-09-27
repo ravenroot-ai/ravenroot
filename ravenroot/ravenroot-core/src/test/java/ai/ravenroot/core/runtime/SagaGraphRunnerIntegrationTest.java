@@ -340,7 +340,7 @@ class SagaGraphRunnerIntegrationTest {
                 "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",
                 "saga.compensation", "undo"));
         var compensation = new GraphNode("undo", NodeKind.BEHAVIOR, "untrusted", Map.of(
-                "saga.scope", "order", "saga.role", "compensation"));
+                "saga.scope", "order", "saga.role", "compensation", "saga.participant", "pure"));
         var graph = new GraphDefinition(List.of(GraphNode.start("start"), forward, compensation,
                 GraphNode.end("end")), List.of(GraphEdge.to("start", "effect"),
                 GraphEdge.to("effect", "end")));
@@ -350,6 +350,31 @@ class SagaGraphRunnerIntegrationTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> new SagaCoordinator(graph, registry, Clock.systemUTC()));
+    }
+
+    @Test
+    void compensationNodeMustDeclareTheSameParticipantContractAsItsForwardStep() {
+        var forward = new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
+                "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",
+                "saga.compensation", "undo"));
+        var missing = new GraphNode("undo", NodeKind.BEHAVIOR, "effect", Map.of(
+                "saga.scope", "order", "saga.role", "compensation"));
+        var mismatched = new GraphNode("undo", NodeKind.BEHAVIOR, "effect", Map.of(
+                "saga.scope", "order", "saga.role", "compensation",
+                "saga.participant", "http-idempotency-v1"));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                NodeResult.continueWith(message.payload())));
+
+        for (GraphNode compensation : List.of(missing, mismatched)) {
+            var graph = new GraphDefinition(List.of(GraphNode.start("start"), forward, compensation,
+                    GraphNode.end("end")), List.of(GraphEdge.to("start", "effect"),
+                    GraphEdge.to("effect", "end")));
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> new SagaCoordinator(graph, registry, Clock.systemUTC()));
+            assertEquals("Invalid saga configuration at node 'undo': "
+                            + "compensation participant contract must equal 'pure'",
+                    failure.getMessage());
+        }
     }
 
     @Test

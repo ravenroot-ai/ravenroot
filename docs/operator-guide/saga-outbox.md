@@ -30,6 +30,9 @@ are `jdbc-receipt-v1` on `jdbc.insert`, `amqp-inbox-v1` on `amqp.publish`, and
 and payload fingerprint. AMQP nodes bind an operator-governed `saga.inboxBinding`, require durable
 publication and wait for business completion. These bindings are frozen in the command envelope and
 the recovery worker revalidates them with current authority before delivery or lookup.
+Every compensation node must repeat the same `saga.participant` contract as its forward step; this
+is admission checked so the real node adapter cannot run compensation without its receipt,
+idempotency, or inbox protocol enabled.
 
 Each accepted definition freezes the canonical graph digest, the participant-contract digest, and
 the forward/compensation bindings in the durable saga snapshot. Recovery refuses a changed

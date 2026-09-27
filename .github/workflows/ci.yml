@@ -233,7 +233,10 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --force --quiet --tags origin
-          gh api "repos/$GITHUB_REPOSITORY/commits/$(git rev-parse HEAD^1)/pulls" \
+          anchor=$(python3 scripts/release_contract.py prior-promotion-anchor \
+            --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" | \
+            python3 -c 'import json, sys; print(json.load(sys.stdin)["anchor"])')
+          gh api "repos/$GITHUB_REPOSITORY/commits/$anchor/pulls" \
             --header 'Accept: application/vnd.github+json' > "$RUNNER_TEMP/prior-promotion-prs.json"
           python3 scripts/release_contract.py check-promotion \
             --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS" \

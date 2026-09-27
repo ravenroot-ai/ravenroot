@@ -346,6 +346,9 @@ def parser() -> argparse.ArgumentParser:
     promotion.add_argument("--head", required=True)
     promotion.add_argument("--labels", required=True, help="The pull request's labels as JSON.")
     promotion.add_argument("--prior-prs-json", type=Path)
+    anchor = commands.add_parser("prior-promotion-anchor")
+    anchor.add_argument("--base", required=True)
+    anchor.add_argument("--head", required=True)
     event = commands.add_parser("validate-event")
     event.add_argument("--event-name", required=True)
     event.add_argument("--ref-type", required=True)
@@ -377,6 +380,8 @@ def main() -> int:
             values = validate_tag_authorization(
                 arguments.tag, arguments.prs_json, arguments.prior_prs_json
             )
+        elif arguments.command == "prior-promotion-anchor":
+            values = {"anchor": prior_promotion_anchor(arguments.base, arguments.head)}
         else:
             values = validate_event(
                 arguments.event_name,
@@ -425,6 +430,45 @@ def require_prior_minor_promotion(path: Path, base: str, promoted_dev: str) -> N
         raise ReleaseContractError("the prior prepared promotion must carry exactly release:minor")
 
 
+def prepared_unreleased_minor_anchor(base: str, head: str) -> str:
+    """Find the one first-parent main bridge that prepared an untagged minor."""
+    published = release_tags_merged_into(base)
+    if not published:
+        raise ReleaseContractError("prepared-release recovery requires an immutable prior release")
+    previous = published[-1][0]
+    target = str(expected_next(previous, "minor"))
+    if version_at(base) != target or version_at(head) != target:
+        raise ReleaseContractError("prepared-release recovery must retain the exact expected minor version")
+    candidates: list[tuple[str, str]] = []
+    for candidate in run_git("rev-list", "--first-parent", base).splitlines():
+        parents = run_git("show", "-s", "--format=%P", candidate).split()
+        if len(parents) != 2 or version_at(candidate) != target:
+            continue
+        if version_at(parents[0]) != str(previous) or version_at(parents[1]) != target:
+            continue
+        try:
+            run_git("cat-file", "-e", f"{candidate}:docs/releases/v{target}.md")
+        except subprocess.CalledProcessError:
+            continue
+        candidates.append((candidate, parents[1]))
+    if len(candidates) != 1:
+        raise ReleaseContractError(
+            "prepared-release recovery requires one exact first-parent main bridge from the immutable minor"
+        )
+    return candidates[0][0]
+
+
+def prior_promotion_anchor(base: str, head: str) -> str:
+    """Select the exact PR-evidence commit for ordinary promotion or prepared recovery."""
+    published = release_tags_merged_into(base)
+    if not published:
+        return base
+    target = str(expected_next(published[-1][0], "minor"))
+    if version_at(base) == target and version_at(head) == target:
+        return prepared_unreleased_minor_anchor(base, head)
+    return base
+
+
 def prepared_unreleased_minor_recovery(
     *, base: str, head: str, prior_prs_json: Path | None, allow_existing_exact_tag: bool = False
 ) -> str:
@@ -438,13 +482,9 @@ def prepared_unreleased_minor_recovery(
     target = str(expected_next(previous, "minor"))
     if version_at(base) != target or version_at(head) != target:
         raise ReleaseContractError("prepared-release recovery must retain the exact expected minor version")
-    parents = run_git("show", "-s", "--format=%P", base).split()
-    if len(parents) != 2:
-        raise ReleaseContractError("prepared-release recovery base is not a main merge commit")
-    if version_at(parents[0]) != str(previous) or version_at(parents[1]) != target:
-        raise ReleaseContractError("prepared-release recovery base does not bridge the immutable minor")
-    run_git("cat-file", "-e", f"{base}:docs/releases/v{target}.md")
-    require_prior_minor_promotion(prior_prs_json, base, parents[1])
+    anchor = prepared_unreleased_minor_anchor(base, head)
+    parents = run_git("show", "-s", "--format=%P", anchor).split()
+    require_prior_minor_promotion(prior_prs_json, anchor, parents[1])
     require_target_tag_available(f"v{target}", head, allow_existing_exact_tag)
     return "minor"
 

@@ -136,10 +136,10 @@ class WebSocketRawTlsIntegrationTest {
 
     @Test
     void realManagedBackpressureRevokesBeforeCloseAndCannotReconnect() throws Exception {
-        try (var server = DeterministicTlsWebSocketServer.scripted(List.of(List.of(
+        try (var server = DeterministicTlsWebSocketServer.backpressure(List.of(
                 frame(0x81, "one".getBytes(StandardCharsets.UTF_8)),
                 frame(0x81, "two".getBytes(StandardCharsets.UTF_8)),
-                frame(0x81, "three".getBytes(StandardCharsets.UTF_8)))))) {
+                frame(0x81, "three".getBytes(StandardCharsets.UTF_8))))) {
             WebSocketProfile profile = profile(server.port(), 1, 2);
             var scheduler = new WebSocketTestSupport.ManualReconnectScheduler();
             var ingress = new WebSocketTestSupport.FakeIngress();
@@ -156,6 +156,7 @@ class WebSocketRawTlsIntegrationTest {
                 source.start(context).toCompletableFuture().join();
                 server.releaseScripts();
                 assertTrue(ingress.entered.await(2, TimeUnit.SECONDS));
+                server.releaseRemainingScript();
                 await(() -> context.degraded.contains("websocket-ingress-backpressure"));
                 ingress.release.countDown();
                 server.awaitConnections();

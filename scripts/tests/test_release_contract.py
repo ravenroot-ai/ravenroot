@@ -30,6 +30,9 @@ from scripts.central_registry import (
 )
 
 
+RECOVERY_PRIOR_ARGUMENT = "--prior-prs-json"
+
+
 class ReleaseVersionTest(unittest.TestCase):
     def test_accepts_current_alpha(self):
         self.assertEqual(str(parse_tag("v0.1.0-alpha.1")), INITIAL_VERSION)
@@ -353,22 +356,35 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
         }]
 
     def recovery(self, document, *, versions=None, tag_exists=False, tag_head=None,
-                 allow_existing_exact_tag=False, base_parents=None):
+                 allow_existing_exact_tag=False, base_parents=None, first_parent=None,
+                 parents_by_commit=None, notes=None):
         versions = versions or {
             self.base: self.target,
             self.recovery_head: self.target,
             self.prior_main: str(self.previous),
             self.promoted_dev: self.target,
         }
+        parents_by_commit = {
+            self.base: base_parents or f"{self.prior_main} {self.promoted_dev}",
+            self.prior_main: "root",
+            **(parents_by_commit or {}),
+        }
+        first_parent = first_parent or [self.base]
+        notes = set(notes or [self.base])
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "prior.json"
             path.write_text(json.dumps(document), encoding="utf-8")
 
             def fake_git(*arguments, **_kwargs):
-                if arguments == ("show", "-s", "--format=%P", self.base):
-                    return base_parents or f"{self.prior_main} {self.promoted_dev}"
-                if arguments == ("cat-file", "-e", f"{self.base}:docs/releases/v{self.target}.md"):
-                    return ""
+                if arguments == ("rev-list", "--first-parent", self.base):
+                    return "\n".join(first_parent)
+                if arguments[:3] == ("show", "-s", "--format=%P"):
+                    return parents_by_commit[arguments[3]]
+                if arguments[:2] == ("cat-file", "-e"):
+                    candidate = arguments[2].split(":", 1)[0]
+                    if candidate in notes:
+                        return ""
+                    raise subprocess.CalledProcessError(1, arguments)
                 if arguments == ("rev-parse", f"refs/tags/v{self.target}^{{commit}}"):
                     return tag_head or self.recovery_head
                 raise AssertionError(arguments)
@@ -378,6 +394,7 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
                  mock.patch.object(release_contract, "run_git", side_effect=fake_git), \
                  mock.patch.object(release_contract, "subprocess") as process:
                 process.run.return_value = subprocess.CompletedProcess([], 0 if tag_exists else 1)
+                process.CalledProcessError = subprocess.CalledProcessError
                 return release_contract.prepared_unreleased_minor_recovery(
                     base=self.base,
                     head=self.recovery_head,
@@ -414,7 +431,7 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
             self.prior_main: str(self.previous),
             self.promoted_dev: "0.4.2-alpha.1",
         }
-        with self.assertRaisesRegex(ReleaseContractError, "does not bridge"):
+        with self.assertRaisesRegex(ReleaseContractError, "one exact first-parent"):
             self.recovery(self.prior_promotion(), versions=versions)
         with self.assertRaisesRegex(ReleaseContractError, "exact merged internal dev promotion"):
             self.recovery(self.prior_promotion(promoted_dev="other-dev"))
@@ -432,8 +449,54 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
                 ReleaseContractError, "exact expected minor version"
             ):
                 self.recovery(self.prior_promotion(), versions=versions)
-        with self.assertRaisesRegex(ReleaseContractError, "not a main merge"):
+        with self.assertRaisesRegex(ReleaseContractError, "one exact first-parent"):
             self.recovery(self.prior_promotion(), base_parents=self.prior_main)
+
+    def test_accepts_a_second_recovery_after_an_intervening_main_merge(self):
+        intervening = "intervening-main"
+        intervening_dev = "intervening-dev"
+        versions = {
+            self.base: self.target,
+            self.recovery_head: self.target,
+            self.prior_main: str(self.previous),
+            self.promoted_dev: self.target,
+            intervening: self.target,
+            intervening_dev: self.target,
+        }
+        self.assertEqual("minor", self.recovery(
+            self.prior_promotion(merge_commit=intervening), versions=versions,
+            first_parent=[self.base, intervening, self.prior_main],
+            parents_by_commit={
+                self.base: f"{intervening} {intervening_dev}",
+                intervening: f"{self.prior_main} {self.promoted_dev}",
+            }, notes=[intervening],
+        ))
+
+    def test_refuses_missing_ambiguous_or_off_first_parent_anchors(self):
+        intervening = "intervening-main"
+        other_dev = "other-dev"
+        versions = {
+            self.base: self.target,
+            self.recovery_head: self.target,
+            self.prior_main: str(self.previous),
+            self.promoted_dev: self.target,
+            intervening: self.target,
+            other_dev: self.target,
+        }
+        cases = (
+            ([self.prior_main], {self.prior_main: "root"}, []),
+            ([self.base, intervening, self.prior_main], {
+                self.base: f"{self.prior_main} {self.promoted_dev}",
+                intervening: f"{self.prior_main} {other_dev}",
+            }, [self.base, intervening]),
+            ([self.prior_main], {self.prior_main: "root"}, [self.base]),
+        )
+        for ancestry, parents, notes in cases:
+            with self.subTest(ancestry=ancestry), self.assertRaisesRegex(
+                ReleaseContractError, "one exact first-parent"
+            ):
+                self.recovery(self.prior_promotion(), versions=versions,
+                              first_parent=ancestry, parents_by_commit=parents, notes=notes)
 
     def test_refuses_foreign_ambiguous_or_conflicting_historical_proof(self):
         foreign_variants = (
@@ -582,9 +645,19 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
                 fixture, "commit-tree", "HEAD^{tree}", "-p", previous_main, "-p", prepared_dev,
                 "-m", "prepared main promotion",
             )
+            self.git(fixture, "checkout", "--detach", prepared_main)
+            self.git(fixture, "commit", "--allow-empty", "-qm", "intervening development")
+            intervening_dev = self.git(fixture, "rev-parse", "HEAD")
+            intervening_main = self.git(
+                fixture, "commit-tree", f"{prepared_main}^{{tree}}", "-p", prepared_main,
+                "-p", intervening_dev, "-m", "intervening main merge",
+            )
+            self.git(fixture, "checkout", "--detach", intervening_main)
+            self.git(fixture, "commit", "--allow-empty", "-qm", "recovery development")
+            recovery_dev = self.git(fixture, "rev-parse", "HEAD")
             synthetic = self.git(
-                fixture, "commit-tree", "HEAD^{tree}", "-p", prepared_main, "-p", prepared_dev,
-                "-m", "recovery fixture",
+                fixture, "commit-tree", f"{intervening_main}^{{tree}}", "-p", intervening_main,
+                "-p", recovery_dev, "-m", "second recovery fixture",
             )
             self.git(fixture, "checkout", "--detach", synthetic)
             prior = [{
@@ -607,27 +680,53 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
             prior_path.write_text(json.dumps(prior), encoding="utf-8")
             current_path.write_text(json.dumps(current), encoding="utf-8")
 
+            discovered_anchor = self.contract(
+                fixture, "prior-promotion-anchor", "--base", intervening_main, "--head", synthetic,
+            )
+            self.assertEqual(0, discovered_anchor.returncode, discovered_anchor.stderr)
+            self.assertEqual(prepared_main, json.loads(discovered_anchor.stdout)["anchor"])
+
+            for mutation in (
+                lambda item: item.update(merge_commit_sha=prepared_dev),
+                lambda item: item["base"].update(ref="foreign-main"),
+                lambda item: item["head"].update(ref="feature/recovery"),
+                lambda item: item["head"]["repo"].update(full_name="foreign/ravenroot"),
+                lambda item: item.update(labels=[]),
+                lambda item: item.update(labels=[{"name": "release:patch"}]),
+                lambda item: item.update(labels=[{"name": "release:minor"}, {"name": "release:patch"}]),
+            ):
+                invalid = json.loads(json.dumps(prior))
+                mutation(invalid[0])
+                prior_path.write_text(json.dumps(invalid), encoding="utf-8")
+                failed = self.contract(
+                    fixture, "check-promotion", "--base", intervening_main, "--head", synthetic,
+                    "--labels", '["release:minor"]', "--prior-prs-json", str(prior_path),
+                )
+                self.assertNotEqual(0, failed.returncode)
+                self.assertRegex(failed.stderr, "exact merged internal dev promotion|exactly release:minor")
+            prior_path.write_text(json.dumps(prior), encoding="utf-8")
+
             promotion = self.contract(
-                fixture, "check-promotion", "--base", prepared_main, "--head", synthetic,
+                fixture, "check-promotion", "--base", intervening_main, "--head", synthetic,
                 "--labels", '["release:minor"]', "--prior-prs-json", str(prior_path),
             )
             self.assertEqual(0, promotion.returncode, promotion.stderr)
             self.assertEqual({"intent": "minor", "version": self.target}, json.loads(promotion.stdout))
             missing = self.contract(
-                fixture, "check-promotion", "--base", prepared_main, "--head", synthetic,
+                fixture, "check-promotion", "--base", intervening_main, "--head", synthetic,
                 "--labels", '["release:minor"]',
             )
             self.assertNotEqual(0, missing.returncode)
             self.assertIn("requires prior promotion evidence", missing.stderr)
 
             authorization = self.contract(
-                fixture, "authorize-main", "--before", prepared_main, "--head", synthetic,
+                fixture, "authorize-main", "--before", intervening_main, "--head", synthetic,
                 "--prs-json", str(current_path), "--prior-prs-json", str(prior_path),
             )
             self.assertEqual(0, authorization.returncode, authorization.stderr)
             self.assertEqual("v0.5.0-alpha.1", json.loads(authorization.stdout)["tag"])
             missing_authorization = self.contract(
-                fixture, "authorize-main", "--before", prepared_main, "--head", synthetic,
+                fixture, "authorize-main", "--before", intervening_main, "--head", synthetic,
                 "--prs-json", str(current_path),
             )
             self.assertNotEqual(0, missing_authorization.returncode)
@@ -638,13 +737,13 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
                 "tag", "-a", f"v{self.target}", "-m", "fixture", synthetic,
             )
             already_tagged = self.contract(
-                fixture, "authorize-main", "--before", prepared_main, "--head", synthetic,
-                "--prs-json", str(current_path), "--prior-prs-json", str(prior_path),
+                fixture, "authorize-main", "--before", intervening_main, "--head", synthetic,
+                "--prs-json", str(current_path), RECOVERY_PRIOR_ARGUMENT, str(prior_path),
             )
             self.assertNotEqual(0, already_tagged.returncode)
             self.assertIn("already exists", already_tagged.stderr)
             pre_promotion_tagged = self.contract(
-                fixture, "check-promotion", "--base", prepared_main, "--head", synthetic,
+                fixture, "check-promotion", "--base", intervening_main, "--head", synthetic,
                 "--labels", '["release:minor"]', "--prior-prs-json", str(prior_path),
             )
             self.assertNotEqual(0, pre_promotion_tagged.returncode)
@@ -664,15 +763,15 @@ class RecoveryCliBoundaryTest(unittest.TestCase):
 
             self.git(fixture, "tag", "-d", f"v{self.target}")
             alternate = self.git(
-                fixture, "commit-tree", "HEAD^{tree}", "-p", prepared_main, "-p", prepared_dev,
-                "-m", "different recovery fixture",
+                fixture, "commit-tree", f"{intervening_main}^{{tree}}", "-p", intervening_main,
+                "-p", recovery_dev, "-m", "different second recovery fixture",
             )
             self.git(
                 fixture, "tag", "-a", f"v{self.target}", "-m", "different fixture", alternate,
             )
             self.assertNotEqual(synthetic, self.git(fixture, "rev-parse", f"v{self.target}^{{commit}}"))
             mismatched = self.contract(
-                fixture, "authorize-main", "--before", prepared_main, "--head", synthetic,
+                fixture, "authorize-main", "--before", intervening_main, "--head", synthetic,
                 "--prs-json", str(current_path), "--prior-prs-json", str(prior_path),
             )
             self.assertNotEqual(0, mismatched.returncode)

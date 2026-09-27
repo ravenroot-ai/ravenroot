@@ -2620,6 +2620,17 @@ public final class RavenrootServer implements AutoCloseable {
                 readProcessInstanceTraversals(exchange, httpContext, segments[1]);
                 return;
             }
+            if (segments.length == 3 && !segments[1].isBlank() && "sagas".equals(segments[2])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                readProcessInstanceSagas(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 5 && !segments[1].isBlank() && "sagas".equals(segments[2])
+                    && !segments[3].isBlank() && !segments[4].isBlank()) {
+                if (!method(exchange, httpContext, "POST")) return;
+                controlSaga(exchange, httpContext, segments[1], segments[3], segments[4]);
+                return;
+            }
             if (segments.length == 5 && !segments[1].isBlank()
                     && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
                     && ("approve".equals(segments[4]) || "deny".equals(segments[4])
@@ -5034,6 +5045,96 @@ public final class RavenrootServer implements AutoCloseable {
             }
             throw storeFailure;
         }
+    }
+
+    private void readProcessInstanceSagas(HttpExchange exchange, HttpRequestContext httpContext,
+                                          String rawId) throws IOException {
+        if (!authorizedApplication.sagaStatusAvailable()) {
+            fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        var sagas = authorizedApplication.processInstanceSagas(
+                httpContext.applicationContext(), processInstanceId);
+        var commands = authorizedApplication.processInstanceSagaCommands(
+                httpContext.applicationContext(), processInstanceId);
+        String sagaBody = sagas.stream().map(RavenrootServer::sagaJson)
+                .collect(java.util.stream.Collectors.joining(","));
+        String commandBody = commands.stream().map(RavenrootServer::sagaCommandJson)
+                .collect(java.util.stream.Collectors.joining(","));
+        String body = "{\"sagas\":[" + sagaBody + "],\"outbox\":[" + commandBody + "]}";
+        json(exchange, 200, body);
+    }
+
+    private void controlSaga(HttpExchange exchange, HttpRequestContext httpContext, String rawProcessId,
+                             String rawSagaId, String rawAction) throws IOException {
+        java.util.UUID processId;
+        java.util.UUID sagaId;
+        long expectedRevision;
+        ai.ravenroot.api.persistence.SagaOperatorAction action;
+        try {
+            processId = java.util.UUID.fromString(rawProcessId);
+            sagaId = java.util.UUID.fromString(rawSagaId);
+            expectedRevision = Long.parseLong(exchange.getRequestHeaders()
+                    .getFirst("X-Ravenroot-Expected-Saga-Revision"));
+            action = ai.ravenroot.api.persistence.SagaOperatorAction.valueOf(
+                    rawAction.replace('-', '_').toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var result = authorizedApplication.requestSagaAction(httpContext.applicationContext(), processId,
+                    sagaId, expectedRevision, action);
+            json(exchange, 200, sagaJson(result));
+        } catch (IllegalStateException conflict) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private static String sagaJson(ai.ravenroot.api.persistence.SagaSnapshot saga) {
+        String steps = saga.occurrences().values().stream()
+                .sorted(java.util.Comparator.comparing(ai.ravenroot.api.persistence.SagaStepSnapshot::stepId)
+                        .thenComparing(ai.ravenroot.api.persistence.SagaStepSnapshot::occurrenceId))
+                .map(step -> "{\"occurrenceId\":\"" + step.occurrenceId()
+                        + "\",\"stepId\":\"" + escape(step.stepId())
+                        + "\",\"invocationId\":\"" + step.invocationId()
+                        + "\",\"forwardOperationId\":\"" + escape(step.forwardOperationId())
+                        + "\",\"compensationOperationId\":\"" + escape(step.compensationOperationId())
+                        + "\",\"status\":\"" + step.status()
+                        + "\",\"detail\":\"" + escape(step.detail()) + "\"}")
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"sagaId\":\"" + saga.sagaId() + "\",\"scope\":\""
+                + escape(saga.definition().scopeId()) + "\",\"revision\":" + saga.revision()
+                + ",\"disposition\":\"" + saga.disposition()
+                + "\",\"cancellationRequested\":" + saga.cancellationRequested()
+                + ",\"actionableReason\":\"" + escape(saga.actionableReason())
+                + "\",\"steps\":[" + steps + "]}";
+    }
+
+    private static String sagaCommandJson(ai.ravenroot.api.persistence.SagaOutboxRecord record) {
+        var intent = record.intent();
+        return "{\"messageId\":\"" + intent.messageId()
+                + "\",\"sagaId\":\"" + intent.sagaId()
+                + "\",\"operationId\":\"" + escape(intent.operationId())
+                + "\",\"commandType\":\"" + escape(intent.commandType())
+                + "\",\"schemaVersion\":" + intent.schemaVersion()
+                + ",\"status\":\"" + record.status()
+                + "\",\"attempts\":" + record.attempts()
+                + ",\"maxAttempts\":" + intent.maxAttempts()
+                + ",\"lastFailure\":\"" + escape(record.lastFailure()) + "\"}";
     }
 
     /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */

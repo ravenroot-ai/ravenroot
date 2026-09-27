@@ -88,7 +88,8 @@ class ManagedExecutionStoreTest {
                 "readProcessJournal", "readProcessJournalPage");
         var managedInternal = java.util.Set.of(
                 "applyManaged", "claimManaged", "claimPendingWorkAmong", "claimDueTimersAmong",
-                "managedClaimCandidates");
+                "managedClaimCandidates", "claimSagaCommands", "listSagaCompletionCandidates",
+                "listSagaRecoveryCandidates", "settleSagaCommand");
         var routed = new java.util.HashSet<String>(safe);
         routed.addAll(managedPublic);
         routed.addAll(managedInternal);
@@ -123,6 +124,33 @@ class ManagedExecutionStoreTest {
                 .toCompletableFuture().join();
 
         assertTrue(called.get(), "the adapter owns fencing/replay precedence before capacity drift");
+    }
+
+    @Test
+    void sagaReadsDelegateButTenantWideOutboxMutationStaysFailClosed() {
+        ExecutionKey key = key(9);
+        var claimed = new AtomicBoolean();
+        ExecutionStore delegate = executionStore((method, arguments) -> switch (method.getName()) {
+            case "listSagas", "listSagaCommands" -> CompletableFuture.completedFuture(List.of());
+            case "claimSagaCommands", "listSagaCompletionCandidates", "listSagaRecoveryCandidates" -> {
+                claimed.set(true);
+                yield CompletableFuture.completedFuture(List.of());
+            }
+            default -> defaultStoreValue(method.getName());
+        });
+        ExecutionStore managed = ManagedExecutionStore.protect(delegate, manifestStore(Map.of()));
+
+        assertTrue(managed.listSagas(key).toCompletableFuture().join().isEmpty());
+        assertTrue(managed.listSagaCommands(key).toCompletableFuture().join().isEmpty());
+        CompletionException refused = assertThrows(CompletionException.class, () -> managed
+                .claimSagaCommands("acme", "publisher", 1, Duration.ofSeconds(5))
+                .toCompletableFuture().join());
+        assertTrue(refused.getCause().getMessage().contains("not public entry points"));
+        assertThrows(CompletionException.class, () -> managed
+                .listSagaCompletionCandidates("acme", 1).toCompletableFuture().join());
+        assertThrows(CompletionException.class, () -> managed
+                .listSagaRecoveryCandidates("acme", 1).toCompletableFuture().join());
+        assertFalse(claimed.get(), "tenant-wide mutation must not bypass pinned execution authority");
     }
 
     @Test

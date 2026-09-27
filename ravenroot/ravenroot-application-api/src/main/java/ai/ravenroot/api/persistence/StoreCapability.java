@@ -179,5 +179,8 @@ public enum StoreCapability {
     EXECUTION_RESULTS,
 
     /** Atomic process workspace and fenced runner jobs; add DURABLE for restart survival. */
-    RUNNER_JOBS
+    RUNNER_JOBS,
+
+    /** Versioned saga aggregates and application-command outbox rows share the execution batch. */
+    DURABLE_SAGAS
 }

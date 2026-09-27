@@ -66,6 +66,7 @@ function stubClient(overrides = {}) {
     undeployDeployment: vi.fn(async id => ({ ...READY, deploymentId: id, state: 'STOPPED' })),
     processInventory: vi.fn(async () => ({ items: [], nextCursor: null,
       retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
+    processInstanceSagas: vi.fn(async () => ({ sagas: [], outbox: [] })),
     ...overrides,
   };
 }
@@ -462,6 +463,39 @@ describe('row actions', () => {
     expect(row.textContent).toContain('control RUNNING');
     expect(row.textContent).toContain('terminal reason CANCELLED');
     expect(row.textContent).toContain('cancellation recorded');
+  });
+
+  it('shows durable saga disposition, participant steps, and the actionable reason for a selected process', async () => {
+    const process = {
+      tenantId: 'tenant-a', deploymentId: 'orders-v3', graphVersion: 'graph-v3',
+      processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000003', status: 'RUNNING',
+      terminationReason: null, cancelled: false, controlState: 'RUNNING', disposition: 'ACTIVE',
+      revision: 8, lifecycleGeneration: 4, fencingToken: 10,
+      lifecycleCapabilities: { contractVersion: 1, scope: 'PROCESS', commands: [] },
+    };
+    const client = stubClient({
+      deployments: vi.fn(async () => [DURABLE_READY]),
+      processInventory: vi.fn(async () => ({ items: [process], nextCursor: null,
+        retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
+      processInstanceSagas: vi.fn(async () => ({ sagas: [{
+        sagaId: 'bbbbbbbb-0000-0000-0000-000000000004', scope: 'order', revision: 5,
+        disposition: 'UNRESOLVED', actionableReason: 'participant outcome requires reconciliation',
+        steps: [{ stepId: 'reserve', status: 'OUTCOME_UNKNOWN' }],
+      }], outbox: [{ commandType: 'order.created', status: 'BROKER_ACCEPTED', attempts: 2,
+        maxAttempts: 20, lastFailure: 'business completion pending' }] })),
+    });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    field('deployment-list').querySelector('[data-deployment-operational]').click();
+    await vi.waitFor(() => expect(client.processInventory).toHaveBeenCalled());
+    field('lifecycle-process-list').querySelector('[data-process-select]').click();
+    await vi.waitFor(() => expect(client.processInstanceSagas).toHaveBeenCalledWith(process.processInstanceId));
+
+    const row = field('lifecycle-process-list').querySelector('.lifecycle-process-item');
+    expect(row.textContent).toContain('order · UNRESOLVED');
+    expect(row.textContent).toContain('participant outcome requires reconciliation');
+    expect(row.textContent).toContain('reserve: OUTCOME_UNKNOWN');
+    expect(row.textContent).toContain('order.created · BROKER_ACCEPTED · attempts 2/20');
   });
 });
 

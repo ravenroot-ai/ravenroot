@@ -580,11 +580,14 @@ public final class BehaviorRegistry {
      */
     public Optional<NodeTypeDescriptor> descriptor(String behavior) {
         if ("agent".equals(behavior) && runnerJobs != null) {
-            return Optional.of(ai.ravenroot.core.runner.GovernedAgent.descriptor(resolvedDescriptors.get(behavior)));
+            return Optional.of(SagaCatalogProperties.decorate(
+                    ai.ravenroot.core.runner.GovernedAgent.descriptor(resolvedDescriptors.get(behavior))));
         }
         // The resolved entry, not the factory's raw one, so every consumer -- schema validation,
         // the nature validator, the catalog API -- sees the same nature the registry decided at load.
-        return behavior == null ? Optional.empty() : Optional.ofNullable(resolvedDescriptors.get(behavior));
+        if (behavior == null) return Optional.empty();
+        NodeTypeDescriptor descriptor = resolvedDescriptors.get(behavior);
+        return descriptor == null ? Optional.empty() : Optional.of(sagaDescriptor(descriptor));
     }
 
     /** Runtime command/property authority remains the ordinary descriptor unless access is explicit. */
@@ -597,9 +600,12 @@ public final class BehaviorRegistry {
             runnerJobs.definitions(node).forEach(definition -> definition.commands().values().forEach(command ->
                     command.outcomes().forEach(name -> outcomes.putIfAbsent(name,
                             ai.ravenroot.api.catalog.NodeOutcomeDescriptor.literal(name, "Approved definition outcome.")))));
-            return Optional.of(descriptor.withOutcomes(outcomes.values().toArray(ai.ravenroot.api.catalog.NodeOutcomeDescriptor[]::new)));
+            return Optional.of(SagaCatalogProperties.decorate(descriptor.withOutcomes(
+                    outcomes.values().toArray(ai.ravenroot.api.catalog.NodeOutcomeDescriptor[]::new))));
         }
-        return node == null ? Optional.empty() : Optional.ofNullable(resolvedDescriptors.get(node.behavior()));
+        if (node == null) return Optional.empty();
+        NodeTypeDescriptor descriptor = resolvedDescriptors.get(node.behavior());
+        return descriptor == null ? Optional.empty() : Optional.of(sagaDescriptor(descriptor));
     }
 
     /**
@@ -646,10 +652,15 @@ public final class BehaviorRegistry {
         if (runnerJobs != null) {
             values.removeIf(value -> value.behavior().equals("agent")); values.add(descriptor("agent").orElseThrow());
         }
-        return values.stream()
+        return values.stream().map(this::sagaDescriptor)
                 .sorted(java.util.Comparator.comparing(NodeTypeDescriptor::category)
                         .thenComparing(NodeTypeDescriptor::displayName))
                 .toList();
+    }
+
+    private NodeTypeDescriptor sagaDescriptor(NodeTypeDescriptor descriptor) {
+        return factories.get(descriptor.behavior()) instanceof LegacyNodeBehaviorFactory
+                ? descriptor : SagaCatalogProperties.decorate(descriptor);
     }
 
     public Map<String, NodeCatalogSource> catalogSources() { return Map.copyOf(catalogSources); }

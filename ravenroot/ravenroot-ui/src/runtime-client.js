@@ -1050,6 +1050,21 @@ export class RavenrootRuntimeClient {
     });
   }
 
+  /** Reads the bounded, payload-free saga and participant status for one process instance. */
+  async processInstanceSagas(processInstanceId, { signal } = {}) {
+    const id = String(processInstanceId || '');
+    if (!id) throw new Error('Process instance sagas require an id');
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/sagas`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    if (!result || !Array.isArray(result.sagas) || !Array.isArray(result.outbox)) {
+      throw new Error('Process saga response is invalid');
+    }
+    return result;
+  }
+
   /** Reads the bounded, tenant-authorized actionable Human Task projection for one exact graph
    * context. The runtime configuration supplies page and polling limits; this method supplies no
    * browser-owned defaults. */

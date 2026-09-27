@@ -42,6 +42,8 @@ class PostgresProcessControlMigrationTest {
         }
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("DROP TABLE saga_command_outbox");
+            statement.execute("DROP TABLE saga_instance");
             statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
             statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("ALTER TABLE process_instance DROP COLUMN control_state");

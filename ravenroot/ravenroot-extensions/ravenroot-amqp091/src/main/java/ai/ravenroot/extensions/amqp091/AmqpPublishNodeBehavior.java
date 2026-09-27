@@ -556,6 +556,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             for (var property : configuration.properties().entrySet()) {
                 String name = property.getKey();
                 if (CONFIGURATION_FIELDS.contains(name)) continue;
+                if (name.startsWith("saga.")) continue;
                 if (RecoveryRepeatabilityProperty.NAME.equals(name)) {
                     if (RecoveryRepeatabilityProperty.ALLOWED_VALUES.contains(property.getValue())) continue;
                     throw Refusal.rejected("INVALID_GRAPH_PROPERTY");

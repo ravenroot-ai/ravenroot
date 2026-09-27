@@ -76,6 +76,7 @@ import java.util.concurrent.TimeoutException;
 
 /** Framework-neutral graph execution semantics, including fan-out and fan-in. */
 public final class GraphRunner implements AutoCloseable {
+    private static final java.time.Duration SAGA_TERMINAL_INLINE_WAIT = java.time.Duration.ofSeconds(2);
     private static final Runnable NO_TIMEOUT_RELINQUISHED_OBSERVER = () -> { };
 
     /**
@@ -107,6 +108,7 @@ public final class GraphRunner implements AutoCloseable {
      * strategy closes.</p>
      */
     private final GraphDefinition graph;
+    private final SagaCoordinator sagaCoordinator;
 
     /**
      * Immutable identity of exactly the definition {@link #graph} holds (ARC-02).
@@ -363,6 +365,8 @@ public final class GraphRunner implements AutoCloseable {
      */
     private final Set<UUID> cancelledTraversals = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<UUID, ActiveBudget> activeBudgets = new ConcurrentHashMap<>();
+    /** Runtime state used by the saga boundary around actual node dispatch. */
+    private final ConcurrentHashMap<UUID, ExecutionState> activeExecutionStates = new ConcurrentHashMap<>();
 
     /**
      * Traversals asked to hold, and the gate each parked hop is waiting on.
@@ -875,6 +879,7 @@ public final class GraphRunner implements AutoCloseable {
                 ? GraphVersionSnapshot.submission(submitted)
                 : requireDescribes(snapshot, submitted);
         this.graph = pinned.definition();
+        this.sagaCoordinator = new SagaCoordinator(this.graph, behaviors, clock);
         this.behaviors = java.util.Objects.requireNonNull(behaviors, "behaviors");
         this.executionScopedExternalIo = executionScopedExternalIo;
         this.completedHumanTaskNode = validateCompletedHumanTaskNode(this.graph, completedHumanTaskNode);
@@ -1129,6 +1134,7 @@ public final class GraphRunner implements AutoCloseable {
             throw refused;
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
+        activeExecutionStates.put(traversalId, state);
         monitor.executionStarted(identity);
         // Strictly after the start event, and never before it -- see #beginPublishing for why the
         // ordering is what stops EXECUTION_PAUSED from preceding EXECUTION_STARTED.
@@ -1205,7 +1211,13 @@ public final class GraphRunner implements AutoCloseable {
                     }
                     if (outcome == null) {
                         try {
-                            state.executionCompleted();
+                            sagaCoordinator.prepareCompletion(traversalId, state.recorder);
+                            if (sagaCoordinator.awaitTerminal(traversalId, state.recorder,
+                                    SAGA_TERMINAL_INLINE_WAIT)) {
+                                state.executionCompleted();
+                            } else {
+                                state.executionWaitingForSaga();
+                            }
                         } catch (RuntimeException refused) {
                             // The PERS-01 aggregate is the second line of the same defence: it
                             // refuses to become COMPLETED while an invocation is still non-terminal,
@@ -1224,11 +1236,14 @@ public final class GraphRunner implements AutoCloseable {
                         // Before this, only the result knew: the event said "execution completed" over
                         // a run in which every node that did anything had failed and been routed.
                         Set<String> handledFailures = state.handledFailureNodes();
-                        monitor.executionCompleted(identity, handledFailures);
+                        if (!state.sagaCompletionPending()) {
+                            monitor.executionCompleted(identity, handledFailures);
+                        }
                         return CompletableFuture.completedFuture(new GraphExecutionResult(processInstanceId,
                                 traversalId, state.resultPayload(), state.visitedNodes, state.defaultedNodes,
                                 state.bypassedNodes, handledFailures, state.untakenEdges));
                     }
+                    sagaCoordinator.prepareFailure(traversalId, state.recorder);
                     state.executionFailed(ExecutionTermination.reasonOf(outcome));
                     publishTermination(identity, outcome);
                     return CompletableFuture.<GraphExecutionResult>failedFuture(outcome);
@@ -1275,6 +1290,7 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
+        activeExecutionStates.put(traversalId, state);
         state.reentryStarted();
         monitor.executionStarted(identity);
         // The second entry path, wired exactly as #execute is.
@@ -1345,9 +1361,18 @@ public final class GraphRunner implements AutoCloseable {
                     beginClosing(traversalId);
                     cancelBackoffs(traversalId);
                     try {
-                        if (failure == null) state.executionCompleted();
+                        if (failure == null) {
+                            sagaCoordinator.prepareCompletion(traversalId, state.recorder);
+                            if (sagaCoordinator.awaitTerminal(traversalId, state.recorder,
+                                    SAGA_TERMINAL_INLINE_WAIT)) {
+                                state.executionCompleted();
+                            } else {
+                                state.executionWaitingForSaga();
+                            }
+                        }
                         else if (!(outcome instanceof VerifiedToolApprovalSuspension)
                                 && !(outcome instanceof VerifiedExternalWorkSuspension)) {
+                            sagaCoordinator.prepareFailure(traversalId, state.recorder);
                             state.executionFailed(ExecutionTermination.reasonOf(outcome));
                         }
                     } finally {
@@ -1476,12 +1501,14 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
+        activeExecutionStates.put(traversalId, state);
         UUID invocationId = existingAttemptId == null ? identitySource.nextNodeInvocationId() : suspendedInvocationId;
         try {
             coordinator.restoreContinuation(joinContinuation, invocationId).toCompletableFuture().join();
         } catch (RuntimeException restorationFailure) {
             coordinators.remove(traversalId, coordinator);
             activeBudgets.remove(traversalId);
+            activeExecutionStates.remove(traversalId);
             resumedHop.close();
             behaviors.releaseOperationalPolicy(traversalId);
             return CompletableFuture.failedFuture(unwrap(restorationFailure));
@@ -1537,10 +1564,17 @@ public final class GraphRunner implements AutoCloseable {
                     cancelBackoffs(traversalId);
                     try {
                         if (failure == null) {
-                            state.executionCompleted();
-                            monitor.executionCompleted(identity, state.handledFailureNodes());
+                            sagaCoordinator.prepareCompletion(traversalId, state.recorder);
+                            if (sagaCoordinator.awaitTerminal(traversalId, state.recorder,
+                                    SAGA_TERMINAL_INLINE_WAIT)) {
+                                state.executionCompleted();
+                                monitor.executionCompleted(identity, state.handledFailureNodes());
+                            } else {
+                                state.executionWaitingForSaga();
+                            }
                         } else if (!(outcome instanceof VerifiedExternalWorkSuspension)
                                 && !(outcome instanceof VerifiedToolApprovalSuspension)) {
+                            sagaCoordinator.prepareFailure(traversalId, state.recorder);
                             state.executionFailed(ExecutionTermination.reasonOf(outcome));
                             publishTermination(identity, outcome);
                         }
@@ -1648,6 +1682,7 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
+        activeExecutionStates.put(traversalId, state);
         monitor.executionStarted(identity);
         // The fourth entry path. A traversal continued from a durable hold is as pausable as any
         // other, including by a second hold taken while this method is still running.
@@ -1667,10 +1702,17 @@ public final class GraphRunner implements AutoCloseable {
                     cancelBackoffs(traversalId);
                     try {
                         if (failure == null) {
-                            state.executionCompleted();
-                            monitor.executionCompleted(identity, state.handledFailureNodes());
+                            sagaCoordinator.prepareCompletion(traversalId, state.recorder);
+                            if (sagaCoordinator.awaitTerminal(traversalId, state.recorder,
+                                    SAGA_TERMINAL_INLINE_WAIT)) {
+                                state.executionCompleted();
+                                monitor.executionCompleted(identity, state.handledFailureNodes());
+                            } else {
+                                state.executionWaitingForSaga();
+                            }
                         } else if (!(outcome instanceof VerifiedExternalWorkSuspension)
                                 && !(outcome instanceof VerifiedToolApprovalSuspension)) {
+                            sagaCoordinator.prepareFailure(traversalId, state.recorder);
                             state.executionFailed(ExecutionTermination.reasonOf(outcome));
                             publishTermination(identity, outcome);
                         }
@@ -1722,6 +1764,7 @@ public final class GraphRunner implements AutoCloseable {
         if (behaviors.runnerJobs() != null) behaviors.runnerJobs().releaseLive(traversalId, this);
         coordinators.remove(traversalId, coordinator);
         activeBudgets.remove(traversalId);
+        activeExecutionStates.remove(traversalId);
         cancelledTraversals.remove(traversalId);
         // ON_CALLER: this runs on the traversal's own completion path, not on anyone's request
         // thread. A gate found here USED TO have no hop waiting on it -- the traversal had reached
@@ -1843,6 +1886,10 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
         if (!cancelledTraversals.add(traversalId)) {
             return false;
+        }
+        ExecutionState sagaState = activeExecutionStates.get(traversalId);
+        if (sagaState != null) {
+            sagaCoordinator.cancellationRequested(traversalId, sagaState.recorder);
         }
         // A paused traversal has a hop waiting on its gate. Releasing it here is what makes cancel
         // reach a paused execution at all: the released hop re-enters run(), reads the mark set
@@ -4328,7 +4375,24 @@ public final class GraphRunner implements AutoCloseable {
                                 new NodeCommandAdmissionException(node.id(), message.command().name()));
                     }
                 }
-                return operational(message).handle(message, context.cancellation());
+                ExecutionState state = activeExecutionStates.get(message.traversalId());
+                SagaCoordinator.Before saga = state == null
+                        ? new SagaCoordinator.Before(message, null, null)
+                        : sagaCoordinator.before(node, message, state.recorder);
+                if (saga.replay() != null) return CompletableFuture.completedFuture(saga.replay());
+                if (saga.invocation() == null) return operational(message).handle(message, context.cancellation());
+                CompletionStage<NodeResult> invoked;
+                try {
+                    invoked = operational(saga.message()).handle(saga.message(), context.cancellation());
+                } catch (RuntimeException failure) {
+                    if (state != null) sagaCoordinator.failed(saga, failure, state.recorder);
+                    return CompletableFuture.failedFuture(failure);
+                }
+                return invoked.whenComplete((result, failure) -> {
+                    if (state == null) return;
+                    if (failure == null) sagaCoordinator.succeeded(saga, result, state.recorder);
+                    else sagaCoordinator.failed(saga, unwrap(failure), state.recorder);
+                });
             }
 
             private NodeHandler operational(NodeMessage message) {
@@ -5469,6 +5533,9 @@ public final class GraphRunner implements AutoCloseable {
          */
         private volatile boolean durablyHeld;
 
+        /** True after graph work ended but durable participant completion is still pending. */
+        private volatile boolean sagaCompletionPending;
+
         /**
          * Whether any invocation of this traversal is still non-terminal in the folded aggregate.
          *
@@ -6021,7 +6088,7 @@ public final class GraphRunner implements AutoCloseable {
          * end remains observable in the aggregate, which commits in this same transaction.</p>
          */
         private synchronized void executionCompleted() {
-            if (durablyHeld) {
+            if (durablyHeld || sagaCompletionPending) {
                 return;
             }
             var transitions = List.<ExecutionTransition>of(
@@ -6030,6 +6097,27 @@ public final class GraphRunner implements AutoCloseable {
             record(transitions, List.of());
             lifecycle = fold(lifecycle, transitions);
             terminal = true;
+        }
+
+        /**
+         * Persists the bounded saga terminal gate as a recoverable wait. The outbox recovery worker
+         * owns the later WAITING -> RUNNING -> COMPLETED transition after every participant receipt
+         * is durable; an unavailable participant is therefore visible and restart-safe, not a graph
+         * failure and not a successful execution.
+         */
+        private synchronized void executionWaitingForSaga() {
+            if (sagaCompletionPending) return;
+            var transitions = List.<ExecutionTransition>of(
+                    new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING),
+                    new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING));
+            record(transitions, List.of());
+            lifecycle = fold(lifecycle, transitions);
+            sagaCompletionPending = true;
+            terminal = true;
+        }
+
+        private boolean sagaCompletionPending() {
+            return sagaCompletionPending;
         }
 
         /**
@@ -6061,7 +6149,7 @@ public final class GraphRunner implements AutoCloseable {
         private synchronized void executionFailed(
                 ai.ravenroot.api.application.ExecutionTerminationReason reason) {
             // A held traversal has not failed; it is waiting, and its hold says so. See #durablyHeld.
-            if (durablyHeld) {
+            if (durablyHeld || sagaCompletionPending) {
                 return;
             }
             var transitions = new ArrayList<ExecutionTransition>();

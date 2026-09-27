@@ -1069,6 +1069,11 @@ final class PostgresSchema {
                 new SchemaMigration(14, "durable deployment incarnation origin", List.of(
                         "ALTER TABLE process_instance ADD COLUMN deployment_incarnation_id TEXT",
                         "CREATE INDEX idx_process_instance_deployment_incarnation ON process_instance "
-                                + "(tenant_id, deployment_id, deployment_incarnation_id)")));
+                                + "(tenant_id, deployment_id, deployment_incarnation_id)")),
+                new SchemaMigration(15, "durable saga coordination and command outbox", List.of(
+                        "CREATE TABLE saga_instance (tenant_id TEXT NOT NULL, process_instance_id UUID NOT NULL, saga_id UUID NOT NULL, revision BIGINT NOT NULL, disposition TEXT NOT NULL, graph_completed BOOLEAN NOT NULL, snapshot BYTEA NOT NULL, PRIMARY KEY (tenant_id, process_instance_id, saga_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
+                        "CREATE TABLE saga_command_outbox (tenant_id TEXT NOT NULL, process_instance_id UUID NOT NULL, message_id UUID NOT NULL, saga_id UUID NOT NULL, operation_id TEXT NOT NULL, identity_fingerprint TEXT NOT NULL, intent BYTEA NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL, owner TEXT, fencing_token BIGINT NOT NULL, lease_expires_at_epoch_second BIGINT, lease_expires_at_nano INTEGER, next_attempt_at_epoch_second BIGINT NOT NULL, next_attempt_at_nano INTEGER NOT NULL, created_at_epoch_second BIGINT NOT NULL, created_at_nano INTEGER NOT NULL, broker_accepted_at_epoch_second BIGINT, broker_accepted_at_nano INTEGER, business_completed_at_epoch_second BIGINT, business_completed_at_nano INTEGER, last_failure TEXT NOT NULL, PRIMARY KEY (tenant_id, message_id), UNIQUE (tenant_id, operation_id), FOREIGN KEY (tenant_id, process_instance_id, saga_id) REFERENCES saga_instance (tenant_id, process_instance_id, saga_id) ON DELETE CASCADE)",
+                        "CREATE INDEX idx_saga_completion ON saga_instance (tenant_id, graph_completed, disposition, process_instance_id, saga_id)",
+                        "CREATE INDEX idx_saga_outbox_claim ON saga_command_outbox (tenant_id, status, next_attempt_at_epoch_second, next_attempt_at_nano)")));
     }
 }

@@ -21,7 +21,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -78,6 +81,10 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                         "Outcome for HTTP 2xx responses.", "continue"),
                 NodePropertyDescriptor.optional("failureOutcome", "Failure outcome", NodePropertyType.STRING,
                         "Outcome for non-2xx responses.", "error"),
+                NodePropertyDescriptor.optional("saga.outcomeLookupUrl", "Saga outcome lookup URL",
+                        NodePropertyType.TEXT,
+                        "Participant lookup URL rendered after an unknown HTTP result. Supports "
+                                + "{{attributes.sagaOperationId}}.", ""),
                 // PERS-04 (ADR 0022). Required exactly where the answer has consequences: a GET
                 // is idempotent and a POST is not, and the `side-effect` capability tag cannot express
                 // the difference — which is why capability tags were rejected as a recovery contract.
@@ -120,6 +127,7 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
         String credentialScheme = NodeProperties.string(node, "credentialScheme", "Bearer").trim();
         String successOutcome = NodeProperties.string(node, "successOutcome", "continue");
         String failureOutcome = NodeProperties.string(node, "failureOutcome", "error");
+        String outcomeLookupTemplate = NodeProperties.string(node, "saga.outcomeLookupUrl", "").trim();
         Map<String, String> headers = headers(node);
 
         return message -> {
@@ -133,6 +141,15 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                     ? capacity.maximumTimeout() : requestedTimeout;
             var builder = HttpRequest.newBuilder(uri).timeout(effectiveTimeout);
             headers.forEach(builder::header);
+            String body = NodeProperties.render(bodyTemplate, message, node);
+            byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+            String requestFingerprint = sha256(bodyBytes);
+            if ("http-idempotency-v1".equals(node.properties().get("saga.participant"))) {
+                Object operationId = message.attributes().get("sagaOperationId");
+                if (operationId == null) throw new IllegalStateException("saga operation identity is absent");
+                builder.header("Idempotency-Key", operationId.toString());
+                builder.header("X-Ravenroot-Payload-SHA256", requestFingerprint);
+            }
             if (!credentialRef.isEmpty()) {
                 // KNOWN GAP (SEC-07, deliberately out of scope and escalated separately).
                 // `credentialRef` comes from GraphML node properties, and CredentialResolver.resolve
@@ -155,8 +172,6 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                     }
                 }
             }
-            String body = NodeProperties.render(bodyTemplate, message, node);
-            byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
             // The request half of the volume gate. Checked on the rendered bytes,
             // because the template is small and the payload it interpolates need not be.
             if (bodyBytes.length > capacity.maximumRequestBytes()) {
@@ -168,13 +183,72 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                     : HttpRequest.BodyPublishers.ofByteArray(bodyBytes);
             HttpRequest request = builder.method(method, publisher).build();
             // Bounded, not BodyHandlers.ofString, which reads without a ceiling.
-            return client.sendAsync(request, BoundedBodyHandlers.ofString(
+            var delivery = client.sendAsync(request, BoundedBodyHandlers.ofString(
                             capacity.maximumResponseBytes(), StandardCharsets.UTF_8))
                     .thenApply(response -> new NodeResult(response.statusCode() >= 200 && response.statusCode() < 300
                             ? successOutcome : failureOutcome, response.body(),
                             NodeProperties.attributes(message, "http.status", response.statusCode(),
                                     "http.uri", uri.toString())));
+            if (!"http-idempotency-v1".equals(node.properties().get("saga.participant"))
+                    || outcomeLookupTemplate.isEmpty()) return delivery;
+            return delivery.exceptionallyCompose(failure -> {
+                URI lookup = URI.create(NodeProperties.render(outcomeLookupTemplate, message, node));
+                outboundPolicy.requireAllowed(lookup);
+                ToolAuthorization.requireAllowed(toolPolicy, message, "http.request",
+                        Map.of("host", lookup.getHost(), "method", "GET"));
+                var lookupBuilder = HttpRequest.newBuilder(lookup).timeout(effectiveTimeout).GET();
+                if (!credentialRef.isEmpty()) {
+                    var secret = credentials.resolve(credentialRef).orElseThrow(() ->
+                            new SecurityException("Credential reference cannot be resolved: " + credentialRef));
+                    try (secret) {
+                        char[] value = secret.copy();
+                        try {
+                            lookupBuilder.header(credentialHeader, credentialScheme.isEmpty()
+                                    ? new String(value) : credentialScheme + " " + new String(value));
+                        } finally {
+                            java.util.Arrays.fill(value, '\0');
+                        }
+                    }
+                }
+                HttpRequest query = lookupBuilder.build();
+                return client.sendAsync(query, BoundedBodyHandlers.ofString(
+                                capacity.maximumResponseBytes(), StandardCharsets.UTF_8))
+                        .thenCompose(response -> {
+                            String operationId = String.valueOf(message.attributes().get("sagaOperationId"));
+                            String expected = operationId
+                                    .startsWith("compensate:") ? "COMPENSATED" : "APPLIED";
+                            if (response.statusCode() == 200 && reconciled(response.body(), operationId,
+                                    requestFingerprint, expected)) {
+                                return java.util.concurrent.CompletableFuture.completedFuture(new NodeResult(
+                                        successOutcome, response.body(), NodeProperties.attributes(message,
+                                        "http.status", response.statusCode(), "http.uri", uri.toString(),
+                                        "saga.reconciled", true)));
+                            }
+                            return java.util.concurrent.CompletableFuture.<NodeResult>failedFuture(failure);
+                        });
+            });
         };
+    }
+
+    private static String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static boolean reconciled(String response, String operationId, String fingerprint, String state) {
+        try {
+            Object decoded = ai.ravenroot.api.payload.PayloadJson.read(response.getBytes(StandardCharsets.UTF_8),
+                    ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+            if (!(decoded instanceof Map<?, ?> values)) return false;
+            return operationId.equals(values.get("operationId"))
+                    && fingerprint.equals(values.get("fingerprint"))
+                    && state.equals(values.get("state"));
+        } catch (RuntimeException malformed) {
+            return false;
+        }
     }
 
     private ResolvedOperationalPolicy.BuiltInHttpCapacity capacityFor(NodeMessage message) {

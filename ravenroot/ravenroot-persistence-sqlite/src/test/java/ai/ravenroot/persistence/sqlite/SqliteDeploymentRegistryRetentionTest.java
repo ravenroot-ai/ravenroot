@@ -126,6 +126,8 @@ class SqliteDeploymentRegistryRetentionTest {
             statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
             statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("DROP TABLE deployment_identity_binding");
+            statement.execute("DROP TABLE saga_command_outbox");
+            statement.execute("DROP TABLE saga_instance");
             statement.execute("DELETE FROM store_schema_history WHERE version >= 33");
             statement.execute("PRAGMA user_version = 32");
         }

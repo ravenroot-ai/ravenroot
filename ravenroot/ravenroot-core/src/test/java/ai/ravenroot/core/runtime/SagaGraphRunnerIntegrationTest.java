@@ -1,0 +1,450 @@
+package ai.ravenroot.core.runtime;
+
+import ai.ravenroot.api.application.ProcessInstance;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.application.Traversal;
+import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.ExecutionBatch;
+import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionTransition;
+import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.SagaDisposition;
+import ai.ravenroot.api.persistence.SagaStepStatus;
+import ai.ravenroot.api.node.service.SagaCommandTransport;
+import ai.ravenroot.api.execution.NodeMessage;
+import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.RetryClassified;
+import ai.ravenroot.api.persistence.Retryability;
+import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.core.graph.GraphDefinition;
+import ai.ravenroot.core.graph.GraphEdge;
+import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.graph.NodeKind;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class SagaGraphRunnerIntegrationTest {
+    @Test
+    void runnerPersistsIntentBeforeRealHandlerAndRecordsItsObservedOutcome(@TempDir Path directory) {
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"),
+                new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
+                        "saga.scope", "order", "saga.step", "reserve",
+                        "saga.participant", "pure")), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var seenOperation = new AtomicReference<String>();
+        NodeHandler handler = message -> {
+            // The handler is the real registered behavior. These values can only be present if the
+            // runner persisted and enriched the delivery before invoking it.
+            seenOperation.set(String.valueOf(message.attributes().get("sagaOperationId")));
+            assertNotNull(message.attributes().get("sagaPayloadFingerprint"));
+            return CompletableFuture.completedFuture(ai.ravenroot.api.execution.NodeResult.continueWith(
+                    message.payload()));
+        };
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("effect", "Pure effect probe", "Test", "Test probe",
+                        "actor", false, List.of(), java.util.Set.of("saga-pure"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) { return handler; }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("runtime.db"), Clock.systemUTC());
+             var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+        long revision = createRunning(store, key, traversal);
+        try (
+             var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor());
+             var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+            runner.execute(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                    Map.of("order", "A-1"), "graph-v1", null, null, recorder)
+                    .toCompletableFuture().join();
+        }
+        assertNotNull(seenOperation.get());
+        var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+        assertEquals(SagaDisposition.SUCCEEDED, saga.disposition());
+        assertEquals(SagaStepStatus.CONFIRMED_SUCCESS,
+                saga.occurrences().values().iterator().next().status());
+        }
+    }
+
+    @Test
+    void authoredPureStringCannotUpgradeAnUntrustedEffectHandler() {
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"),
+                new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
+                        "saga.scope", "order", "saga.step", "reserve",
+                        "saga.participant", "pure")), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = new BehaviorRegistry().register("effect", message ->
+                CompletableFuture.completedFuture(ai.ravenroot.api.execution.NodeResult.continueWith(
+                        message.payload())));
+        try (var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new GraphRunner(manager, engine, registry, new ExecutionMonitor()));
+        }
+    }
+
+    @Test
+    void parallelEffectsMustBothFinishBeforeJoinCanCompleteTheSaga(@TempDir Path directory) {
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"),
+                sagaNode("left", "left"), sagaNode("right", "right"),
+                new GraphNode("join", NodeKind.BEHAVIOR, "join", Map.of()), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "left"), GraphEdge.to("start", "right"),
+                        GraphEdge.to("left", "join"), GraphEdge.to("right", "join"),
+                        GraphEdge.to("join", "end")));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                ai.ravenroot.api.execution.NodeResult.continueWith(message.payload())))
+                .registerFactory(pureFactory("join", message -> CompletableFuture.completedFuture(
+                        ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()))));
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("parallel.db"), Clock.systemUTC());
+             var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+        long revision = createRunning(store, key, traversal);
+        try (
+             var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor());
+             var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+            runner.execute(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                    Map.of("order", "A-1"), "graph-v1", null, null, recorder)
+                    .toCompletableFuture().join();
+        }
+        var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+        assertEquals(SagaDisposition.SUCCEEDED, saga.disposition());
+        assertEquals(2, saga.occurrences().size());
+        }
+    }
+
+    @Test
+    void asynchronousBusinessCompletionGatesSuccessWithoutTurningTheWaitIntoFailure(@TempDir Path directory)
+            throws Exception {
+        var publish = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
+                "saga.scope", "order", "saga.step", "created", "saga.participant", "amqp-inbox-v1",
+                "saga.businessCompletionRequired", true, "saga.commandType", "order.created",
+                "saga.irreversible", true));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), publish, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "publish"), GraphEdge.to("publish", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("amqp.publish", "AMQP", "Test", "Test AMQP",
+                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(new NodeResult("continue",
+                        Map.of("status", "CONFIRMED"), message.attributes()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("async.db"), Clock.systemUTC());
+             var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+            long revision = createRunning(store, key, traversal);
+            try (var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor());
+                 var recorder = ExecutionRecorder.open(store, key, "runner", Duration.ofSeconds(30), revision)) {
+                var execution = runner.execute(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                        Map.of("order", "A-1"), "graph-v1", null, null, recorder).toCompletableFuture();
+                long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (store.listSagaCommands(key).toCompletableFuture().join().isEmpty()
+                        && System.nanoTime() < until) Thread.sleep(10);
+                var transport = new SagaCommandTransport() {
+                    @Override public CompletableFuture<BrokerResult> publish(
+                            ai.ravenroot.api.persistence.SagaCommandIntent ignored) {
+                        return CompletableFuture.completedFuture(new BrokerResult(true, "accepted"));
+                    }
+                    @Override public CompletableFuture<Boolean> businessCompleted(
+                            ai.ravenroot.api.persistence.SagaCommandIntent ignored) {
+                        return CompletableFuture.completedFuture(true);
+                    }
+                };
+                var publisher = new SagaOutboxPublisher(store, transport,
+                        (ignoredKey, ignoredIntent) -> { }, "publisher", 4,
+                        Duration.ofSeconds(5), Duration.ofMillis(10));
+                publisher.runOnce("tenant-a");
+                Thread.sleep(1100);
+                publisher.runOnce("tenant-a");
+                execution.get(5, TimeUnit.SECONDS);
+            }
+            var stored = store.load(key).toCompletableFuture().join();
+            assertEquals(ProcessInstanceStatus.COMPLETED, stored.state().status());
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(true, saga.graphCompleted());
+            assertEquals(SagaDisposition.SUCCEEDED, saga.disposition());
+        }
+    }
+
+    @Test
+    void businessCompletionPastInlineBoundBecomesRestartSafeWaitingInsteadOfFailure(@TempDir Path directory) {
+        var publish = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
+                "saga.scope", "order", "saga.step", "created", "saga.participant", "amqp-inbox-v1",
+                "saga.businessCompletionRequired", true, "saga.commandType", "order.created",
+                "saga.irreversible", true));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), publish, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "publish"), GraphEdge.to("publish", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("amqp.publish", "AMQP", "Test", "Test AMQP",
+                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(new NodeResult("continue",
+                        Map.of("status", "CONFIRMED"), message.attributes()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("waiting.db"), Clock.systemUTC());
+             var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+            long revision = createRunning(store, key, traversal);
+            try (var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor());
+                 var recorder = ExecutionRecorder.open(store, key, "runner", Duration.ofSeconds(30), revision)) {
+                runner.execute(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                        Map.of("order", "A-1"), "graph-v1", null, null, recorder)
+                        .toCompletableFuture().join();
+            }
+            var stored = store.load(key).toCompletableFuture().join();
+            assertEquals(ProcessInstanceStatus.WAITING, stored.state().status());
+            assertEquals(TraversalStatus.WAITING, stored.state().traversals().get(traversal).status());
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(true, saga.graphCompleted());
+            assertEquals(SagaDisposition.RUNNING, saga.disposition());
+        }
+    }
+
+    @Test
+    void traversalCannotReportSuccessWhenADeclaredSagaBranchNeverRan(@TempDir Path directory) {
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), sagaNode("left", "left"),
+                sagaNode("unreached", "right"), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "left"), GraphEdge.to("left", "end")));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                ai.ravenroot.api.execution.NodeResult.continueWith(message.payload())));
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("incomplete.db"), Clock.systemUTC());
+             var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+        long revision = createRunning(store, key, traversal);
+        try (
+             var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor());
+             var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+            assertThrows(CompletionException.class, () -> runner.execute(TestIdentities.of("tenant-a", "alice"),
+                    process, traversal, Map.of("order", "A-1"), "graph-v1", null, null, recorder)
+                    .toCompletableFuture().join());
+        }
+        assertEquals(SagaDisposition.COMPENSATED,
+                store.listSagas(key).toCompletableFuture().join().getFirst().disposition());
+        }
+    }
+
+    @Test
+    void participantCompletingAfterCancellationRemainsCompensationPending(@TempDir Path directory)
+            throws Exception {
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), sagaNode("effect", "reserve"),
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var invoked = new CountDownLatch(1);
+        var participant = new CompletableFuture<ai.ravenroot.api.execution.NodeResult>();
+        var registry = pureRegistry("effect", message -> {
+            invoked.countDown();
+            return participant;
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("late.db"), Clock.systemUTC());
+             var engine = new JoinTestEngine(); var manager = GraphManager.from(graph)) {
+            long revision = createRunning(store, key, traversal);
+            try (var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor());
+                 var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+                var execution = runner.execute(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                        Map.of("order", "A-1"), "graph-v1", null, null, recorder).toCompletableFuture();
+                assertEquals(true, invoked.await(5, TimeUnit.SECONDS));
+                assertEquals(true, runner.cancelTraversal(traversal));
+                participant.complete(ai.ravenroot.api.execution.NodeResult.continueWith(Map.of("reserved", true)));
+                assertThrows(CompletionException.class, execution::join);
+            }
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(true, saga.cancellationRequested());
+            assertEquals(SagaDisposition.COMPENSATION_PENDING, saga.disposition());
+            assertEquals(SagaStepStatus.CONFIRMED_SUCCESS,
+                    saga.occurrences().values().iterator().next().status());
+        }
+    }
+
+    @Test
+    void unknownOutcomeIsRedeliveredAfterRestartWithTheOriginalBusinessIdentity(@TempDir Path directory) {
+        var node = sagaNode("effect", "reserve");
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                NodeResult.continueWith(message.payload())));
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        String firstOperation;
+        try (var store = new SqliteExecutionStore(directory.resolve("restart.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker-before-crash",
+                    Duration.ofSeconds(30), revision)) {
+                var firstCoordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var first = firstCoordinator.before(node, message(process, traversal, UUID.randomUUID()), recorder);
+                firstOperation = String.valueOf(first.message().attributes().get("sagaOperationId"));
+                firstCoordinator.failed(first, new java.io.IOException("response lost"), recorder);
+            }
+            long resumedRevision = store.load(key).toCompletableFuture().join().revision();
+            try (var recorder = ExecutionRecorder.open(store, key, "worker-after-restart",
+                    Duration.ofSeconds(30), resumedRevision)) {
+                var recoveredCoordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var recovered = recoveredCoordinator.before(node,
+                        message(process, traversal, UUID.randomUUID()), recorder);
+                assertEquals(firstOperation, recovered.message().attributes().get("sagaOperationId"));
+                recoveredCoordinator.succeeded(recovered,
+                        NodeResult.continueWith(recovered.message().payload()), recorder);
+            }
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(SagaDisposition.SUCCEEDED, saga.disposition());
+            assertEquals(1, saga.occurrences().size());
+        }
+    }
+
+    @Test
+    void compensationNodeMustMatchTheTrustedParticipantAdapter() {
+        var forward = new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
+                "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",
+                "saga.compensation", "undo"));
+        var compensation = new GraphNode("undo", NodeKind.BEHAVIOR, "untrusted", Map.of(
+                "saga.scope", "order", "saga.role", "compensation"));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), forward, compensation,
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "effect"),
+                GraphEdge.to("effect", "end")));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                NodeResult.continueWith(message.payload()))).register("untrusted", message ->
+                CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new SagaCoordinator(graph, registry, Clock.systemUTC()));
+    }
+
+    @Test
+    void expiredFrozenDeadlinePreventsANewEffectAfterRestart(@TempDir Path directory) {
+        var node = new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
+                "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",
+                "saga.deadlineMs", 1000L));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = pureRegistry("effect", message -> CompletableFuture.completedFuture(
+                NodeResult.continueWith(message.payload())));
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        Instant createdAt = Instant.parse("2026-09-27T10:00:00Z");
+        try (var store = new SqliteExecutionStore(directory.resolve("deadline.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker-before-pause",
+                    Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.fixed(createdAt, ZoneOffset.UTC));
+                var before = coordinator.before(node, message(process, traversal, UUID.randomUUID()), recorder);
+                coordinator.failed(before, new java.io.IOException("runner stopped before outcome"), recorder);
+            }
+            long resumedRevision = store.load(key).toCompletableFuture().join().revision();
+            try (var recorder = ExecutionRecorder.open(store, key, "worker-after-deadline",
+                    Duration.ofSeconds(30), resumedRevision)) {
+                var recovered = new SagaCoordinator(graph, registry,
+                        Clock.fixed(createdAt.plusSeconds(2), ZoneOffset.UTC));
+                assertThrows(IllegalStateException.class, () -> recovered.before(
+                        node, message(process, traversal, UUID.randomUUID()), recorder));
+            }
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(true, saga.cancellationRequested());
+            assertEquals(SagaDisposition.COMPENSATED, saga.disposition());
+            assertEquals(createdAt.plusSeconds(1), saga.deadline());
+        }
+    }
+
+    @Test
+    void trustedParticipantNoEffectFailureIsNotParkedAsUnknown(@TempDir Path directory) {
+        var node = new GraphNode("effect", NodeKind.BEHAVIOR, "http-request", Map.of(
+                "saga.scope", "order", "saga.step", "notify",
+                "saga.participant", "http-idempotency-v1", "saga.irreversible", true,
+                "saga.outcomeLookupUrl", "https://participant.test/operations/{{attributes.sagaOperationId}}"));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("http-request", "HTTP", "Test", "Test HTTP",
+                        "actor", false, List.of(), java.util.Set.of("side-effect"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("no-effect.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var before = coordinator.before(node, message(process, traversal, UUID.randomUUID()), recorder);
+                coordinator.failed(before, new ConfirmedNoEffect(), recorder);
+            }
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(SagaDisposition.COMPENSATED, saga.disposition());
+            assertEquals(SagaStepStatus.CONFIRMED_NO_EFFECT,
+                    saga.occurrences().values().iterator().next().status());
+        }
+    }
+
+    private static final class ConfirmedNoEffect extends RuntimeException implements RetryClassified {
+        @Override public Retryability retryability() { return Retryability.RETRYABLE_NO_EFFECT; }
+    }
+
+    private static NodeMessage message(UUID process, UUID traversal, UUID invocation) {
+        return new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal, invocation,
+                UUID.randomUUID(), "effect", Map.of("order", "A-1"), Map.of());
+    }
+
+    private static GraphNode sagaNode(String id, String step) {
+        return new GraphNode(id, NodeKind.BEHAVIOR, "effect", Map.of(
+                "saga.scope", "order", "saga.step", step, "saga.participant", "pure"));
+    }
+
+    private static BehaviorRegistry pureRegistry(String behavior, NodeHandler handler) {
+        return new BehaviorRegistry().registerFactory(pureFactory(behavior, handler));
+    }
+
+    private static NodeBehaviorFactory pureFactory(String behavior, NodeHandler handler) {
+        return new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor(behavior, behavior, "Test", "Test probe",
+                        "actor", false, List.of(), java.util.Set.of("saga-pure"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) { return handler; }
+        };
+    }
+
+    private static long createRunning(ExecutionStore store, ExecutionKey key, UUID traversalId) {
+        var accepted = new ProcessInstance(key.processInstanceId(), ProcessInstanceStatus.ACCEPTED,
+                Map.of(traversalId, new Traversal(traversalId, "start", TraversalStatus.ACCEPTED, Map.of())));
+        var created = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(accepted, new GraphVersionPin("graph-v1")))
+                .build()).toCompletableFuture().join();
+        return store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .build()).toCompletableFuture().join().revision();
+    }
+}

@@ -77,6 +77,9 @@ import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.SagaSnapshot;
+import ai.ravenroot.api.persistence.SagaOutboxRecord;
+import ai.ravenroot.api.persistence.SagaOutboxSettlement;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
@@ -237,7 +240,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoreCapability.HUMAN_TASKS,
             StoreCapability.HUMAN_TASK_CONFIRMATIONS,
             StoreCapability.EXECUTION_PAUSES,
-            StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.RUNNER_JOBS);
+            StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.RUNNER_JOBS,
+            StoreCapability.DURABLE_SAGAS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -394,6 +398,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private final Clock clock;
     private final PostgresStoreConfig config;
     private final HumanTaskPolicy humanTaskPolicy;
+    private final ai.ravenroot.api.persistence.SagaOutboxCapacity sagaOutboxCapacity;
     private final Transactions transactions;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -426,6 +431,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
         this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        this.sagaOutboxCapacity = ai.ravenroot.api.persistence.SagaOutboxCapacity.configured();
         this.transactions = new Transactions(dataSource, config,
                 Objects.requireNonNull(commitBoundary, "commitBoundary"));
         // Named and daemon so a thread dump says which store is blocked and a forgotten close cannot
@@ -670,6 +676,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         if (idempotency != null) {
             writeIdempotencyRecord(connection, key, idempotency, revision, now);
         }
+        PostgresSagaStorage.write(connection, key, batch, now, sagaOutboxCapacity);
         // Inside the same transaction as the transition above, which is the entirety of the shared
         // transactional boundary the event journal promises. There is no publish step to crash between,
         // because there is no publish step: delivery reads the committed journal afterwards.
@@ -2810,7 +2817,9 @@ public final class PostgresExecutionStore implements ExecutionStore {
         String terminal = String.join(", ", terminalStatusNames().stream()
                 .map(name -> "'" + name + "'").toList());
         return "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? AND status IN ("
-                + terminal + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) AND ("
+                + terminal + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM saga_instance s WHERE s.tenant_id = process_instance.tenant_id AND s.process_instance_id = process_instance.process_instance_id "
+                + "AND s.disposition NOT IN ('SUCCEEDED', 'COMPENSATED')) AND ("
                 + "(retained_until_epoch_second IS NOT NULL AND "
                 + StoredInstant.atOrBefore("retained_until") + ") OR "
                 + "(retained_until_epoch_second IS NULL AND "
@@ -5737,6 +5746,56 @@ public final class PostgresExecutionStore implements ExecutionStore {
         } catch (ArithmeticException | DateTimeException overflow) {
             return Instant.MAX;
         }
+    }
+
+    @Override
+    public CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        Objects.requireNonNull(key, "key"); Objects.requireNonNull(sagaId, "sagaId");
+        return async(() -> read(key, connection -> PostgresSagaStorage.load(connection, key, sagaId)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        Objects.requireNonNull(key, "key");
+        return async(() -> read(key, connection -> PostgresSagaStorage.list(connection, key)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        Objects.requireNonNull(key, "key");
+        return async(() -> read(key, connection -> PostgresSagaStorage.listCommands(connection, key)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaCompletionCandidates(String tenantId, int limit) {
+        requireTenantId(tenantId); requireLimit(limit);
+        return async(() -> read(null, connection -> PostgresSagaStorage.completionCandidates(
+                connection, tenantId, limit, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaRecoveryCandidates(String tenantId, int limit) {
+        requireTenantId(tenantId); requireLimit(limit);
+        return async(() -> read(null, connection -> PostgresSagaStorage.recoveryCandidates(
+                connection, tenantId, limit, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        requireTenantId(tenantId); requireWorkerId(workerId); requireLimit(limit); requireLeaseTtl(ttl);
+        return async(() -> write(null, connection -> PostgresSagaStorage.claim(connection, tenantId,
+                workerId, limit, ttl, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        requireTenantId(tenantId); requireWorkerId(workerId); Objects.requireNonNull(messageId, "messageId");
+        Objects.requireNonNull(settlement, "settlement");
+        return async(() -> write(null, connection -> PostgresSagaStorage.settle(connection, tenantId,
+                messageId, workerId, fencingToken, settlement, clock.instant())));
     }
 
     /**

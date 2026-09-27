@@ -157,6 +157,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             def fixture_git(root: Path, *arguments: str) -> None:
                 subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
 
+            def seed_future_fragment(root: Path) -> None:
+                fragments = [path for path in (root / ".changes").glob("*.md")
+                             if path.name != "README.md"]
+                if fragments:
+                    return
+                fragment = root / ".changes/future.feature.md"
+                fragment.write_text("Exercises preparation after a released source state.\n",
+                                    encoding="utf-8")
+                fixture_git(root, "add", fragment.relative_to(root).as_posix())
+                fixture_git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "fixture future fragment")
+
             def isolated_tree(name: str, source: Path, revision: str) -> Path:
                 """Clone a complete audit fixture with independent local refs and no source config."""
                 root = Path(location) / name
@@ -198,19 +210,19 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     self.fail("no ordinary product source is reachable from the latest release tag")
             for intent in ("patch", "minor"):
                 ordinary = isolated_tree(f"ordinary-{intent}", ROOT, source_revision)
+                seed_future_fragment(ordinary)
                 prepared_tree(ordinary, intent, source_version)
 
             prepared_source = isolated_tree("prepared-source", ROOT, source_revision)
+            seed_future_fragment(prepared_source)
             prepared_version = prepare(prepared_source, "minor")["version"]
             fixture_git(prepared_source, "add", ".")
             fixture_git(prepared_source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                         "commit", "-qm", "prepared fixture")
             fixture_git(prepared_source, "tag", f"v{prepared_version}")
-            fragment = prepared_source / ".changes/future.feature.md"
-            fragment.write_text("Exercises preparation from a prior release state.\n", encoding="utf-8")
-            fixture_git(prepared_source, "add", fragment.relative_to(prepared_source).as_posix())
-            fixture_git(prepared_source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                        "commit", "-qm", "fixture fragment")
+            self.assertEqual([], [path for path in (prepared_source / ".changes").glob("*.md")
+                                  if path.name != "README.md"])
+            seed_future_fragment(prepared_source)
 
             for intent in ("patch", "minor"):
                 root = isolated_tree(f"prepared-{intent}", prepared_source, "HEAD")

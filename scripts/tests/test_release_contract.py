@@ -341,7 +341,8 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
             "labels": [{"name": label}],
         }]
 
-    def recovery(self, document, *, versions=None, tag_exists=False, allow_existing_exact_tag=False):
+    def recovery(self, document, *, versions=None, tag_exists=False, tag_head=None,
+                 allow_existing_exact_tag=False):
         versions = versions or {
             self.base: self.target,
             self.recovery_head: self.target,
@@ -358,7 +359,7 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
                 if arguments == ("cat-file", "-e", f"{self.base}:docs/releases/v{self.target}.md"):
                     return ""
                 if arguments == ("rev-parse", f"refs/tags/v{self.target}^{{commit}}"):
-                    return self.recovery_head
+                    return tag_head or self.recovery_head
                 raise AssertionError(arguments)
 
             with mock.patch.object(release_contract, "release_tags_merged_into", return_value=[(self.previous, f"v{self.previous}")]), \
@@ -389,6 +390,11 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
             "minor",
             self.recovery(self.prior_promotion(), tag_exists=True, allow_existing_exact_tag=True),
         )
+        with self.assertRaisesRegex(ReleaseContractError, "different immutable content"):
+            self.recovery(
+                self.prior_promotion(), tag_exists=True, tag_head="other-main",
+                allow_existing_exact_tag=True,
+            )
 
     def test_refuses_wrong_expected_version_and_prior_promotion_identity(self):
         versions = {
@@ -401,6 +407,35 @@ class PreparedUnreleasedRecoveryTest(unittest.TestCase):
             self.recovery(self.prior_promotion(), versions=versions)
         with self.assertRaisesRegex(ReleaseContractError, "exact merged internal dev promotion"):
             self.recovery(self.prior_promotion(promoted_dev="other-dev"))
+
+
+class PreparedRecoveryCallerTest(unittest.TestCase):
+    def test_main_authorization_passes_prior_evidence_to_recovery(self):
+        prior = Path("prior.json")
+        with mock.patch.object(release_contract, "run_git", side_effect=["head", "before dev"]), \
+             mock.patch.object(release_contract, "selected_pull_request", return_value=("minor", "dev")), \
+             mock.patch.object(release_contract, "authoritative_version", return_value="0.5.0-alpha.1"), \
+             mock.patch.object(release_contract, "version_at", return_value="0.5.0-alpha.1"), \
+             mock.patch.object(release_contract, "version_errors", return_value=[]), \
+             mock.patch.object(release_contract, "authorized_release_intent", return_value="minor") as intent, \
+             mock.patch.object(release_contract, "require_target_tag_available"), \
+             mock.patch.object(release_contract, "require_release_notes"):
+            result = authorize_main(before="before", head="head", prs_json=Path("current.json"),
+                                    prior_prs_json=prior)
+        self.assertEqual({"intent": "minor", "should_release": "true", "tag": "v0.5.0-alpha.1"}, result)
+        self.assertEqual(prior, intent.call_args.kwargs["prior_prs_json"])
+        self.assertFalse(intent.call_args.kwargs["allow_existing_exact_tag"])
+
+    def test_tag_authorization_allows_only_the_tagged_recovery_head(self):
+        prior = Path("prior.json")
+        with mock.patch.object(release_contract, "run_git", side_effect=["head", "before dev"]), \
+             mock.patch.object(release_contract, "authorize_main", return_value={
+                 "intent": "minor", "should_release": "true", "tag": "v0.5.0-alpha.1"
+             }) as authorize:
+            result = validate_tag_authorization("v0.5.0-alpha.1", Path("current.json"), prior)
+        self.assertEqual("v0.5.0-alpha.1", result["tag"])
+        self.assertEqual(prior, authorize.call_args.kwargs["prior_prs_json"])
+        self.assertTrue(authorize.call_args.kwargs["allow_existing_exact_tag"])
 
 
 if __name__ == "__main__":

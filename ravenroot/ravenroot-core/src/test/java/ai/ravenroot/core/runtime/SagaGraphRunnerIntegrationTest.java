@@ -150,6 +150,7 @@ class SagaGraphRunnerIntegrationTest {
     @Test
     void asynchronousBusinessCompletionGatesSuccessWithoutTurningTheWaitIntoFailure(@TempDir Path directory)
             throws Exception {
+        var inlinePublishes = new java.util.concurrent.atomic.AtomicInteger();
         var publish = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
                 "saga.scope", "order", "saga.step", "created", "saga.participant", "amqp-inbox-v1",
                 "saga.adapter", "ravenroot.amqp-inbox.v1", "saga.inboxBinding", "orders-v1",
@@ -163,8 +164,11 @@ class SagaGraphRunnerIntegrationTest {
                         "actor", false, List.of(), java.util.Set.of("side-effect", "saga-adapter:ravenroot.amqp-inbox.v1"));
             }
             @Override public NodeHandler create(GraphNode ignored) {
-                return message -> CompletableFuture.completedFuture(new NodeResult("continue",
-                        Map.of("status", "CONFIRMED"), message.attributes()));
+                return message -> {
+                    inlinePublishes.incrementAndGet();
+                    return CompletableFuture.completedFuture(new NodeResult("continue",
+                            Map.of("status", "CONFIRMED"), message.attributes()));
+                };
             }
         });
         UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
@@ -202,6 +206,7 @@ class SagaGraphRunnerIntegrationTest {
             var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
             assertEquals(true, saga.graphCompleted());
             assertEquals(SagaDisposition.SUCCEEDED, saga.disposition());
+            assertEquals(0, inlinePublishes.get(), "the durable outbox is the AMQP delivery authority");
         }
     }
 
@@ -486,6 +491,7 @@ class SagaGraphRunnerIntegrationTest {
 
     @Test
     void frozenAmqpOperationsReplaceAuthoredMessageIdentityAndKeepCausality(@TempDir Path directory) {
+        var inlinePublishes = new java.util.concurrent.atomic.AtomicInteger();
         Map<String, Object> forwardProperties = new java.util.LinkedHashMap<>(Map.of(
                 "saga.scope", "order", "saga.step", "publish",
                 "saga.participant", "amqp-inbox-v1",
@@ -509,7 +515,10 @@ class SagaGraphRunnerIntegrationTest {
                         "side-effect", "saga-adapter:ravenroot.amqp-inbox.v1"));
             }
             @Override public NodeHandler create(GraphNode ignored) {
-                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                return message -> {
+                    inlinePublishes.incrementAndGet();
+                    return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                };
             }
         });
         UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
@@ -523,8 +532,10 @@ class SagaGraphRunnerIntegrationTest {
             long revision = createRunning(store, key, traversal);
             try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
                 var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
-                coordinator.before(forward, original, recorder);
-                var step = store.listSagas(key).toCompletableFuture().join().getFirst()
+                var queuedForward = coordinator.before(forward, original, recorder);
+                assertNotNull(queuedForward.replay());
+                var current = store.listSagas(key).toCompletableFuture().join().getFirst();
+                var step = current
                         .occurrences().values().iterator().next();
                 var envelope = SagaRecoveryEnvelope.decode(step.receipt());
                 Map<?, ?> frozenForward = jsonMap(envelope.forward().payload().bytes());
@@ -542,6 +553,25 @@ class SagaGraphRunnerIntegrationTest {
                 assertEquals(step.payloadFingerprint(), forwardBody.get("payloadFingerprint"));
                 assertEquals(step.payloadFingerprint(), compensationBody.get("payloadFingerprint"));
                 assertEquals(envelope.forward().messageId(), envelope.compensation().causalMessageId());
+
+                var confirmed = new ai.ravenroot.api.persistence.SagaStepSnapshot(step.occurrenceId(),
+                        step.stepId(), step.invocationId(), step.forwardOperationId(),
+                        step.compensationOperationId(), step.payloadFingerprint(),
+                        SagaStepStatus.CONFIRMED_SUCCESS, step.receipt(), "business receipt", Instant.now());
+                var occurrences = new java.util.LinkedHashMap<>(current.occurrences());
+                occurrences.put(confirmed.occurrenceId(), confirmed);
+                var confirmedSnapshot = new ai.ravenroot.api.persistence.SagaSnapshot(current.key(),
+                        current.sagaId(), current.traversalId(), current.definition(), current.revision() + 1,
+                        SagaDisposition.RUNNING, false, occurrences, current.deadline(), current.createdAt(),
+                        Instant.now(), "", false);
+                recorder.recordSaga(List.of(new ai.ravenroot.api.persistence.SagaWrite(UUID.randomUUID(),
+                        current.revision(), confirmedSnapshot)), List.of());
+                var compensationMessage = new NodeMessage(original.security(), process, traversal,
+                        UUID.randomUUID(), UUID.randomUUID(), "cancel-publish", payload, Map.of());
+                var queuedCompensation = coordinator.before(compensation, compensationMessage, recorder);
+                assertNotNull(queuedCompensation.replay());
+                assertEquals(2, store.listSagaCommands(key).toCompletableFuture().join().size());
+                assertEquals(0, inlinePublishes.get(), "forward and compensation use only the durable outbox");
             }
         }
     }

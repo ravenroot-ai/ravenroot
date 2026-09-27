@@ -335,6 +335,10 @@ public final class SagaOutboxPublisher {
         if (!saga.key().equals(record.key())) {
             throw new SecurityException("saga command crosses its owning execution boundary");
         }
+        if (saga.disposition() == SagaDisposition.COMPENSATED
+                || saga.disposition() == SagaDisposition.SUCCEEDED && saga.graphCompleted()) {
+            throw new SecurityException("terminal saga cannot dispatch a stale command");
+        }
         SagaStepSnapshot step = saga.occurrences().values().stream()
                 .filter(value -> value.forwardOperationId().equals(record.intent().operationId())
                         || value.compensationOperationId().equals(record.intent().operationId()))

@@ -46,6 +46,58 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class SagaOutboxPublisherTest {
     @Test
+    void stalePendingCommandCannotPublishAfterSagaIsTerminal() throws Exception {
+        MutableClock clock = new MutableClock();
+        var store = new InMemoryExecutionStore(clock);
+        ExecutionKey key = new ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversal = UUID.randomUUID(), sagaId = UUID.randomUUID(), occurrence = UUID.randomUUID();
+        var created = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of(traversal, new Traversal(traversal, "start",
+                        TraversalStatus.ACCEPTED, Map.of()))), new GraphVersionPin("graph-v1"))).build())
+                .toCompletableFuture().join();
+        OpaquePayload payload = frozenPayload(key, traversal);
+        String digest = sha256(payload);
+        String operation = "forward:" + sagaId + ":publish:" + occurrence;
+        var intent = new SagaCommandIntent(UUID.randomUUID(), sagaId, operation,
+                "participant:amqp-inbox-v1:amqp.publish", "saga.forward.amqp-inbox-v1.v1",
+                1, payload, digest, null, clock.instant(), 5);
+        var definition = new SagaDefinition(1, "order", "a".repeat(64), "b".repeat(64), Map.of(
+                "publish", new SagaStepDefinition("publish", "publish", "amqp-inbox-v1",
+                        "cancel", List.of(), false, true)));
+        var step = new SagaStepSnapshot(occurrence, "publish", UUID.randomUUID(), operation,
+                "compensate:" + sagaId + ":publish:" + occurrence, digest,
+                SagaStepStatus.COMPENSATED, new SagaRecoveryEnvelope(intent, null).encode(),
+                "terminal tombstone", clock.instant());
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.COMPENSATED, true, Map.of(occurrence, step), null,
+                clock.instant(), clock.instant(), "", true);
+        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot)).enqueueSagaCommand(intent).build())
+                .toCompletableFuture().join();
+
+        var effects = new AtomicInteger();
+        var authorityCalls = new AtomicInteger();
+        var publisher = new SagaOutboxPublisher(store, new SagaCommandTransport() {
+            @Override public CompletableFuture<BrokerResult> publish(SagaCommandIntent ignored) {
+                effects.incrementAndGet();
+                return CompletableFuture.completedFuture(new BrokerResult(true, "unexpected"));
+            }
+            @Override public CompletableFuture<Boolean> businessCompleted(SagaCommandIntent ignored) {
+                effects.incrementAndGet();
+                return CompletableFuture.completedFuture(true);
+            }
+        }, (ignoredKey, ignoredIntent) -> authorityCalls.incrementAndGet(), "recovery", 8,
+                Duration.ofSeconds(5), Duration.ofSeconds(1), clock);
+
+        assertEquals(SagaOutboxStatus.PENDING, publisher.runOnce("tenant-a").getFirst().status());
+        assertEquals(0, authorityCalls.get());
+        assertEquals(0, effects.get());
+        assertEquals(SagaDisposition.COMPENSATED,
+                store.loadSaga(key, sagaId).toCompletableFuture().join().orElseThrow().disposition());
+    }
+
+    @Test
     void currentAuthorityDenialPreventsIntactCommandPublishWithoutInventingSuccess() throws Exception {
         MutableClock clock = new MutableClock();
         var store = new InMemoryExecutionStore(clock);

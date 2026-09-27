@@ -154,10 +154,20 @@ final class SagaCoordinator {
                 SagaStepStatus.DISPATCHED, recovery,
                 previous == null ? "intent persisted before dispatch" : "stable operation redelivery",
                 now);
+        boolean durableOutbox = "amqp-inbox-v1".equals(stepDefinition.participantContract());
         persist(recorder, current, replace(current, dispatched, current.disposition(), "", now),
-                "amqp-inbox-v1".equals(stepDefinition.participantContract()) ? forwardIntent : null);
-        return new Before(enriched, null, new Invocation(sagaId, occurrenceId, stepId, false,
-                stepDefinition.participantContract(), stepDefinition.businessCompletionRequired()));
+                durableOutbox ? forwardIntent : null);
+        var invocation = new Invocation(sagaId, occurrenceId, stepId, false,
+                stepDefinition.participantContract(), stepDefinition.businessCompletionRequired());
+        // The participant command was committed atomically with the saga transition. Publishing it
+        // inline as well would make broker availability decide traversal even though the durable
+        // outbox is the delivery authority. The publisher invokes the real adapter and confirms the
+        // business receipt; the graph proceeds from the already committed intent.
+        if (durableOutbox) {
+            return new Before(enriched,
+                    new NodeResult("continue", enriched.payload(), enriched.attributes()), invocation);
+        }
+        return new Before(enriched, null, invocation);
         }
     }
 
@@ -390,9 +400,13 @@ final class SagaCoordinator {
                 "compensation intent persisted before dispatch", clock.instant());
         persist(recorder, current, replace(current, compensating, SagaDisposition.COMPENSATION_PENDING,
                 "", clock.instant()), compensationIntent);
-        return new Before(frozen, null,
-                new Invocation(current.sagaId(), forward.occurrenceId(), forward.stepId(), true,
-                        definition.participantContract(), definition.businessCompletionRequired()));
+        var invocation = new Invocation(current.sagaId(), forward.occurrenceId(), forward.stepId(), true,
+                definition.participantContract(), definition.businessCompletionRequired());
+        if ("amqp-inbox-v1".equals(definition.participantContract())) {
+            return new Before(frozen,
+                    new NodeResult("continue", frozen.payload(), frozen.attributes()), invocation);
+        }
+        return new Before(frozen, null, invocation);
     }
 
     private static NodeMessage frozenParticipantMessage(GraphNode node, SagaCommandIntent intent,

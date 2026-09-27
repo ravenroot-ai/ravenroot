@@ -80,19 +80,24 @@ explicit compensating command carrying its own operation identity and causal mes
 
 ## Runtime outcomes and recovery
 
-The runner wraps the real registered handler. It commits `DISPATCHED` before invoking the handler,
-then records confirmed success, confirmed no-effect, or unknown outcome from the actual adapter
-boundary. Unknown forward or compensation outcomes leave the saga `UNRESOLVED`; graph completion is
+The runner wraps real registered JDBC and HTTP handlers. It commits `DISPATCHED` before invoking
+them, then records confirmed success, confirmed no-effect, or unknown outcome from the actual
+adapter boundary. For an AMQP inbox participant, the same commit adds the command to the durable
+outbox and the outbox publisher is the sole broker delivery authority. Unknown forward or
+compensation outcomes leave the saga `UNRESOLVED`; graph completion is
 refused while a scope is `RUNNING`, `COMPENSATION_PENDING`, or `UNRESOLVED`. Successful late siblings
 remain effects that must be compensated. Shutdown can stop new dispatch, but it cannot fence an
 external effect already issued.
 
 Compensation nodes can run only for a confirmed effect and in reverse dependency order. Their
-operation identities are stable and their unknown results remain actionable. `SUCCEEDED` and
-`COMPENSATED` are terminal saga dispositions. A compensated saga completes the recovery workflow,
-but the original execution and traversal finish as `FAILED`, never as business success.
-`COMPENSATION_PENDING` and `UNRESOLVED` must be retained with their
-receipts and outbox records; storage cleanup must not remove them while recovery can still occur.
+operation identities are stable and their unknown results remain actionable. `SUCCEEDED` is
+published only after the durable graph boundary has closed and every required participant business
+receipt is final. `COMPENSATED` is the terminal disposition for a failed or cancelled business
+transaction whose confirmed effects were reversed; the original execution and traversal finish as
+`FAILED`, never as business success. Graph-incomplete work stays `RUNNING`. Older persisted
+`SUCCEEDED` snapshots whose `graphCompleted` flag is false are treated as open recovery state and
+remain protected from purge. `COMPENSATION_PENDING` and `UNRESOLVED` must also be retained with
+their receipts and outbox records while recovery can still occur.
 
 Saga snapshots and outbox records are tenant and process scoped through `ExecutionStore`. An
 authenticated execution reader can inspect bounded, payload-free status at

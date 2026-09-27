@@ -296,3 +296,101 @@ test('v2 clears runtime on revocation, replacement, and replay-gap reconciliatio
   }, { source: projection.source, currentGeneration: generation });
   await expect(page.locator('main')).toHaveAttribute('data-viewer-continuity', 'live');
 });
+
+for (const theme of ['dark', 'light']) for (const view of ['design', 'monitoring']) {
+  test(`${view} ${theme} groups reset, expire and expose live member inspection across maximize`, async ({ page }, testInfo) => {
+    const grouped = structuredClone(projection);
+    grouped.projection.nodes.push({ id: 'end', kind: 'END', label: 'End', visualType: 'end',
+      layout: { x: 480, y: 100, width: 80, height: 80 } });
+    grouped.projection.edges.push({ id: 'finish', source: 'worker', target: 'end', visualType: 'continue' });
+    grouped.projection.groups = [{ id: 'pipeline', name: 'Pipeline', memberNodeIds: ['start', 'worker'],
+      anchorNodeId: 'start', collapsed: true }];
+    grouped.projection.nodes.push(
+      { id: 'sink', kind: 'END', label: 'Sink', visualType: 'end', layout: { x: 680, y: 100, width: 80, height: 80 } },
+      { id: 'outside', kind: 'END', label: 'Outside', visualType: 'end', layout: { x: 880, y: 100, width: 80, height: 80 } });
+    grouped.projection.groups.push({ id: 'output', name: 'Output', memberNodeIds: ['end', 'sink'], anchorNodeId: 'end', collapsed: true });
+    grouped.projection.edges.push({ id: 'external', source: 'sink', target: 'outside', visualType: 'continue' });
+    await mount(page, grouped, theme);
+    await page.evaluate(() => { document.querySelector('main').requestFullscreen = undefined;
+      window.v2Viewer.updateRuns({ runs: [{ processInstanceId: 'run-a', status: 'ACTIVE' }] }); });
+    await page.getByRole('combobox').first().selectOption(view);
+    const summary = page.getByRole('button', { name: 'Expand visual group Pipeline, 2 members' });
+    const collapse = page.getByRole('button', { name: 'Collapse visual group Pipeline, 2 members' });
+    const paint = () => page.evaluate(source => {
+      const generation = window.selectionLog.at(-1).generation;
+      window.v2Viewer.observe({ type: 'reset', ...source, processInstanceId: 'run-a' }, generation);
+      for (const [index, edgeId] of ['route', 'finish', 'external'].entries()) {
+        const frame = { type: 'execution', ...source, processInstanceId: 'run-a', cursor: `pulse-${index}`,
+          event: { type: 'EDGE_TRAVERSED', edgeId, executionId: 'run-a', sequence: index + 1,
+            occurredAt: new Date().toISOString() } };
+        window.v2Viewer.observe(frame, generation);
+        if (window.v2Viewer.observe(frame, generation).reason !== 'duplicate') throw new Error('duplicate accepted');
+      }
+    }, grouped.source);
+    const width = () => view === 'monitoring' ? summary.locator('rect').getAttribute('stroke-width')
+      : summary.getAttribute('data-design-element').then(id => page.evaluate(id =>
+        window.v2Viewer.presentationSnapshot().nodes.find(node => node.id === id).style['border-width'], id));
+    const boundaryActive = () => view === 'monitoring'
+      ? page.locator('.d3-visual-edges [data-original-edge-id="finish"]').evaluate(node => node.classList.contains('d3-edge--active'))
+      : page.evaluate(() => window.v2Viewer.presentationSnapshot().edges.filter(edge => edge.source !== 'worker')
+        .some(edge => Number.parseFloat(edge.style.width) > 2.5));
+    await paint();
+    await expect.poll(boundaryActive).toBe(true);
+    await expect.poll(width).toMatch(/^5(?:px)?$/);
+    await expect.poll(width, { timeout: 3000 }).not.toMatch(/^5(?:px)?$/);
+    await expect.poll(boundaryActive).toBe(false);
+    await summary.focus(); await page.keyboard.press('Enter');
+    await expect(collapse).toBeVisible();
+    await expect(collapse).toBeFocused();
+    await page.evaluate(source => window.v2Viewer.observe({ type: 'execution', ...source,
+      processInstanceId: 'run-a', cursor: 'node', event: { type: 'NODE_STARTED', nodeId: 'worker',
+        executionId: 'run-a', sequence: 5, activeInstances: 2, inFlightArrivals: 3,
+        processingDuration: 0.004121079, occurredAt: '2026-09-26T21:21:45Z' } },
+    window.selectionLog.at(-1).generation), grouped.source);
+    const member = view === 'monitoring' ? page.locator('.d3-nodes circle[data-node-id="worker"]')
+      : page.getByRole('button', { name: 'Inspect node Worker' });
+    const tip = page.locator('.embed-runtime-tooltip');
+    for (const maximized of [false, true]) {
+      if (maximized) await page.locator('[data-viewer-maximize]').click();
+      await member.hover();
+      await expect(tip).toContainText('ID: worker'); await expect(tip).toContainText('State: active');
+      await expect(tip).toContainText('Active instances: 2'); await expect(tip).toContainText('In-flight arrivals: 3');
+      await expect(tip).toContainText('Processing duration: 0.004121079s');
+      const box = await tip.boundingBox(); const canvas = await page.locator('[data-viewer-canvas]').boundingBox();
+      expect(box.x).toBeGreaterThanOrEqual(canvas.x); expect(box.y).toBeGreaterThanOrEqual(canvas.y);
+      expect(box.x + box.width).toBeLessThanOrEqual(canvas.x + canvas.width + 1);
+      expect(box.y + box.height).toBeLessThanOrEqual(canvas.y + canvas.height + 1);
+      await testInfo.attach(`${view}-${theme}-${maximized ? 'maximized' : 'normal'}-inspection`, {
+        body: await page.screenshot(), contentType: 'image/png' });
+      if (evidencePath(`attempt6-${view}-${theme}-${maximized}.png`)) {
+        await page.screenshot({ path: evidencePath(`attempt6-${view}-${theme}-${maximized}.png`) });
+      }
+    }
+    await page.keyboard.press('Escape');
+    await collapse.click(); await expect(summary).toBeVisible();
+    for (const reset of [ { type: 'invalidated', reason: 'AUTHORITY_CHANGED' },
+      { type: 'gap' }, { type: 'lifecycle', lifecycle: 'STOPPED' },
+      { type: 'execution', graphVersion: 'v2' }, { type: 'reset' } ]) {
+      await paint(); await expect.poll(width).toMatch(/^5(?:px)?$/);
+      await page.evaluate(({ source, reset }) => window.v2Viewer.observe({ ...source,
+        processInstanceId: 'run-a', ...reset }, window.selectionLog.at(-1).generation), { source: grouped.source, reset });
+      await expect.poll(width).not.toMatch(/^5(?:px)?$/);
+    }
+    await paint();
+    const priorGeneration = await page.evaluate(() => window.selectionLog.at(-1).generation);
+    await page.evaluate(() => window.v2Viewer.updateRuns({ runs: [
+      { processInstanceId: 'run-a', status: 'ACTIVE' }, { processInstanceId: 'run-b', status: 'ACTIVE' },
+    ] }, 'run-a'));
+    await page.getByRole('combobox', { name: 'Live run' }).selectOption('run-b');
+    await expect.poll(width).not.toMatch(/^5(?:px)?$/);
+    expect(await page.evaluate(({ source, generation }) => window.v2Viewer.observe({ ...source,
+      type: 'execution', processInstanceId: 'run-a', cursor: 'old',
+      event: { type: 'NODE_STARTED', nodeId: 'worker', sequence: 99 } }, generation),
+    { source: grouped.source, generation: priorGeneration })).toMatchObject({ accepted: false, reason: 'stale-generation' });
+    await page.getByRole('combobox', { name: 'Live run' }).selectOption('run-a');
+    await paint();
+    await page.evaluate(() => window.v2Viewer.clearRuntime());
+    await expect.poll(width).not.toMatch(/^5(?:px)?$/);
+    await summary.click(); await member.hover(); await expect(tip).toContainText('State: Unavailable');
+  });
+}

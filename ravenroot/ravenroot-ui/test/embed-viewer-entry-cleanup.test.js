@@ -65,7 +65,7 @@ describe('embed viewer failed-mount cleanup', () => {
       render: vi.fn(), fit: vi.fn(), zoomBy: vi.fn(), panBy: vi.fn(), destroy: vi.fn(),
     };
     mocks.instance = {
-      nodes: vi.fn(() => []), edges: vi.fn(() => []), style: vi.fn(), on: vi.fn(),
+      nodes: vi.fn(() => []), edges: vi.fn(() => []), style: vi.fn(), off: vi.fn(), on: vi.fn(),
       elements: vi.fn(() => ({ boundingBox: vi.fn() })), extent: vi.fn(),
       width: vi.fn(() => 800), height: vi.fn(() => 500), zoom: vi.fn(() => 1),
       pan: vi.fn(), resize: vi.fn(), layout: vi.fn(),

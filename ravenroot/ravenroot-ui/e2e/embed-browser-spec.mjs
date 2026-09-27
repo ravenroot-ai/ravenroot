@@ -80,11 +80,14 @@ for (const scenario of [
       if (evidencePath(`server-embed-${scenario.expected}-normal.png`)) {
         await shell.screenshot({ path: evidencePath(`server-embed-${scenario.expected}-normal.png`) });
       }
-      await viewer.evaluate(() => { document.querySelector('main').requestFullscreen = undefined; });
+      const nativeFullscreen = scenario.path === '/theme-light';
+      // The cross-origin fixture grants fullscreen only for the light scenario; the other
+      // frames exercise the browser's real Permissions-Policy denial and deterministic fallback.
       const maximize = viewer.locator('[data-viewer-maximize]');
       await maximize.click();
       await expect(shell).toHaveClass(/embed-viewer--maximized/u);
       await expect(maximize).toHaveAttribute('aria-label', 'Restore embedded graph');
+      await expect.poll(() => viewer.evaluate(() => Boolean(document.fullscreenElement))).toBe(nativeFullscreen);
       expect(await viewer.locator('.embed-viewer-controls > :not(.embed-maximize)')
         .evaluateAll(elements => elements.every(element => getComputedStyle(element).display === 'none')))
         .toBe(true);
@@ -100,7 +103,8 @@ for (const scenario of [
       if (evidencePath(`server-embed-${scenario.expected}-maximized.png`)) {
         await shell.screenshot({ path: evidencePath(`server-embed-${scenario.expected}-maximized.png`) });
       }
-      await maximize.press('Escape');
+      if (nativeFullscreen) await viewer.evaluate(() => document.exitFullscreen());
+      else await maximize.press('Escape');
       await expect(shell).not.toHaveClass(/embed-viewer--maximized/u);
       await expect(maximize).toBeFocused();
       const accessibility = await new AxeBuilder({ page })

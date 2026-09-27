@@ -157,17 +157,7 @@ export function mountD3ElasticRenderer({
     const tip = d3.select(tooltip);
     let tooltipPoint = null;
     const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
-    const nodeText = node => {
-      const state = node.runtimeObserved ? node.runtimeState : null;
-      return [node.label, known('ID', node.id), known('State', state),
-        known('Active instances', node.runtimeObserved ? node.instances : null),
-        known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
-        known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
-        known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
-        known('Fallback', node.runtimeObserved ? (node.fallback ? 'yes' : 'no') : null),
-        known('Bypassed', node.runtimeObserved ? (node.runtimeState === 'bypassed' ? 'yes' : 'no') : null),
-      ].join('\n');
-    };
+    const nodeText = runtimeNodeTooltipText;
     const edgeText = link => [link.label || link.id,
       `Recent activity: ${link.flow?.recent ?? 0}`,
       `Traversals: ${link.flow?.count ?? 0}`,
@@ -440,4 +430,17 @@ export function mountD3ElasticRenderer({
       if (tooltip !== null) tooltip.style.display = 'none';
     },
   };
+}
+
+export function runtimeNodeTooltipText(node) {
+  const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
+  const state = node.runtimeObserved ? node.runtimeState : null;
+  return [node.label, known('ID', node.id), known('State', state),
+    known('Active instances', node.runtimeObserved ? node.instances : null),
+    known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
+    known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
+    known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
+    known('Fallback', node.runtimeObserved ? (node.fallback ? 'yes' : 'no') : null),
+    known('Bypassed', node.runtimeObserved ? (node.runtimeState === 'bypassed' ? 'yes' : 'no') : null),
+  ].join('\n');
 }

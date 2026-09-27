@@ -144,7 +144,7 @@ const proxy = (request, response) => {
 
 const parentHtml = (viewerLaunchUrl, registrationId) => `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer"
 content="no-referrer"><title>Ravenroot embed boundary fixture</title></head><body>
-<iframe id="viewer" name="viewer" width="800" height="500"
+<iframe allow="${registrationId === 'theme-light' ? 'fullscreen' : "fullscreen 'none'"}" id="viewer" name="viewer" width="800" height="500"
 sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"
 src=${JSON.stringify(viewerLaunchUrl)}></iframe>
 <iframe id="foreign" name="foreign" hidden src=${JSON.stringify(`${foreignOrigin.origin}/`)}></iframe>

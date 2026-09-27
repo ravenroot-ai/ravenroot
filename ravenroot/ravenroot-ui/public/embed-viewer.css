@@ -290,3 +290,8 @@ body { min-block-size: 18rem; background: var(--surface-canvas); }
     white-space: normal;
   }
 }
+
+.embed-design-inspection { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:2; }
+.embed-design-inspection button { position:absolute; background:transparent; border:0; padding:0; pointer-events:auto; cursor:pointer; }
+.embed-design-inspection button:focus-visible { outline:3px solid var(--embed-focus, #58a6ff); outline-offset:2px; }
+.embed-design-inspection[hidden] { display:none; }

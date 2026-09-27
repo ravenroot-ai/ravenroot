@@ -12,7 +12,9 @@ no credential, no adapter, and no operator API. Panning, zooming, switching layo
 graph contents are the whole of what it does.
 
 The maximize control uses the browser Fullscreen API when the frame is allowed to do so and otherwise
-fills the frame's viewport. The same control and **Escape** restore the view, including when fullscreen
+fills the frame's viewport. Grant the cross-origin iframe `allow="fullscreen"` (and ensure the
+parent's Permissions-Policy permits fullscreen for the viewer origin) to enable native fullscreen.
+The same control and **Escape** restore the view, including when fullscreen
 ends outside the viewer. Graph position, zoom, selected nodes, selected run, and live observations remain
 attached throughout the transition.
 
@@ -393,7 +395,7 @@ to your viewer origin, and serve it from your registered origin.
 <body>
 <h1>Our graph</h1>
 <p id="state">Starting the graph view&hellip;</p>
-<iframe id="viewer" title="Ravenroot read-only graph"
+<iframe allow="fullscreen" id="viewer" title="Ravenroot read-only graph"
         sandbox="allow-scripts allow-same-origin"
         referrerpolicy="no-referrer"></iframe>
 

@@ -2789,14 +2789,17 @@ function documentModeLabel(document_) {
 
 let maximizedDocumentId = null;
 let maximizedReturnFocus = null;
+let maximizeGeneration = 0;
 
 function setGraphDocumentMaximized(document_, maximized) {
   if (!document_ || workspace.find(document_.id) !== document_) return false;
   if (maximized && workspace.activeId !== document_.id) activateDocument(document_.id);
+  const generation = ++maximizeGeneration;
+  document_.maximizeGeneration = generation;
   if (maximized) {
     maximizedReturnFocus = window.document.activeElement;
     maximizedDocumentId = document_.id;
-    document_.maximizeViewport = document_.cy ? { zoom: document_.cy.zoom(), pan: { ...document_.cy.pan() } } : null;
+    document_.maximizeViewport ||= document_.cy ? { zoom: document_.cy.zoom(), pan: { ...document_.cy.pan() } } : null;
   } else if (maximizedDocumentId !== document_.id) return false;
   else maximizedDocumentId = null;
   window.document.documentElement.classList.toggle('graph-document-maximized', maximized);
@@ -2809,15 +2812,20 @@ function setGraphDocumentMaximized(document_, maximized) {
     if (control) control.title = active ? 'Restore graph document' : 'Maximize graph document';
   });
   window.requestAnimationFrame(() => {
+    if (generation !== document_.maximizeGeneration || workspace.find(document_.id) !== document_) return;
+    resizeDocumentElastic(document_);
     document_.cy?.resize();
     if (document_.maximizeViewport) document_.cy?.viewport(document_.maximizeViewport);
     document_.cy?.forceRender();
-    if (maximized) document_.pane?.querySelector('[data-pane-document-maximize]')?.focus({ preventScroll: true });
-    else {
+    if (maximized) {
+      if (generation === maximizeGeneration) document_.pane?.querySelector('[data-pane-document-maximize]')?.focus({ preventScroll: true });
+    } else {
       // The workspace ResizeObserver can deliver once more after this frame. Keep the saved
       // viewport authoritative through that delivery, then repeat it once the restored pane has
       // its final size before releasing the guard.
       window.requestAnimationFrame(() => {
+        if (generation !== document_.maximizeGeneration || workspace.find(document_.id) !== document_) return;
+        resizeDocumentElastic(document_);
         document_.cy?.resize();
         if (document_.maximizeViewport) document_.cy?.viewport(document_.maximizeViewport);
         document_.cy?.forceRender();
@@ -2827,10 +2835,12 @@ function setGraphDocumentMaximized(document_, maximized) {
             height: document_.container.clientHeight,
           });
         }
-        const target = maximizedReturnFocus?.isConnected ? maximizedReturnFocus
-          : document_.pane?.querySelector('[data-pane-document-maximize]');
-        target?.focus?.({ preventScroll: true });
-        maximizedReturnFocus = null;
+        if (generation === maximizeGeneration) {
+          const target = maximizedReturnFocus?.isConnected ? maximizedReturnFocus
+            : document_.pane?.querySelector('[data-pane-document-maximize]');
+          target?.focus?.({ preventScroll: true });
+          maximizedReturnFocus = null;
+        }
         document_.maximizeViewport = null;
       });
     }
@@ -3221,14 +3231,15 @@ function applyPaneGeometry() {
   // the drawing against, and they do not observe anything. Dimensions only — the simulation is not
   // recentred for a nudge, for the same reason `syncPaneRenderer` does not refit for one: the
   // geometry the user set is theirs.
-  shown.forEach(owner => {
-    const renderer = elasticRendererFor(owner);
-    if (!renderer?.host.classList.contains('active')
-        || !renderer.host.clientWidth || !renderer.host.clientHeight) return;
-    renderer.svg.setAttribute('width', String(renderer.host.clientWidth));
-    renderer.svg.setAttribute('height', String(renderer.host.clientHeight));
-  });
+  shown.forEach(resizeDocumentElastic);
   scheduleMinimap();
+}
+
+function resizeDocumentElastic(owner) {
+  const renderer = elasticRendererFor(owner);
+  if (!renderer?.host.classList.contains('active')
+      || !renderer.host.clientWidth || !renderer.host.clientHeight) return;
+  renderer.elasticMount?.resize(renderer.host.clientWidth, renderer.host.clientHeight);
 }
 
 // The size each renderer was last told about, so a pane that did not change is never disturbed.
@@ -3621,6 +3632,13 @@ function completeReplaceActiveDocument(target, graph, name) {
   // requested, never whichever sibling happens to be active by then. A closed, rebound, or
   // programmatically backgrounded target makes the completion an atomic no-op.
   if (workspace.find(target.id) !== target || workspace.active !== target) return false;
+  if (maximizedDocumentId === target.id) {
+    setGraphDocumentMaximized(target, false);
+    target.maximizeGeneration = null;
+    maximizeGeneration += 1;
+    maximizedReturnFocus = null;
+    target.maximizeViewport = null;
+  }
   if (edgeGestureSession?.owner === target) cancelEdgeGesture({ clearMessage: true });
   retireProgramReadiness(target);
   // Retire callbacks before `initCy` destroys the old instance. ELK may not emit `layoutstart`
@@ -3703,6 +3721,9 @@ function replaceActiveDocumentFromText(
 function activateDocument(id) {
   finishVisualGroups(workspace.active);
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
+  if (maximizedDocumentId && maximizedDocumentId !== id) {
+    setGraphDocumentMaximized(workspace.find(maximizedDocumentId), false);
+  }
   if (inspectorDraft?.form.isConnected) {
     return runAfterInspectorDraft(() => activateDocument(id));
   }
@@ -3721,6 +3742,13 @@ function activateDocument(id) {
 }
 
 function teardownDocument(target) {
+  if (maximizedDocumentId === target.id) {
+    setGraphDocumentMaximized(target, false);
+    target.maximizeGeneration = null;
+    maximizeGeneration += 1;
+    maximizedReturnFocus = null;
+  }
+  target.maximizeViewport = null;
   if (dragSnapshot?.owner === target) cancelNodeMoveGesture();
   if (edgeGestureSession?.owner === target) cancelEdgeGesture({ clearMessage: true });
   retireProgramReadiness(target);
@@ -4679,8 +4707,7 @@ function resumeDocumentRenderer(owner) {
     if (transition.changed && renderer.kind === 'elastic') {
       renderer.host.classList.remove('suspended');
       if (renderer.host.clientWidth && renderer.host.clientHeight) {
-        renderer.svg.setAttribute('width', String(renderer.host.clientWidth));
-        renderer.svg.setAttribute('height', String(renderer.host.clientHeight));
+        renderer.elasticMount?.resize(renderer.host.clientWidth, renderer.host.clientHeight);
       }
       rehydrateD3RuntimeEdges(owner);
     }

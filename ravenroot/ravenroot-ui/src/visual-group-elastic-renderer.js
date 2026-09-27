@@ -9,7 +9,9 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
   isLive, marker, nodeText, edgeLabel, onViewportChange,
   groupFill = '#edf4ff', groupText = '#24354b', groupBorder = '#526780' }) {
   const layer = zoomGroup.append('g').attr('class', 'd3-visual-groups');
-  const edgeLayer = layer.append('g').attr('class', 'd3-visual-edges');
+  // Projected paths are presentation only; their source endpoint must not cover a real
+  // member's pointer/tooltip target when the adjacent group remains collapsed.
+  const edgeLayer = layer.append('g').attr('class', 'd3-visual-edges').attr('pointer-events', 'none');
   const ghostLayer = layer.append('g').attr('class', 'd3-visual-members');
   const groupLayer = layer.append('g').attr('class', 'd3-visual-headers');
   const canonicalNodes = new Map(nodes.map(node => [node.id, node]));

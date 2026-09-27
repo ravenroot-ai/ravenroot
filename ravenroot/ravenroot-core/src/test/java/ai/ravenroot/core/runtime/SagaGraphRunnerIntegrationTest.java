@@ -49,6 +49,77 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SagaGraphRunnerIntegrationTest {
     @Test
+    void atomicOutboxCapacityRefusalTerminatesWithoutPartialSagaOrInlinePublish(@TempDir Path directory) {
+        String previous = System.getProperty(
+                ai.ravenroot.api.persistence.SagaOutboxCapacity.COMMANDS_PROPERTY);
+        System.setProperty(ai.ravenroot.api.persistence.SagaOutboxCapacity.COMMANDS_PROPERTY, "1");
+        try {
+            var inlinePublishes = new java.util.concurrent.atomic.AtomicInteger();
+            var publish = new GraphNode("publish", NodeKind.BEHAVIOR, "amqp.publish", Map.of(
+                    "saga.scope", "order", "saga.step", "created", "saga.participant", "amqp-inbox-v1",
+                    "saga.adapter", "ravenroot.amqp-inbox.v1", "saga.inboxBinding", "orders-v1",
+                    "persistent", true, "saga.businessCompletionRequired", true,
+                    "saga.commandType", "order.created", "saga.irreversible", true));
+            var graph = new GraphDefinition(List.of(GraphNode.start("start"), publish, GraphNode.end("end")),
+                    List.of(GraphEdge.to("start", "publish"), GraphEdge.to("publish", "end")));
+            var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+                @Override public NodeTypeDescriptor descriptor() {
+                    return new NodeTypeDescriptor("amqp.publish", "AMQP", "Test", "Trusted AMQP probe",
+                            "actor", false, List.of(), java.util.Set.of(
+                            "side-effect", "saga-adapter:ravenroot.amqp-inbox.v1"));
+                }
+                @Override public NodeHandler create(GraphNode ignored) {
+                    return message -> {
+                        inlinePublishes.incrementAndGet();
+                        return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                    };
+                }
+            });
+            try (var store = new SqliteExecutionStore(directory.resolve("capacity.db"), Clock.systemUTC());
+                 var engine = new JoinTestEngine(); var manager = GraphManager.from(graph);
+                 var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor())) {
+                UUID firstProcess = UUID.randomUUID(), firstTraversal = UUID.randomUUID();
+                var firstKey = new ExecutionKey("tenant-a", firstProcess);
+                long firstRevision = createRunning(store, firstKey, firstTraversal);
+                try (var recorder = ExecutionRecorder.open(store, firstKey, "runner-1",
+                        Duration.ofSeconds(30), firstRevision)) {
+                    runner.execute(TestIdentities.of("tenant-a", "alice"), firstProcess, firstTraversal,
+                            Map.of("order", "A-1"), "graph-v1", null, null, recorder)
+                            .toCompletableFuture().join();
+                }
+                assertEquals(ProcessInstanceStatus.WAITING,
+                        store.load(firstKey).toCompletableFuture().join().state().status());
+                assertEquals(1, store.listSagaCommands(firstKey).toCompletableFuture().join().size());
+
+                UUID refusedProcess = UUID.randomUUID(), refusedTraversal = UUID.randomUUID();
+                var refusedKey = new ExecutionKey("tenant-a", refusedProcess);
+                long refusedRevision = createRunning(store, refusedKey, refusedTraversal);
+                try (var recorder = ExecutionRecorder.open(store, refusedKey, "runner-2",
+                        Duration.ofSeconds(30), refusedRevision)) {
+                    var failure = assertThrows(CompletionException.class, () -> runner.execute(
+                            TestIdentities.of("tenant-a", "alice"), refusedProcess, refusedTraversal,
+                            Map.of("order", "A-2"), "graph-v1", null, null, recorder)
+                            .toCompletableFuture().join());
+                    org.junit.jupiter.api.Assertions.assertTrue(
+                            String.valueOf(failure.getCause().getMessage()).contains(
+                                    "saga outbox tenant capacity exceeded"));
+                }
+                assertEquals(ProcessInstanceStatus.FAILED,
+                        store.load(refusedKey).toCompletableFuture().join().state().status());
+                assertEquals(List.of(), store.listSagas(refusedKey).toCompletableFuture().join());
+                assertEquals(List.of(), store.listSagaCommands(refusedKey).toCompletableFuture().join());
+                assertEquals(0, inlinePublishes.get());
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty(ai.ravenroot.api.persistence.SagaOutboxCapacity.COMMANDS_PROPERTY);
+            } else {
+                System.setProperty(ai.ravenroot.api.persistence.SagaOutboxCapacity.COMMANDS_PROPERTY, previous);
+            }
+        }
+    }
+
+    @Test
     void runnerPersistsIntentBeforeRealHandlerAndRecordsItsObservedOutcome(@TempDir Path directory) {
         var graph = new GraphDefinition(List.of(GraphNode.start("start"),
                 new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(

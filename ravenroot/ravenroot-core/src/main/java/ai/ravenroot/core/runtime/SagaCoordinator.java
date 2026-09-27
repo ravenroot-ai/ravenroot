@@ -308,7 +308,12 @@ final class SagaCoordinator {
         if (recorder == null) return;
         for (UUID sagaId : traversalSagas.getOrDefault(traversalId, Set.of())) {
             synchronized (sagaLocks.computeIfAbsent(sagaId, ignored -> new Object())) {
-                SagaSnapshot current = require(recorder, sagaId);
+                SagaSnapshot current = recorder.saga(sagaId).orElse(null);
+                // Admission can fail atomically while creating the first saga occurrence (for
+                // example, an outbox capacity refusal). The in-memory traversal registration is
+                // deliberately earlier than that commit so concurrent branches share one lock,
+                // but there is no durable effect to cancel when the whole batch was rejected.
+                if (current == null) continue;
                 if (current.cancellationRequested()
                         || current.disposition() == SagaDisposition.SUCCEEDED && current.graphCompleted()) continue;
                 var occurrences = new LinkedHashMap<UUID, SagaStepSnapshot>();
@@ -350,7 +355,8 @@ final class SagaCoordinator {
         if (recorder == null || definitions.isEmpty()) return;
         cancellationRequested(traversalId, recorder);
         for (UUID sagaId : traversalSagas.getOrDefault(traversalId, Set.of())) {
-            SagaSnapshot current = require(recorder, sagaId);
+            SagaSnapshot current = recorder.saga(sagaId).orElse(null);
+            if (current == null) continue;
             if (current.graphCompleted()) continue;
             Instant now = clock.instant();
             var failedBoundary = new SagaSnapshot(current.key(), current.sagaId(), current.traversalId(),

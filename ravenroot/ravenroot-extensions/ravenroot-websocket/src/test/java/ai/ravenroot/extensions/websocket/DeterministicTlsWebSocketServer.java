@@ -44,6 +44,7 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
     final List<String> requestTargets = new java.util.concurrent.CopyOnWriteArrayList<>();
     final List<Map<String, String>> handshakes = new java.util.concurrent.CopyOnWriteArrayList<>();
     final List<byte[]> clientMessages = new java.util.concurrent.CopyOnWriteArrayList<>();
+    final List<byte[]> clientClosePayloads = new java.util.concurrent.CopyOnWriteArrayList<>();
     final CountDownLatch completed;
     final CountDownLatch pong = new CountDownLatch(1);
     volatile byte[] pongPayload;
@@ -128,7 +129,15 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
     private void captureSend(Socket peer) throws IOException {
         ClientFrame frame = readClientFrame(peer.getInputStream());
         clientMessages.add(frame.payload());
-        writeFrame(peer.getOutputStream(), 0x88, new byte[]{0x03, (byte) 0xE8});
+        // The managed send result settles before it begins its own close handshake.  Waiting for
+        // that client close keeps this fixture from converting a successfully received frame into
+        // a deliberately ambiguous transport outcome by closing the peer first.
+        ClientFrame close = readClientFrame(peer.getInputStream());
+        if (close.opcode() != 0x8 || close.payload().length < 2) {
+            throw new IOException("expected client close after captured send");
+        }
+        clientClosePayloads.add(close.payload());
+        writeFrame(peer.getOutputStream(), 0x88, close.payload());
     }
 
     private static void holdUntilClientClose(Socket peer) throws IOException {

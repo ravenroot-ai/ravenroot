@@ -54,6 +54,10 @@ class WebSocketRawTlsIntegrationTest {
             assertEquals("Bearer token-2", server.handshakes.get(1).get("authorization"));
             assertEquals(List.of("first", "second"), server.clientMessages.stream()
                     .map(bytes -> new String(bytes, StandardCharsets.UTF_8)).toList());
+            assertEquals(2, server.clientClosePayloads.size(),
+                    "the capture peer must answer the managed client's close, never close first");
+            byte[] expectedClose = new byte[]{0x03, (byte) 0xE8, 'c', 'o', 'm', 'p', 'l', 'e', 't', 'e'};
+            for (byte[] close : server.clientClosePayloads) assertArrayEquals(expectedClose, close);
             String observable = first.payload() + " " + second.payload();
             assertFalse(observable.contains("token-1"));
             assertFalse(observable.contains("token-2"));

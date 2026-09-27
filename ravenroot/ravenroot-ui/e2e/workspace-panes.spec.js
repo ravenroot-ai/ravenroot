@@ -408,8 +408,12 @@ test.describe('two documents side by side', () => {
     expect(separatorValues.min).toBeLessThanOrEqual(separatorValues.now);
     expect(separatorValues.now).toBeLessThanOrEqual(separatorValues.max);
 
-    // Tab walks pane, separator, pane — the route that needs no chord and no modifier.
-    await page.locator(`#cy .doc-pane[data-document-id="${first}"]`).focus();
+    // Tab walks pane, its accessible graph action, separator, pane — the route that needs no
+    // chord and no modifier. The close control remains outside this measured route.
+    const firstPane = page.locator(`#cy .doc-pane[data-document-id="${first}"]`);
+    await firstPane.focus();
+    await page.keyboard.press('Tab');
+    await expect(firstPane.locator('[data-pane-document-maximize]')).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(separator).toBeFocused();
     await page.keyboard.press('Tab');

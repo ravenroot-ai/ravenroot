@@ -71,6 +71,8 @@ export function mountD3ElasticRenderer({
 
   const viewportWidth = Math.max(1, finite(width, 800));
   const viewportHeight = Math.max(1, finite(height, 600));
+  let currentViewportWidth = viewportWidth;
+  let currentViewportHeight = viewportHeight;
   // The idle silhouette `resetRuntime` restores: the zero-instance size the caller derives from the
   // sizing helper, NOT the instance counts painted when this renderer mounted. A run -> Design ->
   // Monitoring round-trip remounts the renderer without clearing `instances` (#494), so a
@@ -82,12 +84,12 @@ export function mountD3ElasticRenderer({
       node.baseR = Number.isFinite(idleRadius) ? idleRadius : node.r;
     }
   });
-
   const nodeText = palette?.nodeText ?? '#e6edf3';
   const edgeLabel = palette?.edgeLabel ?? '#b1bac4';
   let destroyed = false;
   let hovered = null;
   let refreshTooltip = () => {};
+  let tooltipObserver = null;
   let visualGroups = null;
   const pulseTimers = new Map();
 
@@ -149,6 +151,7 @@ export function mountD3ElasticRenderer({
   const nodeSelection = nodeGroup.selectAll('circle')
     .data(nodes, node => node.id)
     .enter().append('circle')
+    .attr('data-node-id', node => node.id)
     .attr('r', node => node.r)
     .attr('fill', node => node.color)
     .attr('stroke', node => node.stroke ?? '#8c959f')
@@ -164,17 +167,9 @@ export function mountD3ElasticRenderer({
 
   if (tooltip !== null) {
     const tip = d3.select(tooltip);
-    const known = (label, value) => value == null || value === '' ? `${label}: unknown` : `${label}: ${value}`;
-    const nodeText = node => {
-      const state = node.runtimeObserved ? node.runtimeState : null;
-      return [node.label, known('State', state), known('Active instances', node.runtimeObserved ? node.instances : null),
-        known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
-        known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
-        known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
-        known('Fallback', node.runtimeObserved ? (node.fallback ? 'yes' : 'no') : null),
-        known('Bypassed', node.runtimeObserved ? (node.runtimeState === 'bypassed' ? 'yes' : 'no') : null),
-      ].join('\n');
-    };
+    let tooltipPoint = null;
+    const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
+    const nodeText = runtimeNodeTooltipText;
     const edgeText = link => [link.label || link.id,
       `Recent activity: ${link.flow?.recent ?? 0}`,
       `Traversals: ${link.flow?.count ?? 0}`,
@@ -182,25 +177,37 @@ export function mountD3ElasticRenderer({
       known('Last traversal time', formatRuntimeTime(link.flow?.lastOccurredAt)),
       known('Configured weight', link.configuredWeight),
     ].join('\n');
-    const show = (event, text) => tip.text(text)
-      .style('left', `${event.offsetX + 14}px`)
-      .style('top', `${event.offsetY - 10}px`)
-      .style('display', 'block');
+    const positionTooltip = event => {
+      if (!event) return;
+      tooltipPoint = { offsetX: finite(event.offsetX, 0), offsetY: finite(event.offsetY, 0) };
+      const bounds = tooltip.parentElement?.getBoundingClientRect?.() || { width: 0, height: 0 };
+      const tipBounds = tooltip.getBoundingClientRect();
+      const left = Math.max(8, Math.min(event.offsetX + 14, bounds.width - tipBounds.width - 8));
+      const top = Math.max(8, Math.min(event.offsetY - 10, bounds.height - tipBounds.height - 8));
+      tip.style('left', `${left}px`).style('top', `${top}px`);
+    };
+    const show = (event, text) => {
+      tip.text(text).style('display', 'block');
+      positionTooltip(event);
+    };
     nodeSelection
       .on('mouseover.tip', (event, node) => { hovered = { kind: 'node', datum: node }; show(event, nodeText(node)); })
-      .on('mousemove.tip', event => tip
-        .style('left', `${event.offsetX + 14}px`).style('top', `${event.offsetY - 10}px`))
+      .on('mousemove.tip', positionTooltip)
       .on('mouseout.tip', () => { hovered = null; tip.style('display', 'none'); });
     edgeSelection
       .on('mouseover.tip', (event, link) => { hovered = { kind: 'edge', datum: link }; show(event, edgeText(link)); })
-      .on('mousemove.tip', event => tip
-        .style('left', `${event.offsetX + 14}px`).style('top', `${event.offsetY - 10}px`))
+      .on('mousemove.tip', positionTooltip)
       .on('mouseout.tip', () => { hovered = null; tip.style('display', 'none'); });
 
     refreshTooltip = () => {
       if (!hovered || tooltip.style.display === 'none') return;
       tip.text(hovered.kind === 'node' ? nodeText(hovered.datum) : edgeText(hovered.datum));
+      positionTooltip(tooltipPoint);
     };
+    if (typeof ResizeObserver === 'function' && tooltip.parentElement) {
+      tooltipObserver = new ResizeObserver(() => refreshTooltip());
+      tooltipObserver.observe(tooltip.parentElement);
+    }
   }
 
   const arcPath = link => {
@@ -333,7 +340,8 @@ export function mountD3ElasticRenderer({
 
   visualGroups = createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
     nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection, isLive,
-    marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange });
+    marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange,
+    groupFill: palette.nodeSurface, groupText: palette.nodeText, groupBorder: palette.nodeBorder });
 
   return {
     nodes,
@@ -413,10 +421,12 @@ export function mountD3ElasticRenderer({
       refreshTooltip();
     },
     updateEdgeFlow(edgeId, flow, { reducedMotion = false, decayMs = 1_400, onDecay = null } = {}) {
-      const link = links.find(candidate => candidate.id === edgeId);
+      const runtimeIdentity = candidate => candidate.runtimeIdentity === undefined
+        ? candidate.id : candidate.runtimeIdentity;
+      const link = links.find(candidate => runtimeIdentity(candidate) === edgeId);
       if (!link || destroyed) return;
       link.flow = flow;
-      const selection = edgeSelection.filter(candidate => candidate.id === edgeId);
+      const selection = edgeSelection.filter(candidate => runtimeIdentity(candidate) === edgeId);
       selection.interrupt('flow').attr('stroke-width', edgeFlowWidth(flow.recent))
         .attr('opacity', flow.recent > 0 ? 1 : .82)
         .classed('d3-edge--active', flow.recent > 0);
@@ -425,9 +435,9 @@ export function mountD3ElasticRenderer({
           .transition('flow').duration(Math.min(decayMs, 900)).ease(d3.easeLinear)
           .attr('stroke-dashoffset', 0);
       } else selection.attr('stroke-dasharray', null).attr('stroke-dashoffset', null);
-      clearTimeout(pulseTimers.get(edgeId));
+      clearTimeout(pulseTimers.get(link.id));
       if (flow.recent > 0 && typeof onDecay === 'function') {
-        pulseTimers.set(edgeId, setTimeout(onDecay, Math.max(0, decayMs)));
+        pulseTimers.set(link.id, setTimeout(onDecay, Math.max(0, decayMs)));
       }
       refreshTooltip();
       visualGroups.refresh();
@@ -439,21 +449,30 @@ export function mountD3ElasticRenderer({
       const y1 = Math.min(...nodes.map(node => node.y - node.r));
       const y2 = Math.max(...nodes.map(node => node.y + node.r));
       const scale = Math.max(.05, Math.min(10,
-        Math.min((viewportWidth - padding * 2) / Math.max(1, x2 - x1),
-          (viewportHeight - padding * 2) / Math.max(1, y2 - y1))));
+        Math.min((currentViewportWidth - padding * 2) / Math.max(1, x2 - x1),
+          (currentViewportHeight - padding * 2) / Math.max(1, y2 - y1))));
       const transform = d3.zoomIdentity
-        .translate(viewportWidth / 2 - ((x1 + x2) / 2) * scale,
-          viewportHeight / 2 - ((y1 + y2) / 2) * scale)
+        .translate(currentViewportWidth / 2 - ((x1 + x2) / 2) * scale,
+          currentViewportHeight / 2 - ((y1 + y2) / 2) * scale)
         .scale(scale);
       root.call(zoom.transform, transform);
     },
     zoomBy(factor) {
-      if (!destroyed) root.call(zoom.scaleBy, finite(factor, 1), [viewportWidth / 2, viewportHeight / 2]);
+      if (!destroyed) root.call(zoom.scaleBy, finite(factor, 1),
+        [currentViewportWidth / 2, currentViewportHeight / 2]);
     },
     panBy(delta) {
       if (!destroyed) root.call(zoom.translateBy,
         finite(delta?.x, 0) / d3.zoomTransform(svg).k,
         finite(delta?.y, 0) / d3.zoomTransform(svg).k);
+    },
+    resize(nextWidth, nextHeight) {
+      if (destroyed) return;
+      currentViewportWidth = Math.max(1, finite(nextWidth, currentViewportWidth));
+      currentViewportHeight = Math.max(1, finite(nextHeight, currentViewportHeight));
+      root.attr('width', currentViewportWidth).attr('height', currentViewportHeight)
+        .attr('viewBox', `0 0 ${currentViewportWidth} ${currentViewportHeight}`);
+      refreshTooltip();
     },
     destroy() {
       if (destroyed) return;
@@ -462,9 +481,23 @@ export function mountD3ElasticRenderer({
       visualGroups.destroy();
       pulseTimers.forEach(clearTimeout);
       pulseTimers.clear();
+      tooltipObserver?.disconnect();
       root.on('.zoom', null).interrupt();
       root.selectAll('*').interrupt().remove();
       if (tooltip !== null) tooltip.style.display = 'none';
     },
   };
+}
+
+export function runtimeNodeTooltipText(node) {
+  const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
+  const state = node.runtimeObserved ? node.runtimeState : null;
+  return [node.label, known('ID', node.id), known('State', state),
+    known('Active instances', node.runtimeObserved ? node.instances : null),
+    known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
+    known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
+    known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
+    known('Fallback', node.runtimeObserved ? (node.fallback ? 'yes' : 'no') : null),
+    known('Bypassed', node.runtimeObserved ? (node.runtimeState === 'bypassed' ? 'yes' : 'no') : null),
+  ].join('\n');
 }

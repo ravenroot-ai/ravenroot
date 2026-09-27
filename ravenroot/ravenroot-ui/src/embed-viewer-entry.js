@@ -36,6 +36,10 @@ import {
   normalizeBounds,
   projectMinimap,
 } from './minimap-geometry.js';
+import { createEmbedDesignInspection } from './embed-design-inspection.js';
+import { createEmbedMaximizeController } from './embed-maximize.js';
+import { createVisualGroupRenderer } from './visual-group-renderer.js';
+import { edgeFlowSnapshot, FLOW_PULSE_MS } from './monitoring-runtime-state.js';
 
 export function viewerStylesheet(mode = 'cyto', theme = 'dark') {
   return createViewerStylesheet(requireEmbedTheme(theme), mode);
@@ -58,9 +62,18 @@ function elasticElements(snapshot, palette, width, height) {
     y: node.layout?.y ?? (Math.floor(index / columns) + 1) * height
       / (Math.ceil(snapshot.nodes.length / columns) + 1),
     instances: null,
+    arrivals: null,
+    runtimeObserved: false,
+    runtimeState: 'idle',
+    lastEventType: null,
+    lastOccurredAt: null,
+    processingDuration: null,
+    fallback: false,
+    bypassed: Boolean(node.bypassed),
   }));
   const links = snapshot.edges.map(edge => ({
     id: edge.id,
+    runtimeIdentity: edge.runtimeIdentity,
     source: edge.source,
     target: edge.target,
     baseWidth: 1.8,
@@ -106,6 +119,7 @@ export function createEmbedViewer(container, {
   mode.value = semanticModes ? 'design' : 'cyto';
   mode.disabled = true;
   const controls = [...container.querySelectorAll('[data-viewer-command]')];
+  const maximizeControl = requiredElement(container, '[data-viewer-maximize]');
   const focusBoundaries = [...container.ownerDocument.querySelectorAll('.embed-focus-sentinel')];
   if (focusBoundaries.length !== 2) throw new Error('Embed viewer focus boundary unavailable.');
   const lifecycle = createEmbedShellLifecycle({
@@ -126,12 +140,24 @@ export function createEmbedViewer(container, {
     maxZoom: 5,
     wheelSensitivity: 0.25,
   });
+  const maximizeController = createEmbedMaximizeController(container, maximizeControl, {
+    onResize: () => {
+      instance.resize();
+      elasticMount?.resize?.(canvas.clientWidth || 800, canvas.clientHeight || 500);
+      scheduleMinimap();
+    },
+  });
   const elasticSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   elasticSvg.classList.add('embed-viewer-elastic');
   elasticSvg.dataset.viewerElastic = '';
   elasticSvg.setAttribute('aria-hidden', 'true');
   elasticSvg.setAttribute('hidden', '');
   canvas.append(elasticSvg);
+  const runtimeTooltip = document.createElement('div');
+  runtimeTooltip.className = 'embed-runtime-tooltip';
+  runtimeTooltip.setAttribute('role', 'tooltip');
+  runtimeTooltip.style.display = 'none';
+  canvas.append(runtimeTooltip);
   const cytoscapeAdapter = createCytoscapeReadOnlyRendererAdapter(instance);
   let resizeFrame = null;
   let minimapFrame = null;
@@ -140,11 +166,109 @@ export function createEmbedViewer(container, {
   let mounted = false;
   let currentSnapshot = null;
   let elasticMount = null;
+  let visualGroupsRenderer = null;
+  let visualGroupState = {};
   let deploymentState = null;
   let runGeneration = 0;
   const modeStates = new Map();
+  const pulseTimers = new Map();
+  const cancelPulseTimers = () => { pulseTimers.forEach(clearTimeout); pulseTimers.clear(); };
   const isMonitoring = () => semanticModes ? mode.value === 'monitoring' : mode.value === 'elastic';
   const designStyle = () => semanticModes ? 'design' : mode.value;
+
+  const groupGraph = () => ({ nodes: currentSnapshot?.nodes || [], edges: currentSnapshot?.edges || [] });
+  const runtimeEdgeIdentity = displayId => currentSnapshot?.edges.find(edge => edge.id === displayId)?.runtimeIdentity;
+  const groupOptions = () => ({ graph: groupGraph(), groups: currentSnapshot?.groups || [],
+    state: visualGroupState, animate: false, selection: [], focus: null,
+    onToggle: (groupId, collapsed) => toggleGroup(groupId, collapsed) });
+  const toggleGroup = (groupId, collapsed) => {
+    if (!currentSnapshot?.groups.some(group => group.id === groupId)) return;
+    visualGroupState = { ...visualGroupState, [groupId]: { ...(visualGroupState[groupId] || {}), collapsed } };
+    if (isMonitoring()) elasticMount?.setVisualGroups(groupOptions());
+    else visualGroupsRenderer?.setGroups(groupOptions());
+    applyGroupedRuntime();
+    designInspection.refresh();
+  };
+  const designInspection = createEmbedDesignInspection({ canvas, cy: instance, tooltip: runtimeTooltip,
+    snapshot: () => currentSnapshot, runtime: () => deploymentState,
+    projection: () => visualGroupsRenderer?.projection, toggle: toggleGroup });
+  const applyGroupedRuntime = () => {
+    if (!deploymentState) return;
+    const projection = isMonitoring() ? elasticMount?.visualGroupProjection : visualGroupsRenderer?.projection;
+    if (!projection) return;
+    // Elastic node and edge updates repaint the current projection in place. Re-projecting here
+    // replaces its visible paths during the same observation and can erase a just-painted pulse.
+    if (isMonitoring()) return;
+    for (const group of projection.groups.filter(item => item.collapsed)) {
+      const runtimes = group.memberNodeIds.map(id => deploymentState.nodeStates.get(id)).filter(Boolean);
+      const priority = ['failed', 'active', 'fallback', 'bypassed', 'completed'];
+      const state = priority.find(candidate => runtimes.some(runtime => runtime.runtimeState === candidate));
+      const internalPulse = currentSnapshot.edges.some(edge => group.memberNodeIds.includes(edge.source)
+        && group.memberNodeIds.includes(edge.target) && edge.runtimeIdentity
+        && deploymentState.edgeStates.get(edge.runtimeIdentity)?.recent > 0);
+      const summary = instance.getElementById(group.summaryId);
+      summary.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding');
+      if (summary.nonempty() && (state || internalPulse)) summary.style({
+        'border-color': state ? (state === 'active' ? palette.selection
+          : state === 'failed' ? palette.edgeType.failed : palette.edgeType[state] || palette.runtimeIdle)
+          : palette.selection,
+        'border-width': state === 'active' || internalPulse ? 5 : 3,
+        'underlay-color': state === 'failed' ? palette.edgeType.failed : palette.selection,
+        'underlay-opacity': internalPulse ? .3 : .14,
+        'underlay-padding': internalPulse ? 12 : 7,
+      });
+    }
+    for (const edge of projection.edges) {
+      const runtime = edge.originalEdgeIds.map(runtimeEdgeIdentity).filter(Boolean)
+        .map(id => deploymentState.edgeStates.get(id)).find(value => value?.recent);
+      const visible = instance.getElementById(edge.id);
+      if (visible.nonempty()) {
+        visible.data('runtimeActive', Boolean(runtime?.recent));
+        visible.data('runtimeRecent', runtime?.recent || 0);
+        visible.data('runtimeCount', runtime?.count || 0);
+        // Projected edges inherit bypass styles; let runtime selectors own their paint properties.
+        visible.removeStyle('width line-color target-arrow-color line-style line-dash-pattern');
+      }
+    }
+  };
+  const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  const paintRuntimeEdgeFlow = edgeId => {
+    if (destroyed || !deploymentState) return;
+    const flow = edgeFlowSnapshot(deploymentState.runtime, edgeId);
+    deploymentState.edgeStates.set(edgeId, flow);
+    const remainingPulseMs = flow.expiresAt == null ? 0 : Math.max(0, flow.expiresAt - Date.now());
+    elasticMount?.updateEdgeFlow(edgeId, flow, {
+      reducedMotion: reducedMotion(),
+      decayMs: remainingPulseMs || FLOW_PULSE_MS,
+      // Expiry is owned by the viewer, independently of the selected renderer.
+      onDecay: null,
+    });
+    clearTimeout(pulseTimers.get(edgeId));
+    pulseTimers.delete(edgeId);
+    if (flow.recent > 0 && remainingPulseMs > 0) {
+      const generation = runGeneration;
+      pulseTimers.set(edgeId, setTimeout(() => {
+        pulseTimers.delete(edgeId);
+        if (!destroyed && generation === runGeneration) paintRuntimeEdgeFlow(edgeId);
+      }, remainingPulseMs));
+    }
+    applyDeploymentViewStateToRenderer(instance, deploymentState);
+    applyGroupedRuntime();
+  };
+  const resetRuntimePresentation = () => {
+    cancelPulseTimers();
+    elasticMount?.nodes.forEach(node => elasticMount.updateNode(node.id, {
+      runtimeObserved: false, runtimeState: 'idle', instances: null, arrivals: null,
+      lastEventType: null, lastOccurredAt: null, processingDuration: null,
+      fallback: false, stroke: palette.runtimeIdle, strokeWidth: 1.5,
+    }));
+    elasticMount?.links.forEach(link => elasticMount.updateEdgeFlow(
+      link.runtimeIdentity === undefined ? link.id : link.runtimeIdentity,
+      { recent: 0, count: 0, lastEvent: null, lastOccurredAt: null, expiresAt: null },
+      { reducedMotion: true }));
+    applyGroupedRuntime();
+    designInspection.refresh();
+  };
 
   const applyDesignPresentation = () => {
     if (!semanticModes) return;
@@ -226,6 +350,7 @@ export function createEmbedViewer(container, {
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = null;
       instance.resize();
+      elasticMount?.resize(canvas.clientWidth || 800, canvas.clientHeight || 500);
       scheduleMinimap();
     });
   });
@@ -267,6 +392,7 @@ export function createEmbedViewer(container, {
     elasticMount?.destroy();
     elasticMount = null;
     elasticSvg.setAttribute('hidden', '');
+    elasticSvg.setAttribute('aria-hidden', 'true');
     canvas.dataset.activeRenderer = 'cytoscape';
   };
   const startElastic = ({ recompute = false } = {}) => {
@@ -278,6 +404,7 @@ export function createEmbedViewer(container, {
     const saved = modeStates.get('monitoring');
     if (saved?.positions) elements.nodes.forEach(node => Object.assign(node, saved.positions[node.id] || {}));
     elasticSvg.removeAttribute('hidden');
+    elasticSvg.removeAttribute('aria-hidden');
     canvas.dataset.activeRenderer = 'elastic';
     elasticMount = mountD3ElasticRenderer({
       svg: elasticSvg,
@@ -286,12 +413,14 @@ export function createEmbedViewer(container, {
       width,
       height,
       palette,
+      tooltip: runtimeTooltip,
       markerKey: 'embed',
       isLive: () => !destroyed && isMonitoring(),
       onViewportChange: scheduleMinimap,
       initialTransform: saved?.transform || null,
       startSimulation: recompute,
     });
+    if (currentSnapshot.groups?.length) elasticMount.setVisualGroups(groupOptions());
     if (deploymentState) {
       const runtimeColor = state => state === 'active' ? palette.selection
         : state === 'completed' ? palette.edgeType.completed
@@ -301,10 +430,12 @@ export function createEmbedViewer(container, {
       deploymentState.nodeStates.forEach((runtime, nodeId) => elasticMount.updateNode(nodeId, {
         runtimeObserved: true, runtimeState: runtime.runtimeState,
         instances: runtime.activeInstances, arrivals: runtime.arrivals,
+        lastEventType: runtime.lastEventType, lastOccurredAt: runtime.lastOccurredAt,
+        processingDuration: runtime.processingDuration,
         fallback: runtime.fallback, stroke: runtimeColor(runtime.runtimeState),
         strokeWidth: runtime.runtimeState === 'active' ? 5 : 3,
       }));
-      deploymentState.edgeStates.forEach((runtime, edgeId) => elasticMount.updateEdgeFlow(edgeId, runtime));
+      deploymentState.edgeStates.forEach((_runtime, edgeId) => paintRuntimeEdgeFlow(edgeId));
     }
   };
   const captureMode = () => {
@@ -321,6 +452,7 @@ export function createEmbedViewer(container, {
     }
   };
   const applyMode = (announce = true) => {
+    designInspection.setEnabled(false);
     if (!semanticModes && mode.value === 'elastic' && elasticOption.disabled) mode.value = 'cyto';
     if (isMonitoring()) {
       startElastic({ recompute: !semanticModes });
@@ -341,7 +473,15 @@ export function createEmbedViewer(container, {
       }
       if (semanticModes) applyViewerDesignRoutes(instance, currentSnapshot?.designArrangement);
       else if (designStyle() === 'cyto') applyViewerDesignRoutes(instance, null);
+      if (currentSnapshot?.groups?.length) {
+        visualGroupsRenderer ||= createVisualGroupRenderer({ cy: instance,
+          isCurrent: () => !destroyed && !isMonitoring() });
+        visualGroupsRenderer.setGroups(groupOptions());
+      }
     }
+    if (deploymentState) applyDeploymentViewStateToRenderer(instance, deploymentState);
+    applyGroupedRuntime();
+    designInspection.setEnabled(!isMonitoring());
     container.dataset.viewerRenderer = mode.value;
     scheduleMinimap();
     if (announce) status.textContent = `${mode.options[mode.selectedIndex].text} view ready.`;
@@ -367,6 +507,7 @@ export function createEmbedViewer(container, {
       resetDeploymentViewRuntime(deploymentState, runSelect.value ? 'CONNECTING' : 'DETACHED',
         runSelect.value ? null : 'NO_AUTHORIZED_RUNS');
       applyDeploymentViewStateToRenderer(instance, deploymentState);
+      resetRuntimePresentation();
     }
     onRunSelected(runSelect.value || null, runGeneration);
     status.textContent = runSelect.value ? 'Connecting to selected run.' : 'No authorized runs.';
@@ -441,7 +582,12 @@ export function createEmbedViewer(container, {
   const teardown = preserveState => {
     if (destroyed) return;
     destroyed = true;
+    cancelPulseTimers();
+    designInspection.destroy();
+    maximizeController.destroy();
     stopElastic();
+    visualGroupsRenderer?.destroy();
+    visualGroupsRenderer = null;
     controls.forEach(control => control.removeEventListener('click', click));
     mode.removeEventListener('change', modeChange);
     runSelect?.removeEventListener('change', runChange);
@@ -452,6 +598,7 @@ export function createEmbedViewer(container, {
     concealMinimap();
     alternative.replaceChildren();
     elasticSvg.remove();
+    runtimeTooltip.remove();
     metadata.textContent = '';
     lifecycle.destroy({ preserveState });
     core.destroy();
@@ -516,6 +663,9 @@ export function createEmbedViewer(container, {
           }
           if (signal.aborted) throw signal.reason;
           currentSnapshot = rendered;
+          visualGroupState = Object.fromEntries((rendered.groups || []).map(group => [group.id, {
+            collapsed: group.collapsed, anchorNodeId: group.anchorNodeId, lastSelectedNodeIds: [],
+          }]));
           mounted = true;
           const elasticAvailable = viewerSupportsElastic(rendered.nodes.length, rendered.edges.length);
           if (elasticOption) elasticOption.disabled = !elasticAvailable;
@@ -554,6 +704,10 @@ export function createEmbedViewer(container, {
       if (generation !== runGeneration) return { accepted: false, reason: 'stale-generation' };
       const result = applyDeploymentViewFrame(deploymentState, frame);
       applyDeploymentViewStateToRenderer(instance, deploymentState);
+      if (result.reason !== 'execution' && (result.accepted || result.terminal)
+          && deploymentState.nodeStates.size === 0 && deploymentState.edgeStates.size === 0) {
+        resetRuntimePresentation();
+      }
       if (elasticMount && frame.event?.nodeId) {
         const runtime = deploymentState.nodeStates.get(frame.event.nodeId);
         const runtimeColor = state => state === 'active' ? palette.selection
@@ -564,14 +718,18 @@ export function createEmbedViewer(container, {
         if (runtime) elasticMount.updateNode(frame.event.nodeId, {
           runtimeObserved: true, runtimeState: runtime.runtimeState,
           instances: runtime.activeInstances, arrivals: runtime.arrivals,
+          lastEventType: runtime.lastEventType, lastOccurredAt: runtime.lastOccurredAt,
+          processingDuration: runtime.processingDuration,
           fallback: runtime.fallback, stroke: runtimeColor(runtime.runtimeState),
           strokeWidth: runtime.runtimeState === 'active' ? 5 : 3,
         });
       }
-      if (elasticMount && frame.event?.edgeId) {
+      if (frame.event?.edgeId) {
         const runtime = deploymentState.edgeStates.get(frame.event.edgeId);
-        if (runtime) elasticMount.updateEdgeFlow(frame.event.edgeId, runtime);
+        if (runtime) paintRuntimeEdgeFlow(frame.event.edgeId);
       }
+      applyGroupedRuntime();
+      designInspection.refresh();
       container.dataset.viewerContinuity = deploymentState.continuity.toLowerCase();
       container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
       if (result.terminal || deploymentState.continuity !== 'LIVE') {
@@ -617,6 +775,7 @@ export function createEmbedViewer(container, {
       if (deploymentState) {
         resetDeploymentViewRuntime(deploymentState, 'DETACHED', reason);
         applyDeploymentViewStateToRenderer(instance, deploymentState);
+        resetRuntimePresentation();
         container.dataset.viewerContinuity = deploymentState.continuity.toLowerCase();
         container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
       }

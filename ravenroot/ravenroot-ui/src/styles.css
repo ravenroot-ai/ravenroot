@@ -1410,9 +1410,7 @@
       overflow: hidden;
       user-select: none; cursor: default;
     }
-    /* With one document open there is nothing to tell apart, and the top bar already names it. The
-       strip appears the moment a second document exists — tiled beside it or hidden behind it. */
-    #cy:not(.panes-titled) .doc-pane-header { display: none; }
+    /* The document strip also owns maximize/restore, so it remains available with one document. */
     .doc-pane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .doc-pane-origin {
       flex: 0 0 auto;
@@ -1424,13 +1422,27 @@
       white-space: nowrap;
     }
     .doc-pane-modified { flex: 0 0 auto; font-weight: 700; color: var(--warn); }
-    .doc-pane-close {
-      flex: 0 0 24px; width: 24px; height: 24px; margin-left: auto; padding: 0;
+    .doc-pane-maximize, .doc-pane-close {
+      flex: 0 0 24px; width: 24px; height: 24px; padding: 0;
       border: 0; border-radius: 3px; background: transparent; color: var(--tx-2);
       font: inherit; font-size: 16px; line-height: 1; cursor: pointer;
     }
-    .doc-pane-close:hover { background: var(--bg-h); color: var(--tx-1); }
-    .doc-pane-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .doc-pane-maximize { margin-left: auto; display: grid; place-items: center; }
+    .doc-pane-maximize > span { width: 11px; height: 9px; border: 1.5px solid currentColor; border-radius: 1px; }
+    .doc-pane-maximize[aria-pressed="true"] > span { position: relative; transform: translate(1px, -1px); }
+    .doc-pane-maximize[aria-pressed="true"] > span::after { content: ''; position: absolute; inset: 2px 2px -3px -3px; border: 1.5px solid currentColor; border-radius: 1px; background: var(--bg-1); z-index: -1; }
+    .doc-pane-maximize:hover, .doc-pane-close:hover { background: var(--bg-h); color: var(--tx-1); }
+    .doc-pane-maximize:focus-visible, .doc-pane-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+    html.graph-document-maximized, html.graph-document-maximized body { overflow: hidden; }
+    html.graph-document-maximized #cy-wrap { position: fixed; inset: 0; z-index: 2147483647; width: 100vw; height: 100vh; background: var(--surface-canvas); }
+    html.graph-document-maximized #cy-wrap > :not(#cy) { display: none !important; }
+    html.graph-document-maximized #cy { display: block; width: 100%; height: 100%; }
+    html.graph-document-maximized #cy > :not(.doc-pane--maximized) { display: none !important; }
+    html.graph-document-maximized .doc-pane--maximized { display: flex !important; position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; visibility: visible !important; pointer-events: auto !important; }
+    html.graph-document-maximized .doc-pane--maximized .doc-pane-header { display: flex; position: absolute; z-index: 20; top: 8px; right: 8px; width: 32px; height: 32px; padding: 4px; border: 0; border-radius: 5px; background: var(--surface-overlay); box-shadow: var(--shadow-popover); }
+    html.graph-document-maximized .doc-pane--maximized .doc-pane-header > :not(.doc-pane-maximize) { display: none !important; }
+    html.graph-document-maximized .doc-pane--maximized .doc-pane-maximize { margin: 0; }
     /* Between the 360px floor and the 480px comfort width the split is permitted and tight, so the
        strip gives back what it can rather than overflowing the name that carries the identity. */
     .doc-pane--tight .doc-pane-header { padding: 0 6px; gap: 4px; font-size: 10px; }

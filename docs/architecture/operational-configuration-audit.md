@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24257 |
+| Atomic operational candidates discovered | 24301 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24257 |
+| Reviewed | 24301 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10035 |
+| Retained protocol or format invariants | 10061 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 699 |
 | Retained derived values | 1087 |
-| Test fixtures | 8285 |
+| Test fixtures | 8303 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2165.
+Retired source candidates preserved in inventory history: 2167.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 113.
+Checked source reconciliations: 114.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24257 candidates.
+zero-count or unclassified rows as needed and sums to 24301 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24257 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22596 |
+| retained | 22640 |
 
 ### Classification counts
 
@@ -86,10 +86,10 @@ zero-count or unclassified rows as needed and sums to 24257 candidates.
 | derived | 1087 |
 | operator-configurable | 1661 |
 | presentation-text | 699 |
-| protocol-or-format-invariant | 10035 |
+| protocol-or-format-invariant | 10061 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
-| test-fixture | 8285 |
+| test-fixture | 8303 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 24257 candidates.
 | deployment | 2864 |
 | deployment-example | 20 |
 | java | 7288 |
-| script | 2343 |
-| test-fixture | 8285 |
+| script | 2369 |
+| test-fixture | 8303 |
 | ui | 3457 |
 
 ### Owning remediation counts
@@ -117,8 +117,8 @@ assigned to an issue retroactively.
 | #318 | 107 |
 | #319 | 287 |
 | #320 | 1471 |
-| #321 | 8512 |
-| Retained; no remediation required | 13725 |
+| #321 | 8510 |
+| Retained; no remediation required | 13771 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24211 |
-| Unchanged identities | 24167 |
-| Approved identity migrations | 38 |
-| Approved retirements | 6 |
-| Semantically classified additions | 52 |
-| Current candidates | 24257 |
+| Source inventory candidates | 24257 |
+| Unchanged identities | 24255 |
+| Approved identity migrations | 0 |
+| Approved retirements | 2 |
+| Semantically classified additions | 46 |
+| Current candidates | 24301 |
 
 ## Final semantic review
 
@@ -16528,42 +16528,68 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-667835b51291cdfc89b7` | `scripts/release_contract.py:189` `release_transition` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
 | `oc-48614291d26b9dcb293e` | `scripts/release_contract.py:192` `release_transition` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
 | `oc-4d8e82f7a15c8906d242` | `scripts/release_contract.py:192` `release_transition` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-8ac6130b091d8614757b` | `scripts/release_contract.py:209` `check_promotion` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-ebd5d9b16d24878135bd` | `scripts/release_contract.py:209` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-b08c2314b73241a3409f` | `scripts/release_contract.py:211` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-e7513d6778226e281050` | `scripts/release_contract.py:211` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
-| `oc-8d2cb6f84ab979d18df1` | `scripts/release_contract.py:216` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-8ac6130b091d8614757b` | `scripts/release_contract.py:211` `check_promotion` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
+| `oc-ebd5d9b16d24878135bd` | `scripts/release_contract.py:211` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-b08c2314b73241a3409f` | `scripts/release_contract.py:213` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-e7513d6778226e281050` | `scripts/release_contract.py:213` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-8d2cb6f84ab979d18df1` | `scripts/release_contract.py:218` `check_promotion` | script | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
 | `oc-00eed7d12191c48a1d87` | `scripts/release_contract.py:225` `check_promotion` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-110f5c5c14451e9bea92` | `scripts/release_contract.py:228` `check_promotion` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
 | `oc-e2014974d80af35496e6` | `scripts/release_contract.py:231` `check_promotion` | script | retained | presentation-text | This string is human-readable release validation or failure output, not an operator setting or protocol token. |
-| `oc-80d812746834fcde605c` | `scripts/release_contract.py:243` `authorize_main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-dd8a32c2db23fdd16620` | `scripts/release_contract.py:246` `authorize_main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-bb2531afc6645517ec3a` | `scripts/release_contract.py:253` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-fe0d57e6a156432f4b3e` | `scripts/release_contract.py:265` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-025f4ce5039203f15951` | `scripts/release_contract.py:268` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-33b4c943e39130d769fe` | `scripts/release_contract.py:268` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-3ce4946e701c8b350a47` | `scripts/release_contract.py:268` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-4941b8bb5d637f72d4ae` | `scripts/release_contract.py:268` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-7305ec8d304649996020` | `scripts/release_contract.py:268` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-7ca33b903fab4d0cc7a7` | `scripts/release_contract.py:268` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-ec02f1b37c0e93a345ff` | `scripts/release_contract.py:276` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a6244836b777f7272064` | `scripts/release_contract.py:278` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-372da67c875d834037fa` | `scripts/release_contract.py:280` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-3b1b87bd590bd6e5a024` | `scripts/release_contract.py:280` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d036996434808bbc890f` | `scripts/release_contract.py:280` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f9b34a9e33bbf919adc2` | `scripts/release_contract.py:280` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-33aa96e91bdf5dc72851` | `scripts/release_contract.py:288` `validate_tag_authorization` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-d7ffa8ee09137dd06081` | `scripts/release_contract.py:296` `validate_tag_authorization` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-70990d3449c8340ca643` | `scripts/release_contract.py:304` `validate_tag` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-b99f4da4b8395cc50d3e` | `scripts/release_contract.py:307` `validate_tag` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-81dbe133a97172904d23` | `scripts/release_contract.py:312` `validate_tag` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-867ec97730f1727be145` | `scripts/release_contract.py:320` `validate_tag` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-9144943b59c1b4859efe` | `scripts/release_contract.py:326` `write_outputs` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-302297c17845f6142384` | `scripts/release_contract.py:329` `write_outputs` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a647ffd120a0c1870225` | `scripts/release_contract.py:329` `write_outputs` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-e609e93ec926a5595d18` | `scripts/release_contract.py:340` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-216a628f549cef153960` | `scripts/release_contract.py:346` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f41d5a7b6405061be368` | `scripts/release_contract.py:382` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-80d812746834fcde605c` | `scripts/release_contract.py:244` `authorize_main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-dd8a32c2db23fdd16620` | `scripts/release_contract.py:247` `authorize_main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-bb2531afc6645517ec3a` | `scripts/release_contract.py:254` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-fe0d57e6a156432f4b3e` | `scripts/release_contract.py:264` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-025f4ce5039203f15951` | `scripts/release_contract.py:267` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-33b4c943e39130d769fe` | `scripts/release_contract.py:267` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-3ce4946e701c8b350a47` | `scripts/release_contract.py:267` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4941b8bb5d637f72d4ae` | `scripts/release_contract.py:267` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-7305ec8d304649996020` | `scripts/release_contract.py:267` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-7ca33b903fab4d0cc7a7` | `scripts/release_contract.py:267` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-372da67c875d834037fa` | `scripts/release_contract.py:272` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-3b1b87bd590bd6e5a024` | `scripts/release_contract.py:272` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d036996434808bbc890f` | `scripts/release_contract.py:272` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f9b34a9e33bbf919adc2` | `scripts/release_contract.py:272` `authorize_main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-33aa96e91bdf5dc72851` | `scripts/release_contract.py:282` `validate_tag_authorization` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-d7ffa8ee09137dd06081` | `scripts/release_contract.py:291` `validate_tag_authorization` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-70990d3449c8340ca643` | `scripts/release_contract.py:299` `validate_tag` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-b99f4da4b8395cc50d3e` | `scripts/release_contract.py:302` `validate_tag` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-81dbe133a97172904d23` | `scripts/release_contract.py:307` `validate_tag` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-867ec97730f1727be145` | `scripts/release_contract.py:315` `validate_tag` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-9144943b59c1b4859efe` | `scripts/release_contract.py:321` `write_outputs` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-302297c17845f6142384` | `scripts/release_contract.py:324` `write_outputs` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-a647ffd120a0c1870225` | `scripts/release_contract.py:324` `write_outputs` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-e609e93ec926a5595d18` | `scripts/release_contract.py:335` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-bf63dba4b2575a2f3ac1` | `scripts/release_contract.py:336` `parser` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-216a628f549cef153960` | `scripts/release_contract.py:342` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-991ea0ecf31e978f6406` | `scripts/release_contract.py:343` `parser` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d0f95634fb2fe56bfb1b` | `scripts/release_contract.py:348` `parser` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f41d5a7b6405061be368` | `scripts/release_contract.py:388` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8424e153e0476cab608e` | `scripts/release_contract.py:403` `require_target_tag_available` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d80a911df3b3bce9264c` | `scripts/release_contract.py:405` `require_target_tag_available` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-c311c34dc608419c681d` | `scripts/release_contract.py:409` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d7fb1996916ed17f03e9` | `scripts/release_contract.py:409` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f7bfa917b51e20f9abf5` | `scripts/release_contract.py:409` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-ce71b8bf11783308cbd5` | `scripts/release_contract.py:410` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-6b1b52405c6540a1e830` | `scripts/release_contract.py:412` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-f1664bac53fcd2997502` | `scripts/release_contract.py:422` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-d7de9f936583de8a8f23` | `scripts/release_contract.py:424` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-b2c04fda4e1374119a52` | `scripts/release_contract.py:425` `require_prior_minor_promotion` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-1f6d06dce8577a1a2316` | `scripts/release_contract.py:431` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-8d7aabf418677bba842b` | `scripts/release_contract.py:431` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-cda98174fa4975b69a40` | `scripts/release_contract.py:431` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-b1b937ac98262f82373e` | `scripts/release_contract.py:433` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-8e7e3504db1c9356a193` | `scripts/release_contract.py:436` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-aa7aa78cffde66075af0` | `scripts/release_contract.py:438` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-9420aa0540e7faef6dad` | `scripts/release_contract.py:440` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-644056250c389974ca9b` | `scripts/release_contract.py:443` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-900fbaf09547521acac8` | `scripts/release_contract.py:445` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-7d3ab3d5472c892039c3` | `scripts/release_contract.py:446` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-9d65c10f79abb793490d` | `scripts/release_contract.py:446` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-accb7f4b8f0abd051308` | `scripts/release_contract.py:446` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-c671b1cfcbaa234cb956` | `scripts/release_contract.py:447` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-7ceb62552564d5874a2d` | `scripts/release_contract.py:449` `prepared_unreleased_minor_recovery` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
+| `oc-bd66a2d11fb01d431898` | `scripts/release_contract.py:457` `authorized_release_intent` | script | retained | protocol-or-format-invariant | This atom enforces the fail-closed release-recovery contract and does not configure product runtime behavior. |
 | `oc-328a92a902d0093f7ef5` | `scripts/select_backend_tests.py:24` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed backend CI scope routing; it is not operator-configurable. |
 | `oc-36c35c73b4eb78210a1a` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |
 | `oc-6471af3402cf9b2b9af6` | `scripts/select_backend_tests.py:30` `module` | script | retained | protocol-or-format-invariant | Issue #475 adds fixed CI backend verification scope routing; it is not operator-configurable. |

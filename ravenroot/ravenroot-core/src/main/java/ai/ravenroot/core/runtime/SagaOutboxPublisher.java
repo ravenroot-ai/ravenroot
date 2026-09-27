@@ -270,9 +270,7 @@ public final class SagaOutboxPublisher {
                 boolean compensated = sagas.stream()
                         .filter(saga -> saga.traversalId().equals(candidate.traversalId()))
                         .anyMatch(saga -> saga.disposition() == SagaDisposition.COMPENSATED);
-                if (compensated) {
-                    recordMissingRecoveryResult(stored, candidate.traversalId(), sagas);
-                }
+                recordMissingRecoveryResult(stored, candidate.traversalId(), sagas, compensated);
                 batch.apply(new ExecutionTransition.TraversalTransitioned(candidate.traversalId(),
                         compensated ? TraversalStatus.FAILED : TraversalStatus.COMPLETED));
                 boolean otherOpen = process.traversals().entrySet().stream()
@@ -305,7 +303,8 @@ public final class SagaOutboxPublisher {
     private void recordMissingRecoveryResult(
             ai.ravenroot.api.persistence.StoredProcessInstance stored,
             java.util.UUID traversalId,
-            java.util.List<ai.ravenroot.api.persistence.SagaSnapshot> sagas) {
+            java.util.List<ai.ravenroot.api.persistence.SagaSnapshot> sagas,
+            boolean compensated) {
         if (store.loadExecutionResult(stored.tenantId(), traversalId).toCompletableFuture().join().isPresent()) {
             return;
         }
@@ -319,9 +318,11 @@ public final class SagaOutboxPublisher {
                 .max(java.time.Instant::compareTo).orElse(clock.instant());
         try {
             store.recordExecutionResult(ai.ravenroot.api.persistence.DurableExecutionResult.of(
-                    stored.key(), traversalId, stored.graphVersionPin(), ProcessInstanceStatus.FAILED,
+                    stored.key(), traversalId, stored.graphVersionPin(), compensated
+                            ? ProcessInstanceStatus.FAILED : ProcessInstanceStatus.COMPLETED,
                     null, startedAt, endedAt,
-                    ai.ravenroot.api.persistence.ExecutionResultPayload.none(),
+                    compensated ? ai.ravenroot.api.persistence.ExecutionResultPayload.none()
+                            : ai.ravenroot.api.persistence.ExecutionResultPayload.unavailable(),
                     ai.ravenroot.api.persistence.ExecutionResultNodes.empty(), null))
                     .toCompletableFuture().join();
         } catch (java.util.concurrent.CompletionException concurrentResult) {

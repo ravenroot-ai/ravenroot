@@ -462,6 +462,69 @@ class SagaOutboxPublisherTest {
                 "a restarted application must read the recovery-owned terminal result");
     }
 
+    @Test
+    void restartRecordsUnavailableOutputWhenDurableSuccessOutlivesItsOriginalResultWriter() throws Exception {
+        MutableClock clock = new MutableClock();
+        var store = new InMemoryExecutionStore(clock);
+        ExecutionKey key = new ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversal = UUID.randomUUID(), sagaId = UUID.randomUUID(), occurrence = UUID.randomUUID();
+        var accepted = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of(traversal, new Traversal(traversal, "start",
+                        TraversalStatus.ACCEPTED, Map.of()))), new GraphVersionPin("graph-v1"))).build())
+                .toCompletableFuture().join();
+        UUID invocation = UUID.randomUUID();
+        var completedInvocation = new ai.ravenroot.api.application.NodeInvocation(invocation, "participant",
+                java.util.Set.of(), ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED,
+                List.of(new ai.ravenroot.api.application.NodeAttempt(UUID.randomUUID(), 1,
+                        ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED)));
+        var running = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(accepted.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(traversal, completedInvocation))
+                .build()).toCompletableFuture().join();
+        OpaquePayload body = frozenPayload(key, traversal);
+        String digest = sha256(body);
+        String forwardOperation = "forward:" + sagaId + ":participant:" + occurrence;
+        var forward = new SagaCommandIntent(UUID.randomUUID(), sagaId, forwardOperation,
+                "participant:http-idempotency-v1:http-request", "saga.forward.http-idempotency-v1.v1",
+                1, body, digest, null, clock.instant(), 5);
+        var definition = new SagaDefinition(1, "order", "a".repeat(64), "b".repeat(64), Map.of(
+                "participant", new SagaStepDefinition("participant", "participant", "http-idempotency-v1",
+                        "undo-participant", List.of(), false, false)));
+        var step = new SagaStepSnapshot(occurrence, "participant", invocation, forwardOperation,
+                "compensate:" + sagaId + ":participant:" + occurrence, digest,
+                SagaStepStatus.CONFIRMED_SUCCESS, new SagaRecoveryEnvelope(forward, null).encode(),
+                "business receipt confirmed", clock.instant());
+        var succeeded = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(occurrence, step), null,
+                clock.instant(), clock.instant(), "", true);
+        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(running.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, succeeded)).build())
+                .toCompletableFuture().join();
+
+        var publisher = new SagaOutboxPublisher(store, new SagaCommandTransport() {
+            @Override public CompletableFuture<BrokerResult> publish(SagaCommandIntent ignored) {
+                return CompletableFuture.completedFuture(new BrokerResult(true, "unused"));
+            }
+            @Override public CompletableFuture<Boolean> businessCompleted(SagaCommandIntent ignored) {
+                return CompletableFuture.completedFuture(false);
+            }
+        }, (ignoredKey, ignoredIntent) -> { }, "recovery", 8,
+                Duration.ofSeconds(5), Duration.ofMillis(10), clock);
+
+        assertEquals(List.of(), publisher.runOnce("tenant-a"));
+        assertEquals(ProcessInstanceStatus.COMPLETED,
+                store.load(key).toCompletableFuture().join().state().status());
+        var coldReader = new ExecutionResultRegistry(1, 1, DurableExecutionResults.of(store));
+        var redacted = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                ai.ravenroot.api.application.ExecutionLookup.Redacted.class,
+                coldReader.lookup(new ExecutionResultRegistry.Key("tenant-a", traversal)));
+        assertEquals(ProcessInstanceStatus.COMPLETED, redacted.status());
+        assertEquals(ai.ravenroot.api.persistence.ResultPayloadState.UNAVAILABLE,
+                redacted.payloadState(), "recovery must not claim the missing output was empty");
+    }
+
     private static OpaquePayload frozenPayload(ExecutionKey key, UUID traversal) {
         var value = ai.ravenroot.api.payload.PayloadValue.fromJava(Map.of(
                 "behavior", "fixture", "nodeId", "participant", "properties", Map.of(),

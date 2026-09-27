@@ -99,6 +99,12 @@ transaction whose confirmed effects were reversed; the original execution and tr
 remain protected from purge. `COMPENSATION_PENDING` and `UNRESOLVED` must also be retained with
 their receipts and outbox records while recovery can still occur.
 
+If the producing process ends after the durable saga boundary but before it records the ordinary
+execution result, recovery writes the terminal lifecycle from the pinned aggregate. A compensated
+run is reported as `FAILED`; a successful run is `COMPLETED` with payload state `UNAVAILABLE`, because
+the replacement worker cannot recreate arbitrary graph output or node evidence and must not report a
+fabricated empty result.
+
 Saga snapshots and outbox records are tenant and process scoped through `ExecutionStore`. An
 authenticated execution reader can inspect bounded, payload-free status at
 `GET /v1/executions/{processInstanceId}/sagas`; the response exposes identities, step states,

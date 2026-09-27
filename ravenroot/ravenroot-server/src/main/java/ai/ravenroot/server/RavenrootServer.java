@@ -4607,10 +4607,10 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code Redacted} is a distinct 410, {@code EXECUTION_RESULT_REDACTED}: the execution provably
      * ran, but its payload was never retained in the first place, rather than having aged out after
      * being retained. The two are different facts calling for different operator responses — an
-     * expired result is a retention policy working as configured, a redacted one is either a size cap
-     * an operator can raise or a node returning a value no remote adapter could ever persist — so
+     * expired result is a retention policy working as configured, while a redacted result identifies
+     * a size cap, an unrepresentable node output, or output evidence lost with its original runtime — so
      * they carry different {@code code}s and {@code redactedExecutionJson}'s body adds
-     * {@code payloadState} to say which of the two. {@code Unknown} is 404 and covers a
+     * {@code payloadState} to say which condition applies. {@code Unknown} is 404 and covers a
      * nonexistent id, another tenant's id and a fully evicted one alike — see
      * {@code ExecutionLookup.Unknown} for why those three must not be distinguishable.</p>
      *
@@ -5265,12 +5265,13 @@ public final class RavenrootServer implements AutoCloseable {
      * one of {@code WITHHELD} (a configured budget refused the payload: either an encoded projection
      * larger than the store's byte cap, or a value the runtime's payload limits rejected before any
      * encoding of it existed, which terminates the traversal on that rejection) or
-     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all) --
+     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all), or
+     * {@code UNAVAILABLE} (recovery proved the terminal lifecycle after the producing runtime ended
+     * before it recorded an output projection) --
      * {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}'s canonical constructor refuses
-     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only two
-     * this method ever renders. A caller reading it can tell "raise the configured cap" from "this
-     * node returns something no remote adapter could ever persist", which is exactly the distinction
-     * {@code EXECUTION_RESULT_EXPIRED} alone could not make -- see
+     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only three
+     * this method ever renders. A caller can distinguish a configured limit, an unrepresentable
+     * value, and output evidence lost with the original runtime -- see
      * {@link ErrorCode#EXECUTION_RESULT_REDACTED}'s own Javadoc.</p>
      */
     private static String redactedExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Redacted redacted,

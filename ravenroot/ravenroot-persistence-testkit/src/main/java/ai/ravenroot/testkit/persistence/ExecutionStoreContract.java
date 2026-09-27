@@ -6306,6 +6306,28 @@ public abstract class ExecutionStoreContract {
         assertEquals(recorded.retainedUntil(), read.retainedUntil());
     }
 
+    @Test
+    final void aRecoveryUnavailablePayloadRoundTripsWithoutBecomingNoOutput() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        DurableExecutionResult unavailable = DurableExecutionResult.of(key, traversalId,
+                new GraphVersionPin("graph-v1"), ProcessInstanceStatus.COMPLETED, null,
+                endedAt.minusSeconds(1), endedAt,
+                ai.ravenroot.api.persistence.ExecutionResultPayload.unavailable(),
+                ExecutionResultNodes.empty(), null);
+
+        DurableExecutionResult recorded = await(store().recordExecutionResult(unavailable));
+        DurableExecutionResult read = await(store().loadExecutionResult(DEFAULT_TENANT, traversalId))
+                .orElseThrow();
+
+        assertEquals(ResultPayloadState.UNAVAILABLE, recorded.payload().state());
+        assertEquals(recorded, read,
+                "an adapter must not decode recovery-unavailable output as ordinary no-output");
+    }
+
     // ---- duplicate terminal events ----
 
     @Test

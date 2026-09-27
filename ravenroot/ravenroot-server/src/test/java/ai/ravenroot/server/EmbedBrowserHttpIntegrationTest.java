@@ -607,6 +607,9 @@ class EmbedBrowserHttpIntegrationTest {
             assertTrue(readOnlyHtml.contains("<option value=\"design\">Design</option>"));
             assertTrue(readOnlyHtml.contains("<option value=\"monitoring\">Monitoring</option>"));
             assertTrue(readOnlyHtml.contains("data-viewer-command=\"render\""));
+            assertTrue(readOnlyHtml.contains("data-viewer-metadata hidden"));
+            assertTrue(readOnlyHtml.contains("class=\"embed-zoom-controls\""));
+            assertTrue(readOnlyHtml.contains("aria-label=\"Fit\""));
             assertTrue(readOnlyHtml.contains("data-viewer-run"));
             assertFalse(readOnlyHtml.contains("data-viewer-start"));
             assertFalse(readOnlyHtml.contains(">Cyto<"));

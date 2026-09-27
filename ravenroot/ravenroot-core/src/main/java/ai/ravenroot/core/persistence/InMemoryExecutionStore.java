@@ -691,8 +691,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return sagas.values().stream()
                         .filter(snapshot -> snapshot.key().tenantId().equals(tenantId))
                         .filter(snapshot -> !leaseLive(instances.get(snapshot.key()), clock.instant()))
-                        .filter(snapshot -> snapshot.disposition() != SagaDisposition.SUCCEEDED
-                                && snapshot.disposition() != SagaDisposition.COMPENSATED)
+                        .filter(snapshot -> snapshot.disposition() != SagaDisposition.COMPENSATED
+                                && (snapshot.disposition() != SagaDisposition.SUCCEEDED
+                                || !snapshot.graphCompleted()))
                         .sorted(java.util.Comparator.comparing(value -> value.sagaId().toString()))
                         .limit(limit).toList();
             }
@@ -1333,7 +1334,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     boolean unresolvedSaga = sagas.entrySet().stream()
                             .filter(saga -> saga.getKey().key().equals(instance.getKey()))
                             .map(Map.Entry::getValue)
-                            .anyMatch(saga -> saga.disposition() != SagaDisposition.SUCCEEDED
+                            .anyMatch(saga -> !saga.graphCompleted()
+                                    || saga.disposition() != SagaDisposition.SUCCEEDED
                                     && saga.disposition() != SagaDisposition.COMPENSATED);
                     if (unresolvedSaga) continue;
                     if (deadline.isEmpty() || deadline.get().isAfter(now)) {

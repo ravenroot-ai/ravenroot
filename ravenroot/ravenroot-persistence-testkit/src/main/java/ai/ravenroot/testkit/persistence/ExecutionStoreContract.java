@@ -6123,6 +6123,38 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
     }
 
+    @Test
+    final void purgeProtectsSucceededParticipantEffectsUntilTheGraphBoundaryIsDurable() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID(); UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        var definition = new SagaDefinition(1, "late-sibling-retention", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "participant", "http-idempotency-v1",
+                        "undo", List.of(), false, false)));
+        Instant createdAt = clock().instant();
+        var interruptedSuccess = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, createdAt, createdAt, "", false);
+        StoredProcessInstance terminal = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, interruptedSuccess)).build()));
+        Instant deadline = await(store().findProcessInstance(key)).orElseThrow().retainedUntil().orElseThrow();
+        clock().set(deadline);
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())),
+                "participant success cannot release retention before the graph failure boundary is recovered");
+
+        var completedSuccess = new SagaSnapshot(key, sagaId, traversal, definition, 2,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, createdAt, clock().instant(), "", true);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(terminal.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 1, completedSuccess)).build()));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(key.tenantId())),
+                "graph-complete success releases the instance to ordinary retention");
+        assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
+    }
+
     /**
      * {@code inventoryRetainedFrom}'s javadoc: the floor is the <strong>latest</strong> retention
      * deadline the tenant has actually crossed, not the earliest, and the boundary is exclusive --
@@ -6686,6 +6718,24 @@ public abstract class ExecutionStoreContract {
 
         assertEquals(List.of(recoverableSaga), await(store().listSagaRecoveryCandidates(DEFAULT_TENANT, 1)),
                 "an older live runner must not starve a recoverable saga behind a bounded page");
+    }
+
+    @Test
+    final void sagaRecoveryIncludesSucceededBusinessWorkUntilItsGraphBoundaryIsDurable() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        Instant now = clock().instant();
+        var definition = new SagaDefinition(1, "late-sibling", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        var interrupted = new SagaSnapshot(key, UUID.randomUUID(), traversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", false);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, interrupted)).build()));
+
+        assertEquals(List.of(interrupted), await(store().listSagaRecoveryCandidates(DEFAULT_TENANT, 10)),
+                "business success before the graph boundary must remain recoverable after a crash");
     }
 
     @Test

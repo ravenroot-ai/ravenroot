@@ -137,7 +137,7 @@ final class SqliteSagaStorage {
             throws SQLException {
         var result = new ArrayList<SagaSnapshot>();
         try (var statement = connection.prepareStatement(
-                "SELECT s.snapshot FROM saga_instance s LEFT JOIN lease l ON l.tenant_id=s.tenant_id AND l.process_instance_id=s.process_instance_id WHERE s.tenant_id=? AND s.disposition NOT IN ('SUCCEEDED','COMPENSATED') AND (l.process_instance_id IS NULL OR l.expires_at_epoch_second<? OR (l.expires_at_epoch_second=? AND l.expires_at_nano<=?)) ORDER BY s.process_instance_id,s.saga_id LIMIT ?")) {
+                "SELECT s.snapshot FROM saga_instance s LEFT JOIN lease l ON l.tenant_id=s.tenant_id AND l.process_instance_id=s.process_instance_id WHERE s.tenant_id=? AND s.disposition<>'COMPENSATED' AND (s.disposition<>'SUCCEEDED' OR s.graph_completed=0) AND (l.process_instance_id IS NULL OR l.expires_at_epoch_second<? OR (l.expires_at_epoch_second=? AND l.expires_at_nano<=?)) ORDER BY s.process_instance_id,s.saga_id LIMIT ?")) {
             statement.setString(1, tenant); statement.setLong(2, now.getEpochSecond());
             statement.setLong(3, now.getEpochSecond()); statement.setInt(4, now.getNano());
             statement.setInt(5, limit);

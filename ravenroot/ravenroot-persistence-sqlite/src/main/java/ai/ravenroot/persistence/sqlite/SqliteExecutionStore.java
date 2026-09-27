@@ -1426,7 +1426,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         return "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? AND status IN ("
                 + String.join(", ", terminal) + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) "
                 + "AND NOT EXISTS (SELECT 1 FROM saga_instance s WHERE s.tenant_id = process_instance.tenant_id AND s.process_instance_id = process_instance.process_instance_id "
-                + "AND s.disposition NOT IN ('SUCCEEDED', 'COMPENSATED')) AND ("
+                + "AND (s.graph_completed=0 OR s.disposition NOT IN ('SUCCEEDED', 'COMPENSATED'))) AND ("
                 + "(retained_until_epoch_second IS NOT NULL AND "
                 + StoredInstant.atOrBefore("retained_until") + ") OR "
                 + "(retained_until_epoch_second IS NULL AND "

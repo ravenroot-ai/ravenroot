@@ -117,8 +117,8 @@ public final class SagaOutboxPublisher {
                 var traversal = process.traversals().get(candidate.traversalId());
                 var current = store.loadSaga(candidate.key(), candidate.sagaId())
                         .toCompletableFuture().join().orElse(null);
-                if (current == null || current.disposition() == SagaDisposition.SUCCEEDED
-                        || current.disposition() == SagaDisposition.COMPENSATED) continue;
+                if (current == null || current.disposition() == SagaDisposition.COMPENSATED
+                        || current.disposition() == SagaDisposition.SUCCEEDED && current.graphCompleted()) continue;
                 java.time.Instant now = clock.instant();
                 boolean deadlineExpired = current.deadline() != null && !now.isBefore(current.deadline());
                 if (traversal == null || (process.status() == ProcessInstanceStatus.WAITING

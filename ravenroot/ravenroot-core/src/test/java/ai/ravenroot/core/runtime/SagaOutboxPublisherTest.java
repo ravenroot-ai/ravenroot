@@ -335,6 +335,64 @@ class SagaOutboxPublisherTest {
                 "a compensated business transaction remains distinguishable from normal success");
     }
 
+    @Test
+    void restartCompensatesBusinessSuccessWhoseParallelGraphNeverReachedItsBoundary() throws Exception {
+        MutableClock clock = new MutableClock();
+        var store = new InMemoryExecutionStore(clock);
+        ExecutionKey key = new ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversal = UUID.randomUUID(), sagaId = UUID.randomUUID(), occurrence = UUID.randomUUID();
+        var accepted = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of(traversal, new Traversal(traversal, "start",
+                        TraversalStatus.ACCEPTED, Map.of()))), new GraphVersionPin("graph-v1"))).build())
+                .toCompletableFuture().join();
+        var failed = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(accepted.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversal, TraversalStatus.FAILED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()).toCompletableFuture().join();
+        OpaquePayload body = frozenPayload(key, traversal);
+        String digest = sha256(body);
+        String forwardOperation = "forward:" + sagaId + ":rest:" + occurrence;
+        String compensationOperation = "compensate:" + sagaId + ":rest:" + occurrence;
+        var forward = new SagaCommandIntent(UUID.randomUUID(), sagaId, forwardOperation,
+                "participant:http-idempotency-v1:http-request", "saga.forward.http-idempotency-v1.v1",
+                1, body, digest, null, clock.instant(), 5);
+        var compensation = new SagaCommandIntent(UUID.randomUUID(), sagaId, compensationOperation,
+                "participant:http-idempotency-v1:http-request", "saga.compensation.http-idempotency-v1.v1",
+                1, body, digest, forward.messageId(), clock.instant(), 5);
+        var definition = new SagaDefinition(1, "order", "a".repeat(64), "b".repeat(64), Map.of(
+                "rest", new SagaStepDefinition("rest", "rest", "http-idempotency-v1",
+                        "undo-rest", List.of(), false, false)));
+        var step = new SagaStepSnapshot(occurrence, "rest", UUID.randomUUID(), forwardOperation,
+                compensationOperation, digest, SagaStepStatus.CONFIRMED_SUCCESS,
+                new SagaRecoveryEnvelope(forward, compensation).encode(), "late success", clock.instant());
+        var interrupted = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(occurrence, step), null,
+                clock.instant(), clock.instant(), "", false);
+        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(failed.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, interrupted)).build())
+                .toCompletableFuture().join();
+
+        var publisher = new SagaOutboxPublisher(store, new SagaCommandTransport() {
+            @Override public CompletableFuture<BrokerResult> publish(SagaCommandIntent ignored) {
+                return CompletableFuture.completedFuture(new BrokerResult(true, "accepted"));
+            }
+            @Override public CompletableFuture<Boolean> businessCompleted(SagaCommandIntent ignored) {
+                return CompletableFuture.completedFuture(false);
+            }
+        }, (ignoredKey, ignoredIntent) -> { }, "recovery", 8,
+                Duration.ofSeconds(5), Duration.ofMillis(10), clock);
+
+        assertEquals(List.of(), publisher.runOnce("tenant-a"));
+        var recovered = store.loadSaga(key, sagaId).toCompletableFuture().join().orElseThrow();
+        assertEquals(true, recovered.cancellationRequested());
+        assertEquals(SagaDisposition.COMPENSATION_PENDING, recovered.disposition());
+        assertEquals(SagaStepStatus.COMPENSATING,
+                recovered.occurrences().values().iterator().next().status());
+        assertEquals(compensationOperation, store.listSagaCommands(key).toCompletableFuture().join()
+                .getFirst().intent().operationId());
+    }
+
     private static OpaquePayload frozenPayload(ExecutionKey key, UUID traversal) {
         var value = ai.ravenroot.api.payload.PayloadValue.fromJava(Map.of(
                 "behavior", "fixture", "nodeId", "participant", "properties", Map.of(),

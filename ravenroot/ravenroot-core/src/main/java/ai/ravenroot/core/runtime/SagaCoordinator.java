@@ -224,8 +224,10 @@ final class SagaCoordinator {
             SagaSnapshot snapshot = require(recorder, sagaId);
             if (!snapshot.graphCompleted()) {
                 Instant now = clock.instant();
+                SagaDisposition disposition = allStepsSucceeded(snapshot)
+                        ? SagaDisposition.SUCCEEDED : snapshot.disposition();
                 var completed = new SagaSnapshot(snapshot.key(), snapshot.sagaId(), snapshot.traversalId(),
-                        snapshot.definition(), snapshot.revision() + 1, snapshot.disposition(),
+                        snapshot.definition(), snapshot.revision() + 1, disposition,
                         snapshot.cancellationRequested(), snapshot.occurrences(), snapshot.deadline(),
                         snapshot.createdAt(), now, snapshot.actionableReason(), true);
                 persist(recorder, snapshot, completed);
@@ -238,6 +240,10 @@ final class SagaCoordinator {
         Set<UUID> sagaIds = traversalSagas.getOrDefault(traversalId, Set.of());
         for (UUID sagaId : sagaIds) {
             SagaSnapshot snapshot = require(recorder, sagaId);
+            if (!snapshot.graphCompleted()) {
+                throw new IllegalStateException("saga traversal cannot complete before its graph boundary: "
+                        + snapshot.sagaId());
+            }
             if (snapshot.disposition() == SagaDisposition.COMPENSATED) {
                 throw new IllegalStateException("saga business transaction was compensated: "
                         + snapshot.sagaId());
@@ -269,7 +275,8 @@ final class SagaCoordinator {
                     throw new IllegalStateException("saga traversal cannot complete while UNRESOLVED: "
                             + snapshot.actionableReason());
                 }
-                pending |= snapshot.disposition() != SagaDisposition.SUCCEEDED
+                pending |= !snapshot.graphCompleted()
+                        || snapshot.disposition() != SagaDisposition.SUCCEEDED
                         && snapshot.disposition() != SagaDisposition.COMPENSATED;
             }
             if (!pending) {
@@ -293,7 +300,7 @@ final class SagaCoordinator {
             synchronized (sagaLocks.computeIfAbsent(sagaId, ignored -> new Object())) {
                 SagaSnapshot current = require(recorder, sagaId);
                 if (current.cancellationRequested()
-                        || current.disposition() == SagaDisposition.SUCCEEDED) continue;
+                        || current.disposition() == SagaDisposition.SUCCEEDED && current.graphCompleted()) continue;
                 var occurrences = new LinkedHashMap<UUID, SagaStepSnapshot>();
                 boolean unknown = false;
                 boolean confirmedEffect = false;
@@ -471,7 +478,14 @@ final class SagaCoordinator {
         }
         boolean eachStepSucceeded = current.definition().steps().keySet().stream().allMatch(step -> occurrences.stream()
                 .anyMatch(value -> value.stepId().equals(step) && value.status() == SagaStepStatus.CONFIRMED_SUCCESS));
-        return eachStepSucceeded ? SagaDisposition.SUCCEEDED : SagaDisposition.RUNNING;
+        return eachStepSucceeded && current.graphCompleted()
+                ? SagaDisposition.SUCCEEDED : SagaDisposition.RUNNING;
+    }
+
+    private static boolean allStepsSucceeded(SagaSnapshot snapshot) {
+        return snapshot.definition().steps().keySet().stream().allMatch(step -> snapshot.occurrences().values()
+                .stream().anyMatch(value -> value.stepId().equals(step)
+                        && value.status() == SagaStepStatus.CONFIRMED_SUCCESS));
     }
 
     private static SagaSnapshot replace(SagaSnapshot current, SagaStepSnapshot step,

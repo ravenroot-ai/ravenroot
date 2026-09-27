@@ -302,6 +302,54 @@ class SagaGraphRunnerIntegrationTest {
     }
 
     @Test
+    void successfulParticipantIsCompensatedWhenAParallelSiblingFailsLater(@TempDir Path directory) {
+        var node = new GraphNode("effect", NodeKind.BEHAVIOR, "http-request", Map.of(
+                "saga.scope", "order", "saga.step", "reserve",
+                "saga.participant", "http-idempotency-v1",
+                "saga.adapter", "ravenroot.http-idempotency.v1",
+                "saga.outcomeLookupUrl", "https://participant.test/operations/{{attributes.sagaOperationId}}",
+                "saga.compensation", "undo"));
+        var undo = new GraphNode("undo", NodeKind.BEHAVIOR, "http-request", Map.of(
+                "saga.scope", "order", "saga.role", "compensation",
+                "saga.participant", "http-idempotency-v1",
+                "saga.adapter", "ravenroot.http-idempotency.v1",
+                "saga.outcomeLookupUrl", "https://participant.test/operations/{{attributes.sagaOperationId}}"));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, undo, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "effect"), GraphEdge.to("effect", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("http-request", "HTTP", "Test", "Trusted HTTP probe",
+                        "actor", false, List.of(), java.util.Set.of(
+                        "side-effect", "saga-adapter:ravenroot.http-idempotency.v1"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        try (var store = new SqliteExecutionStore(directory.resolve("late-sibling.db"), Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var before = coordinator.before(node, message(process, traversal, UUID.randomUUID()), recorder);
+                coordinator.succeeded(before, new NodeResult("continue", before.message().payload(),
+                        Map.of("http.status", 200)), recorder);
+                assertEquals(SagaDisposition.RUNNING,
+                        store.listSagas(key).toCompletableFuture().join().getFirst().disposition());
+
+                coordinator.prepareFailure(traversal, recorder);
+            }
+            var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
+            assertEquals(true, saga.cancellationRequested());
+            assertEquals(true, saga.graphCompleted());
+            assertEquals(SagaDisposition.COMPENSATION_PENDING, saga.disposition());
+            assertEquals(SagaStepStatus.CONFIRMED_SUCCESS,
+                    saga.occurrences().values().iterator().next().status());
+        }
+    }
+
+    @Test
     void unknownOutcomeIsRedeliveredAfterRestartWithTheOriginalBusinessIdentity(@TempDir Path directory) {
         var node = sagaNode("effect", "reserve");
         var graph = new GraphDefinition(List.of(GraphNode.start("start"), node, GraphNode.end("end")),
@@ -329,6 +377,7 @@ class SagaGraphRunnerIntegrationTest {
                 assertEquals(firstOperation, recovered.message().attributes().get("sagaOperationId"));
                 recoveredCoordinator.succeeded(recovered,
                         NodeResult.continueWith(recovered.message().payload()), recorder);
+                recoveredCoordinator.prepareCompletion(traversal, recorder);
             }
             var saga = store.listSagas(key).toCompletableFuture().join().getFirst();
             assertEquals(SagaDisposition.SUCCEEDED, saga.disposition());
@@ -368,6 +417,7 @@ class SagaGraphRunnerIntegrationTest {
                         message(process, traversal, UUID.randomUUID()), recorder);
                 assertEquals(frozenOperation, recovered.message().attributes().get("sagaOperationId"));
                 coordinator.succeeded(recovered, NodeResult.continueWith(recovered.message().payload()), recorder);
+                coordinator.prepareCompletion(traversal, recorder);
             }
             var completed = store.listSagas(key).toCompletableFuture().join().getFirst();
             assertEquals(SagaDisposition.SUCCEEDED, completed.disposition());

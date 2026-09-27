@@ -497,6 +497,79 @@ class SagaGraphRunnerIntegrationTest {
     }
 
     @Test
+    void liveCompensationUsesTheFrozenParticipantRequestAfterGraphPayloadMutation(@TempDir Path directory) {
+        var forward = new GraphNode("write", NodeKind.BEHAVIOR, "jdbc.insert", Map.of(
+                "saga.scope", "order", "saga.step", "order-write",
+                "saga.participant", "jdbc-receipt-v1",
+                "saga.adapter", "ravenroot.jdbc-receipt.v1",
+                "saga.receiptStatement", "lookup-order-effect",
+                "saga.compensation", "cancel"));
+        var blocker = new GraphNode("blocker", NodeKind.BEHAVIOR, "jdbc.insert", Map.of(
+                "saga.scope", "order", "saga.step", "blocker",
+                "saga.participant", "jdbc-receipt-v1",
+                "saga.adapter", "ravenroot.jdbc-receipt.v1",
+                "saga.receiptStatement", "lookup-blocker", "saga.irreversible", true));
+        var compensation = new GraphNode("cancel", NodeKind.BEHAVIOR, "jdbc.insert", Map.of(
+                "saga.scope", "order", "saga.role", "compensation",
+                "saga.participant", "jdbc-receipt-v1",
+                "saga.adapter", "ravenroot.jdbc-receipt.v1",
+                "saga.receiptStatement", "lookup-order-reversal"));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), forward, blocker, compensation,
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "write"),
+                GraphEdge.to("write", "blocker"), GraphEdge.to("blocker", "end")));
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("jdbc.insert", "JDBC", "Test", "Trusted JDBC probe",
+                        "actor", false, List.of(), java.util.Set.of(
+                        "side-effect", "saga-adapter:ravenroot.jdbc-receipt.v1"));
+            }
+            @Override public NodeHandler create(GraphNode ignored) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+        });
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var key = new ExecutionKey("tenant-a", process);
+        var originalPayload = Map.<String, Object>of("contract", "jdbc.parameters.v1", "parameters", Map.of(
+                "orderId", "ORDER-A", "sku", "SKU-A", "quantity", 1));
+        var original = new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal,
+                UUID.randomUUID(), UUID.randomUUID(), "write", originalPayload,
+                Map.of("businessTarget", "ORDER-A"));
+        try (var store = new SqliteExecutionStore(directory.resolve("frozen-live-compensation.db"),
+                Clock.systemUTC())) {
+            long revision = createRunning(store, key, traversal);
+            try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
+                var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
+                var dispatched = coordinator.before(forward, original, recorder);
+                coordinator.succeeded(dispatched, NodeResult.continueWith(dispatched.message().payload()), recorder);
+                var blocked = coordinator.before(blocker, new NodeMessage(original.security(), process, traversal,
+                        UUID.randomUUID(), UUID.randomUUID(), "blocker", originalPayload, original.attributes()),
+                        recorder);
+                coordinator.failed(blocked, new java.io.IOException("later participant outcome unknown"), recorder);
+                coordinator.cancellationRequested(traversal, recorder);
+
+                var step = store.listSagas(key).toCompletableFuture().join().getFirst().occurrences().values()
+                        .stream().filter(value -> value.stepId().equals("order-write")).findFirst().orElseThrow();
+                var frozenIntent = SagaRecoveryEnvelope.decode(step.receipt()).compensation();
+                Map<?, ?> envelope = jsonMap(frozenIntent.payload().bytes());
+                var changedPayload = Map.<String, Object>of("contract", "jdbc.parameters.v1", "parameters", Map.of(
+                        "orderId", "ORDER-B", "sku", "SKU-B", "quantity", 99));
+                var currentAuthority = TestIdentities.of("tenant-a", "recovery-worker");
+                var changed = new NodeMessage(currentAuthority, process, traversal, UUID.randomUUID(),
+                        UUID.randomUUID(), "cancel", changedPayload, Map.of("businessTarget", "ORDER-B"));
+
+                var live = coordinator.before(compensation, changed, recorder);
+                assertEquals(envelope.get("payload"), live.message().payload());
+                assertEquals(envelope.get("attributes"), live.message().attributes());
+                assertEquals(currentAuthority, live.message().security());
+                assertEquals("ORDER-A", jsonMap(live.message().payload()).get("parameters") instanceof Map<?, ?> p
+                        ? p.get("orderId") : null);
+                assertEquals("ORDER-A", live.message().attributes().get("businessTarget"));
+                assertEquals(frozenIntent.operationId(), live.message().attributes().get("sagaOperationId"));
+            }
+        }
+    }
+
+    @Test
     void compensationNodeMustMatchTheTrustedParticipantAdapter() {
         var forward = new GraphNode("effect", NodeKind.BEHAVIOR, "effect", Map.of(
                 "saga.scope", "order", "saga.step", "reserve", "saga.participant", "pure",

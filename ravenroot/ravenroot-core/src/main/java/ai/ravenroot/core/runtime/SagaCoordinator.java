@@ -15,6 +15,8 @@ import ai.ravenroot.api.persistence.SagaStepDefinition;
 import ai.ravenroot.api.persistence.SagaStepSnapshot;
 import ai.ravenroot.api.persistence.SagaStepStatus;
 import ai.ravenroot.api.persistence.SagaWrite;
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphNode;
 
@@ -362,26 +364,67 @@ final class SagaCoordinator {
                             && value.status() != SagaStepStatus.CONFIRMED_NO_EFFECT);
             if (outstanding) throw new IllegalStateException("compensation order violates saga dependencies");
         }
-        NodeMessage enriched = enrich(node, original, current.sagaId(), forward.occurrenceId(),
-                forward.compensationOperationId(), forward.forwardOperationId(),
-                forward.compensationOperationId(), forward.payloadFingerprint());
-        if (forward.status() == SagaStepStatus.COMPENSATED) {
-            return new Before(enriched, new NodeResult("continue", enriched.payload(), enriched.attributes()),
-                    new Invocation(current.sagaId(), forward.occurrenceId(), forward.stepId(), true,
-                            definition.participantContract(), definition.businessCompletionRequired()));
-        }
-        SagaStepSnapshot compensating = copy(forward, SagaStepStatus.COMPENSATING,
-                "compensation intent persisted before dispatch", clock.instant());
         SagaRecoveryEnvelope recovery = SagaRecoveryEnvelope.decode(forward.receipt());
         SagaCommandIntent compensationIntent = recovery.compensation();
         if (compensationIntent == null) {
             throw new IllegalStateException("frozen compensation intent is absent");
         }
+        // The graph may have transformed its payload after the forward effect.  The live path must
+        // execute the exact request that durable recovery would replay, otherwise a compensation can
+        // keep operation A's stable id while acting on graph output for B.  Current request security
+        // remains the authority; serialized security fields are evidence and are never reinstated.
+        NodeMessage frozen = frozenParticipantMessage(node, compensationIntent, original);
+        if (forward.status() == SagaStepStatus.COMPENSATED) {
+            return new Before(frozen, new NodeResult("continue", frozen.payload(), frozen.attributes()),
+                    new Invocation(current.sagaId(), forward.occurrenceId(), forward.stepId(), true,
+                            definition.participantContract(), definition.businessCompletionRequired()));
+        }
+        SagaStepSnapshot compensating = copy(forward, SagaStepStatus.COMPENSATING,
+                "compensation intent persisted before dispatch", clock.instant());
         persist(recorder, current, replace(current, compensating, SagaDisposition.COMPENSATION_PENDING,
                 "", clock.instant()), compensationIntent);
-        return new Before(enriched, null,
+        return new Before(frozen, null,
                 new Invocation(current.sagaId(), forward.occurrenceId(), forward.stepId(), true,
                         definition.participantContract(), definition.businessCompletionRequired()));
+    }
+
+    private static NodeMessage frozenParticipantMessage(GraphNode node, SagaCommandIntent intent,
+                                                        NodeMessage current) {
+        Object decoded = PayloadJson.read(intent.payload().bytes(), PayloadLimits.DEFAULTS).toJava();
+        Map<String, Object> envelope = stringMap(decoded, "frozen participant envelope");
+        if (!node.behavior().equals(envelope.get("behavior")) || !node.id().equals(envelope.get("nodeId"))
+                || !fingerprint(node.properties()).equals(fingerprint(envelope.get("properties")))) {
+            throw new IllegalStateException("frozen compensation adapter binding changed");
+        }
+        Map<String, Object> evidence = stringMap(envelope.get("security"), "frozen security evidence");
+        if (!current.security().tenantId().equals(evidence.get("tenantId"))) {
+            throw new IllegalStateException("frozen compensation tenant changed");
+        }
+        UUID process = uuid(envelope.get("processInstanceId"), "processInstanceId");
+        UUID traversal = uuid(envelope.get("traversalId"), "traversalId");
+        if (!current.processInstanceId().equals(process) || !current.traversalId().equals(traversal)) {
+            throw new IllegalStateException("frozen compensation execution identity changed");
+        }
+        Map<String, Object> attributes = stringMap(envelope.get("attributes"), "frozen attributes");
+        if (!intent.operationId().equals(attributes.get("sagaOperationId"))) {
+            throw new IllegalStateException("frozen compensation operation identity changed");
+        }
+        return new NodeMessage(current.security(), process, traversal,
+                uuid(envelope.get("invocationId"), "invocationId"),
+                uuid(envelope.get("attemptId"), "attemptId"), current.parentInvocationIds(), node.id(),
+                envelope.get("payload"), attributes, current.command());
+    }
+
+    private static Map<String, Object> stringMap(Object value, String name) {
+        if (!(value instanceof Map<?, ?> map)) throw new IllegalStateException(name + " is malformed");
+        var result = new LinkedHashMap<String, Object>();
+        map.forEach((key, item) -> result.put(String.valueOf(key), item));
+        return Map.copyOf(result);
+    }
+
+    private static UUID uuid(Object value, String name) {
+        try { return UUID.fromString(String.valueOf(value)); }
+        catch (RuntimeException malformed) { throw new IllegalStateException("frozen " + name + " is malformed"); }
     }
 
     private static SagaStepStatus observedSuccess(Invocation invocation, NodeResult result) {

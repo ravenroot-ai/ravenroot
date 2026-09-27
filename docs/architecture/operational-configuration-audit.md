@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 108.
+Checked source reconciliations: 109.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 24204 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24201 |
-| Unchanged identities | 24194 |
-| Approved identity migrations | 5 |
-| Approved retirements | 2 |
-| Semantically classified additions | 5 |
+| Source inventory candidates | 24204 |
+| Unchanged identities | 24204 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 24204 |
 
 ## Final semantic review
@@ -11843,39 +11843,39 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e3165265662d667f1822` | `ravenroot/ravenroot-ui/src/app.js:2786` `documentModeLabel` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-4be13bda494fd7883d31` | `ravenroot/ravenroot-ui/src/app.js:2792` `documentModeLabel` | ui | retained | derived | Local presentation transition generation initialization/increment fences stale callbacks; it is neither a duration nor an operating limit. |
 | `oc-30d169cabb40a49330bf` | `ravenroot/ravenroot-ui/src/app.js:2809` `if` | ui | retained | presentation-text | This atom controls local viewer presentation, accessibility, selection, or viewport clamping and is not runtime execution configuration. |
-| `oc-ce4218bd91487901aaa7` | `ravenroot/ravenroot-ui/src/app.js:2862` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-2789642749ac3de7dd39` | `ravenroot/ravenroot-ui/src/app.js:2863` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-28893983c044aa96b299` | `ravenroot/ravenroot-ui/src/app.js:2870` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-45e4500355d58c0935e0` | `ravenroot/ravenroot-ui/src/app.js:2872` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-38edb0550f645bdae850` | `ravenroot/ravenroot-ui/src/app.js:2876` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-c4029688452eda1ae9b4` | `ravenroot/ravenroot-ui/src/app.js:2880` `documentPane` | ui | retained | presentation-text | This atom controls local viewer presentation, accessibility, selection, or viewport clamping and is not runtime execution configuration. |
-| `oc-cb0be11a23bfdbdfc913` | `ravenroot/ravenroot-ui/src/app.js:2894` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-634b8a587073a2f3c6b8` | `ravenroot/ravenroot-ui/src/app.js:2937` `documentContainer` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-3263aa10cf24d4f7711c` | `ravenroot/ravenroot-ui/src/app.js:2961` `syncPaneHeaders` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-b25cc10b2a788b0645ab` | `ravenroot/ravenroot-ui/src/app.js:2968` `syncPaneHeaders` | ui | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
-| `oc-8eba90bb29f7a3768e01` | `ravenroot/ravenroot-ui/src/app.js:2970` `syncPaneHeaders` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-5b8c4a0a121dfcc5538b` | `ravenroot/ravenroot-ui/src/app.js:2983` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-18acd6101d22c5b606d5` | `ravenroot/ravenroot-ui/src/app.js:3040` `workspaceSplitter` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-ffe78932adedc8a8397c` | `ravenroot/ravenroot-ui/src/app.js:3070` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-d25270665f5182a31bb1` | `ravenroot/ravenroot-ui/src/app.js:3123` `syncPaneLayout` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-57ea15a857489a9861be` | `ravenroot/ravenroot-ui/src/app.js:3199` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-adac2a041556a3694915` | `ravenroot/ravenroot-ui/src/app.js:3215` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-cb08813b0c1095817266` | `ravenroot/ravenroot-ui/src/app.js:3216` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-0a80fafa1307fc632b4e` | `ravenroot/ravenroot-ui/src/app.js:3217` `applyPaneGeometry` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-e861b760a6c83911183c` | `ravenroot/ravenroot-ui/src/app.js:3217` `applyPaneGeometry` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-f75447c7a38d17816810` | `ravenroot/ravenroot-ui/src/app.js:3217` `applyPaneGeometry` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-20714040759925341c1e` | `ravenroot/ravenroot-ui/src/app.js:3218` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
-| `oc-6d4029e042cf63f09053` | `ravenroot/ravenroot-ui/src/app.js:3218` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
-| `oc-8bfb7fb59ef293a4b58f` | `ravenroot/ravenroot-ui/src/app.js:3218` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
-| `oc-7c05f22ed761bc745804` | `ravenroot/ravenroot-ui/src/app.js:3219` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
-| `oc-9cb48f89698455047b13` | `ravenroot/ravenroot-ui/src/app.js:3219` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
-| `oc-554900dbb59db5f02f51` | `ravenroot/ravenroot-ui/src/app.js:3220` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-feb6cf9d6f0f6634f766` | `ravenroot/ravenroot-ui/src/app.js:3278` `resizeDocumentElastic` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-78cde430e5876ffa69d0` | `ravenroot/ravenroot-ui/src/app.js:3279` `resizeDocumentElastic` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-03f5b7815c19db68eb3e` | `ravenroot/ravenroot-ui/src/app.js:3285` `clampAutomaticFitZoom` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-cbea29bc6033dca3ad65` | `ravenroot/ravenroot-ui/src/app.js:3285` `clampAutomaticFitZoom` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
-| `oc-242c564c69b7f4f0623e` | `ravenroot/ravenroot-ui/src/app.js:3309` `syncPaneRenderer` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-fa3e30180ec791ca1cb6` | `ravenroot/ravenroot-ui/src/app.js:3310` `syncPaneRenderer` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-ce4218bd91487901aaa7` | `ravenroot/ravenroot-ui/src/app.js:2860` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-2789642749ac3de7dd39` | `ravenroot/ravenroot-ui/src/app.js:2861` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-28893983c044aa96b299` | `ravenroot/ravenroot-ui/src/app.js:2868` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-45e4500355d58c0935e0` | `ravenroot/ravenroot-ui/src/app.js:2870` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-38edb0550f645bdae850` | `ravenroot/ravenroot-ui/src/app.js:2874` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-c4029688452eda1ae9b4` | `ravenroot/ravenroot-ui/src/app.js:2878` `documentPane` | ui | retained | presentation-text | This atom controls local viewer presentation, accessibility, selection, or viewport clamping and is not runtime execution configuration. |
+| `oc-cb0be11a23bfdbdfc913` | `ravenroot/ravenroot-ui/src/app.js:2892` `documentPane` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-634b8a587073a2f3c6b8` | `ravenroot/ravenroot-ui/src/app.js:2935` `documentContainer` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-3263aa10cf24d4f7711c` | `ravenroot/ravenroot-ui/src/app.js:2959` `syncPaneHeaders` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-b25cc10b2a788b0645ab` | `ravenroot/ravenroot-ui/src/app.js:2966` `syncPaneHeaders` | ui | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
+| `oc-8eba90bb29f7a3768e01` | `ravenroot/ravenroot-ui/src/app.js:2968` `syncPaneHeaders` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-5b8c4a0a121dfcc5538b` | `ravenroot/ravenroot-ui/src/app.js:2981` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-18acd6101d22c5b606d5` | `ravenroot/ravenroot-ui/src/app.js:3038` `workspaceSplitter` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-ffe78932adedc8a8397c` | `ravenroot/ravenroot-ui/src/app.js:3068` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-d25270665f5182a31bb1` | `ravenroot/ravenroot-ui/src/app.js:3121` `syncPaneLayout` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-57ea15a857489a9861be` | `ravenroot/ravenroot-ui/src/app.js:3197` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-adac2a041556a3694915` | `ravenroot/ravenroot-ui/src/app.js:3213` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-cb08813b0c1095817266` | `ravenroot/ravenroot-ui/src/app.js:3214` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-0a80fafa1307fc632b4e` | `ravenroot/ravenroot-ui/src/app.js:3215` `applyPaneGeometry` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-e861b760a6c83911183c` | `ravenroot/ravenroot-ui/src/app.js:3215` `applyPaneGeometry` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-f75447c7a38d17816810` | `ravenroot/ravenroot-ui/src/app.js:3215` `applyPaneGeometry` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-20714040759925341c1e` | `ravenroot/ravenroot-ui/src/app.js:3216` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
+| `oc-6d4029e042cf63f09053` | `ravenroot/ravenroot-ui/src/app.js:3216` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
+| `oc-8bfb7fb59ef293a4b58f` | `ravenroot/ravenroot-ui/src/app.js:3216` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
+| `oc-7c05f22ed761bc745804` | `ravenroot/ravenroot-ui/src/app.js:3217` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
+| `oc-9cb48f89698455047b13` | `ravenroot/ravenroot-ui/src/app.js:3217` `applyPaneGeometry` | ui | retained | security-ceiling-or-default | These fixed browser limits bound parsed input, retained state, payload, or collection work within one UI session. |
+| `oc-554900dbb59db5f02f51` | `ravenroot/ravenroot-ui/src/app.js:3218` `applyPaneGeometry` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-feb6cf9d6f0f6634f766` | `ravenroot/ravenroot-ui/src/app.js:3276` `resizeDocumentElastic` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-78cde430e5876ffa69d0` | `ravenroot/ravenroot-ui/src/app.js:3277` `resizeDocumentElastic` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-03f5b7815c19db68eb3e` | `ravenroot/ravenroot-ui/src/app.js:3283` `clampAutomaticFitZoom` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-cbea29bc6033dca3ad65` | `ravenroot/ravenroot-ui/src/app.js:3283` `clampAutomaticFitZoom` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |
+| `oc-242c564c69b7f4f0623e` | `ravenroot/ravenroot-ui/src/app.js:3307` `syncPaneRenderer` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-fa3e30180ec791ca1cb6` | `ravenroot/ravenroot-ui/src/app.js:3308` `syncPaneRenderer` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-da66c0664b121ee41bc8` | `ravenroot/ravenroot-ui/src/app.js:3359` `moveSeparator` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-d86dc98662cde0d97031` | `ravenroot/ravenroot-ui/src/app.js:3360` `moveSeparator` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-2c18f5664c067c51596f` | `ravenroot/ravenroot-ui/src/app.js:3361` `moveSeparator` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |

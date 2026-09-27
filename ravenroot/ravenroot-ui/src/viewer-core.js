@@ -37,15 +37,52 @@ function projectionNode(node) {
   return Object.freeze({ id, kind, visualType, label, bypassed: Boolean(node?.bypassed), layout });
 }
 
-function projectionEdge(edge) {
+function projectionEdge(edge, id) {
   return Object.freeze({
-    id: typeof edge?.id === 'string' && edge.id ? edge.id : null,
+    id,
+    runtimeIdentity: typeof edge?.id === 'string' && edge.id ? edge.id : null,
     source: requireText(edge?.source, 'edge.source'),
     target: requireText(edge?.target, 'edge.target'),
     label: typeof edge?.label === 'string' ? edge.label : '',
     visualType: typeof edge?.visualType === 'string' && edge.visualType
       ? edge.visualType : 'continue',
   });
+}
+
+function projectionEdges(edges) {
+  if (!Array.isArray(edges)) return null;
+  const occupied = new Set(edges.flatMap(edge => typeof edge?.id === 'string' && edge.id ? [edge.id] : []));
+  return edges.map((edge, index) => {
+    if (typeof edge?.id === 'string' && edge.id) return projectionEdge(edge, edge.id);
+    const base = `rr-viewer-edge:${index}`;
+    let id = base;
+    let suffix = 0;
+    while (occupied.has(id)) id = `${base}~${++suffix}`;
+    occupied.add(id);
+    return projectionEdge(edge, id);
+  });
+}
+
+function projectionGroups(value, nodeIds) {
+  if (value == null) return Object.freeze([]);
+  if (!Array.isArray(value) || value.length > 2_000) throw new TypeError('Invalid viewer projection: groups.');
+  const ids = new Set();
+  const members = new Set();
+  return Object.freeze(value.map(group => {
+    const id = requireText(group?.id, 'group.id');
+    const name = requireText(group?.name, 'group.name');
+    const anchorNodeId = requireText(group?.anchorNodeId, 'group.anchorNodeId');
+    const memberNodeIds = Array.isArray(group?.memberNodeIds) ? group.memberNodeIds.map(
+      member => requireText(member, 'group.memberNodeIds')) : null;
+    if (!memberNodeIds || memberNodeIds.length < 2 || new Set(memberNodeIds).size !== memberNodeIds.length || ids.has(id)
+      || memberNodeIds.some(member => !nodeIds.has(member) || members.has(member))
+      || !memberNodeIds.includes(anchorNodeId) || typeof group.collapsed !== 'boolean') {
+      throw new TypeError('Invalid viewer projection: groups.');
+    }
+    ids.add(id); memberNodeIds.forEach(member => members.add(member));
+    return Object.freeze({ id, name, memberNodeIds: Object.freeze(memberNodeIds), anchorNodeId,
+      collapsed: group.collapsed });
+  }));
 }
 
 /**
@@ -60,7 +97,7 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
     throw new TypeError('Incompatible viewer projection.');
   }
   const nodes = Array.isArray(projection.nodes) ? projection.nodes.map(projectionNode) : null;
-  const edges = Array.isArray(projection.edges) ? projection.edges.map(projectionEdge) : null;
+  const edges = projectionEdges(projection.edges);
   if (nodes == null || edges == null) throw new TypeError('Invalid viewer projection.');
   if (nodes.length > budget.nodes || edges.length > budget.edges) {
     throw new RangeError('Viewer projection exceeds the rendering budget.');
@@ -71,6 +108,7 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
       || edges.some(edge => !nodeIds.has(edge.source) || !nodeIds.has(edge.target))) {
     throw new TypeError('Invalid viewer projection topology.');
   }
+  const groups = projectionGroups(projection.groups, nodeIds);
 
   const elements = viewerProjectionElements(nodes, edges).map(element => Object.freeze({
     data: Object.freeze(element.data),
@@ -88,6 +126,7 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
     graphVersionId: requireText(projection.graphVersionId, 'graphVersionId'),
     canonicalDigest: requireText(projection.canonicalDigest, 'canonicalDigest'),
     designArrangement,
+    groups,
     nodes: Object.freeze(nodes),
     edges: Object.freeze(edges),
     elements: Object.freeze(elements),

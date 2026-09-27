@@ -33,6 +33,7 @@ function shell() {
       <select data-viewer-mode><option value="cyto">Cyto</option>
         <option value="n8n">N8N</option><option value="elastic">Elastic</option></select>
       <button data-viewer-command="fit"></button>
+      <button data-viewer-maximize></button>
       <div data-viewer-canvas></div><canvas data-viewer-minimap tabindex="0"></canvas>
       <ol data-viewer-alternative></ol>
     </main>
@@ -50,6 +51,7 @@ function semanticShell() {
       <select data-viewer-run aria-label="Live run"></select>
       <p data-viewer-run-empty>No authorized runs.</p>
       <button data-viewer-command="render"></button>
+      <button data-viewer-maximize></button>
       <div data-viewer-canvas></div><canvas data-viewer-minimap tabindex="0"></canvas>
       <ol data-viewer-alternative></ol>
     </main>
@@ -63,7 +65,7 @@ describe('embed viewer failed-mount cleanup', () => {
       render: vi.fn(), fit: vi.fn(), zoomBy: vi.fn(), panBy: vi.fn(), destroy: vi.fn(),
     };
     mocks.instance = {
-      nodes: vi.fn(() => []), edges: vi.fn(() => []), style: vi.fn(), on: vi.fn(),
+      nodes: vi.fn(() => []), edges: vi.fn(() => []), style: vi.fn(), off: vi.fn(), on: vi.fn(),
       elements: vi.fn(() => ({ boundingBox: vi.fn() })), extent: vi.fn(),
       width: vi.fn(() => 800), height: vi.fn(() => 500), zoom: vi.fn(() => 1),
       pan: vi.fn(), resize: vi.fn(), layout: vi.fn(),

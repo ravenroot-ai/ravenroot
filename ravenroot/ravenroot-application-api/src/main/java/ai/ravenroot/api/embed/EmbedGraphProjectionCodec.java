@@ -66,9 +66,56 @@ public final class EmbedGraphProjectionCodec {
         key("edges");
         List<EmbedGraphProjection.Edge> edges = edges();
         String designArrangement = optionalStringMember("designArrangement");
+        List<EmbedGraphProjection.Group> groups = optionalGroupsMember();
         expect('}');
         return new EmbedGraphProjection(contractVersion, graphId, graphVersionId, canonicalDigest,
-                nodes, edges, designArrangement);
+                nodes, edges, designArrangement, groups);
+    }
+
+    private List<EmbedGraphProjection.Group> optionalGroupsMember() {
+        String prefix = ",\"groups\":";
+        if (!source.startsWith(prefix, cursor)) return List.of();
+        cursor += prefix.length();
+        var groups = new ArrayList<EmbedGraphProjection.Group>();
+        expect('[');
+        if (peek() == ']') { cursor++; return groups; }
+        while (true) {
+            expect('{');
+            String id = member("id");
+            expect(',');
+            String name = member("name");
+            expect(',');
+            key("memberNodeIds");
+            List<String> members = strings();
+            expect(',');
+            String anchor = member("anchorNodeId");
+            expect(',');
+            key("collapsed");
+            boolean collapsed = bool();
+            expect('}');
+            groups.add(new EmbedGraphProjection.Group(id, name, members, anchor, collapsed));
+            if (peek() == ',') { cursor++; continue; }
+            expect(']');
+            return groups;
+        }
+    }
+
+    private List<String> strings() {
+        var values = new ArrayList<String>();
+        expect('[');
+        if (peek() == ']') { cursor++; return values; }
+        while (true) {
+            values.add(string());
+            if (peek() == ',') { cursor++; continue; }
+            expect(']');
+            return values;
+        }
+    }
+
+    private boolean bool() {
+        if (source.startsWith("true", cursor)) { cursor += 4; return true; }
+        if (source.startsWith("false", cursor)) { cursor += 5; return false; }
+        throw invalid("expected a boolean");
     }
 
     private List<EmbedGraphProjection.Node> nodes() {

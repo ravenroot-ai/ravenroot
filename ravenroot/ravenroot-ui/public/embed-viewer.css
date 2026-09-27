@@ -3,6 +3,7 @@
   --surface-canvas: #0d1117;
   --surface-primary: #161b22;
   --surface-raised: #21262d;
+  --surface-overlay: rgba(22, 27, 34, .96);
   --surface-hover: #2d333b;
   --border-default: #30363d;
   --text-primary: #e6edf3;
@@ -23,6 +24,7 @@
   --surface-canvas: #f6f8fa;
   --surface-primary: #ffffff;
   --surface-raised: #f3f4f6;
+  --surface-overlay: rgba(255, 255, 255, .97);
   --surface-hover: #eaeef2;
   --border-default: #d0d7de;
   --text-primary: #1f2328;
@@ -42,6 +44,7 @@
     --surface-canvas: #f6f8fa;
     --surface-primary: #ffffff;
     --surface-raised: #f3f4f6;
+    --surface-overlay: rgba(255, 255, 255, .97);
     --surface-hover: #eaeef2;
     --border-default: #d0d7de;
     --text-primary: #1f2328;
@@ -60,6 +63,7 @@
 html, body { width: 100%; min-width: 0; min-height: 100%; margin: 0; }
 
 body { min-block-size: 18rem; background: var(--surface-canvas); }
+.embed-viewer-document--maximized, .embed-viewer-document--maximized body { overflow: hidden; }
 
 .embed-skip-link {
   position: fixed;
@@ -148,17 +152,24 @@ body { min-block-size: 18rem; background: var(--surface-canvas); }
   font-weight: 650;
   touch-action: manipulation;
 }
-
-.embed-viewer-controls [data-viewer-command] {
-  inline-size: 2.5rem;
-  min-inline-size: 2.5rem;
-  block-size: 2.5rem;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-}
-.embed-viewer-controls button:hover { background: var(--surface-hover); }
+.embed-viewer-controls [data-viewer-command], .embed-maximize { inline-size: 2.5rem; min-inline-size: 2.5rem; block-size: 2.5rem; display: inline-grid; place-items: center; padding: 0; }
 .embed-viewer-controls button svg { inline-size: 1rem; block-size: 1rem; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.embed-maximize > span { inline-size: .9rem; block-size: .72rem; border: 1.5px solid currentColor; border-radius: 1px; }
+.embed-maximize[aria-pressed="true"] > span { position: relative; transform: translate(2px, -2px); }
+.embed-maximize[aria-pressed="true"] > span::after { content: ''; position: absolute; inset: 2px 2px -4px -4px; border: 1.5px solid currentColor; border-radius: 1px; background: var(--surface-raised); z-index: -1; }
+
+.embed-viewer--maximized { position: fixed; inset: 0; z-index: 2147483647; inline-size: 100vw; block-size: 100vh; min-block-size: 0; grid-template-rows: minmax(0, 1fr); background: var(--surface-canvas); }
+.embed-viewer--maximized .embed-viewer-header { position: absolute; inset-block-start: .5rem; inset-inline-end: .5rem; z-index: 20; border: 0; padding: 0; background: transparent; }
+.embed-viewer--maximized .embed-viewer-title,
+.embed-viewer--maximized .embed-viewer-metadata,
+.embed-viewer--maximized .embed-viewer-controls > :not(.embed-maximize) { display: none; }
+.embed-viewer--maximized .embed-maximize { background: var(--surface-overlay); box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.embed-viewer--maximized .embed-viewer-canvas { block-size: 100%; }
+.embed-viewer--maximized .embed-viewer-status { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+.embed-viewer--maximized .embed-viewer-minimap,
+.embed-viewer--maximized .embed-viewer-alternative { display: none; }
+
+.embed-viewer-controls button:hover { background: var(--surface-hover); }
 
 :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 
@@ -169,6 +180,7 @@ body { min-block-size: 18rem; background: var(--surface-canvas); }
   background: var(--surface-canvas);
   touch-action: none;
 }
+.embed-runtime-tooltip { position: absolute; z-index: 30; max-inline-size: min(24rem, calc(100% - 1rem)); white-space: pre-line; padding: .55rem .65rem; border: 1px solid var(--border-default); border-radius: .45rem; background: var(--surface-overlay); color: var(--text-primary); box-shadow: 0 8px 24px rgba(0,0,0,.38); font-size: .8125rem; line-height: 1.45; pointer-events: none; }
 
 .embed-viewer-elastic {
   position: absolute;
@@ -254,7 +266,7 @@ body { min-block-size: 18rem; background: var(--surface-canvas); }
   .embed-viewer-controls button, .embed-mode-label select, .embed-run-label select {
     min-inline-size: 3rem; min-block-size: 3rem;
   }
-  .embed-viewer-controls [data-viewer-command] { inline-size: 3rem; block-size: 3rem; }
+  .embed-viewer-controls [data-viewer-command], .embed-maximize { inline-size: 3rem; block-size: 3rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -278,3 +290,8 @@ body { min-block-size: 18rem; background: var(--surface-canvas); }
     white-space: normal;
   }
 }
+
+.embed-design-inspection { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:2; }
+.embed-design-inspection button { position:absolute; background:transparent; border:0; padding:0; pointer-events:auto; cursor:pointer; }
+.embed-design-inspection button:focus-visible { outline:3px solid var(--embed-focus, #58a6ff); outline-offset:2px; }
+.embed-design-inspection[hidden] { display:none; }

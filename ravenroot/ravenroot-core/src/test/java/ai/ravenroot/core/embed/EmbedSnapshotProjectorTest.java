@@ -76,6 +76,32 @@ class EmbedSnapshotProjectorTest {
     }
 
     @Test
+    void deploymentProjectionCarriesValidatedGroupsAndFailsOpenForUnsupportedMetadata() {
+        String groups = "{\"version\":1,\"groups\":[{\"id\":\"g\",\"name\":\"Workers\","
+                + "\"memberNodeIds\":[\"start\",\"end\"],\"anchorNodeId\":\"start\",\"collapsed\":true}]}";
+        var nodes = List.of(GraphNode.start("start"), GraphNode.end("end"));
+        var edges = List.of(GraphEdge.to("start", "end"));
+        var projection = EmbedSnapshotProjector.projectDefinition(new GraphDefinition(nodes, edges,
+                        Map.of("ravenroot.ui.visualGroups", groups, "private.group.note", "must-not-leak")),
+                "deployment", "version", "digest", EmbedProjectionBudget.DEFAULTS);
+        assertEquals(List.of(new EmbedGraphProjection.Group("g", "Workers", List.of("start", "end"),
+                "start", true)), projection.groups());
+        assertEquals(projection, ai.ravenroot.api.embed.EmbedGraphProjectionCodec.decode(projection.toJson()));
+        assertTrue(!projection.toJson().contains("must-not-leak"));
+
+        for (String unsupported : List.of("not json",
+                "{\"version\":2,\"groups\":[]}",
+                "{\"version\":1,\"groups\":[{\"id\":\"g\",\"name\":\"Nested\","
+                        + "\"memberNodeIds\":[\"start\",\"missing\"],\"anchorNodeId\":\"start\",\"collapsed\":true}]}")) {
+            var fallback = EmbedSnapshotProjector.projectDefinition(new GraphDefinition(nodes, edges,
+                            Map.of("ravenroot.ui.visualGroups", unsupported)),
+                    "deployment", "version", "digest", EmbedProjectionBudget.DEFAULTS);
+            assertTrue(fallback.groups().isEmpty());
+            assertEquals(2, fallback.nodes().size());
+        }
+    }
+
+    @Test
     void legacySnapshotProjectionRetainsItsExactOriginalJsonShape() {
         var definition = new GraphDefinition(List.of(
                 new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null,

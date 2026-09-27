@@ -58,11 +58,12 @@ final class GraphMlDocument {
     private final int foreignNamespaceElements;
     private final int synthesizedEdgeIds;
     private final Map<String, Object> graphProperties;
+    private final String visualGroupsMetadata;
 
     private GraphMlDocument(byte[] original, byte[] propertyGraphView,
                             List<GraphMlProfileReport.DeclaredKey> declaredKeys, int opaqueDataValues,
                             int foreignNamespaceElements, int synthesizedEdgeIds,
-                            Map<String, Object> graphProperties) {
+                            Map<String, Object> graphProperties, String visualGroupsMetadata) {
         this.original = original;
         this.propertyGraphView = propertyGraphView;
         this.declaredKeys = List.copyOf(declaredKeys);
@@ -70,6 +71,7 @@ final class GraphMlDocument {
         this.foreignNamespaceElements = foreignNamespaceElements;
         this.synthesizedEdgeIds = synthesizedEdgeIds;
         this.graphProperties = Map.copyOf(graphProperties);
+        this.visualGroupsMetadata = visualGroupsMetadata;
     }
 
     static GraphMlDocument read(byte[] input) {
@@ -111,11 +113,13 @@ final class GraphMlDocument {
         int foreignNamespaceElements = countForeignNamespaceElements(document);
 
         Map<String, Object> graphProperties = readGraphProperties(graph, keys);
+        String visualGroupsMetadata = readVisualGroupsMetadata(graph, keys);
 
         Document propertyGraphDocument = (Document) document.cloneNode(true);
         preparePropertyGraphView(propertyGraphDocument, keys);
         return new GraphMlDocument(input.clone(), serialize(propertyGraphDocument), declaredKeys,
-                opaqueDataValues, foreignNamespaceElements, synthesizedEdgeIds, graphProperties);
+                opaqueDataValues, foreignNamespaceElements, synthesizedEdgeIds, graphProperties,
+                visualGroupsMetadata);
     }
 
     byte[] original() {
@@ -125,6 +129,30 @@ final class GraphMlDocument {
     /** What the {@code <graph>} element declared about itself. */
     Map<String, Object> graphProperties() {
         return graphProperties;
+    }
+
+    /** The one inert presentation value the deployment viewer may parse under its own budgets. */
+    String visualGroupsMetadata() {
+        return visualGroupsMetadata;
+    }
+
+    private static String readVisualGroupsMetadata(Element graph, Map<String, KeyDefinition> keys) {
+        var matches = keys.values().stream()
+                .filter(key -> "graph".equals(key.scope()) && "string".equals(key.type())
+                        && "ravenroot.ui.visualGroups".equals(key.name()))
+                .toList();
+        if (matches.size() != 1) return null;
+        KeyDefinition key = matches.getFirst();
+        var explicit = directChildren(graph, GRAPHML_NAMESPACE, "data").stream()
+                .filter(data -> key.id().equals(data.getAttribute("key").trim()))
+                .toList();
+        if (explicit.size() == 1 && !hasElementChildren(explicit.getFirst())) {
+            return explicit.getFirst().getTextContent().trim();
+        }
+        if (!explicit.isEmpty() || key.defaultElement() == null || hasElementChildren(key.defaultElement())) {
+            return null;
+        }
+        return key.defaultElement().getTextContent().trim();
     }
 
     /**

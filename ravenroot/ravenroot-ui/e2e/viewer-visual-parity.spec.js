@@ -95,7 +95,7 @@ async function mountEmbedTwin(page, theme, renderer) {
         <header hidden><p data-viewer-metadata></p><select data-viewer-mode>
           <option value="cyto">Cyto</option><option value="n8n">N8N</option>
           <option value="elastic">Elastic</option></select>
-          <button data-viewer-command="fit">Fit</button></header>
+          <button data-viewer-command="fit">Fit</button><button data-viewer-maximize></button></header>
         <div class="embed-viewer-canvas" data-viewer-canvas tabindex="0"></div>
         <canvas data-viewer-minimap tabindex="0"></canvas>
         <ol data-viewer-alternative></ol><p data-viewer-status></p>
@@ -138,6 +138,7 @@ async function mountV2EmbedTwin(page, theme, mode) {
         <p data-viewer-metadata></p><select data-viewer-mode><option value="design">Design</option>
         <option value="monitoring">Monitoring</option></select>
         <button data-viewer-command="render">Render</button><select data-viewer-run></select>
+        <button data-viewer-maximize></button>
         <span data-viewer-run-empty></span></header>
         <div data-viewer-canvas tabindex="0"></div><canvas data-viewer-minimap tabindex="0"></canvas>
         <ol data-viewer-alternative></ol><p data-viewer-status></p></main>

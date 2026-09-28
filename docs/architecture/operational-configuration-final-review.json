@@ -8383,8 +8383,8 @@
         },
         {
           "path": "scripts/check_release_configuration.py",
-          "digest": "410e11578f4e01097b457242d99e66bfc6b93847f32d80ed3ba70a9a737f9e3f",
-          "assertion": "Release checker consumes external tool configuration names."
+          "digest": "97ad9d0ef8f5b253e07be3a0d92e3039092211be7026e889cf56b1ce556b1dfa",
+          "assertion": "Release checker consumes external tool configuration names and now verifies the built-in actor/token binding for the tagged release fixture preflight."
         }
       ],
       "candidateCount": 99,

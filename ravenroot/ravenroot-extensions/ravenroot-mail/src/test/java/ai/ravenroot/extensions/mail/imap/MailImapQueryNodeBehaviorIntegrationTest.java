@@ -599,6 +599,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             assertTrue(factoryCalls.get() > 0, "the tracked factory must actually be attempted");
             assertEquals(1, server.acceptedSockets(),
                     "Angus opens one bounded raw socket before SSL wrapping, but must not retry with a second socket");
+            server.assertFirstPeerClosed();
         }
     }
 
@@ -869,6 +870,14 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         }
         int port() { return listener.getLocalPort(); }
         int acceptedSockets() { return acceptedSockets.get(); }
+        void assertFirstPeerClosed() throws Exception {
+            firstConnection.get(3, TimeUnit.SECONDS);
+            Socket first;
+            synchronized (connections) { first = connections.getFirst(); }
+            first.setSoTimeout(1_000);
+            assertEquals(-1, first.getInputStream().read(),
+                    "a failed SSL wrapper must close the raw transport socket");
+        }
         void awaitFirstConnection(CompletableFuture<?> stage) throws Exception {
             awaitEventOrStage("the first transport connection", firstConnection, stage);
         }

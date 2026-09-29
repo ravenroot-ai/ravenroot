@@ -940,7 +940,11 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
         }
         @Override public Socket createSocket(Socket socket, String host, int port, boolean close)
                 throws java.io.IOException {
-            return watchdog.track(delegate.createSocket(socket, host, port, close));
+            try { return watchdog.track(delegate.createSocket(socket, host, port, close)); }
+            catch (java.io.IOException | RuntimeException | Error failure) {
+                try { socket.close(); } catch (java.io.IOException closing) { failure.addSuppressed(closing); }
+                throw failure;
+            }
         }
     }
 

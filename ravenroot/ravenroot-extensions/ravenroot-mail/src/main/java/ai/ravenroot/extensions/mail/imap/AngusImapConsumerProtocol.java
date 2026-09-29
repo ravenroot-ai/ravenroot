@@ -241,6 +241,12 @@ final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
         @Override public Socket createSocket(InetAddress host, int port, InetAddress local, int localPort)
                 throws java.io.IOException { return opening.track(delegate.createSocket(host, port, local, localPort)); }
         @Override public Socket createSocket(Socket socket, String host, int port, boolean close)
-                throws java.io.IOException { return opening.track(delegate.createSocket(socket, host, port, close)); }
+                throws java.io.IOException {
+            try { return opening.track(delegate.createSocket(socket, host, port, close)); }
+            catch (java.io.IOException | RuntimeException | Error failure) {
+                try { socket.close(); } catch (java.io.IOException closing) { failure.addSuppressed(closing); }
+                throw failure;
+            }
+        }
     }
 }

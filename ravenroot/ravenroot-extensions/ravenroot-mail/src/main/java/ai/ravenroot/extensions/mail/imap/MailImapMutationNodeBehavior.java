@@ -462,6 +462,8 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
     private static void trackSockets(Properties properties, String protocol,
                                      DeadlineWatchdog watchdog) {
         String prefix = "mail." + protocol;
+        // Keep failed tracked sockets from falling back to an untracked default connection.
+        properties.setProperty(prefix + ".socketFactory.fallback", "false");
         Object sslValue = properties.get(prefix + ".ssl.socketFactory");
         SSLSocketFactory ssl = sslValue instanceof SSLSocketFactory factory
                 ? factory : (SSLSocketFactory) SSLSocketFactory.getDefault();

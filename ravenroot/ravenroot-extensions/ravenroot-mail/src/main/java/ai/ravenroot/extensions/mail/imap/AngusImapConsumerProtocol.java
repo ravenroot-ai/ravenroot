@@ -76,6 +76,8 @@ final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
 
     private static void trackSockets(Properties properties, String protocol, Opening opening) {
         String prefix = "mail." + protocol;
+        // Cancellation must own every socket, including factory failure paths.
+        properties.setProperty(prefix + ".socketFactory.fallback", "false");
         Object configuredSsl = properties.get(prefix + ".ssl.socketFactory");
         SSLSocketFactory ssl = configuredSsl instanceof SSLSocketFactory factory
                 ? factory : (SSLSocketFactory) SSLSocketFactory.getDefault();

@@ -330,6 +330,8 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
 
     private static void trackSockets(Properties properties, String protocol, DeadlineWatchdog watchdog) {
         String prefix = "mail." + protocol;
+        // Angus otherwise retries a failed tracked factory with an untracked default socket.
+        properties.setProperty(prefix + ".socketFactory.fallback", "false");
         Object configuredSsl = properties.get(prefix + ".ssl.socketFactory");
         SSLSocketFactory ssl = configuredSsl instanceof SSLSocketFactory factory ? factory : (SSLSocketFactory) SSLSocketFactory.getDefault();
         properties.put(prefix + ".ssl.socketFactory", new TrackingSslSocketFactory(ssl, watchdog));

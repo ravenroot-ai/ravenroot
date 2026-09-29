@@ -17,6 +17,8 @@ import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.io.IOException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.Instant;
@@ -578,6 +580,40 @@ class MailImapQueryNodeBehaviorIntegrationTest {
                 }
             }
         }
+    }
+
+    @Test @Timeout(15)
+    void failedTrackedSslFactoryCannotOpenASecondFallbackSocket() throws Exception {
+        try (var server = new HoldingServer()) {
+            AtomicInteger factoryCalls = new AtomicInteger();
+            NodeAction action = new MailImapQueryNodeBehavior(
+                    (tenant, name) -> Optional.of(profile(tenant, name, server.port(), "localhost", "IMAPS", Set.of("INBOX"), 10)),
+                    ref -> secret(),
+                    properties -> {
+                        properties.put("mail.imaps.ssl.socketFactory", new RefusingSslSocketFactory(factoryCalls));
+                        properties.setProperty("mail.imaps.socketFactory.fallback", "true");
+                        return properties;
+                    }).create(configuration());
+            assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE,
+                    failure(action.handle(node(Map.of("version", "mail.imap.query.v1"))).toCompletableFuture()).code());
+            assertTrue(factoryCalls.get() > 0, "the tracked factory must actually be attempted");
+            assertEquals(1, server.acceptedSockets(),
+                    "Angus opens one bounded raw socket before SSL wrapping, but must not retry with a second socket");
+        }
+    }
+
+    private static final class RefusingSslSocketFactory extends SSLSocketFactory {
+        private final AtomicInteger calls;
+        private RefusingSslSocketFactory(AtomicInteger calls) { this.calls = calls; }
+        private Socket refuse() throws IOException { calls.incrementAndGet(); throw new IOException("refused test socket"); }
+        @Override public String[] getDefaultCipherSuites() { return new String[0]; }
+        @Override public String[] getSupportedCipherSuites() { return new String[0]; }
+        @Override public Socket createSocket() throws IOException { return refuse(); }
+        @Override public Socket createSocket(String host, int port) throws IOException { return refuse(); }
+        @Override public Socket createSocket(String host, int port, InetAddress local, int localPort) throws IOException { return refuse(); }
+        @Override public Socket createSocket(InetAddress host, int port) throws IOException { return refuse(); }
+        @Override public Socket createSocket(InetAddress host, int port, InetAddress local, int localPort) throws IOException { return refuse(); }
+        @Override public Socket createSocket(Socket socket, String host, int port, boolean close) throws IOException { return refuse(); }
     }
 
     @Test void profileIsolationAndTransportPoliciesStayFailClosed() throws Exception {

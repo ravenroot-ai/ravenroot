@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24499 |
+| Atomic operational candidates discovered | 24517 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24499 |
+| Reviewed | 24517 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1960 |
-| Retained protocol or format invariants | 10064 |
+| Retained protocol or format invariants | 10070 |
 | Retained published contract descriptions | 530 |
-| Retained presentation text | 699 |
+| Retained presentation text | 700 |
 | Retained derived values | 1088 |
-| Test fixtures | 8497 |
+| Test fixtures | 8508 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 2194.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 119.
+Checked source reconciliations: 122.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24499 candidates.
+zero-count or unclassified rows as needed and sums to 24517 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24499 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22838 |
+| retained | 22856 |
 
 ### Classification counts
 
@@ -85,11 +85,11 @@ zero-count or unclassified rows as needed and sums to 24499 candidates.
 |---|---:|
 | derived | 1088 |
 | operator-configurable | 1661 |
-| presentation-text | 699 |
-| protocol-or-format-invariant | 10064 |
+| presentation-text | 700 |
+| protocol-or-format-invariant | 10070 |
 | published-contract-description | 530 |
 | security-ceiling-or-default | 1960 |
-| test-fixture | 8497 |
+| test-fixture | 8508 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 24499 candidates.
 | deployment | 2864 |
 | deployment-example | 20 |
 | java | 7284 |
-| script | 2377 |
-| test-fixture | 8497 |
+| script | 2384 |
+| test-fixture | 8508 |
 | ui | 3457 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8510 |
-| Retained; no remediation required | 13969 |
+| Retained; no remediation required | 13987 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24468 |
-| Unchanged identities | 24455 |
-| Approved identity migrations | 6 |
-| Approved retirements | 7 |
-| Semantically classified additions | 38 |
-| Current candidates | 24499 |
+| Source inventory candidates | 24517 |
+| Unchanged identities | 24517 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
+| Current candidates | 24517 |
 
 ## Final semantic review
 
@@ -7885,15 +7885,15 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-10fa3031d765e76f44ae` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:74` `Kind` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-3832674101cd592a6206` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:87` `Kind` | java | retained | security-ceiling-or-default | These are explicit component fallback selections. External bindings and typed operator settings remain separate candidate families, so retaining the fallback does not hide an operator control. |
 | `oc-8b25c8d551cb771a3a61` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:87` `Kind` | java | retained | security-ceiling-or-default | These are explicit component fallback selections. External bindings and typed operator settings remain separate candidate families, so retaining the fallback does not hide an operator control. |
-| `oc-1fd80a8c5e1b3bea41f9` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:522` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-9f265ec75d7e2cff33c8` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:522` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-2c87ff43b762241d0cca` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:679` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-548e533db483abb91e46` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:680` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-ad299ef019449f5c08f3` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:681` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-79702130da71ce16a8fb` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:682` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-201fd42f5df457466997` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:793` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-d9a76a40678ac0042292` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:794` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-f7ee9b843d54750fdde5` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:795` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-1fd80a8c5e1b3bea41f9` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:524` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-9f265ec75d7e2cff33c8` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:524` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-2c87ff43b762241d0cca` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:681` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-548e533db483abb91e46` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:682` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-ad299ef019449f5c08f3` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:683` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-79702130da71ce16a8fb` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:684` `BoundedEnvelope` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-201fd42f5df457466997` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:795` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-d9a76a40678ac0042292` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:796` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-f7ee9b843d54750fdde5` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java:797` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-af3b669db5c2f9205bca` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:68` `MailImapQueryNodeBehavior` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-4ccb5ae76281f7a9b3a9` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:69` `MailImapQueryNodeBehavior` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-b4c4cc06fcba9cbc6e55` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:70` `MailImapQueryNodeBehavior` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
@@ -7919,17 +7919,17 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-79031ef2beda6818141f` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:168` `create` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-b2071e3a8f31f09216b2` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:168` `create` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-c587ca492ef5f367f82f` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:168` `create` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-23f294ec2853fe97c606` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:501` `from` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-4c004ffe98814c2ec666` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:501` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-825beceb71091f976b6c` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:501` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-ad4a46f877998880e846` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:501` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-09a8d3bd5495c9d2e1d5` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:502` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-41e4005997d554f1a785` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:502` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-7028871225aede24d14a` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:502` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-376ce9b3e3bc496ec439` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:580` `ContentLimitException` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-1eb545b9e9459a18c4b8` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:645` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-4c68050fd5b64e84d0f9` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:645` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-a731c72d62c8b5ec3a26` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:645` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-23f294ec2853fe97c606` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:503` `from` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-4c004ffe98814c2ec666` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:503` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-825beceb71091f976b6c` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:503` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-ad4a46f877998880e846` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:503` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-09a8d3bd5495c9d2e1d5` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:504` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-41e4005997d554f1a785` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:504` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-7028871225aede24d14a` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:504` `from` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-376ce9b3e3bc496ec439` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:582` `ContentLimitException` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-1eb545b9e9459a18c4b8` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:647` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-4c68050fd5b64e84d0f9` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:647` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-a731c72d62c8b5ec3a26` | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapQueryNodeBehavior.java:647` `DeadlineWatchdog` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-0b719950899be3509528` | `ravenroot/ravenroot-extensions/ravenroot-matrix/src/main/java/ai/ravenroot/extensions/matrix/MatrixBehaviorDescriptors.java:12` `MatrixBehaviorDescriptors` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-0d3e6e29b914775dbc17` | `ravenroot/ravenroot-extensions/ravenroot-matrix/src/main/java/ai/ravenroot/extensions/matrix/MatrixBehaviorDescriptors.java:13` `MatrixBehaviorDescriptors` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-2983c0f654e3a9604ff7` | `ravenroot/ravenroot-extensions/ravenroot-matrix/src/main/java/ai/ravenroot/extensions/matrix/MatrixConfiguration.java:12` `MatrixConfiguration` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -15460,45 +15460,52 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-995d439c5bca7f6a49ae` | `scripts/check_release_configuration.py:170` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-f21266ec76ac2d23aac7` | `scripts/check_release_configuration.py:170` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-de955df7045b5db82128` | `scripts/check_release_configuration.py:171` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-0732329815122310b423` | `scripts/check_release_configuration.py:172` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-53b553c3a7f506582150` | `scripts/check_release_configuration.py:173` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-671fdb700ed7feddd67e` | `scripts/check_release_configuration.py:176` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-150b4455b22d801f6184` | `scripts/check_release_configuration.py:181` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-3cc1d3d36b8de33c0d5f` | `scripts/check_release_configuration.py:183` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6d913f4171b0ca47bc7a` | `scripts/check_release_configuration.py:192` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-c7723869cb8618048daf` | `scripts/check_release_configuration.py:194` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6ca60f51fb7ca9c30846` | `scripts/check_release_configuration.py:197` `check_workflows` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-fbdf97d6e2984721b65c` | `scripts/check_release_configuration.py:201` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d0b4ef8db9ed12431952` | `scripts/check_release_configuration.py:205` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-2cdf05bbb6fc760186c1` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-44efd6d282255f1293ab` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8cc6eba99a208e63cb33` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f97533b443cb832d5ac4` | `scripts/check_release_configuration.py:208` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-4e630864e57849303bc1` | `scripts/check_release_configuration.py:210` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-5257187011c648c37941` | `scripts/check_release_configuration.py:215` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-7c06f32943854826906f` | `scripts/check_release_configuration.py:218` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-60149af9fb912e199731` | `scripts/check_release_configuration.py:220` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
-| `oc-f45e8bd4a37768cff9a1` | `scripts/check_release_configuration.py:220` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
-| `oc-61b2ad2a448a006fcf5b` | `scripts/check_release_configuration.py:223` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-aca838a688f1fd8612c3` | `scripts/check_release_configuration.py:243` `check_documentation` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5d4424635a3edaf7872d` | `scripts/check_release_configuration.py:249` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8662e4843e99b889bb66` | `scripts/check_release_configuration.py:250` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-34e22bfa7a30fe5b018d` | `scripts/check_release_configuration.py:251` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5f952bbe1a981b45293c` | `scripts/check_release_configuration.py:252` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-87025aa0df2746a1af77` | `scripts/check_release_configuration.py:253` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a5bc4c98b3efd0b2f109` | `scripts/check_release_configuration.py:256` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-3a5bece3a143e0bc9898` | `scripts/check_release_configuration.py:257` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-f9f613c1f1531c6f9cc1` | `scripts/check_release_configuration.py:257` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-343b8bf6778363387a34` | `scripts/check_release_configuration.py:258` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-40f67a7494ef31ed9d71` | `scripts/check_release_configuration.py:261` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-47aeb80030e39f808bf4` | `scripts/check_release_configuration.py:264` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-25350cff74b99658e87a` | `scripts/check_release_configuration.py:265` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
-| `oc-0db856cf2ecddbab3289` | `scripts/check_release_configuration.py:267` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-c59e9b6c31b10dc2dc03` | `scripts/check_release_configuration.py:268` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
-| `oc-2cb271bd78a67b17f38b` | `scripts/check_release_configuration.py:269` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
-| `oc-256ef45753b3d663c584` | `scripts/check_release_configuration.py:270` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
-| `oc-512a53aa3de7fdbdba56` | `scripts/check_release_configuration.py:281` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-876b691ad4e59be157d0` | `scripts/check_release_configuration.py:283` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-167d678c56fd465005d5` | `scripts/check_release_configuration.py:173` `check_workflows` | script | retained | protocol-or-format-invariant | This literal names the exact GitHub token binding, permission, or immutable-fixture preflight required by the release-validation contract; it is not an operator setting. |
+| `oc-0ed91fd2297f6239c616` | `scripts/check_release_configuration.py:174` `check_workflows` | script | retained | protocol-or-format-invariant | This literal names the exact GitHub token binding, permission, or immutable-fixture preflight required by the release-validation contract; it is not an operator setting. |
+| `oc-cbfa31e3006165edc714` | `scripts/check_release_configuration.py:174` `check_workflows` | script | retained | protocol-or-format-invariant | This literal names the exact GitHub token binding, permission, or immutable-fixture preflight required by the release-validation contract; it is not an operator setting. |
+| `oc-3d3e23fd3e6f9a8578b3` | `scripts/check_release_configuration.py:175` `check_workflows` | script | retained | protocol-or-format-invariant | This literal names the exact GitHub token binding, permission, or immutable-fixture preflight required by the release-validation contract; it is not an operator setting. |
+| `oc-af728d8a084cc9798158` | `scripts/check_release_configuration.py:175` `check_workflows` | script | retained | protocol-or-format-invariant | This literal names the exact GitHub token binding, permission, or immutable-fixture preflight required by the release-validation contract; it is not an operator setting. |
+| `oc-784b54d98772e2510ebd` | `scripts/check_release_configuration.py:176` `check_workflows` | script | retained | protocol-or-format-invariant | This literal names the exact GitHub token binding, permission, or immutable-fixture preflight required by the release-validation contract; it is not an operator setting. |
+| `oc-5213b837dd0604f9defd` | `scripts/check_release_configuration.py:179` `check_workflows` | script | retained | presentation-text | This literal is a human-readable release-validation diagnostic, not an operator setting. |
+| `oc-0732329815122310b423` | `scripts/check_release_configuration.py:180` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-53b553c3a7f506582150` | `scripts/check_release_configuration.py:181` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-671fdb700ed7feddd67e` | `scripts/check_release_configuration.py:184` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-150b4455b22d801f6184` | `scripts/check_release_configuration.py:189` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-3cc1d3d36b8de33c0d5f` | `scripts/check_release_configuration.py:191` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6d913f4171b0ca47bc7a` | `scripts/check_release_configuration.py:200` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-c7723869cb8618048daf` | `scripts/check_release_configuration.py:202` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6ca60f51fb7ca9c30846` | `scripts/check_release_configuration.py:205` `check_workflows` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-fbdf97d6e2984721b65c` | `scripts/check_release_configuration.py:209` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d0b4ef8db9ed12431952` | `scripts/check_release_configuration.py:213` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-2cdf05bbb6fc760186c1` | `scripts/check_release_configuration.py:216` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-44efd6d282255f1293ab` | `scripts/check_release_configuration.py:216` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8cc6eba99a208e63cb33` | `scripts/check_release_configuration.py:216` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f97533b443cb832d5ac4` | `scripts/check_release_configuration.py:216` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4e630864e57849303bc1` | `scripts/check_release_configuration.py:218` `check_workflows` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-5257187011c648c37941` | `scripts/check_release_configuration.py:223` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-7c06f32943854826906f` | `scripts/check_release_configuration.py:226` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-60149af9fb912e199731` | `scripts/check_release_configuration.py:228` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
+| `oc-f45e8bd4a37768cff9a1` | `scripts/check_release_configuration.py:228` `check_workflows` | script | retained | derived | The script path/encoding is a local checker implementation input. |
+| `oc-61b2ad2a448a006fcf5b` | `scripts/check_release_configuration.py:231` `check_workflows` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-aca838a688f1fd8612c3` | `scripts/check_release_configuration.py:251` `check_documentation` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5d4424635a3edaf7872d` | `scripts/check_release_configuration.py:257` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8662e4843e99b889bb66` | `scripts/check_release_configuration.py:258` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-34e22bfa7a30fe5b018d` | `scripts/check_release_configuration.py:259` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5f952bbe1a981b45293c` | `scripts/check_release_configuration.py:260` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-87025aa0df2746a1af77` | `scripts/check_release_configuration.py:261` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-a5bc4c98b3efd0b2f109` | `scripts/check_release_configuration.py:264` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-3a5bece3a143e0bc9898` | `scripts/check_release_configuration.py:265` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-f9f613c1f1531c6f9cc1` | `scripts/check_release_configuration.py:265` `check_oci_metadata` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-343b8bf6778363387a34` | `scripts/check_release_configuration.py:266` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-40f67a7494ef31ed9d71` | `scripts/check_release_configuration.py:269` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-47aeb80030e39f808bf4` | `scripts/check_release_configuration.py:272` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-25350cff74b99658e87a` | `scripts/check_release_configuration.py:273` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
+| `oc-0db856cf2ecddbab3289` | `scripts/check_release_configuration.py:275` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-c59e9b6c31b10dc2dc03` | `scripts/check_release_configuration.py:276` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
+| `oc-2cb271bd78a67b17f38b` | `scripts/check_release_configuration.py:277` `check_oci_metadata` | script | retained | protocol-or-format-invariant | This atom fixes the reviewed BuildKit, OCI, in-toto, command, path, or release-validation contract for issue #424. |
+| `oc-256ef45753b3d663c584` | `scripts/check_release_configuration.py:278` `check_oci_metadata` | script | retained | presentation-text | This text reports the release-builder contract or its validation failure to operators. |
+| `oc-512a53aa3de7fdbdba56` | `scripts/check_release_configuration.py:289` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-876b691ad4e59be157d0` | `scripts/check_release_configuration.py:291` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-66500282286c29c3d3d4` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-b570e6aaf76487f6eb65` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-f5716462f484283f2eb2` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |

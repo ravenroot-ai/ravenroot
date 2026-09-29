@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
+      packages: read
       pull-requests: read
     outputs:
       tag: ${{ steps.contract.outputs.tag }}
@@ -92,6 +93,11 @@ jobs:
           python3 scripts/check_release_configuration.py
           python3 -m unittest scripts.tests.test_release_contract -v
           python3 -m unittest scripts.tests.test_release_registries -v
+      - name: Pull immutable repository-owned MinIO fixtures and verify the runner architecture
+        env:
+          RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}
+          RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}
+        run: python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull
       - name: Build and test the tagged UI
         working-directory: ravenroot/ravenroot-ui
         run: |

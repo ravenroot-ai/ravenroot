@@ -1,1 +1,0 @@
-Release validation now authenticates and preloads the immutable private MinIO fixtures before running the full Maven tests, allowing tagged releases to complete their required checks while keeping the fixture package private.

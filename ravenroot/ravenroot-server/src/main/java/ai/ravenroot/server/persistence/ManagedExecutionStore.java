@@ -35,10 +35,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * mutation. An adapter without that atomic seam refuses through the port's default methods; this
  * wrapper never downgrades to an unmanaged call.</p>
  *
- * <p>Bulk recovery examines bounded pages in process-id order. It advances the adapter cursor past
- * executions whose manifests are incompatible, then submits only an explicit key-to-authority map
- * for an atomic claim. An empty map is returned as an empty claim and can never become an unfiltered
- * store call. Keys created after a page was read wait for the next sweep.</p>
+ * <p>Bulk recovery examines bounded pages of eligible work in process-id order. It advances the
+ * adapter cursor past executions whose manifests are incompatible, then submits only an explicit
+ * key-to-authority map for an atomic claim. An empty map is returned as an empty claim and can never
+ * become an unfiltered store call. A sweep reaching the eligible tail may wrap once within its page
+ * budget so work that became eligible below the saved cursor does not wait for another inventory
+ * tick.</p>
  *
  * <p>The manifest store and execution-store delegate must describe the same physical persistence
  * composition. PostgreSQL and SQLite enforce that by reading and locking the manifest row inside
@@ -142,7 +144,29 @@ public final class ManagedExecutionStore implements InvocationHandler {
         int pageSize = Math.min(delegate.maxInventoryPageSize(), Math.max(MIN_CANDIDATE_PAGE, limit));
         Sweep sweep = new Sweep(tenantId, timersOnly);
         Optional<UUID> start = Optional.ofNullable(sweepCursors.get(sweep));
-        return collectAuthorities(tenantId, workerId, ttl, timersOnly, pageSize, start, limit)
+        return collectAuthorities(tenantId, workerId, ttl, timersOnly, pageSize, start, limit,
+                MAX_PAGES_PER_SWEEP)
+                .thenCompose(scan -> {
+                    int remainingPages = MAX_PAGES_PER_SWEEP - scan.pagesVisited();
+                    if (start.isEmpty() || !scan.exhausted() || scan.authorities().size() >= limit
+                            || remainingPages == 0) {
+                        return CompletableFuture.completedFuture(scan);
+                    }
+                    // A key can become eligible below the saved cursor after the previous sweep
+                    // passed it. Reaching the current tail with claim capacity remaining wraps once,
+                    // inside the same bounded call, so a tenant wakeup need not wait for another tick.
+                    return collectAuthorities(tenantId, workerId, ttl, timersOnly, pageSize,
+                            Optional.empty(), limit - scan.authorities().size(), remainingPages)
+                            .thenApply(wrapped -> {
+                                var combined = new java.util.HashMap<>(scan.authorities());
+                                combined.putAll(wrapped.authorities());
+                                return new AuthorityScan(Map.copyOf(combined),
+                                            scan.firstFailure() != null ? scan.firstFailure()
+                                                    : wrapped.firstFailure(),
+                                            wrapped.nextAfter(), wrapped.exhausted(),
+                                            scan.pagesVisited() + wrapped.pagesVisited());
+                            });
+                })
                 .thenCompose(scan -> {
                     if (scan.nextAfter().isPresent()) sweepCursors.put(sweep, scan.nextAfter().orElseThrow());
                     else sweepCursors.remove(sweep);
@@ -161,10 +185,10 @@ public final class ManagedExecutionStore implements InvocationHandler {
 
     private CompletionStage<AuthorityScan> collectAuthorities(
             String tenantId, String workerId, Duration ttl, boolean timersOnly, int pageSize,
-            Optional<UUID> after, int required) {
+            Optional<UUID> after, int required, int pageBudget) {
         CompletionStage<AuthorityScan> stage = CompletableFuture.completedFuture(
-                new AuthorityScan(Map.of(), null, after, false));
-        for (int pageNumber = 0; pageNumber < MAX_PAGES_PER_SWEEP; pageNumber++) {
+                new AuthorityScan(Map.of(), null, after, false, 0));
+        for (int pageNumber = 0; pageNumber < pageBudget; pageNumber++) {
             stage = stage.thenCompose(scan -> {
                 if (scan.authorities().size() >= required || scan.exhausted()) {
                     return CompletableFuture.completedFuture(scan);
@@ -172,7 +196,8 @@ public final class ManagedExecutionStore implements InvocationHandler {
                 return delegate.managedClaimCandidates(tenantId, workerId, pageSize, ttl, timersOnly,
                         scan.nextAfter()).thenCompose(page -> collectPageAuthorities(page.keys(), scan)
                                 .thenApply(updated -> new AuthorityScan(updated.authorities(),
-                                        updated.firstFailure(), page.nextAfter(), page.nextAfter().isEmpty())));
+                                        updated.firstFailure(), page.nextAfter(), page.nextAfter().isEmpty(),
+                                        scan.pagesVisited() + 1)));
             });
         }
         return stage;
@@ -189,7 +214,7 @@ public final class ManagedExecutionStore implements InvocationHandler {
             }));
         }
         return stage.thenApply(failure -> new AuthorityScan(Map.copyOf(found), failure,
-                initial.nextAfter(), initial.exhausted()));
+                initial.nextAfter(), initial.exhausted(), initial.pagesVisited()));
     }
 
     private CompletionStage<ExecutionPersistenceAuthority> authority(ExecutionKey key,
@@ -245,7 +270,8 @@ public final class ManagedExecutionStore implements InvocationHandler {
     }
 
     private record AuthorityScan(Map<ExecutionKey, ExecutionPersistenceAuthority> authorities,
-                                 Throwable firstFailure, Optional<UUID> nextAfter, boolean exhausted) {}
+                                 Throwable firstFailure, Optional<UUID> nextAfter, boolean exhausted,
+                                 int pagesVisited) {}
 
     private record Sweep(String tenantId, boolean timersOnly) {}
 }

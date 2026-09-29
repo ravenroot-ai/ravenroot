@@ -76,6 +76,8 @@ final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
 
     private static void trackSockets(Properties properties, String protocol, Opening opening) {
         String prefix = "mail." + protocol;
+        // Cancellation must own every socket, including factory failure paths.
+        properties.setProperty(prefix + ".socketFactory.fallback", "false");
         Object configuredSsl = properties.get(prefix + ".ssl.socketFactory");
         SSLSocketFactory ssl = configuredSsl instanceof SSLSocketFactory factory
                 ? factory : (SSLSocketFactory) SSLSocketFactory.getDefault();
@@ -239,6 +241,12 @@ final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
         @Override public Socket createSocket(InetAddress host, int port, InetAddress local, int localPort)
                 throws java.io.IOException { return opening.track(delegate.createSocket(host, port, local, localPort)); }
         @Override public Socket createSocket(Socket socket, String host, int port, boolean close)
-                throws java.io.IOException { return opening.track(delegate.createSocket(socket, host, port, close)); }
+                throws java.io.IOException {
+            try { return opening.track(delegate.createSocket(socket, host, port, close)); }
+            catch (java.io.IOException | RuntimeException | Error failure) {
+                try { socket.close(); } catch (java.io.IOException closing) { failure.addSuppressed(closing); }
+                throw failure;
+            }
+        }
     }
 }

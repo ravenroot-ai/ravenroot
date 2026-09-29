@@ -330,6 +330,8 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
 
     private static void trackSockets(Properties properties, String protocol, DeadlineWatchdog watchdog) {
         String prefix = "mail." + protocol;
+        // Angus otherwise retries a failed tracked factory with an untracked default socket.
+        properties.setProperty(prefix + ".socketFactory.fallback", "false");
         Object configuredSsl = properties.get(prefix + ".ssl.socketFactory");
         SSLSocketFactory ssl = configuredSsl instanceof SSLSocketFactory factory ? factory : (SSLSocketFactory) SSLSocketFactory.getDefault();
         properties.put(prefix + ".ssl.socketFactory", new TrackingSslSocketFactory(ssl, watchdog));
@@ -730,7 +732,13 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         @Override public Socket createSocket(String host, int port, InetAddress local, int localPort) throws java.io.IOException { return watchdog.track(delegate.createSocket(host, port, local, localPort)); }
         @Override public Socket createSocket(InetAddress host, int port) throws java.io.IOException { return watchdog.track(delegate.createSocket(host, port)); }
         @Override public Socket createSocket(InetAddress host, int port, InetAddress local, int localPort) throws java.io.IOException { return watchdog.track(delegate.createSocket(host, port, local, localPort)); }
-        @Override public Socket createSocket(Socket socket, String host, int port, boolean close) throws java.io.IOException { return watchdog.track(delegate.createSocket(socket, host, port, close)); }
+        @Override public Socket createSocket(Socket socket, String host, int port, boolean close) throws java.io.IOException {
+            try { return watchdog.track(delegate.createSocket(socket, host, port, close)); }
+            catch (java.io.IOException | RuntimeException | Error failure) {
+                try { socket.close(); } catch (java.io.IOException closing) { failure.addSuppressed(closing); }
+                throw failure;
+            }
+        }
     }
 
     private static GateLease lease(ConcurrentHashMap<String, Gate> gates, String key, int permits) { Gate gate = gates.compute(key, (ignored, current) -> current == null ? new Gate(permits) : current.retain()); return new GateLease(gates, key, gate); }

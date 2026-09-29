@@ -256,14 +256,17 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * shipped as 5 and became 6 when it merged behind another feature that had taken that number, so
      * the number is a merge outcome rather than an identity.</p>
      */
-    static final String LIVE_HANDLER_STATUSES = statusList(false);
+    static final String LIVE_HANDLER_STATUSES = statusList(status -> !status.terminal());
 
     /** The terminal counterpart of {@link #LIVE_HANDLER_STATUSES}. */
-    static final String TERMINAL_HANDLER_STATUSES = statusList(true);
+    static final String TERMINAL_HANDLER_STATUSES = statusList(HandlerStatus::terminal);
 
-    private static String statusList(boolean terminal) {
+    /** Terminal handler states that leave a durable re-entry traversal for the claim loop. */
+    static final String RESUMING_HANDLER_STATUSES = statusList(HandlerStatus::resumesProcess);
+
+    private static String statusList(java.util.function.Predicate<HandlerStatus> included) {
         return java.util.Arrays.stream(HandlerStatus.values())
-                .filter(status -> status.terminal() == terminal)
+                .filter(included)
                 .map(status -> "'" + status.name() + "'")
                 .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
     }
@@ -963,15 +966,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
             requireLeaseTtl(leaseTtl);
             Objects.requireNonNull(after, "after");
             return inReadTransaction(null, () -> {
-                String sql = "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? "
-                        + (after.isPresent() ? "AND process_instance_id > ? " : "")
-                        + "ORDER BY process_instance_id LIMIT ?";
+                Instant now = clock.instant();
+                String sql = managedCandidateSql(timersOnly, after.isPresent());
                 var keys = new ArrayList<ExecutionKey>();
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                    int index = 1;
-                    statement.setString(index++, tenantId);
-                    if (after.isPresent()) statement.setString(index++, after.orElseThrow().toString());
-                    statement.setInt(index, limit);
+                    bindManagedCandidateParameters(statement, tenantId, workerId, limit,
+                            timersOnly, after, now);
                     try (ResultSet rows = statement.executeQuery()) {
                         while (rows.next()) keys.add(new ExecutionKey(tenantId,
                                 StoredUuid.required(rows, 1, "process_instance", "process_instance_id", tenantId)));
@@ -983,6 +983,95 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return new ai.ravenroot.api.persistence.ManagedClaimCandidatePage(keys, next);
             });
         });
+    }
+
+    /**
+     * Drives discovery from the small set of outstanding work rows, never from process history.
+     * The three arms deliberately reuse the predicates used by the authoritative claim below.
+     */
+    static String managedCandidateSql(boolean timersOnly, boolean after) {
+        String cursor = after ? " AND %s.process_instance_id > ?" : "";
+        var arms = new ArrayList<String>();
+        if (!timersOnly) {
+            arms.add("SELECT a.process_instance_id FROM attempt a "
+                    + "INDEXED BY managed_recovery_attempt_candidate WHERE a.tenant_id = ?"
+                    + cursor.formatted("a") + " AND " + claimableAttemptPredicate("a"));
+        }
+        arms.add("SELECT t.process_instance_id FROM timer t "
+                + "INDEXED BY managed_recovery_timer_candidate WHERE t.tenant_id = ?"
+                + cursor.formatted("t") + " AND " + claimableTimerPredicate("t"));
+        if (!timersOnly) {
+            arms.add("SELECT h.process_instance_id FROM execution_handler h "
+                    + "INDEXED BY managed_recovery_handler_candidate WHERE h.tenant_id = ?"
+                    + cursor.formatted("h") + " AND " + claimableHandlerPredicate("h"));
+        }
+        return "SELECT DISTINCT eligible.process_instance_id FROM (" + String.join(" UNION ALL ", arms)
+                + ") eligible WHERE NOT EXISTS (SELECT 1 FROM lease l "
+                + "WHERE l.tenant_id = ? AND l.process_instance_id = eligible.process_instance_id "
+                + "AND l.worker_id <> ? AND " + StoredInstant.strictlyAfter("l.expires_at") + ") "
+                + "ORDER BY eligible.process_instance_id LIMIT ?";
+    }
+
+    private static int bindCandidateStart(PreparedStatement statement, int index, String tenantId,
+                                          java.util.Optional<UUID> after) throws SQLException {
+        statement.setString(index++, tenantId);
+        if (after.isPresent()) statement.setString(index++, after.orElseThrow().toString());
+        return index;
+    }
+
+    static void bindManagedCandidateParameters(PreparedStatement statement, String tenantId,
+                                               String workerId, int limit, boolean timersOnly,
+                                               java.util.Optional<UUID> after, Instant now)
+            throws SQLException {
+        int index = 1;
+        if (!timersOnly) {
+            index = bindCandidateStart(statement, index, tenantId, after);
+            index = StoredInstant.bindComparison(statement, index, now);
+        }
+        index = bindCandidateStart(statement, index, tenantId, after);
+        index = StoredInstant.bindComparison(statement, index, now);
+        index = StoredInstant.bindComparison(statement, index, now);
+        if (!timersOnly) {
+            index = bindCandidateStart(statement, index, tenantId, after);
+            index = StoredInstant.bindComparison(statement, index, now);
+        }
+        statement.setString(index++, tenantId);
+        statement.setString(index++, workerId);
+        index = StoredInstant.bindComparison(statement, index, now);
+        statement.setInt(index, limit);
+    }
+
+    private static String claimableAttemptPredicate(String alias) {
+        return alias + ".status IN ('SCHEDULED', 'RUNNING') "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = "
+                + alias + ".tenant_id AND k.process_instance_id = " + alias
+                + ".process_instance_id AND k.work_item_id = " + alias + ".attempt_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = "
+                + alias + ".tenant_id AND c.process_instance_id = " + alias
+                + ".process_instance_id AND c.work_item_id = " + alias + ".attempt_id AND "
+                + StoredInstant.strictlyAfter("c.visible_again_at") + ")";
+    }
+
+    private static String claimableTimerPredicate(String alias) {
+        return StoredInstant.atOrBefore(alias + ".due_at") + " "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = "
+                + alias + ".tenant_id AND k.process_instance_id = " + alias
+                + ".process_instance_id AND k.work_item_id = " + alias + ".timer_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = "
+                + alias + ".tenant_id AND c.process_instance_id = " + alias
+                + ".process_instance_id AND c.work_item_id = " + alias + ".timer_id AND "
+                + StoredInstant.strictlyAfter("c.visible_again_at") + ")";
+    }
+
+    private static String claimableHandlerPredicate(String alias) {
+        return alias + ".status IN " + RESUMING_HANDLER_STATUSES + " "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = "
+                + alias + ".tenant_id AND k.process_instance_id = " + alias
+                + ".process_instance_id AND k.work_item_id = " + alias + ".handler_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = "
+                + alias + ".tenant_id AND c.process_instance_id = " + alias
+                + ".process_instance_id AND c.work_item_id = " + alias + ".handler_id AND "
+                + StoredInstant.strictlyAfter("c.visible_again_at") + ")";
     }
 
     private static java.util.NavigableMap<ExecutionKey,
@@ -2789,12 +2878,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "LEFT JOIN traversal tr ON tr.tenant_id = i.tenant_id "
                 + "AND tr.process_instance_id = i.process_instance_id AND tr.traversal_id = i.traversal_id "
                 + "WHERE a.tenant_id = ? AND a.process_instance_id = ? "
-                + "AND a.status IN ('SCHEDULED', 'RUNNING') "
-                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = a.tenant_id "
-                + "AND k.process_instance_id = a.process_instance_id AND k.work_item_id = a.attempt_id) "
-                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = a.tenant_id "
-                + "AND c.process_instance_id = a.process_instance_id AND c.work_item_id = a.attempt_id "
-                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + ") "
+                + "AND " + claimableAttemptPredicate("a") + " "
                 + "ORDER BY tr.position, i.position, a.ordinal";
         var ready = new ArrayList<ScheduledAttempt>();
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -2823,12 +2907,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         String sql = "SELECT t.timer_id, t.traversal_id, t.invocation_id, t.payload_content_type, "
                 + "t.payload_bytes, t.due_at_epoch_second, t.due_at_nano FROM timer t "
                 + "WHERE t.tenant_id = ? AND t.process_instance_id = ? "
-                + "AND " + StoredInstant.atOrBefore("t.due_at") + " "
-                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = t.tenant_id "
-                + "AND k.process_instance_id = t.process_instance_id AND k.work_item_id = t.timer_id) "
-                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = t.tenant_id "
-                + "AND c.process_instance_id = t.process_instance_id AND c.work_item_id = t.timer_id "
-                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + ") "
+                + "AND " + claimableTimerPredicate("t") + " "
                 + "ORDER BY t.due_at_epoch_second, t.due_at_nano, t.rowid";
         var due = new ArrayList<TimerSchedule>();
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -4753,12 +4832,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private List<DurableHandler> claimableTriggers(ExecutionKey key, Instant now) throws SQLException {
         String sql = HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
-                + "AND h.status IN " + TERMINAL_HANDLER_STATUSES + " "
-                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = h.tenant_id "
-                + "AND k.process_instance_id = h.process_instance_id AND k.work_item_id = h.handler_id) "
-                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = h.tenant_id "
-                + "AND c.process_instance_id = h.process_instance_id AND c.work_item_id = h.handler_id "
-                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + ") "
+                + "AND " + claimableHandlerPredicate("h") + " "
                 + "ORDER BY h.position";
         var ready = new ArrayList<DurableHandler>();
         try (PreparedStatement statement = connection.prepareStatement(sql)) {

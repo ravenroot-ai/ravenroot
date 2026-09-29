@@ -144,6 +144,19 @@ class MinioFixtureContractTest(unittest.TestCase):
         self.assertGreaterEqual(workflow.count("RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}"), 2)
         self.assertNotIn("secrets.", workflow)
 
+    def test_release_validation_preflights_before_the_tagged_maven_reactor_with_scoped_read(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        validate, separator, _publish = workflow.partition("\n  publish:\n")
+        self.assertTrue(separator)
+        self.assertIn("packages: read", validate)
+        self.assertIn("RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}", validate)
+        self.assertIn("RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}", validate)
+        preflight = "python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull"
+        self.assertIn(preflight, validate)
+        self.assertLess(validate.index(preflight), validate.index("mvn -B --no-transfer-progress clean verify"))
+        self.assertNotIn("packages: write", validate)
+        self.assertNotIn("secrets.", validate)
+
     def test_publication_is_manual_pinned_and_has_only_scoped_package_write(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish-minio-fixtures.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)

@@ -397,12 +397,15 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
-     * Reads one bounded, deterministic page of keys that may yield claimable work, without claiming
-     * it. The page is tenant-scoped and ordered by process UUID. The cursor is the last process UUID
-     * inspected; callers pass it back to make progress past incompatible executions. An empty
-     * {@link ManagedClaimCandidatePage#nextAfter()} means the scan reached the end. Keys that appear
-     * after a page is read wait for a later sweep, and a subsequent atomic {@code claim*Among} call
-     * rechecks authority, eligibility, lease, and timer conditions.
+     * Reads one bounded, deterministic page of keys that currently have eligible recovery work,
+     * without claiming it. Discovery is tenant-scoped, ordered by process UUID, and driven from
+     * outstanding attempts, due timers, and durable handler triggers rather than from retained
+     * process history. The cursor is the last candidate process UUID inspected; callers pass it back
+     * to make progress past incompatible executions. An empty
+     * {@link ManagedClaimCandidatePage#nextAfter()} means the eligible set reached its end. Work that
+     * becomes eligible below a cursor is found when the bounded sweep wraps. A subsequent atomic
+     * {@code claim*Among} call remains authoritative and rechecks authority, eligibility, lease,
+     * fencing, visibility, and timer conditions.
      *
      * @param tenantId tenant whose execution keys are scanned
      * @param workerId stable identity of the worker that will claim candidates

@@ -169,6 +169,14 @@ def check_workflows() -> None:
         raise ValueError("release workflow has no fresh anonymous verification job")
     if "secrets." in validate or "packages: write" in validate or "environment:" in validate:
         raise ValueError("non-secret release gates gained publication authority")
+    for required in (
+        "packages: read",
+        "RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}",
+        "RAVENROOT_FIXTURE_REGISTRY_TOKEN: ${{ github.token }}",
+        "python3 scripts/fixtures/minio/verify.py preflight --platform linux/amd64 --pull",
+    ):
+        if required not in validate:
+            raise ValueError(f"release validation is missing immutable fixture preflight: {required}")
     if "environment:\n      name: release" not in publish:
         raise ValueError("publication job does not enter the protected release environment")
     referenced = set(re.findall(r"secrets\.([A-Z0-9_]+)", publish))

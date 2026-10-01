@@ -150,6 +150,33 @@ public final class RouteTable {
                     + "instance counts.", true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/node-types", "The trusted node-type catalog.", true, true,
                     200, STANDARD_ERRORS, READ, true),
+            new RouteDescriptor(Set.of("GET", "POST"), "/v1/node-palettes",
+                    "Lists or creates durable personal node palettes for the exact authenticated tenant, issuer, and subject. "
+                            + "Palette content is never assistant-visible and responses are private and non-cacheable.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("PATCH", "DELETE"), "/v1/node-palettes/{paletteId}",
+                    "Renames or deletes one caller-owned palette under a required If-Match version fence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/node-palettes/templates",
+                    "Saves one fail-closed, catalog-sanitized node template in a caller-owned palette. "
+                            + "Source ids, edges, coordinates, runtime data, adapter bindings, secret references, "
+                            + "and undeclared properties are excluded.",
+                    true, false, 201, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("PATCH", "DELETE"), "/v1/node-palettes/templates/{templateId}",
+                    "Moves, renames, or deletes one caller-owned template under a required If-Match version fence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/node-palettes/templates/{templateId}/validate",
+                    "Revalidates a saved template's current operator-owned references in the authenticated destination tenant before insertion.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
             // The program-language counterpart of /v1/node-types: a static, tenant-independent
             // capability catalog an editor reads to populate a selector, rather than a route bolted
             // onto /v1/runtime (a live execution snapshot) or /v1/status (a flat set of capability

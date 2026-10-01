@@ -179,6 +179,15 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         };
     }
 
+    @Override
+    public void validateTemplateReferences(NodeConfiguration configuration, String tenantId) {
+        try {
+            Settings.from(configuration, profiles, destinationPolicy, tenantId);
+        } catch (RuntimeException refused) {
+            throw new IllegalArgumentException("AMQP template references are unavailable for this tenant");
+        }
+    }
+
     private NodeResult execute(Settings settings, Payload payload) {
         long deadline = deadline(ticker.getAsLong(), settings.timeoutMs);
         SecretValue secret = null;

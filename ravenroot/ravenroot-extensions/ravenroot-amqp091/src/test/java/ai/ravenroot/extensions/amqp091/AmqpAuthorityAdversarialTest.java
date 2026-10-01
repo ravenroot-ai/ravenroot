@@ -13,11 +13,29 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpAuthorityAdversarialTest {
+    @Test
+    void savedPublisherProfilesAreRevalidatedForTheDestinationTenantWithoutCredentials() {
+        AtomicInteger credentials = new AtomicInteger();
+        var matching = new AmqpPublishNodeBehavior(reference -> {
+            credentials.incrementAndGet();
+            return Optional.empty();
+        }, (tenant, name) -> Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2)));
+        assertDoesNotThrow(() -> matching.validateTemplateReferences(
+                AmqpTestSupport.configuration(), AmqpTestSupport.TENANT));
+        assertEquals(0, credentials.get());
+
+        var crossTenant = new AmqpPublishNodeBehavior(reference -> Optional.empty(),
+                (tenant, name) -> Optional.of(AmqpTestSupport.profile("other", name, 4, 100, 1_000, 2)));
+        assertThrows(IllegalArgumentException.class, () -> crossTenant.validateTemplateReferences(
+                AmqpTestSupport.configuration(), AmqpTestSupport.TENANT));
+    }
+
     @Test
     void graphPriorityAndExpirationAreEffectivePayloadCapsIncludingNullAndZero() {
         var protocol = new AmqpTestSupport.FakeProtocol(

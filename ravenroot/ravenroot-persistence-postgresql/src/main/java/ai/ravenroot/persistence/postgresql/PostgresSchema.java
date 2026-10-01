@@ -1079,6 +1079,48 @@ final class PostgresSchema {
                                 + "process_instance_id, timer_id)",
                         "CREATE INDEX managed_recovery_handler_candidate ON execution_handler "
                                 + "(tenant_id, process_instance_id, handler_id) "
-                                + "WHERE status IN ('RESOLVED', 'DENIED', 'EXPIRED')")));
+                                + "WHERE status IN ('RESOLVED', 'DENIED', 'EXPIRED')")),
+                new SchemaMigration(16, "personal node palettes", List.of(
+                        """
+                        CREATE TABLE node_palette (
+                            tenant_id TEXT NOT NULL,
+                            issuer TEXT NOT NULL,
+                            subject TEXT NOT NULL,
+                            palette_id TEXT NOT NULL,
+                            name TEXT NOT NULL,
+                            version BIGINT NOT NULL,
+                            created_at_epoch_second BIGINT NOT NULL,
+                            created_at_nano INTEGER NOT NULL,
+                            updated_at_epoch_second BIGINT NOT NULL,
+                            updated_at_nano INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, issuer, subject, palette_id),
+                            UNIQUE (tenant_id, issuer, subject, name)
+                        )
+                        """,
+                        """
+                        CREATE TABLE node_template (
+                            tenant_id TEXT NOT NULL,
+                            issuer TEXT NOT NULL,
+                            subject TEXT NOT NULL,
+                            template_id TEXT NOT NULL,
+                            palette_id TEXT NOT NULL,
+                            name TEXT NOT NULL,
+                            kind TEXT NOT NULL,
+                            payload TEXT NOT NULL,
+                            version BIGINT NOT NULL,
+                            created_at_epoch_second BIGINT NOT NULL,
+                            created_at_nano INTEGER NOT NULL,
+                            updated_at_epoch_second BIGINT NOT NULL,
+                            updated_at_nano INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, issuer, subject, template_id),
+                            UNIQUE (tenant_id, issuer, subject, palette_id, name),
+                            FOREIGN KEY (tenant_id, issuer, subject, palette_id)
+                              REFERENCES node_palette (tenant_id, issuer, subject, palette_id)
+                              ON DELETE CASCADE
+                        )
+                        """,
+                        "CREATE INDEX node_template_palette ON node_template "
+                                + "(tenant_id, issuer, subject, palette_id, created_at_epoch_second, "
+                                + "created_at_nano, template_id)")));
     }
 }

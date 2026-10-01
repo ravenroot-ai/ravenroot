@@ -2587,3 +2587,21 @@
 @media (pointer: coarse) {
   .visual-group-actions .btn, .visual-group-members .btn, .visual-group-dialog button { min-height: 44px; }
 }
+
+.node-palettes { display: grid; gap: 9px; }
+.panel--content-collapsed > .panel-body { display: none; }
+.palette-create { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+.palette-create label { display: grid; gap: 4px; color: var(--tx-2); font-size: 11px; }
+.palette-create input { min-width: 0; width: 100%; box-sizing: border-box; }
+.node-palette { border: 1px solid var(--bd); border-radius: 7px; background: var(--bg-2); }
+.node-palette > summary { cursor: pointer; padding: 8px; font-weight: 650; }
+.palette-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 8px 8px; }
+.palette-actions button, .palette-create button, .node-template button { min-height: 32px; }
+.node-template { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(7rem, auto) auto auto; gap: 5px; padding: 5px 8px; }
+.node-template-insert { text-align: left; overflow-wrap: anywhere; cursor: grab; }
+@media (max-width: 720px) {
+  .node-template { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px), (pointer: coarse) {
+  .palette-actions button, .palette-create button, .node-template button { min-height: 44px; }
+}

@@ -93,7 +93,12 @@ public enum AuthorizationAction {
     HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true),
 
     /** Discover the caller tenant's process-local deployments that are currently ready to embed. */
-    EMBED_DEPLOYMENT_DISCOVER("ravenroot.embed.deployment.discover", true);
+    EMBED_DEPLOYMENT_DISCOVER("ravenroot.embed.deployment.discover", true),
+
+    /** Read the authenticated author's personal node palettes. */
+    PALETTE_READ("ravenroot.palette.read", true),
+    /** Create, rename, move, or delete the authenticated author's personal node palettes. */
+    PALETTE_MANAGE("ravenroot.palette.manage", true);
 
     private final String requiredScope;
     private final boolean available;

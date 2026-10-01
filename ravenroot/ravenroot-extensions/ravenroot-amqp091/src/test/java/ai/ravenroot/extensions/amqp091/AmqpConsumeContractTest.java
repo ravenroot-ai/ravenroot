@@ -18,12 +18,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpConsumeContractTest {
+    @Test
+    void savedConsumerProfilesAndInboundAuthorityAreRevalidatedForTheDestinationTenant() {
+        var protocol = new AmqpConsumerTestSupport.FakeProtocol();
+        var matching = behavior(protocol);
+        assertDoesNotThrow(() -> matching.validateTemplateReferences(
+                configuration(Map.of()), AmqpTestSupport.TENANT));
+
+        var missingPolicy = new AmqpConsumeNodeBehavior(ignored -> Optional.empty(),
+                (tenant, name) -> Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2)),
+                (tenant, name) -> Optional.empty(), protocol, Runnable::run, Clock.systemUTC());
+        assertThrows(IllegalArgumentException.class, () -> missingPolicy.validateTemplateReferences(
+                configuration(Map.of()), AmqpTestSupport.TENANT));
+        assertThrows(IllegalArgumentException.class, () -> matching.validateTemplateReferences(
+                configuration(Map.of("queue", "unauthorized.q")), AmqpTestSupport.TENANT));
+    }
+
     @Test void typedEmissionVocabularyIsExactlyTheTrustedDeclaration() {
         Set<String> expected = Set.of("amqp-consumer-already-active", "amqp-consumer-failed",
                 "amqp-consumer-policy-unavailable", "amqp-consumer-unavailable", "amqp-profile-unavailable",

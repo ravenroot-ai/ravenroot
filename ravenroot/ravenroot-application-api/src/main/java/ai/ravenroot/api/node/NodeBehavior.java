@@ -80,6 +80,15 @@ public interface NodeBehavior {
     NodeAction create(NodeConfiguration configuration);
 
     /**
+     * Validates tenant-scoped, operator-owned references before an editor stores or inserts a template.
+     * Implementations must not resolve credentials or return authority details. The default is suitable
+     * for behaviors whose complete authoring contract is already expressed by their descriptor.
+     * @param configuration descriptor-filtered authored properties
+     * @param tenantId authenticated destination tenant
+     */
+    default void validateTemplateReferences(NodeConfiguration configuration, String tenantId) { }
+
+    /**
      * SDK /2 construction path for service-aware behaviors.
      *
      * <p>The default bridge deliberately calls the published SDK /1 method, preserving already

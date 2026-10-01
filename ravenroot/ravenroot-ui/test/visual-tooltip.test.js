@@ -30,17 +30,17 @@ afterEach(() => {
 });
 
 describe('tooltip applicability', () => {
-  // The eight-panel count is written out rather than derived from the markup on purpose: it is an
+  // The nine-panel count is written out rather than derived from the markup on purpose: it is an
   // INVENTORY, so a panel that arrives without its menu tooltip,
   // its close tooltip or its text-control exemption has to be noticed here rather than pass by
   // agreeing with itself.
-  it('keeps the static eight-panel chrome in one explicit tooltip inventory', async () => {
+  it('keeps the static nine-panel chrome in one explicit tooltip inventory', async () => {
     const html = await readFile('index.html', 'utf8');
     const page = new DOMParser().parseFromString(html, 'text/html');
 
-    expect(page.querySelectorAll('.panel[data-panel-id]')).toHaveLength(8);
-    expect(page.querySelectorAll('.panel-hd [data-action="panel-menu"][data-tooltip]')).toHaveLength(8);
-    expect(page.querySelectorAll('.panel-hd [data-action="panel-close"][data-tooltip]')).toHaveLength(8);
+    expect(page.querySelectorAll('.panel[data-panel-id]')).toHaveLength(9);
+    expect(page.querySelectorAll('.panel-hd [data-action="panel-menu"][data-tooltip]')).toHaveLength(9);
+    expect(page.querySelectorAll('.panel-hd [data-action="panel-close"][data-tooltip]')).toHaveLength(9);
     expect(page.querySelectorAll('.panel-hd [title], .rail [title]')).toHaveLength(0);
     expect(page.querySelectorAll('.rail-toggle[data-tooltip], .rail-index[data-tooltip]')).toHaveLength(4);
     expect(page.querySelectorAll('[data-splitter-kind="workspace"][data-tooltip]')).toHaveLength(3);

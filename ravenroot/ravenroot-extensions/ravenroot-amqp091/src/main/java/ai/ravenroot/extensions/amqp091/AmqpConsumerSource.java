@@ -401,6 +401,11 @@ final class AmqpConsumerSource implements InboundSource {
         }
     }
 
+    /** Reuses source-start authority checks without opening a connection or resolving a credential. */
+    static void validateTemplateSettings(NodeConfiguration configuration, AmqpConsumerPolicy policy) {
+        Settings.resolve(configuration, policy);
+    }
+
     private static final class FailureStreak {
         private int attempts;
         int failed() { if (attempts < Integer.MAX_VALUE) attempts++; return attempts; }

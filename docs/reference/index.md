@@ -14,6 +14,7 @@ Look up exact GraphML, node, execution, API, configuration, embed, extension, an
 - [Production environment-variable inventory](environment-variables.md) — Reach every production Java environment name or dynamic family and its semantic contract.
 - [Durable human tasks](human-tasks.md) — Author restart-safe human decisions and use the bounded tenant inbox and generation-fenced decision API.
 - [Session memory](session-memory.md) — Store bounded, redacted agent context with explicit tenant, session, process, and node lifecycles.
+- [Personal node palettes](personal-node-palettes.md) — Save safely filtered configured nodes for one authenticated author and insert them with destination reference checks.
 - [Executions, outcomes, and events](execution-events.md) — Find states, control transitions, evidence sets, cursor semantics, retention gaps, and error shapes.
 - [HTTP API and CLI](api-cli.md) — Map endpoints and commands to authority, inputs, success responses, and refusal behavior.
 - [Command-line tools](command-line-tools.md) — Operate `plugin.sh`, `service.sh`, `dev.sh`, and every supported application CLI verb and option.

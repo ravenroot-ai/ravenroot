@@ -737,6 +737,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public void validateNodeTemplateReferences(String tenantId, String behavior,
+                                               Map<String, String> properties) {
+        behaviors.validateTemplateReferences(new ai.ravenroot.core.graph.GraphNode(
+                "saved-template", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, behavior,
+                new java.util.LinkedHashMap<>(properties)), tenantId);
+    }
+
+    @Override
     public Map<String, ai.ravenroot.api.catalog.NodeCatalogSource> nodeTypeSources() {
         return behaviors.catalogSources();
     }

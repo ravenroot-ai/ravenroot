@@ -563,6 +563,15 @@ public final class BehaviorRegistry {
         if (factory != null) factory.validate(node);
     }
 
+    /** Validates references through the exact registered behavior without constructing an action. */
+    public void validateTemplateReferences(GraphNode node, String tenantId) {
+        if (node == null || node.behavior() == null) return;
+        var factory = factories.get(node.behavior());
+        if (factory == null) throw new IllegalArgumentException("behavior is unavailable");
+        factory.validate(node);
+        factory.validateTemplateReferences(node, tenantId);
+    }
+
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */
     public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
         if (node == null || node.behavior() == null) return Optional.empty();

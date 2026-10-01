@@ -18,6 +18,8 @@ public interface NodeBehaviorFactory {
         // Most behaviors are fully described by the generic property schema.
     }
 
+    default void validateTemplateReferences(GraphNode node, String tenantId) { }
+
     NodeHandler create(GraphNode node);
 
     /** Fail-closed opt-in for trusted, package-owned durable checkpoint decoding. */

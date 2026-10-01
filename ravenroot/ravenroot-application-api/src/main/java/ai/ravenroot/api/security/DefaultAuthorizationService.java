@@ -59,6 +59,14 @@ public final class DefaultAuthorizationService implements AuthorizationService {
                 && context.principalType() != PrincipalType.USER) {
             return deny("runner governance requires an operator principal");
         }
+        if ((action == AuthorizationAction.PALETTE_READ || action == AuthorizationAction.PALETTE_MANAGE)
+                && context.principalType() != PrincipalType.USER) {
+            return deny("personal palettes require a user principal");
+        }
+        if ((action == AuthorizationAction.PALETTE_READ || action == AuthorizationAction.PALETTE_MANAGE)
+                && resource.tenantId().filter(context.tenantId()::equals).isEmpty()) {
+            return deny("personal palettes require exact tenant ownership");
+        }
         if ((action == AuthorizationAction.RUNNER_READ || action == AuthorizationAction.RUNNER_ADMIN
                 || action == AuthorizationAction.RUNNER_CONTROL || action == AuthorizationAction.RUNNER_DISPATCH)
                 && !resource.tenantId().get().equals(context.tenantId())) {
@@ -102,6 +110,10 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.DEVELOPER, Role.APPROVER,
                 Role.TENANT_ADMIN, Role.PLATFORM_ADMIN), AuthorizationAction.STATUS_READ,
                 AuthorizationAction.CATALOG_READ, AuthorizationAction.ARTIFACT_LIST);
+        put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.DEVELOPER, Role.APPROVER,
+                Role.TENANT_ADMIN, Role.PLATFORM_ADMIN), AuthorizationAction.PALETTE_READ);
+        put(matrix, EnumSet.of(Role.OPERATOR, Role.DEVELOPER, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.PALETTE_MANAGE);
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.GRAPH_READ, AuthorizationAction.EXECUTION_START);
         put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),

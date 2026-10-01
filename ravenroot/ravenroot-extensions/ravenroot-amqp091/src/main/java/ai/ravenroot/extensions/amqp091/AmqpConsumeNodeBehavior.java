@@ -99,6 +99,25 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
         return message -> java.util.concurrent.CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
     }
 
+    @Override public void validateTemplateReferences(NodeConfiguration configuration, String tenantId) {
+        String name = configuration.property("brokerProfile")
+                .orElseThrow(() -> new IllegalArgumentException("AMQP broker profile is required"));
+        try {
+            AmqpProfile profile = profiles.resolve(tenantId, name).orElse(null);
+            AmqpConsumerPolicy policy = policies.resolve(tenantId, name).orElse(null);
+            if (profile == null || policy == null || !tenantId.equals(profile.tenant())
+                    || !name.equals(profile.name()) || !tenantId.equals(policy.tenant())
+                    || !name.equals(policy.profile())) {
+                throw new IllegalArgumentException("AMQP template references are unavailable for this tenant");
+            }
+            AmqpConsumerSource.validateTemplateSettings(configuration, policy);
+        } catch (IllegalArgumentException refusal) {
+            throw refusal;
+        } catch (RuntimeException unavailable) {
+            throw new IllegalArgumentException("AMQP template references are unavailable for this tenant");
+        }
+    }
+
     @Override public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context) {
         return new AmqpConsumerSource(configuration, credentials, profiles, policies, protocol, executor, clock);
     }

@@ -324,6 +324,8 @@ public final class RavenrootServer implements AutoCloseable {
      */
     private ai.ravenroot.core.manifest.ExecutionManifestService executionManifests;
     private ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentAuthorityControl;
+    /** Durable personal palette authority, absent when persistence is disabled. */
+    private ai.ravenroot.server.palette.NodePaletteStore nodePalettes;
     private ai.ravenroot.api.application.ExecutionControlAuditSink agentAuthorityControlAudit;
     /**
      * Injectable: the narrower constructors below default to the stdout
@@ -778,6 +780,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/runtime", this::runtime);
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
+        apiContext("/v1/node-palettes", this::nodePalettes);
         apiContext("/v1/human-tasks", this::humanTasks);
         apiPrefixContext("/v1/runner-plane", this::runnerPlane);
         apiContext("/v1/admin/human-tasks", this::adminHumanTasks);
@@ -1166,6 +1169,13 @@ public final class RavenrootServer implements AutoCloseable {
             throw new IllegalStateException("agent authority control is already installed");
         }
         agentAuthorityControl = java.util.Objects.requireNonNull(control, "control");
+    }
+
+    /** Installs durable personal palettes before the listener starts. */
+    synchronized void installNodePalettes(ai.ravenroot.server.palette.NodePaletteStore palettes) {
+        if (started.get()) throw new IllegalStateException("node palettes must be installed before start");
+        if (nodePalettes != null) throw new IllegalStateException("node palettes are already installed");
+        nodePalettes = java.util.Objects.requireNonNull(palettes, "palettes");
     }
 
     /** Test seam that observes the same sanitized control events as the production audit trail. */
@@ -1972,6 +1982,166 @@ public final class RavenrootServer implements AutoCloseable {
             // credential. This class has no signature that puts error text in a body -- see fail(..).
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
+    }
+
+    /** Authenticated CRUD for the caller's exact tenant, issuer, and subject palette namespace. */
+    private void nodePalettes(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (nodePalettes == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+        exchange.getResponseHeaders().set("Pragma", "no-cache");
+        var context = httpContext.applicationContext();
+        var owner = new ai.ravenroot.server.palette.NodePaletteStore.Owner(
+                context.tenantId(), context.issuer(), context.subject());
+        String path = exchange.getRequestURI().getPath();
+        try {
+            if ("/v1/node-palettes".equals(path)) {
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_READ);
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writeAll(
+                            nodePalettes.listPalettes(owner), nodePalettes.listTemplates(owner)));
+                } else if ("POST".equals(exchange.getRequestMethod())) {
+                    authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                    var created = nodePalettes.createPalette(owner,
+                            ai.ravenroot.server.palette.NodePaletteWire.readPaletteName(readPaletteBody(exchange)));
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writePalette(created));
+                } else {
+                    paletteMethodNotAllowed(exchange, httpContext, "GET, POST");
+                }
+                return;
+            }
+            if ("/v1/node-palettes/templates".equals(path)) {
+                if (!"POST".equals(exchange.getRequestMethod())) {
+                    paletteMethodNotAllowed(exchange, httpContext, "POST");
+                    return;
+                }
+                authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                var request = ai.ravenroot.server.palette.NodePaletteWire.readCreateTemplate(
+                        readPaletteBody(exchange), application.nodeTypes());
+                if ("BEHAVIOR".equals(request.node().kind())) {
+                    application.validateNodeTemplateReferences(context.tenantId(), request.node().behavior(),
+                            request.node().properties());
+                }
+                var created = nodePalettes.createTemplate(owner, request.paletteId(), request.name(),
+                        request.node().kind(), ai.ravenroot.server.palette.NodePaletteWire.payload(request.node()));
+                json(exchange, 201, ai.ravenroot.server.palette.NodePaletteWire.writeTemplate(created));
+                return;
+            }
+            final String templatesPrefix = "/v1/node-palettes/templates/";
+            if (path.startsWith(templatesPrefix) && path.length() > templatesPrefix.length()) {
+                String suffix = path.substring(templatesPrefix.length());
+                if (suffix.endsWith("/validate")) {
+                    String id = paletteId(suffix.substring(0, suffix.length() - "/validate".length()));
+                    if (!"POST".equals(exchange.getRequestMethod())) {
+                        paletteMethodNotAllowed(exchange, httpContext, "POST");
+                        return;
+                    }
+                    authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_READ);
+                    var saved = ai.ravenroot.server.palette.NodePaletteWire.readStoredNode(
+                            nodePalettes.findTemplate(owner, id).payload());
+                    if ("BEHAVIOR".equals(saved.kind())) {
+                        application.validateNodeTemplateReferences(context.tenantId(), saved.behavior(),
+                                saved.properties());
+                    }
+                    json(exchange, 200, "{\"valid\":true}");
+                    return;
+                }
+                String id = paletteId(suffix);
+                if (!"PATCH".equals(exchange.getRequestMethod())
+                        && !"DELETE".equals(exchange.getRequestMethod())) {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                    return;
+                }
+                authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                long version = paletteVersion(exchange);
+                if ("PATCH".equals(exchange.getRequestMethod())) {
+                    var request = ai.ravenroot.server.palette.NodePaletteWire.readUpdate(readPaletteBody(exchange));
+                    var updated = nodePalettes.updateTemplate(owner, id, version,
+                            request.paletteId(), request.name());
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writeTemplate(updated));
+                } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                    nodePalettes.deleteTemplate(owner, id, version);
+                    json(exchange, 200, "{\"deleted\":true}");
+                } else {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                }
+                return;
+            }
+            final String palettesPrefix = "/v1/node-palettes/";
+            if (path.startsWith(palettesPrefix) && path.length() > palettesPrefix.length()) {
+                String id = paletteId(path.substring(palettesPrefix.length()));
+                if (!"PATCH".equals(exchange.getRequestMethod())
+                        && !"DELETE".equals(exchange.getRequestMethod())) {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                    return;
+                }
+                authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                long version = paletteVersion(exchange);
+                if ("PATCH".equals(exchange.getRequestMethod())) {
+                    var updated = nodePalettes.renamePalette(owner, id, version,
+                            ai.ravenroot.server.palette.NodePaletteWire.readPaletteName(readPaletteBody(exchange)));
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writePalette(updated));
+                } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                    nodePalettes.deletePalette(owner, id, version);
+                    json(exchange, 200, "{\"deleted\":true}");
+                } else {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                }
+                return;
+            }
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+        } catch (ai.ravenroot.server.palette.NodePaletteStore.StoreException failure) {
+            ErrorCode code = switch (failure.failure()) {
+                case NOT_FOUND -> ErrorCode.UNKNOWN_RESOURCE;
+                case CONFLICT, DUPLICATE_NAME, LIMIT_REACHED -> ErrorCode.CONFLICT;
+                case UNAVAILABLE -> ErrorCode.INTERNAL_ERROR;
+            };
+            fail(exchange, httpContext, code);
+        } catch (PayloadException rejection) {
+            failPayload(exchange, httpContext, rejection);
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    private void authorizePalette(ai.ravenroot.api.security.RequestContext context,
+                                  ai.ravenroot.api.security.AuthorizationAction action) {
+        authorization.requireAllowed(context, action,
+                ai.ravenroot.api.security.ProtectedResource.collection("node-palettes", context.tenantId()));
+    }
+
+    private static byte[] readPaletteBody(HttpExchange exchange) throws IOException {
+        int maximum = ai.ravenroot.server.palette.NodePaletteWire.REQUEST_LIMITS.maxEncodedBytes();
+        try (var input = exchange.getRequestBody()) {
+            byte[] body = input.readNBytes(maximum + 1);
+            if (body.length > maximum) throw new IllegalArgumentException("request too large");
+            return body;
+        }
+    }
+
+    private static String paletteId(String value) {
+        if (value.indexOf('/') >= 0) throw new IllegalArgumentException("invalid identifier");
+        return java.util.UUID.fromString(value).toString();
+    }
+
+    private static long paletteVersion(HttpExchange exchange) {
+        String raw = exchange.getRequestHeaders().getFirst("If-Match");
+        if (raw == null) throw new IllegalArgumentException("If-Match is required");
+        raw = raw.strip();
+        if (raw.startsWith("\"") && raw.endsWith("\"") && raw.length() > 2) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        long version = Long.parseLong(raw);
+        if (version < 1) throw new IllegalArgumentException("invalid version");
+        return version;
+    }
+
+    private static void paletteMethodNotAllowed(HttpExchange exchange, HttpRequestContext context,
+                                                String methods) throws IOException {
+        exchange.getResponseHeaders().set("Allow", methods);
+        fail(exchange, context, ErrorCode.METHOD_NOT_ALLOWED);
     }
 
     /**

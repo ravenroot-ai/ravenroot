@@ -112,7 +112,7 @@ public final class ExecutionStoreBootstrap {
         try {
             SqliteStoreMaintenanceLock.requireNoPendingRecovery(location);
             if (!enabled) {
-                return new Opened(null, null, null, null, () -> { }, maintenanceLock::close);
+                return new Opened(null, null, null, null, null, () -> { }, maintenanceLock::close);
             }
             var store = new SqliteExecutionStore(location, clock,
                     ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), humanTaskPolicy);
@@ -164,7 +164,9 @@ public final class ExecutionStoreBootstrap {
                 }
                 throw failed;
             }
-            return new Opened(store, definitions, manifests, deployments,
+            var palettes = ai.ravenroot.server.palette.JdbcNodePaletteStore.sqlite(
+                    location.databaseFile(), clock);
+            return new Opened(store, definitions, manifests, deployments, palettes,
                     closeInOrder(store, definitions, manifests, deployments), maintenanceLock::close);
         } catch (RuntimeException failed) {
             maintenanceLock.close();
@@ -241,7 +243,9 @@ public final class ExecutionStoreBootstrap {
             // must be released strictly after all three of them. It is not a maintenance lease and
             // excludes nobody — see this class's own explanation of why the shared store must not
             // have one.
-            return new Opened(store, definitions, manifests, deployments,
+            var palettes = ai.ravenroot.server.palette.JdbcNodePaletteStore.postgresql(
+                    pool.dataSource(), clock);
+            return new Opened(store, definitions, manifests, deployments, palettes,
                     closeInOrder(store, definitions, manifests, deployments), pool::close);
         } catch (RuntimeException failed) {
             pool.close();
@@ -305,6 +309,7 @@ public final class ExecutionStoreBootstrap {
         private final GraphDefinitionStore graphDefinitionStore;
         private final ExecutionManifestStore executionManifestStore;
         private final DeploymentRegistry deploymentRegistry;
+        private final ai.ravenroot.server.palette.NodePaletteStore nodePaletteStore;
         private final Runnable closeStore;
         private final Runnable releaseBackingResource;
         private final AtomicBoolean closed = new AtomicBoolean();
@@ -312,18 +317,20 @@ public final class ExecutionStoreBootstrap {
         private Opened(ExecutionStore store, GraphDefinitionStore graphDefinitionStore,
                        ExecutionManifestStore executionManifestStore,
                        DeploymentRegistry deploymentRegistry,
+                       ai.ravenroot.server.palette.NodePaletteStore nodePaletteStore,
                        Runnable closeStore, Runnable releaseBackingResource) {
             this.store = store;
             this.graphDefinitionStore = graphDefinitionStore;
             this.executionManifestStore = executionManifestStore;
             this.deploymentRegistry = deploymentRegistry;
+            this.nodePaletteStore = nodePaletteStore;
             this.closeStore = Objects.requireNonNull(closeStore, "closeStore");
             this.releaseBackingResource = Objects.requireNonNull(
                     releaseBackingResource, "releaseBackingResource");
         }
 
         static Opened forTest(Runnable closeStore, Runnable releaseBackingResource) {
-            return new Opened(null, null, null, null, closeStore, releaseBackingResource);
+            return new Opened(null, null, null, null, null, closeStore, releaseBackingResource);
         }
 
         public ExecutionStore store() {
@@ -355,6 +362,11 @@ public final class ExecutionStoreBootstrap {
         /** Shared durable lifecycle authority, absent only when persistence is disabled. */
         public DeploymentRegistry deploymentRegistry() {
             return deploymentRegistry;
+        }
+
+        /** Personal author palettes in the selected durable store; absent when persistence is disabled. */
+        public ai.ravenroot.server.palette.NodePaletteStore nodePaletteStore() {
+            return nodePaletteStore;
         }
 
         /**

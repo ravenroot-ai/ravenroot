@@ -1439,23 +1439,24 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     descriptor, node.properties()) != ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE) {
                 continue;
             }
-            Optional<NodePackages.SdkNodeBehaviorFactory> capableFactory =
-                    behaviors.sourceCapableFactory(node.behavior());
+            Optional<BehaviorRegistry.InboundSourceFactory> capableFactory =
+                    behaviors.inboundSourceFactory(node.behavior());
             if (capableFactory.isEmpty()) {
                 continue;
             }
-            String packageId = behaviors.catalogSources().get(node.behavior()).bundleId();
-            IngressRouteOwner owner = managedIngress == null ? null : new IngressRouteOwner(packageId,
+            String packageId = capableFactory.orElseThrow().packageId().orElse(null);
+            IngressRouteOwner owner = managedIngress == null || packageId == null ? null : new IngressRouteOwner(packageId,
                     security.tenantId(), id.value(), node.id(), generation);
             SourceContext context = new SourceContext(node.id(), node.behavior(), security, owner, generation);
-            BehaviorRegistry.SourceRegistration packageAuthority = behaviors.registerSourceAuthority(
-                    context, packageId, id, node.id(), generation, security);
+            BehaviorRegistry.SourceRegistration packageAuthority = packageId == null
+                    ? BehaviorRegistry.SourceRegistration.none()
+                    : behaviors.registerSourceAuthority(context, packageId, id, node.id(), generation, security);
             BehaviorRegistry.SourceRegistration sourceAuthority = context.bind(packageAuthority);
             InboundSource source = null;
             boolean recorded = false;
             GraphAdmissionPhase phase = GraphAdmissionPhase.SOURCE_CONSTRUCTION;
             try {
-                source = capableFactory.get().createSource(node, context);
+                source = capableFactory.get().create(node, context);
                 if (source == null) {
                     throw new IllegalStateException("Behavior '" + node.behavior()
                             + "' returned no inbound source for node '" + node.id() + "'");
@@ -2247,6 +2248,41 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     }
 
     /**
+     * Re-offer an execution whose acceptance row survived a crash before its first node invocation.
+     * The source still has the payload because its occurrence cursor has not advanced. A held lease
+     * refuses the re-offer while the original dispatch may still be alive. Once that lease expires,
+     * the same process and traversal are resumed; completed or already-invoked work is never replayed.
+     */
+    private ExecutionRecorder resumeUnstartedTraversal(SecurityContext security, UUID processInstanceId,
+                                                        UUID traversalId) {
+        var key = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), processInstanceId);
+        var stored = awaitStore(executionStore.load(key));
+        var traversal = stored.state().traversals().get(traversalId);
+        if (!graphVersion.equals(stored.graphVersionPin().reference()) || traversal == null
+                || !manager.start().id().equals(traversal.ingressNodeId())) {
+            throw new IllegalStateException("unstarted execution belongs to a different graph definition");
+        }
+        if (!traversal.invocations().isEmpty()) return null;
+
+        long revision = stored.revision();
+        if (stored.state().status() == ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED
+                && traversal.status() == ai.ravenroot.api.application.TraversalStatus.ACCEPTED) {
+            revision = awaitStore(executionStore.apply(
+                    ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                            .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(revision))
+                            .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                                    ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING))
+                            .apply(new ai.ravenroot.api.persistence.ExecutionTransition.TraversalTransitioned(
+                                    traversalId, ai.ravenroot.api.application.TraversalStatus.RUNNING))
+                            .build())).revision();
+        } else if (stored.state().status() != ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING
+                || traversal.status() != ai.ravenroot.api.application.TraversalStatus.RUNNING) {
+            return null;
+        }
+        return ExecutionRecorder.open(executionStore, key, workerId, executionLeaseTtl, revision);
+    }
+
+    /**
      * Pins what this traversal's process instance was resolved against.
      *
      * <p>Reached only from {@link #openTraversalRecorder}, which returns before this when no execution
@@ -2391,6 +2427,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     }
 
     private final class IngressView implements TrustedIngress {
+        private final java.util.Set<UUID> activeDurableEvents = java.util.concurrent.ConcurrentHashMap.newKeySet();
         @Override
         public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
             Objects.requireNonNull(security, "security");
@@ -2510,9 +2547,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
          * degrade-to-volatile the interface default provides, kept here only so this deployment's
          * admission is evaluated once rather than reimplemented. When a store is configured, admission
          * is checked first (a refusal never reaches the store) and the durable commit happens before
-         * the traversal is dispatched, never after -- so a crash between the two leaves a durable
-         * record with no traversal, recoverable by redelivery being recognised as {@code Duplicate},
-         * rather than a traversal with no durable record, which redelivery could not detect at all.
+         * the traversal is dispatched, never after. A crash after the inbox write but before
+         * execution creation is reconciled by redelivery with the same deterministic event identity.
          */
         @Override
         public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
@@ -2570,78 +2606,111 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     (tenantId + '\0' + destination + '\0' + idempotentKey)
                             .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
-            boolean firstDelivery;
-            try {
-                firstDelivery = (sourceStore == null
-                        ? executionStore.recordInboxDelivery(tenantId, destination, eventId, inboxRetention)
-                        : sourceStore.recordInbox(sourceId, eventId, inboxRetention))
-                        .toCompletableFuture().get(DEFAULT_STORE_CALL_BOUND.toMillis(), TimeUnit.MILLISECONDS);
-            } catch (RuntimeException | ExecutionException | TimeoutException storeFailure) {
-                // The commit is genuinely unknown, not refused (IngressReceipt.Ambiguous's own
-                // Javadoc): the traversal is not dispatched, because dispatching now could duplicate
-                // work a delayed, eventually-successful write already durably recorded. Reconciliation
-                // is re-offering the same idempotentKey once the caller has backed off.
+            if (!activeDurableEvents.add(eventId)) {
                 permits.release();
                 return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
-                        "durable commit did not resolve within its bound");
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                permits.release();
-                return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
-                        "interrupted waiting for durable commit");
-            }
-
-            if (!firstDelivery) {
-                // Already durably recorded by an earlier call. No second traversal: recordInboxDelivery
-                // is what converts the source's at-least-once redelivery into at-most-once effect here.
-                permits.release();
-                return new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
-            }
-
-            UUID processInstanceId = identitySource.nextProcessInstanceId();
-            UUID traversalId = identitySource.nextTraversalId();
-            ExecutionRecorder recorder;
-            try {
-                recorder = openTraversalRecorder(security, processInstanceId, traversalId);
-            } catch (ExecutionInstanceBusyException busy) {
-                // Fail closed, expressed in the receipt the caller already knows how to read.
-                // Unreachable today; see IngressDisposition.REJECTED_INSTANCE_BUSY for why, and why
-                // the refuse-versus-queue choice belongs to the re-entry work rather than here.
-                permits.release();
-                return new ai.ravenroot.api.deployment.IngressReceipt.Refused(
-                        "process instance is already leased by another worker");
-            } catch (RuntimeException | Error recordFailure) {
-                permits.release();
-                throw recordFailure;
+                        "the same durable event is still being admitted");
             }
             try {
-                // Registered and dispatched under one lock, against the generation this arrival was
-                // admitted at. The durable commit above is I/O and cannot be held under the lock, so a
-                // barrier may have closed that generation while it ran; this is where that is decided,
-                // by the exact equality ADR 0038 D6 requires. The durable record stands either way and
-                // a redelivery of the same key is recognised as a Duplicate -- which is why refusing
-                // here loses nothing the source cannot re-offer.
-                lock.lock();
+
+                boolean firstDelivery;
                 try {
-                    if (barrierStanding && generation != barrierGeneration) {
-                        closeQuietly(recorder);
-                        permits.release();
-                        return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
-                    }
-                    admitted.put(traversalId, generation);
-                    executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
-                            .whenComplete((ignoredResult, ignoredError) -> {
-                                admitted.remove(traversalId);
-                                permits.release();
-                            });
-                } finally {
-                    lock.unlock();
+                    firstDelivery = (sourceStore == null
+                            ? executionStore.recordInboxDelivery(tenantId, destination, eventId, inboxRetention)
+                            : sourceStore.recordInbox(sourceId, eventId, inboxRetention))
+                            .toCompletableFuture().get(DEFAULT_STORE_CALL_BOUND.toMillis(), TimeUnit.MILLISECONDS);
+                } catch (RuntimeException | ExecutionException | TimeoutException storeFailure) {
+                    // The commit is genuinely unknown, not refused (IngressReceipt.Ambiguous's own
+                    // Javadoc): the traversal is not dispatched, because dispatching now could duplicate
+                    // work a delayed, eventually-successful write already durably recorded. Reconciliation
+                    // is re-offering the same idempotentKey once the caller has backed off.
+                    permits.release();
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                            "durable commit did not resolve within its bound");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    permits.release();
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                            "interrupted waiting for durable commit");
                 }
-            } catch (RuntimeException | Error dispatchFailure) {
-                releaseAdmission(traversalId, permits);
-                throw dispatchFailure;
+
+                // A durable event owns deterministic execution identities. This closes the crash window
+                // between inbox commit and traversal creation: a redelivery that finds only the inbox row
+                // creates the missing execution, while one that finds the execution receives Duplicate.
+                // The execution store's NotPresent expectation is the cross-process arbitration point.
+                UUID processInstanceId = eventId;
+                UUID traversalId = UUID.nameUUIDFromBytes((eventId + "\0traversal")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                ExecutionRecorder recorder;
+                boolean resumed = false;
+                try {
+                    recorder = openTraversalRecorder(security, processInstanceId, traversalId);
+                } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+                    if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.AlreadyExists) {
+                        try {
+                            recorder = resumeUnstartedTraversal(security, processInstanceId, traversalId);
+                            if (recorder == null) {
+                                permits.release();
+                                return new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
+                            }
+                            resumed = true;
+                        } catch (ExecutionInstanceBusyException busy) {
+                            permits.release();
+                            return new ai.ravenroot.api.deployment.IngressReceipt.Refused(
+                                    "process instance is already leased by another worker");
+                        } catch (RuntimeException recoveryFailure) {
+                            permits.release();
+                            return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                                    "durable traversal recovery did not resolve");
+                        }
+                    } else {
+                        permits.release();
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                                "durable traversal acceptance did not resolve");
+                    }
+                } catch (ExecutionInstanceBusyException busy) {
+                    // Fail closed, expressed in the receipt the caller already knows how to read.
+                    // Unreachable today; see IngressDisposition.REJECTED_INSTANCE_BUSY for why, and why
+                    // the refuse-versus-queue choice belongs to the re-entry work rather than here.
+                    permits.release();
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused(
+                            "process instance is already leased by another worker");
+                } catch (RuntimeException | Error recordFailure) {
+                    permits.release();
+                    throw recordFailure;
+                }
+                try {
+                    // Registered and dispatched under one lock, against the generation this arrival was
+                    // admitted at. The durable commit above is I/O and cannot be held under the lock, so a
+                    // barrier may have closed that generation while it ran; this is where that is decided,
+                    // by the exact equality ADR 0038 D6 requires. The durable record stands either way;
+                    // a redelivery has the same execution identity and cannot create a second traversal.
+                    lock.lock();
+                    try {
+                        if (barrierStanding && generation != barrierGeneration) {
+                            closeQuietly(recorder);
+                            permits.release();
+                            return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+                        }
+                        admitted.put(traversalId, generation);
+                        executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
+                                .whenComplete((ignoredResult, ignoredError) -> {
+                                    admitted.remove(traversalId);
+                                    permits.release();
+                                });
+                    } finally {
+                        lock.unlock();
+                    }
+                } catch (RuntimeException | Error dispatchFailure) {
+                    releaseAdmission(traversalId, permits);
+                    throw dispatchFailure;
+                }
+                return firstDelivery && !resumed
+                        ? new ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted(idempotentKey)
+                        : new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
+            } finally {
+                activeDurableEvents.remove(eventId);
             }
-            return new ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted(idempotentKey);
         }
 
         @Override

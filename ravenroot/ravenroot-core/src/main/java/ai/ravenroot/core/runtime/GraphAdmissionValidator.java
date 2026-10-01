@@ -90,6 +90,9 @@ public final class GraphAdmissionValidator {
             if (node.kind() != NodeKind.BEHAVIOR || !include.test(node)) continue;
             try {
                 behaviors.validate(node);
+            } catch (BehaviorValidationException refusal) {
+                throw refuse(GraphAdmissionPhase.PROPERTY_SCHEMA, refusal.reason(),
+                        node.id(), refusal.propertyName());
             } catch (RuntimeException refusal) {
                 throw refuse(GraphAdmissionPhase.CAPABILITY, GraphAdmissionReason.CAPABILITY_UNAVAILABLE,
                         node.id(), null);
@@ -135,7 +138,7 @@ public final class GraphAdmissionValidator {
                 continue;
             }
             boolean sourceCapable = node.kind() == NodeKind.BEHAVIOR
-                    && behaviors.sourceCapableFactory(node.behavior()).isPresent();
+                    && behaviors.inboundSourceFactory(node.behavior()).isPresent();
             if (!sourceCapable && purpose != GraphAdmissionPurpose.EXECUTION) {
                 throw refuse(GraphAdmissionPhase.SOURCE_REQUIREMENT,
                         GraphAdmissionReason.SOURCE_CAPABILITY_MISMATCH, node.id(), null);

@@ -400,6 +400,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private final Transactions transactions;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final Set<OwnedSourceCheckpoints> sourceCheckpointOwners = new java.util.HashSet<>();
 
     /** Creates a store over {@code dataSource}, migrating the schema if it is not current. */
     public PostgresExecutionStore(DataSource dataSource, Clock clock) {
@@ -1798,6 +1799,154 @@ public final class PostgresExecutionStore implements ExecutionStore {
         });
     }
 
+    /**
+     * Holds a session advisory lock on a dedicated connection. PostgreSQL releases it on connection
+     * loss, so process death and orderly close have the same ownership result across hosts.
+     */
+    @Override
+    public ai.ravenroot.api.persistence.SourceCheckpointStore openSourceCheckpointStore(
+            String tenantId, String namespace) {
+        requireTenantId(tenantId);
+        requireDestination(namespace);
+        if (closed.get()) throw new IllegalStateException("source checkpoint store is closed");
+        Connection owner = null;
+        Long acquiredLock = null;
+        try {
+            owner = dataSource.getConnection();
+            String schema;
+            try (PreparedStatement statement = owner.prepareStatement("SELECT current_schema()" );
+                 ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) throw new SQLException("current schema unavailable");
+                schema = rows.getString(1);
+            }
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
+                    (schema.length() + ":" + schema + tenantId.length() + ":" + tenantId + namespace)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            long lockId = java.nio.ByteBuffer.wrap(digest).getLong();
+            boolean acquired;
+            try (PreparedStatement statement = owner.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
+                statement.setLong(1, lockId);
+                try (ResultSet rows = statement.executeQuery()) {
+                    acquired = rows.next() && rows.getBoolean(1);
+                }
+            }
+            if (!acquired) {
+                owner.close();
+                throw new IllegalStateException("source checkpoint owner is active");
+            }
+            acquiredLock = lockId;
+            var handle = new OwnedSourceCheckpoints(tenantId, namespace, owner, lockId);
+            synchronized (sourceCheckpointOwners) {
+                if (closed.get()) {
+                    releaseAdvisoryLock(owner, lockId);
+                    owner.close();
+                    throw new IllegalStateException("source checkpoint store is closed");
+                }
+                sourceCheckpointOwners.add(handle);
+            }
+            return handle;
+        } catch (IllegalStateException failure) {
+            if (acquiredLock != null && owner != null) releaseAdvisoryLock(owner, acquiredLock);
+            if (owner != null) try { owner.close(); } catch (SQLException ignored) { }
+            throw failure;
+        } catch (Exception failure) {
+            if (acquiredLock != null && owner != null) releaseAdvisoryLock(owner, acquiredLock);
+            if (owner != null) try { owner.close(); } catch (SQLException ignored) { }
+            throw new IllegalStateException("exclusive source checkpoint ownership unavailable", failure);
+        }
+    }
+
+    private static void releaseAdvisoryLock(Connection owner, long lockId) {
+        try (PreparedStatement statement = owner.prepareStatement("SELECT pg_advisory_unlock(?)")) {
+            statement.setLong(1, lockId);
+            statement.executeQuery().close();
+        } catch (SQLException ignored) {
+            // A lost session has already released its lock. Closing the handle still retires it.
+        }
+    }
+
+    private final class OwnedSourceCheckpoints implements ai.ravenroot.api.persistence.SourceCheckpointStore {
+        private final String tenant;
+        private final String prefix;
+        private final Connection owner;
+        private final long lockId;
+        private boolean retired;
+        private boolean released;
+        private int pending;
+
+        OwnedSourceCheckpoints(String tenant, String namespace, Connection owner, long lockId) {
+            this.tenant = tenant; this.owner = owner; this.lockId = lockId;
+            this.prefix = "source-v1:" + java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(namespace.getBytes(java.nio.charset.StandardCharsets.UTF_8)) + ".";
+        }
+        private String destination(String sourceId) {
+            if (sourceId == null || sourceId.isBlank() || sourceId.length() > 4096)
+                throw new IllegalArgumentException("invalid source identity");
+            return prefix + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    sourceId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        private synchronized <T> CompletionStage<T> admitted(
+                java.util.function.Supplier<CompletionStage<T>> operation) {
+            try {
+                if (retired || closed.get() || owner.isClosed() || !owner.isValid(1))
+                    return CompletableFuture.failedFuture(new IllegalStateException("source ownership is retired"));
+            } catch (SQLException lost) {
+                return CompletableFuture.failedFuture(new IllegalStateException("source ownership is retired"));
+            }
+            pending++;
+            try {
+                CompletionStage<T> underlying = operation.get();
+                var result = new CompletableFuture<T>();
+                underlying.whenComplete((value, failure) -> {
+                    synchronized (OwnedSourceCheckpoints.this) {
+                        pending--;
+                        if (retired && pending == 0) releaseOwnership();
+                    }
+                    if (failure == null) result.complete(value); else result.completeExceptionally(failure);
+                });
+                return result;
+            } catch (RuntimeException failure) {
+                pending--;
+                return CompletableFuture.failedFuture(failure);
+            }
+        }
+        @Override public CompletionStage<JournalCursor> checkpoint(String sourceId) {
+            return admitted(() -> outboxCursor(tenant, destination(sourceId)));
+        }
+        @Override public CompletionStage<JournalCursor> advance(JournalCursor expected, long position) {
+            return admitted(() -> {
+                if (expected == null || !tenant.equals(expected.tenantId())
+                        || !expected.destination().startsWith(prefix)
+                        || !canonicalSuffix(expected.destination().substring(prefix.length())))
+                    throw new IllegalArgumentException("foreign source checkpoint");
+                return advanceOutboxCursor(expected, position);
+            });
+        }
+        private boolean canonicalSuffix(String suffix) {
+            if (suffix.isEmpty() || suffix.length() > 21846 || !suffix.matches("[A-Za-z0-9_-]+")) return false;
+            try {
+                byte[] decoded = java.util.Base64.getUrlDecoder().decode(suffix);
+                String source = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                        .decode(java.nio.ByteBuffer.wrap(decoded)).toString();
+                return destination(source).equals(prefix + suffix);
+            } catch (RuntimeException | java.nio.charset.CharacterCodingException invalid) { return false; }
+        }
+        @Override public CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId, Duration retention) {
+            return admitted(() -> recordInboxDelivery(tenant, destination(sourceId), eventId, retention));
+        }
+        @Override public synchronized void close() {
+            retired = true;
+            if (pending == 0) releaseOwnership();
+        }
+        private void releaseOwnership() {
+            if (released) return;
+            released = true;
+            releaseAdvisoryLock(owner, lockId);
+            try { owner.close(); } catch (SQLException ignored) { }
+            synchronized (sourceCheckpointOwners) { sourceCheckpointOwners.remove(this); }
+        }
+    }
+
     @Override
     public CompletionStage<JournalCursor> outboxCursor(String tenantId, String destination) {
         return async(() -> {
@@ -2007,6 +2156,9 @@ public final class PostgresExecutionStore implements ExecutionStore {
         if (closed.getAndSet(true)) {
             return;
         }
+        java.util.List<OwnedSourceCheckpoints> owners;
+        synchronized (sourceCheckpointOwners) { owners = java.util.List.copyOf(sourceCheckpointOwners); }
+        owners.forEach(OwnedSourceCheckpoints::close);
         worker.shutdown();
     }
 

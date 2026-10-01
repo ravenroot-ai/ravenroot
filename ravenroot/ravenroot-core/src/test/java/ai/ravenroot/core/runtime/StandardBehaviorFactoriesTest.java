@@ -37,6 +37,8 @@ class StandardBehaviorFactoriesTest {
 
         assertTrue(registry.descriptors().stream().anyMatch(type -> type.behavior().equals("cel-transform")));
         assertTrue(registry.descriptors().stream().anyMatch(type -> type.behavior().equals("delay")));
+        assertTrue(registry.descriptors().stream().anyMatch(type -> type.behavior().equals("timer")));
+        assertTrue(registry.descriptors().stream().anyMatch(type -> type.behavior().equals("crontab")));
         assertEquals(NodeCatalogSource.Origin.CORE, registry.catalogSources().get("delay").origin());
         assertEquals("", registry.catalogSources().get("delay").bundleId());
         assertFalse(registry.create(GraphNode.behavior("future", "not-implemented")).isPresent());
@@ -118,7 +120,7 @@ class StandardBehaviorFactoriesTest {
         // ANTI-VACUITY: the two assertions above are absences, and an absence over an empty catalog
         // is not an assertion. This pins what the catalog does contain, so an accidental emptying
         // fails here instead of turning the three lines above green for the wrong reason.
-        assertEquals(new java.util.TreeSet<>(java.util.Set.of("bigint-op", "boundary-guard", "cel-decision", "cel-transform", "delay",
+        assertEquals(new java.util.TreeSet<>(java.util.Set.of("bigint-op", "boundary-guard", "cel-decision", "cel-transform", "delay", "timer", "crontab",
                 "http-request", "human-task", "json-parse", "json-path", "log", "program", "template")), behaviors,
                 "the core catalog changed shape; update this roster deliberately");
     }

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, chmod, copyFile, lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { canonicalJson, sha256, text, utf8 } from "./codec.js";
 import { decryptSecret } from "./crypto.js";
 import { CONTRACT_BY_ID, serializeSelection } from "./registry.js";
@@ -47,6 +47,7 @@ export interface InstallOptions {
   readonly replace?: boolean;
   readonly execute?: boolean;
   readonly commandRunner?: (command: readonly string[], environment: Readonly<Record<string, string>>) => Promise<void>;
+  readonly queryRunner?: (command: readonly string[]) => Promise<string>;
 }
 
 export interface PreparedInstall {
@@ -80,12 +81,6 @@ async function readState(root: string): Promise<InstallerState | undefined> {
 async function resolveInputs(pkg: DecodedPackage, password?: string): Promise<{ environment: Record<string, string>; documents: ExternalDocument[] }> {
   const environment: Record<string, string> = {};
   const embeddedSecrets = new Map<string, string>();
-  for (const selection of pkg.manifest.configurations) {
-    for (const [key, value] of Object.entries(serializeSelection(selection))) {
-      if (environment[key] !== undefined && environment[key] !== value) throw new Error(`Package defines conflicting values for ${key}`);
-      environment[key] = value;
-    }
-  }
   for (const binding of pkg.manifest.secrets) {
     if (binding.mode === "embedded") {
       if (!password) throw new Error(`Password is required to unlock ${binding.bindingId}`);
@@ -94,6 +89,13 @@ async function resolveInputs(pkg: DecodedPackage, password?: string): Promise<{ 
       const value = await decryptSecret(binding.bindingId, JSON.parse(text(entry)) as EmbeddedSecretEnvelope, password);
       environment[binding.environmentKey] = value;
       embeddedSecrets.set(binding.bindingId, value);
+    }
+  }
+  for (const selection of pkg.manifest.configurations) {
+    const resolved = { ...selection, values: replaceDocumentSecrets(selection.values, embeddedSecrets) as Readonly<Record<string, unknown>> };
+    for (const [key, value] of Object.entries(serializeSelection(resolved))) {
+      if (environment[key] !== undefined && environment[key] !== value) throw new Error(`Package defines conflicting values for ${key}`);
+      environment[key] = value;
     }
   }
   const enabled = pkg.manifest.bundles.map((bundle) => bundle.id).sort().join(",");
@@ -118,7 +120,7 @@ function replaceDocumentSecrets(value: unknown, secrets: ReadonlyMap<string, str
     if (entries.length === 1 && entries[0]?.[0] === "$secret") {
       const bindingId = entries[0][1];
       if (typeof bindingId !== "string" || !secrets.has(bindingId)) {
-        throw new Error(`External document references unavailable embedded secret ${String(bindingId)}`);
+        throw new Error(`Configuration references unavailable embedded secret ${String(bindingId)}`);
       }
       return secrets.get(bindingId) as string;
     }
@@ -142,9 +144,134 @@ function targetReferenceEnvironment(pkg: DecodedPackage): Record<string, string>
   const references: Record<string, string> = {};
   for (const binding of pkg.manifest.secrets) {
     if (binding.mode !== "target-reference") continue;
-    references[binding.environmentKey] = binding.composeVariable ?? binding.environmentKey;
+    if (!binding.composeVariable) throw new Error(`Target reference ${binding.bindingId} has no environment source`);
+    references[binding.environmentKey] = binding.composeVariable;
   }
   return references;
+}
+
+function composeEnvironmentValues(value: unknown): Map<string, string | undefined> {
+  const result = new Map<string, string | undefined>();
+  if (value === undefined) return result;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item !== "string") throw new Error("Compose ravenroot environment list contains a non-string entry");
+      const separator = item.indexOf("=");
+      const key = separator < 0 ? item : item.slice(0, separator);
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(key) || result.has(key)) throw new Error(`Compose ravenroot environment contains invalid or duplicate key ${key}`);
+      result.set(key, separator < 0 ? undefined : item.slice(separator + 1));
+    }
+    return result;
+  }
+  if (!value || typeof value !== "object") throw new Error("Compose ravenroot environment must be a map or list");
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(key) || item !== null && !["string", "number", "boolean"].includes(typeof item)) {
+      throw new Error(`Compose ravenroot environment contains invalid value for ${key}`);
+    }
+    result.set(key, item === null ? undefined : String(item));
+  }
+  return result;
+}
+
+async function composeCollisions(root: string, desired: Readonly<Record<string, string>>): Promise<string[]> {
+  const path = confined(root, "compose.yaml");
+  if (!await exists(path)) throw new Error("Compose target requires compose.yaml for structural collision preflight");
+  let document: unknown;
+  try { document = parse(await readFile(path, "utf8")); }
+  catch (error) { throw new Error(`Unable to parse Compose target for collision preflight: ${error instanceof Error ? error.message : String(error)}`); }
+  const service = (document as { services?: Record<string, { environment?: unknown }> } | null)?.services?.ravenroot;
+  if (!service) throw new Error("Compose target has no services.ravenroot for collision preflight");
+  const existing = composeEnvironmentValues(service.environment);
+  return Object.entries(desired).flatMap(([key, value]) => {
+    if (!existing.has(key)) return [];
+    const current = existing.get(key);
+    if (current === value || current === `\${${key}:-}`) return [];
+    return [`compose.yaml services.ravenroot.environment.${key} has a non-identical existing value`];
+  });
+}
+
+async function defaultQueryRunner(command: readonly string[]): Promise<string> {
+  return new Promise<string>((resolvePromise, reject) => {
+    const child = spawn(command[0] as string, command.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    const output: Buffer[] = [];
+    const errors: Buffer[] = [];
+    let size = 0;
+    child.stdout.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= 4 * 1024 * 1024) output.push(chunk); });
+    child.stderr.on("data", (chunk: Buffer) => { if (errors.reduce((sum, entry) => sum + entry.length, 0) < 64 * 1024) errors.push(chunk); });
+    child.once("error", (error) => reject(new Error(`Kubernetes collision preflight could not execute ${command[0]}: ${error.message}`)));
+    child.once("exit", (code) => {
+      if (size > 4 * 1024 * 1024) reject(new Error("Kubernetes collision preflight response exceeded 4 MiB"));
+      else if (code !== 0) reject(new Error(`Kubernetes collision preflight failed: ${Buffer.concat(errors).toString("utf8").trim() || `exit ${code}`}`));
+      else resolvePromise(Buffer.concat(output).toString("utf8"));
+    });
+  });
+}
+
+async function queryKubernetesObject(runner: (command: readonly string[]) => Promise<string>, command: readonly string[]): Promise<Record<string, unknown> | undefined> {
+  const raw = (await runner(command)).trim();
+  if (!raw) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new Error("Kubernetes collision preflight returned invalid JSON"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Kubernetes collision preflight returned a non-object");
+  return value as Record<string, unknown>;
+}
+
+async function kubernetesCollisions(pkg: DecodedPackage, environment: Readonly<Record<string, string>>,
+                                    runner: (command: readonly string[]) => Promise<string>): Promise<string[]> {
+  const namespace = String(pkg.manifest.target.options.namespace ?? "default");
+  const release = String(pkg.manifest.target.options.release ?? "ravenroot");
+  const deploymentName = String(pkg.manifest.target.options.deploymentName ?? `${release}-ravenroot`);
+  const secretName = `ravenroot-config-${pkg.manifest.target.id.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40)}`;
+  const get = (kind: string, name: string) => ["kubectl", "get", kind, name, "--namespace", namespace, "--ignore-not-found", "-o", "json"];
+  const [deployment, secret] = await Promise.all([
+    queryKubernetesObject(runner, get("deployment", deploymentName)),
+    queryKubernetesObject(runner, get("secret", secretName))
+  ]);
+  const conflicts: string[] = [];
+  const secretData = secret?.data;
+  if (secretData && typeof secretData !== "object") throw new Error("Kubernetes configuration Secret has invalid data");
+  for (const [key, value] of Object.entries(environment)) {
+    const existing = (secretData as Record<string, unknown> | undefined)?.[key];
+    if (existing !== undefined && existing !== yamlScalar(value)) conflicts.push(`Kubernetes Secret ${secretName} key ${key} has a non-identical existing value`);
+  }
+  if (!deployment) return conflicts;
+  const spec = deployment.spec as { template?: { spec?: { containers?: unknown[] } } } | undefined;
+  const containers = spec?.template?.spec?.containers;
+  if (!Array.isArray(containers)) throw new Error("Kubernetes Deployment has no inspectable containers");
+  const container = containers.find((item) => item && typeof item === "object" && (item as { name?: unknown }).name === "ravenroot") as {
+    env?: unknown[]; envFrom?: unknown[]
+  } | undefined;
+  if (!container) throw new Error("Kubernetes Deployment has no ravenroot container for collision preflight");
+  const expected = new Map<string, unknown>();
+  for (const key of Object.keys(environment)) expected.set(key, { secretKeyRef: { name: secretName, key } });
+  for (const binding of pkg.manifest.secrets.filter((candidate) => candidate.mode === "target-reference")) {
+    expected.set(binding.environmentKey, { secretKeyRef: { name: binding.kubernetesSecret, key: binding.kubernetesKey } });
+  }
+  for (const entry of container.env ?? []) {
+    if (!entry || typeof entry !== "object") throw new Error("Kubernetes Deployment contains an invalid env entry");
+    const value = entry as { name?: unknown; value?: unknown; valueFrom?: unknown };
+    if (typeof value.name !== "string" || !expected.has(value.name)) continue;
+    if (value.valueFrom === undefined || canonicalJson(value.valueFrom) !== canonicalJson(expected.get(value.name))) {
+      conflicts.push(`Kubernetes Deployment environment ${value.name} has a non-identical existing source`);
+    }
+  }
+  for (const source of container.envFrom ?? []) {
+    if (!source || typeof source !== "object") throw new Error("Kubernetes Deployment contains an invalid envFrom entry");
+    const row = source as { prefix?: unknown; secretRef?: { name?: unknown }; configMapRef?: { name?: unknown } };
+    const prefix = typeof row.prefix === "string" ? row.prefix : "";
+    const kind = row.secretRef ? "secret" : row.configMapRef ? "configmap" : undefined;
+    const name = row.secretRef?.name ?? row.configMapRef?.name;
+    if (!kind || typeof name !== "string") throw new Error("Kubernetes Deployment contains an unverifiable envFrom source");
+    const object = await queryKubernetesObject(runner, get(kind, name));
+    if (!object) throw new Error(`Kubernetes Deployment envFrom ${kind}/${name} cannot be verified`);
+    const data = object.data;
+    if (!data || typeof data !== "object") continue;
+    for (const key of Object.keys(data as Record<string, unknown>)) {
+      const effective = `${prefix}${key}`;
+      if (expected.has(effective)) conflicts.push(`Kubernetes Deployment envFrom ${kind}/${name} also defines ${effective}`);
+    }
+  }
+  return conflicts;
 }
 
 function composeArtifacts(pkg: DecodedPackage, environment: Readonly<Record<string, string>>, documents: readonly ExternalDocument[]): GeneratedArtifact[] {
@@ -193,8 +320,8 @@ function kubernetesArtifacts(pkg: DecodedPackage, environment: Record<string, st
   }));
   const targetRefs = references.map((binding) => ({
     name: binding.environmentKey,
-    valueFrom: { secretKeyRef: { name: binding.kubernetesSecret ?? "REQUIRED_TARGET_SECRET",
-      key: binding.kubernetesKey ?? binding.bindingId } }
+    valueFrom: { secretKeyRef: { name: binding.kubernetesSecret as string,
+      key: binding.kubernetesKey as string } }
   }));
   const patch = {
     apiVersion: "apps/v1", kind: "Deployment",
@@ -329,6 +456,17 @@ export async function prepareInstall(pkg: DecodedPackage, options: InstallOption
     : pkg.manifest.target.kind === "kubernetes" ? kubernetesArtifacts(pkg, environment, resolvedInputs.documents)
       : prestartArtifacts(pkg, environment, resolvedInputs.documents, root);
   const evaluated = await artifactChanges(root, artifacts, options.replace === true);
+  if (pkg.manifest.target.kind === "compose") {
+    const references = targetReferenceEnvironment(pkg);
+    const documentEnvironment = Object.fromEntries(resolvedInputs.documents.map((document) => [
+      document.environmentKey, `/etc/ravenroot/configurator/${document.fileName}`
+    ]));
+    const desired = { ...environment, ...documentEnvironment,
+      ...Object.fromEntries(Object.entries(references).map(([key, source]) => [key, `\${${source}}`])) };
+    evaluated.conflicts.push(...await composeCollisions(root, desired));
+  } else if (pkg.manifest.target.kind === "kubernetes") {
+    evaluated.conflicts.push(...await kubernetesCollisions(pkg, environment, options.queryRunner ?? defaultQueryRunner));
+  }
   const environmentDigests: Record<string, string> = {};
   for (const [key, value] of Object.entries(environment)) environmentDigests[key] = await sha256(utf8(value));
   if (previous && previous.packageDigest !== pkg.digest && options.replace !== true) {

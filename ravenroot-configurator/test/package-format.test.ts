@@ -40,4 +40,30 @@ describe("portable package", () => {
     await expect(createPackage({ target: target("compose"), configurations: [selection], secrets: [], bundles: [await fakeBundle("ai.ravenroot.extensions.jdbc")] }))
       .rejects.toThrow("outside the target tenant");
   });
+
+  test("requires encrypted placeholders for credential material in JSON documents", async () => {
+    const raw = { contractId: "core.human-task", identity: {}, values: { interactionDocument: {
+      schemaVersion: 1, capabilitySecretBase64: "raw-secret", profiles: []
+    }, RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED: true } };
+    await expect(createPackage({ target: target("compose"), configurations: [raw], secrets: [], bundles: [] }))
+      .rejects.toThrow("is sensitive and must use an encrypted");
+    const protectedSelection = { ...raw, values: { ...raw.values, interactionDocument: {
+      ...raw.values.interactionDocument, capabilitySecretBase64: { $secret: "capability" }
+    } } };
+    await expect(createPackage({ target: target("compose"), configurations: [protectedSelection], secrets: [], bundles: [] }))
+      .rejects.toThrow("unavailable encrypted secret binding");
+    const created = await createPackage({ target: target("compose"), configurations: [protectedSelection],
+      password: "package-password", secrets: [{ mode: "embedded", bindingId: "capability",
+        environmentKey: "RAVENROOT_UNUSED_DOCUMENT_SECRET", value: "secret-material" }], bundles: [] });
+    expect(Buffer.from(created.bytes).includes(Buffer.from("secret-material"))).toBe(false);
+  });
+
+  test("requires concrete target-side secret coordinates", async () => {
+    await expect(createPackage({ target: target("kubernetes"), configurations: [coreHttp], bundles: [],
+      secrets: [{ mode: "target-reference", bindingId: "token", environmentKey: "RAVENROOT_CREDENTIAL_TOKEN" }] }))
+      .rejects.toThrow("requires kubernetesSecret and kubernetesKey");
+    await expect(createPackage({ target: target("compose"), configurations: [coreHttp], bundles: [],
+      secrets: [{ mode: "target-reference", bindingId: "token", environmentKey: "RAVENROOT_CREDENTIAL_TOKEN" }] }))
+      .rejects.toThrow("requires composeVariable");
+  });
 });

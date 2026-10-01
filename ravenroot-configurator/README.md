@@ -33,6 +33,8 @@ Optional profiles that request managed services require a `bundle.service-grant`
 
 Apply writes only `.ravenroot-config/` beneath the selected target. It refuses target identity changes, unmanaged file drift, incompatible bundles, digest failures, missing bundle payloads, and an interrupted transaction. A transaction backs up every managed file and its prior state, writes a pending recovery marker, recreates the target when requested, and restores the previous bytes if restart fails. `--replace` is the explicit operation for replacing a managed value.
 
+Planning performs structural collision checks before writing. Compose reads the existing `services.ravenroot.environment` map or list. Kubernetes reads the live Deployment, referenced `envFrom` objects, and generated Secret name with `kubectl`; if that live state cannot be queried, Kubernetes planning and apply fail closed. Target-side references must name a concrete Compose variable or Kubernetes Secret and key.
+
 - **Compose:** writes an additive override, mounts generated operator documents read only, stages prebuilt bundles into the existing image build, and recreates only `ravenroot`.
 - **Kubernetes:** writes target-owned Secrets, Helm image values, and an additive strategic Deployment patch; mounts generated documents, builds an optional derived image from prebuilt bundle bytes, performs the Helm upgrade, applies the patch, and waits for rollout.
 - **Pre-start:** writes a mode `0600` environment script, generated documents, and bundle directory. Set `restartCommandJson` to a JSON string array to run an embedding-specific restart without a shell.

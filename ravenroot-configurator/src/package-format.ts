@@ -12,6 +12,11 @@ const MANIFEST_PATH = "manifest.json";
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 1024 * 1024 * 1024;
 const MAX_ENTRIES = 4096;
+const SENSITIVE_DOCUMENT_FIELDS = new Set([
+  "apikey", "accesskey", "capabilitysecretbase64", "clientsecret", "completionsecretbase64",
+  "password", "passwordbase64", "privatekey", "secret", "secretaccesskey", "secretbase64",
+  "signingsecret", "token", "tokenbase64"
+]);
 
 export interface PackageInput {
   readonly target: PackageTarget;
@@ -59,6 +64,37 @@ function validateBundleBindings(configurations: readonly ConfigurationSelection[
       throw new Error(`Managed-service grant for ${id} omits required capabilities: ${missingCapabilities.join(", ")}`);
     }
   }
+}
+
+function validateDocumentSecrets(value: unknown, embeddedBindings: ReadonlySet<string>, path = "configuration"): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => validateDocumentSecrets(item, embeddedBindings, `${path}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 1 && entries[0]?.[0] === "$secret") {
+    const bindingId = entries[0][1];
+    if (typeof bindingId !== "string" || !embeddedBindings.has(bindingId)) {
+      throw new Error(`${path} references an unavailable encrypted secret binding`);
+    }
+    return;
+  }
+  for (const [key, item] of entries) {
+    const sensitive = SENSITIVE_DOCUMENT_FIELDS.has(key.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    const itemEntries = item && typeof item === "object" && !Array.isArray(item)
+      ? Object.entries(item as Record<string, unknown>) : [];
+    const placeholder = itemEntries.length === 1 && itemEntries[0]?.[0] === "$secret";
+    if (sensitive && !placeholder) {
+      throw new Error(`${path}.${key} is sensitive and must use an encrypted { "$secret": "binding-id" } placeholder`);
+    }
+    validateDocumentSecrets(item, embeddedBindings, `${path}.${key}`);
+  }
+}
+
+function validateConfigurationSecrets(configurations: readonly ConfigurationSelection[], secrets: readonly SecretBindingManifest[]): void {
+  const embedded = new Set(secrets.filter((secret) => secret.mode === "embedded").map((secret) => secret.bindingId));
+  for (const selection of configurations) validateDocumentSecrets(selection.values, embedded, selection.contractId);
 }
 
 function preview(input: PackageInput): RedactedPlan {
@@ -111,6 +147,23 @@ export async function createPackage(input: PackageInput): Promise<PortablePackag
     if (secrets.some((candidate) => candidate.bindingId === secret.bindingId || candidate.environmentKey === secret.environmentKey)) {
       throw new Error(`Duplicate secret binding: ${secret.bindingId}`);
     }
+    if (secret.mode === "target-reference") {
+      if (input.target.kind === "kubernetes" && (!secret.kubernetesSecret || !secret.kubernetesKey)) {
+        throw new Error(`Kubernetes target reference ${secret.bindingId} requires kubernetesSecret and kubernetesKey`);
+      }
+      if (input.target.kind !== "kubernetes" && !secret.composeVariable) {
+        throw new Error(`${input.target.kind} target reference ${secret.bindingId} requires composeVariable`);
+      }
+      if (secret.composeVariable && !/^[A-Z_][A-Z0-9_]*$/.test(secret.composeVariable)) {
+        throw new Error(`Target reference ${secret.bindingId} has an invalid environment variable`);
+      }
+      if (secret.kubernetesSecret && !/^[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?$/.test(secret.kubernetesSecret)) {
+        throw new Error(`Target reference ${secret.bindingId} has an invalid Kubernetes Secret name`);
+      }
+      if (secret.kubernetesKey && !/^[A-Za-z0-9._-]+$/.test(secret.kubernetesKey)) {
+        throw new Error(`Target reference ${secret.bindingId} has an invalid Kubernetes Secret key`);
+      }
+    }
     if (secret.mode === "embedded") {
       if (!input.password) throw new Error("A password is required for embedded secrets");
       const entry = `secrets/${secret.bindingId}.json`;
@@ -125,6 +178,7 @@ export async function createPackage(input: PackageInput): Promise<PortablePackag
       });
     }
   }
+  validateConfigurationSecrets(input.configurations, secrets);
   for (const bundle of input.bundles) {
     for (const [name, bytes] of Object.entries(bundle.files)) entries[`${bundle.manifest.entryPrefix}${name}`] = bytes;
   }
@@ -180,14 +234,44 @@ export async function inspectPackage(bytes: Uint8Array): Promise<DecodedPackage>
       || !Array.isArray(manifest.bundles) || !manifest.target || typeof manifest.target.id !== "string") {
     throw new Error("Package manifest structure is invalid");
   }
+  const secretIdentities = new Set<string>();
+  for (const secret of manifest.secrets) {
+    if (!secret || !["embedded", "target-reference"].includes(secret.mode)
+        || typeof secret.bindingId !== "string" || typeof secret.environmentKey !== "string"
+        || secretIdentities.has(secret.bindingId) || secretIdentities.has(secret.environmentKey)) {
+      throw new Error("Package secret binding structure is invalid or duplicated");
+    }
+    secretIdentities.add(secret.bindingId);
+    secretIdentities.add(secret.environmentKey);
+    if (secret.mode === "embedded" && (typeof secret.entry !== "string" || !secret.entry.startsWith("secrets/"))) {
+      throw new Error(`Embedded secret ${secret.bindingId} has an invalid entry`);
+    }
+    if (secret.mode === "target-reference" && manifest.target.kind === "kubernetes"
+        && (!secret.kubernetesSecret || !secret.kubernetesKey)) {
+      throw new Error(`Kubernetes target reference ${secret.bindingId} is incomplete`);
+    }
+    if (secret.mode === "target-reference" && manifest.target.kind !== "kubernetes" && !secret.composeVariable) {
+      throw new Error(`${manifest.target.kind} target reference ${secret.bindingId} is incomplete`);
+    }
+  }
   for (const selection of manifest.configurations) serializeSelection(selection);
+  validateConfigurationSecrets(manifest.configurations, manifest.secrets);
   const declared = new Set(manifest.entries.map((entry) => entry.path));
   const undeclared = Object.keys(entries).filter((path) => path !== MANIFEST_PATH && !declared.has(path));
   if (undeclared.length) throw new Error(`Package contains undeclared entries: ${undeclared.join(", ")}`);
+  const allowedEntries = new Set(["configurations.json",
+    ...manifest.secrets.flatMap((secret) => secret.mode === "embedded" && secret.entry ? [secret.entry] : []),
+    ...manifest.entries.map((entry) => entry.path).filter((path) => manifest.bundles.some((bundle) => path.startsWith(bundle.entryPrefix)))]);
+  const unexpectedEntries = manifest.entries.map((entry) => entry.path).filter((path) => !allowedEntries.has(path));
+  if (unexpectedEntries.length) throw new Error(`Package declares unsupported entries: ${unexpectedEntries.join(", ")}`);
   for (const entry of manifest.entries) {
     const content = entries[entry.path];
     if (!content) throw new Error(`Package entry is missing: ${entry.path}`);
     if (content.byteLength !== entry.sizeBytes || await sha256(content) !== entry.sha256) throw new Error(`Package entry failed integrity verification: ${entry.path}`);
+  }
+  const configurationsEntry = entries["configurations.json"];
+  if (!configurationsEntry || text(configurationsEntry) !== canonicalJson(manifest.configurations)) {
+    throw new Error("Package configurations entry does not exactly match the manifest");
   }
   for (const bundle of manifest.bundles) {
     if (bundle.schemaVersion !== "1" || bundle.sdkContract !== "ravenroot.node-sdk/2") throw new Error(`Bundle is incompatible: ${bundle.id}`);

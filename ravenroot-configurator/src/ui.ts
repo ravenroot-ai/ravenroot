@@ -48,31 +48,70 @@ function configurationView(): void {
     const contract = CONTRACTS.find((candidate) => candidate.id === selection.contractId)!;
     const panel = document.createElement("div");
     panel.className = "panel";
-    const axes = contract.identity.map((axis) => `<label>${axis}<input data-axis="${axis}" value="${selection.identity[axis] ?? ""}" /></label>`).join("");
+    const heading = document.createElement("div");
+    heading.className = "row";
+    const title = document.createElement("strong");
+    title.textContent = contract.title;
+    const remove = document.createElement("button");
+    remove.className = "secondary";
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => { selections.splice(index, 1); configurationView(); });
+    heading.append(title, remove);
+
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    for (const axis of contract.identity) {
+      const label = document.createElement("label");
+      label.append(document.createTextNode(axis));
+      const input = document.createElement("input");
+      input.dataset.axis = axis;
+      input.value = selection.identity[axis] ?? "";
+      input.addEventListener("input", () => { (selection.identity as Record<string, string>)[axis] = input.value; });
+      label.append(input);
+      grid.append(label);
+    }
     const fields = contract.encoding === "base64-json"
-      ? `<label>Decoded strict JSON document<textarea data-json>${JSON.stringify(selection.values.document, null, 2)}</textarea></label>`
-      : contract.fields.map((field) => field.type === "json" ? `<label>${field.label}<textarea data-field-json="${field.name}">${JSON.stringify(selection.values[field.name], null, 2)}</textarea></label>`
-        : `<label>${field.label}${field.runtimeDefault !== undefined ? ` <small>Runtime default: ${field.runtimeDefault}</small>` : ""}
-          <input data-field="${field.name}" type="${field.type === "integer" ? "number" : field.type === "boolean" ? "checkbox" : "text"}"
-          ${field.type === "boolean" && selection.values[field.name] ? "checked" : ""} value="${field.type === "boolean" ? "true" : String(selection.values[field.name] ?? "")}" /></label>`).join("");
-    panel.innerHTML = `<div class="row"><strong>${contract.title}</strong><button class="secondary" data-remove>Remove</button></div><div class="grid">${axes}${fields}</div>
-      <p>${contract.nodeIds.map((node) => `<span class="chip">${node}</span>`).join("")}</p>`;
-    panel.querySelector("[data-remove]")?.addEventListener("click", () => { selections.splice(index, 1); configurationView(); });
-    panel.querySelectorAll<HTMLInputElement>("[data-axis]").forEach((input) => input.addEventListener("input", () => {
-      (selection.identity as Record<string, string>)[input.dataset.axis as string] = input.value;
-    }));
-    panel.querySelectorAll<HTMLInputElement>("[data-field]").forEach((input) => input.addEventListener("input", () => {
-      const field = contract.fields.find((candidate) => candidate.name === input.dataset.field)!;
-      (selection.values as Record<string, unknown>)[field.name] = field.type === "boolean" ? input.checked : field.type === "integer" ? Number(input.value) : field.type === "csv" ? input.value.split(",").map((item) => item.trim()).filter(Boolean) : input.value;
-    }));
-    panel.querySelectorAll<HTMLTextAreaElement>("[data-field-json]").forEach((input) => input.addEventListener("input", () => {
-      try { (selection.values as Record<string, unknown>)[input.dataset.fieldJson as string] = JSON.parse(input.value); message(""); }
-      catch { message("Configuration JSON is not valid.", true); }
-    }));
-    panel.querySelector<HTMLTextAreaElement>("[data-json]")?.addEventListener("input", (event) => {
-      try { (selection.values as Record<string, unknown>).document = JSON.parse((event.target as HTMLTextAreaElement).value); message(""); }
-      catch { message("Configuration JSON is not valid.", true); }
-    });
+      ? [{ name: "document", label: "Decoded strict JSON document", type: "json" as const }]
+      : contract.fields;
+    for (const field of fields) {
+      const label = document.createElement("label");
+      label.append(document.createTextNode(field.label));
+      if (field.type === "json") {
+        const input = document.createElement("textarea");
+        input.value = JSON.stringify(selection.values[field.name], null, 2);
+        input.addEventListener("input", () => {
+          try { (selection.values as Record<string, unknown>)[field.name] = JSON.parse(input.value); message(""); }
+          catch { message("Configuration JSON is not valid.", true); }
+        });
+        label.append(input);
+      } else {
+        if (field.runtimeDefault !== undefined) {
+          const hint = document.createElement("small");
+          hint.textContent = ` Runtime default: ${String(field.runtimeDefault)}`;
+          label.append(hint);
+        }
+        const input = document.createElement("input");
+        input.type = field.type === "integer" ? "number" : field.type === "boolean" ? "checkbox" : "text";
+        if (field.type === "boolean") input.checked = Boolean(selection.values[field.name]);
+        else input.value = String(selection.values[field.name] ?? "");
+        input.addEventListener("input", () => {
+          (selection.values as Record<string, unknown>)[field.name] = field.type === "boolean" ? input.checked
+            : field.type === "integer" ? Number(input.value)
+              : field.type === "csv" ? input.value.split(",").map((item) => item.trim()).filter(Boolean) : input.value;
+        });
+        label.append(input);
+      }
+      grid.append(label);
+    }
+    const nodes = document.createElement("p");
+    for (const node of contract.nodeIds) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = node;
+      nodes.append(chip);
+    }
+    panel.append(heading, grid, nodes);
     root.append(panel);
   });
 }

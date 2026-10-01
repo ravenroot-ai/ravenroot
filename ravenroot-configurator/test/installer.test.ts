@@ -51,7 +51,7 @@ describe("target adapters", () => {
     }), configurations: [{ contractId: "ai.llm-profile", identity: { profile: "default" }, values: { document: { endpoint: "https://model.example.test", model: "bounded" } } },
       serviceGrant("ai.ravenroot.extensions.ai", ["outbound-http", "tool-authorization", "agent-resources"])],
     secrets: [], bundles: [bundle] })).bytes);
-    await applyInstall(await prepareInstall(pkg, { targetRoot: directory }), { targetRoot: directory });
+    await applyInstall(await prepareInstall(pkg, { targetRoot: directory, queryRunner: async () => "" }), { targetRoot: directory });
     const values = parse(await readFile(join(directory, ".ravenroot-config/kubernetes/values.rrcfg.yaml"), "utf8"));
     expect(values.image).toMatchObject({ repository: "registry.example.test/ravenroot-configured", tag: "2026-10-02" });
     const deploymentPatch = parse(await readFile(join(directory, ".ravenroot-config/kubernetes/deployment-patch.rrcfg.yaml"), "utf8"));
@@ -84,5 +84,30 @@ describe("target adapters", () => {
     expect(environment).toContain(`RAVENROOT_PLUGINS_INSTALL_DIR='${join(directory, ".ravenroot-config/prestart/plugins")}'`);
     expect(await readFile(join(directory, ".ravenroot-config/prestart/plugins/ai.ravenroot.extensions.ai/bundle.jar"), "utf8"))
       .toBe("closed prebuilt bundle bytes");
+  });
+
+  test("refuses non-identical Compose environment collisions in map and list forms", async () => {
+    const pkg = await inspectPackage((await createPackage({ target: target("compose"), configurations: [coreHttp], secrets: [], bundles: [] })).bytes);
+    for (const environment of ["    environment:\n      RAVENROOT_HTTP_ALLOWED_HOSTS: other.example\n",
+      "    environment:\n      - RAVENROOT_HTTP_ALLOWED_HOSTS=other.example\n"]) {
+      const directory = await root();
+      await writeFile(join(directory, "compose.yaml"), `services:\n  ravenroot:\n${environment}`);
+      expect((await prepareInstall(pkg, { targetRoot: directory })).plan.conflicts)
+        .toContain("compose.yaml services.ravenroot.environment.RAVENROOT_HTTP_ALLOWED_HOSTS has a non-identical existing value");
+    }
+  });
+
+  test("refuses live Kubernetes Deployment and Secret collisions and unavailable preflight", async () => {
+    const directory = await root();
+    const pkg = await inspectPackage((await createPackage({ target: target("kubernetes", { namespace: "ravenroot" }),
+      configurations: [coreHttp], secrets: [], bundles: [] })).bytes);
+    const queryRunner = async (command: readonly string[]): Promise<string> => command[2] === "deployment" ? JSON.stringify({
+      spec: { template: { spec: { containers: [{ name: "ravenroot", env: [{ name: "RAVENROOT_HTTP_ALLOWED_HOSTS", value: "other.example" }] }] } } }
+    }) : JSON.stringify({ data: { RAVENROOT_HTTP_ALLOWED_PORTS: Buffer.from("8443").toString("base64") } });
+    const conflicts = (await prepareInstall(pkg, { targetRoot: directory, queryRunner })).plan.conflicts;
+    expect(conflicts).toContain("Kubernetes Deployment environment RAVENROOT_HTTP_ALLOWED_HOSTS has a non-identical existing source");
+    expect(conflicts).toContain("Kubernetes Secret ravenroot-config-test-target key RAVENROOT_HTTP_ALLOWED_PORTS has a non-identical existing value");
+    await expect(prepareInstall(pkg, { targetRoot: directory,
+      queryRunner: async () => { throw new Error("cluster unavailable"); } })).rejects.toThrow("cluster unavailable");
   });
 });

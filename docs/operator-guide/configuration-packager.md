@@ -26,7 +26,7 @@ Every selected optional profile requires its complete prebuilt bundle directory.
 
 ## Plan, apply, and recover
 
-Always run `plan` against the intended target directory first. Plans show only managed paths, digests, secret binding identities, restart commands, and verification steps. Apply is confined to `.ravenroot-config/` and refuses a different bound target, managed file drift, package integrity failure, or a pending interrupted transaction. Use `--replace` only after reviewing a planned managed value replacement.
+Always run `plan` against the intended target directory first. Plans show only managed paths, digests, secret binding identities, restart commands, and verification steps. Compose planning parses `compose.yaml` and refuses a non-identical `services.ravenroot.environment` key in either map or list form. Kubernetes planning queries the live Deployment, its direct and `envFrom` sources, and the generated configuration Secret; unavailable or malformed cluster state fails closed, so offline Kubernetes operation is limited to `inspect` and cannot produce an applicable plan. Apply is confined to `.ravenroot-config/` and refuses a different bound target, managed file drift, package integrity failure, or a pending interrupted transaction. Use `--replace` only after reviewing a planned managed value replacement.
 
 With `--execute`, Compose rebuilds and recreates the `ravenroot` service, Kubernetes applies generated Secrets, upgrades the Helm release, adds a strategic Deployment patch, and waits for rollout, and pre-start runs the configured argument-vector restart command. A failed command rolls back the written files. A pending journal left by a process crash blocks another apply until `rollback` restores the backed-up bytes.
 

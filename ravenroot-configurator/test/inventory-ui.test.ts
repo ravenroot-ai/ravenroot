@@ -23,4 +23,25 @@ describe("guided registry", () => {
     expect(document.querySelectorAll("#contract option")).toHaveLength(CONTRACTS.length);
     expect(document.body.textContent).toContain("Prebuilt bundles");
   });
+
+  test("renders operator identity and JSON as values without creating active markup", () => {
+    const contract = document.querySelector<HTMLSelectElement>("#contract") as HTMLSelectElement;
+    contract.value = "bundle.service-grant";
+    (document.querySelector<HTMLButtonElement>("#add-contract") as HTMLButtonElement).click();
+    const identityPayload = `default\" autofocus onfocus=\"globalThis.uiInjected=true`;
+    const identity = document.querySelector<HTMLInputElement>("[data-axis]") as HTMLInputElement;
+    identity.value = identityPayload;
+    identity.dispatchEvent(new Event("input"));
+    const jsonPayload = `</textarea><img src=x onerror=\"globalThis.uiInjected=true\">`;
+    const documentInput = document.querySelector<HTMLTextAreaElement>("#configurations textarea") as HTMLTextAreaElement;
+    documentInput.value = JSON.stringify({ capabilities: [], note: jsonPayload });
+    documentInput.dispatchEvent(new Event("input"));
+
+    (document.querySelector<HTMLButtonElement>("#add-contract") as HTMLButtonElement).click();
+
+    expect((document.querySelector<HTMLInputElement>("[data-axis]") as HTMLInputElement).value).toBe(identityPayload);
+    expect(JSON.parse((document.querySelector<HTMLTextAreaElement>("#configurations textarea") as HTMLTextAreaElement).value).note).toBe(jsonPayload);
+    expect(document.querySelector("#configurations img")).toBeNull();
+    expect((globalThis as typeof globalThis & { uiInjected?: boolean }).uiInjected).not.toBe(true);
+  });
 });

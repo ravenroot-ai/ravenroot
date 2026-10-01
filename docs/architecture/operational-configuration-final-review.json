@@ -118,8 +118,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -175,8 +175,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -231,8 +231,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -289,8 +289,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -349,8 +349,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -409,8 +409,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -469,8 +469,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -529,8 +529,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -589,8 +589,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -649,8 +649,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -709,8 +709,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -769,8 +769,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -829,8 +829,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -889,8 +889,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -949,8 +949,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1009,8 +1009,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1067,8 +1067,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1125,8 +1125,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1185,8 +1185,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1243,8 +1243,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1788,8 +1788,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java",
@@ -1813,8 +1813,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
-          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "eda24a8810d534faff0e62cc91475bc72209c2029aa7df89afba5c3774ce1ff4",
+          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #522 preserves this reviewed semantic group while documenting the Configurator and publication-policy carrier."
         }
       ],
       "candidateCount": 5,
@@ -5472,8 +5472,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
-          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "eda24a8810d534faff0e62cc91475bc72209c2029aa7df89afba5c3774ce1ff4",
+          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #522 preserves this reviewed semantic group while documenting the Configurator and publication-policy carrier."
         }
       ],
       "candidateCount": 44,
@@ -5663,8 +5663,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "fbf36bde1dc2b5da3a1f46aef6989738638712b18c97b5b50d731fc3933c6ba1",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #522 preserves this reviewed semantic group while loading the closed publication policy and installing its durable audit sink at packaged startup."
         }
       ],
       "candidateCount": 3,
@@ -5766,8 +5766,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
-          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "eda24a8810d534faff0e62cc91475bc72209c2029aa7df89afba5c3774ce1ff4",
+          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #522 preserves this reviewed semantic group while documenting the Configurator and publication-policy carrier."
         }
       ],
       "candidateCount": 95,
@@ -8378,8 +8378,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "205ce879d0b12403796b3f127734268b99fa47741c73a9632460d4854af15573",
-          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged."
+          "digest": "0879fabd93d686c3243a7eb1a647fcd029a1db5f676cbe941ea77234a665cf2a",
+          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #522 preserves this reviewed semantic group while publishing the publication-policy environment carrier."
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -11498,13 +11498,13 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "eda24a8810d534faff0e62cc91475bc72209c2029aa7df89afba5c3774ce1ff4",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #522 preserves this reviewed semantic group while documenting the Configurator and publication-policy carrier."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
+          "digest": "5fe185012359899b98e4debcb9a12a5a2d03acde407e881e6e51f627bbc279a9",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #522 preserves this reviewed semantic group while documenting the publication-policy environment carrier."
         }
       ],
       "candidateCount": 4,
@@ -11572,13 +11572,13 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "eda24a8810d534faff0e62cc91475bc72209c2029aa7df89afba5c3774ce1ff4",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #522 preserves this reviewed semantic group while documenting the Configurator and publication-policy carrier."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
+          "digest": "5fe185012359899b98e4debcb9a12a5a2d03acde407e881e6e51f627bbc279a9",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #522 preserves this reviewed semantic group while documenting the publication-policy environment carrier."
         }
       ],
       "candidateCount": 1,
@@ -11643,13 +11643,13 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "9e8157ac980cb4e2e54c7939f2d060f94f08ede9b9c81dddf5416909aa1354cc",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "eda24a8810d534faff0e62cc91475bc72209c2029aa7df89afba5c3774ce1ff4",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #522 preserves this reviewed semantic group while documenting the Configurator and publication-policy carrier."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "c6a52352e30aecf1747b3ae4677329009bff5274e9a81749e19bc7bcfa8acc51",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
+          "digest": "5fe185012359899b98e4debcb9a12a5a2d03acde407e881e6e51f627bbc279a9",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #522 preserves this reviewed semantic group while documenting the publication-policy environment carrier."
         }
       ],
       "candidateCount": 1,

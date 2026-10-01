@@ -52,6 +52,8 @@
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle
       url: /operator-guide/plugin-bundles.html
+    - title: Configuration packager
+      url: /operator-guide/configuration-packager.html
     - title: Authoring assistant
       url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations

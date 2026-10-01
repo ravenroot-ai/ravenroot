@@ -29,6 +29,7 @@ Use the maintained complete GraphML file for the behavior you want to try:
 - [`log`](../examples/nodes/log.graphml), [`delay`](../examples/nodes/delay.graphml),
   [`template`](../examples/nodes/template.graphml), [`json-parse`](../examples/nodes/json-parse.graphml),
   [`bigint-op`](../examples/nodes/bigint-op.graphml), and [`json-path`](../examples/nodes/json-path.graphml)
+- [`timer`](../examples/nodes/timer.graphml) and [`crontab`](../examples/nodes/crontab.graphml)
 - [`cel-transform`](../examples/nodes/cel-transform.graphml) and
   [`cel-decision`](../examples/nodes/cel-decision.graphml)
 - [`human-task`](../examples/nodes/human-task.graphml),
@@ -50,6 +51,8 @@ ravenroot run example.graphml 'example input'
 Use the UI's Test action before Run when a node can perform an effect. The fragments below show the
 action node's exact GraphML `data` entries for explanation; they are not standalone graphs or a
 replacement syntax.
+The `timer` and `crontab` examples are deployment sources: start them with a durable execution
+store and they emit their own payload at scheduled times. They need no input supplied by `run`.
 
 ## `log`
 

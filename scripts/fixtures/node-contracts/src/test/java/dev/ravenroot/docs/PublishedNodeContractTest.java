@@ -68,7 +68,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Runtime-backed publication gate for the public 60-node catalog and its admission-ready examples. */
+/** Runtime-backed publication gate for the public 62-node catalog and its admission-ready examples. */
 final class PublishedNodeContractTest {
     private static final String UPDATE_PROPERTY = "ravenroot.docs.update";
     private static final Path REPOSITORY = repositoryRoot();
@@ -79,7 +79,7 @@ final class PublishedNodeContractTest {
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
         List<NodeTypeDescriptor> descriptors = descriptors();
-        assertEquals(60, descriptors.size(), "the documented baseline must classify every supported node");
+        assertEquals(62, descriptors.size(), "the documented baseline must classify every supported node");
         String actual = snapshot(descriptors);
         update(SNAPSHOT, actual);
         assertEquals(Files.readString(SNAPSHOT), actual,
@@ -123,6 +123,9 @@ final class PublishedNodeContractTest {
             update(example, graphMl(descriptor));
             try (var input = Files.newInputStream(example); var graph = GraphManager.readGraphMl(input)) {
                 new BehaviorPropertySchema(registry).validate(graph.definition());
+                if (descriptor.behavior().equals("timer") || descriptor.behavior().equals("crontab")) {
+                    registry.validate(graph.definition().node("action"));
+                }
                 assertEquals(descriptor.behavior(), graph.definition().node("action").behavior());
                 assertEquals(1, graph.definition().failureEdges("action").size(),
                         descriptor.behavior() + " must demonstrate one failure route");
@@ -569,9 +572,15 @@ final class PublishedNodeContractTest {
             edges.append("    <edge id=\"action-end-").append(index++).append("\" source=\"action\" target=\"end\"><data key=\"outcome\">")
                     .append(xml(outcome)).append("</data></edge>\n");
         }
+        String usage = descriptor.behavior().equals("timer") || descriptor.behavior().equals("crontab")
+                ? "This calendar source starts the graph without an incoming payload."
+                : "Supply an input payload at execution.";
+        String profileHint = descriptor.behavior().equals("timer") || descriptor.behavior().equals("crontab")
+                ? ""
+                : "     Replace any replace-with-operator-profile value with a configured profile before Run.\n";
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                + "<!-- Admission-ready " + xml(descriptor.behavior()) + " graph. Supply an input payload at execution.\n"
-                + "     Replace any replace-with-operator-profile value with a configured profile before Run.\n"
+                + "<!-- Admission-ready " + xml(descriptor.behavior()) + " graph. " + usage + "\n"
+                + profileHint
                 + "     Success reaches end through the documented descriptor outcome; failure reaches error. -->\n"
                 + "<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">\n"
                 + "  <key id=\"kind\" for=\"node\" attr.name=\"kind\" attr.type=\"string\"/>\n"
@@ -600,6 +609,10 @@ final class PublishedNodeContractTest {
     }
 
     private static String exampleValue(String behavior, NodePropertyDescriptor property) {
+        if ((behavior.equals("timer") || behavior.equals("crontab")) && property.name().equals("zoneId"))
+            return "UTC";
+        if (behavior.equals("timer") && property.name().equals("times")) return "09:00";
+        if (behavior.equals("crontab") && property.name().equals("entries")) return "0 9 * * *";
         if (behavior.equals("bigint-op") && property.name().equals("operation")) return "add";
         if (behavior.equals("bigint-op") && property.name().equals("left")) return "literal:1";
         if (behavior.equals("bigint-op") && property.name().equals("right")) return "literal:1";

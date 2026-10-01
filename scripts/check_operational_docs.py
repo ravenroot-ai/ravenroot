@@ -21,6 +21,8 @@ CORE_FACTORIES = ROOT / "ravenroot" / "ravenroot-core" / "src" / "main" / "java"
 CORE_FACTORY_IDS = {
     "LogNodeBehaviorFactory": "log",
     "DelayNodeBehaviorFactory": "delay",
+    "TimerNodeBehaviorFactory": "timer",
+    "CrontabNodeBehaviorFactory": "crontab",
     "HumanTaskNodeBehaviorFactory": "human-task",
     "TemplateNodeBehaviorFactory": "template",
     "JsonParseNodeBehaviorFactory": "json-parse",

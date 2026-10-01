@@ -1,0 +1,40 @@
+name: Configurator
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ravenroot-configurator/**
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/PublicationPolicyConfiguration.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/audit/AuditTrailPublicationSink.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java
+      - ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/PublicationPolicyConfigurationTest.java
+      - .github/workflows/configurator.yml
+
+permissions:
+  contents: read
+
+jobs:
+  configurator:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ravenroot-configurator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ravenroot-configurator/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level moderate
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm example:amqp
+      - name: Verify packaged-server publication policy carrier
+        working-directory: .
+        run: mvn -f ravenroot/pom.xml -pl ravenroot-server -am -Dtest=PublicationPolicyConfigurationTest -Dsurefire.failIfNoSpecifiedTests=false test

@@ -1,0 +1,65 @@
+{
+  "target": {
+    "kind": "compose",
+    "id": "amqp-local-example",
+    "tenantIds": ["tenant-a"],
+    "options": {}
+  },
+  "configurations": [
+    {
+      "contractId": "amqp.profile",
+      "identity": { "tenant": "tenant-a", "profile": "orders" },
+      "values": {
+        "host": "rabbitmq.example.test",
+        "port": 5671,
+        "tls": true,
+        "vhost": "/operations",
+        "username": "ravenroot",
+        "credentialRef": "broker",
+        "defaultExchange": "orders",
+        "additionalExchanges": [],
+        "defaultRoutingKey": "orders.created",
+        "additionalRoutingKeys": ["orders.updated"],
+        "approvedHeaders": ["trace-id"],
+        "approvedReplyTo": [],
+        "allowPersistent": true,
+        "maxPriority": 5,
+        "maxExpirationMs": 60000,
+        "maxConcurrency": 4,
+        "maxPerSecond": 20,
+        "timeoutMs": 10000,
+        "maxBodyBytes": 262144,
+        "retries": 1
+      }
+    },
+    {
+      "contractId": "amqp.consumer",
+      "identity": { "tenant": "tenant-a", "profile": "orders" },
+      "values": {
+        "queue": "orders.ravenroot",
+        "prefetch": 8,
+        "approvedHeaders": ["trace-id"],
+        "identityHeader": "",
+        "maxBodyBytes": 262144,
+        "maxHeaderBytes": 8192,
+        "retryBackoffMs": 500,
+        "maxRetryBackoffMs": 5000,
+        "poisonAttempts": 5,
+        "poisonPolicy": "reject",
+        "drainTimeoutMs": 10000
+      }
+    }
+  ],
+  "secrets": [
+    {
+      "mode": "target-reference",
+      "bindingId": "broker-password",
+      "environmentKey": "RAVENROOT_AMQP091_CREDENTIAL_62726F6B6572",
+      "composeVariable": "RABBITMQ_PASSWORD",
+      "kubernetesSecret": "ravenroot-amqp",
+      "kubernetesKey": "password"
+    }
+  ],
+  "bundleDirectories": ["./prebuilt/amqp091"],
+  "createdAt": "2026-10-02T00:00:00.000Z"
+}

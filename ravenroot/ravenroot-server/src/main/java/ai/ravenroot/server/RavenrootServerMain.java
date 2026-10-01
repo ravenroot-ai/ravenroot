@@ -226,6 +226,7 @@ public final class RavenrootServerMain {
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
+                new ai.ravenroot.server.audit.AuditTrailPublicationSink(auditTrail),
                 toolApprovals, toolApprovalSettings, agentBudgets, humanTasks, humanTaskPolicy);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
@@ -810,6 +811,7 @@ public final class RavenrootServerMain {
             BehaviorEnvironment environment, CredentialResolver credentials,
             AuditTrailPluginActivationSink auditSink,
             ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
+            ai.ravenroot.api.publication.PublicationAuditSink publicationAuditSink,
             ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
             ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
             ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
@@ -821,8 +823,8 @@ public final class RavenrootServerMain {
                     toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment,
-                            ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
-                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), humanTasks,
+                            PublicationPolicyConfiguration.fromEnvironment(System.getenv()),
+                            publicationAuditSink, humanTasks,
                             humanTaskPolicy),
                     System.getenv(), services);
         } catch (RuntimeException activationFailed) {

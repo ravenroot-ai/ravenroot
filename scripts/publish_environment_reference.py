@@ -114,6 +114,7 @@ ROW_BOUNDARIES = {
     "RAVENROOT_TRUSTED_PROXY_ADDRESSES": (
         "comma-separated exact IP literals trusted as proxy peers; blank trusts none"
     ),
+    "RAVENROOT_PUBLICATION_POLICY_CONFIG": "unset keeps boundary-guard fail closed; otherwise an operator-owned closed version-one JSON file containing immutable publication policy revisions and declarative rules; requires restart",
 }
 
 
@@ -185,7 +186,7 @@ def group(name: str) -> str:
     if name in {"RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
                 "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE", "RAVENROOT_RUNNER_READINESS_FILE", "RAVENROOT_LOCAL_RUNNER_CONFIG"}:
         return "runner"
-    if name == "RAVENROOT_RUNNER_CONFIG":
+    if name in {"RAVENROOT_RUNNER_CONFIG", "RAVENROOT_PUBLICATION_POLICY_CONFIG"}:
         return "agent"
     if name in {
         "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",

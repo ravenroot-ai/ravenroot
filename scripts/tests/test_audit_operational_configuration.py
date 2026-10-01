@@ -2122,16 +2122,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_731_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_757_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(97, len(details))
+            self.assertEqual(102, len(details))
             self.assertEqual(
-                {"methods": 107, "path": 97, "summary": 428, "successStatuses": 99},
+                {"methods": 115, "path": 102, "summary": 436, "successStatuses": 104},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(731, len(entries))
+            self.assertEqual(757, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -2143,7 +2143,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
 
-    def test_runner_routes_include_put_without_opening_the_method_vocabulary(self) -> None:
+    def test_route_table_accepts_reviewed_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
@@ -2154,6 +2154,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                    for identifier in item["candidateIds"]["methods"])
         }
         self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
+        palette_patch_routes = {
+            item["path"] for item in details
+            if any(candidates[identifier].expression == '"PATCH"'
+                   for identifier in item["candidateIds"]["methods"])
+        }
+        self.assertEqual({
+            "/v1/node-palettes/{paletteId}",
+            "/v1/node-palettes/templates/{templateId}",
+        }, palette_patch_routes)
         self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
         self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
         self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})

@@ -14032,8 +14032,10 @@ function applyPaletteDisclosures() {
   const stored = storedPaletteDisclosures();
   document.querySelectorAll('[data-action="panel-disclosure"]').forEach(control => {
     const expanded = stored[control.dataset.panel] !== false;
+    const label = `${expanded ? 'Collapse' : 'Expand'} ${panelDescriptor(control.dataset.panel)?.title || 'section'}`;
     control.setAttribute('aria-expanded', String(expanded));
-    control.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${panelDescriptor(control.dataset.panel)?.title || 'section'}`);
+    control.setAttribute('aria-label', label);
+    control.dataset.tooltip = label;
     control.textContent = expanded ? '▾' : '▸';
     panelElement(control.dataset.panel)?.classList.toggle('panel--content-collapsed', !expanded);
   });

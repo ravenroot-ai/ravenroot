@@ -118,8 +118,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -175,8 +175,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -231,8 +231,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -289,8 +289,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -349,8 +349,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -409,8 +409,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -469,8 +469,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -529,8 +529,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -589,8 +589,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -649,8 +649,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -709,8 +709,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -769,8 +769,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -829,8 +829,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -889,8 +889,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -949,8 +949,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1009,8 +1009,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1067,8 +1067,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1125,8 +1125,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1185,8 +1185,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1243,8 +1243,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1788,8 +1788,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java",
@@ -5658,13 +5658,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "629fa077f763aad37d06962022173b250fff242c5f7dd8a57b25f9159c19b999",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #521 preserves this reviewed semantic group while adding authenticated personal-palette routes."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #521 preserves this reviewed semantic group while composing the tenant-scoped palette store."
         }
       ],
       "candidateCount": 3,
@@ -5688,8 +5688,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "629fa077f763aad37d06962022173b250fff242c5f7dd8a57b25f9159c19b999",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #521 preserves this reviewed semantic group while adding authenticated personal-palette routes."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/provider/AssistantOutputLimit.java",
@@ -5761,8 +5761,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
-          "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "629fa077f763aad37d06962022173b250fff242c5f7dd8a57b25f9159c19b999",
+          "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #521 preserves this reviewed semantic group while adding authenticated personal-palette routes."
         },
         {
           "path": "docs/reference/configuration.md",
@@ -6223,8 +6223,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "629fa077f763aad37d06962022173b250fff242c5f7dd8a57b25f9159c19b999",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #521 preserves this reviewed semantic group while adding authenticated personal-palette routes."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
@@ -6364,8 +6364,8 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "629fa077f763aad37d06962022173b250fff242c5f7dd8a57b25f9159c19b999",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #521 preserves this reviewed semantic group while adding authenticated personal-palette routes."
         }
       ],
       "candidateCount": 29,
@@ -8533,8 +8533,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "66642cd30737ebbd70745e1591862bdedbbc4894e89c565e0901a450abb0d8f0",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer."
+          "digest": "d04444050a1f09a5a48d1b86edf5d7d40a763e41aa6b4f706dbf7518374659cb",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #521 preserves this reviewed semantic group while adding the personal-palette Workbench panel."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
@@ -8829,8 +8829,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "66642cd30737ebbd70745e1591862bdedbbc4894e89c565e0901a450abb0d8f0",
-          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer."
+          "digest": "d04444050a1f09a5a48d1b86edf5d7d40a763e41aa6b4f706dbf7518374659cb",
+          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #521 preserves this reviewed semantic group while adding the personal-palette Workbench panel."
         }
       ],
       "candidateCount": 131,
@@ -8987,8 +8987,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "66642cd30737ebbd70745e1591862bdedbbc4894e89c565e0901a450abb0d8f0",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer."
+          "digest": "d04444050a1f09a5a48d1b86edf5d7d40a763e41aa6b4f706dbf7518374659cb",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #521 preserves this reviewed semantic group while adding the personal-palette Workbench panel."
         }
       ],
       "candidateCount": 43,
@@ -10766,8 +10766,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "66642cd30737ebbd70745e1591862bdedbbc4894e89c565e0901a450abb0d8f0",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer."
+          "digest": "d04444050a1f09a5a48d1b86edf5d7d40a763e41aa6b4f706dbf7518374659cb",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #521 preserves this reviewed semantic group while adding the personal-palette Workbench panel."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
@@ -11429,8 +11429,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "66642cd30737ebbd70745e1591862bdedbbc4894e89c565e0901a450abb0d8f0",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer."
+          "digest": "d04444050a1f09a5a48d1b86edf5d7d40a763e41aa6b4f706dbf7518374659cb",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #521 preserves this reviewed semantic group while adding the personal-palette Workbench panel."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",

@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef"
+    "836bfabac3940be746bbb44c3d4fa2c5bb75b0a8caa3ee3a5a1b018080eef969"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6"
+    "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -198,7 +198,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+    EMBED_MAIN_PATH: "b6289fcde1271e3917f53b08166ab33c615c5b7e0550c1c6f98e0579c8665b77",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -214,7 +214,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef",
+        "836bfabac3940be746bbb44c3d4fa2c5bb75b0a8caa3ee3a5a1b018080eef969",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -6202,7 +6202,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef"),
+         "836bfabac3940be746bbb44c3d4fa2c5bb75b0a8caa3ee3a5a1b018080eef969"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7808,7 +7808,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  'f949ae4ea25c316ce8d25de0e1a082b9d2580524905a0f973b2c533e4424cb2f',
+  '89b9762b1e45fdb06ef3d6cb4228dd34b879d4e018659719b515ac96b6ad0d26',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -7832,7 +7832,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef',
+  '836bfabac3940be746bbb44c3d4fa2c5bb75b0a8caa3ee3a5a1b018080eef969',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -8175,7 +8175,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'dbfee4ea16c5730eb2b4dcd20da2c73ff02bca76820160fab0aa07e75a7e5b9f',
+  '3e05d22030393b22ca5b2acb78223f8835106fe4216663ab24efad3ec47fb7b7',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -8418,6 +8418,7 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-7472c211aa6980103e4b',
  'oc-00dc7c6b323744d9427e',
  'oc-107e73202ff972e53169',
+ 'oc-1bed77f8f397cfa98208',
  'oc-20f796f0e15a1c389586',
  'oc-23f50ddca7ea65fc2aec',
  'oc-2d7c516244dfb35125e6',
@@ -8442,7 +8443,7 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-8561e4404c8819c4a62f',
  'oc-86ec24b91c7449c418be',
  'oc-886d1581ff889079e85d',
- 'oc-890813c7fb2d8861e36f',
+ 'oc-389255cffa9d91785bc3',
  'oc-92e7a625ae5d828264bc',
  'oc-9afebfed0a8eeafb99ce',
  'oc-a35ea52a7d68498116e3',
@@ -10762,8 +10763,8 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                 'rationale': 'Constructor diagnostic label or one-byte '
                                                              'overflow detection sentinel; actual limit '
                                                              'comes from typed authority.',
-                                                'candidateIds': ['oc-45c33d012ba830f6aa95',
-                                                                 'oc-f104357558572e8b33a8']},
+                                                'candidateIds': ['oc-5cc859036ec85f54143e',
+                                                                 'oc-6e44c0652ce7d3a85a35']},
  'program.authoring.served-schema-version': {'classification': 'protocol-or-format-invariant',
                                              'status': 'retained',
                                              'rationale': 'Fixed peer protocol/header/schema identity, not a '
@@ -12666,7 +12667,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  '126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef'),
+  '836bfabac3940be746bbb44c3d4fa2c5bb75b0a8caa3ee3a5a1b018080eef969'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',

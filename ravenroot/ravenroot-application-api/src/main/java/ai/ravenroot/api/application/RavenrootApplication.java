@@ -43,7 +43,12 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     List<NodeTypeDescriptor> nodeTypes();
 
-    /** Validates operator-owned references for one sanitized template in its destination tenant. */
+    /**
+     * Validates operator-owned references for one sanitized template in its destination tenant.
+     * @param tenantId authenticated destination tenant
+     * @param behavior installed behavior identifier
+     * @param properties descriptor-filtered authored properties
+     */
     default void validateNodeTemplateReferences(String tenantId, String behavior,
                                                 Map<String, String> properties) { }
 

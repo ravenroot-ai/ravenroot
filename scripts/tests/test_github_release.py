@@ -50,6 +50,11 @@ def fail(message):
 
 if argv[:2] == ["api", "--paginate"]:
     releases = [state["release"]] if state.get("release") else []
+    hidden = state.get("hidden", 0)
+    if releases and hidden:
+        state["hidden"] = hidden - 1
+        save()
+        releases = []
     sys.stdout.write(json.dumps([releases]))
 elif argv[0] == "api":
     url = argv[1]
@@ -195,6 +200,23 @@ class GitHubReleaseRehearsalTest(unittest.TestCase):
             "the draft must exist before any asset is uploaded",
         )
         self.assertTrue(any(command.startswith("release edit") for command in commands))
+
+    def test_new_draft_is_retried_until_it_appears_in_the_release_listing(self):
+        self.misbehave(hidden=2)
+        with mock.patch.object(github_release.time, "sleep") as sleep:
+            self.assertEqual(0, self.run_main())
+
+        self.assertEqual([mock.call(1), mock.call(1)], sleep.call_args_list)
+        self.assertEqual(0, self.current()["draft"])
+
+    def test_new_draft_that_never_appears_in_the_release_listing_fails_closed(self):
+        self.misbehave(hidden=github_release.DRAFT_VISIBILITY_RETRIES + 1)
+        with mock.patch.object(github_release.time, "sleep") as sleep:
+            self.assertEqual(1, self.run_main())
+
+        self.assertEqual(github_release.DRAFT_VISIBILITY_RETRIES, sleep.call_count)
+        self.assertTrue(self.current()["draft"])
+        self.assertEqual([], self.current()["assets"])
 
     def test_complete_release_is_verified_without_creating_or_uploading_anything(self):
         self.assertEqual(0, self.run_main())

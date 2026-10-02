@@ -166,6 +166,7 @@ public final class RouteTable {
                             + "Source ids, edges, coordinates, runtime data, adapter bindings, secret references, "
                             + "and undeclared properties are excluded.",
                     true, false, 201, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.NODE_TEMPLATE_REFERENCE_UNAVAILABLE.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("PATCH", "DELETE"), "/v1/node-palettes/templates/{templateId}",
@@ -176,6 +177,7 @@ public final class RouteTable {
             new RouteDescriptor(Set.of("POST"), "/v1/node-palettes/templates/{templateId}/validate",
                     "Revalidates a saved template's current operator-owned references in the authenticated destination tenant before insertion.",
                     true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.NODE_TEMPLATE_REFERENCE_UNAVAILABLE.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
             // The program-language counterpart of /v1/node-types: a static, tenant-independent
             // capability catalog an editor reads to populate a selector, rather than a route bolted

@@ -1269,8 +1269,8 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "NODE_TEMPLATE_REFERENCE_UNAVAILABLE"},
           "404": {"description": "UNKNOWN_RESOURCE"},
-          "409": {"description": "CONFLICT"},
           "500": {"description": "INTERNAL_ERROR"}
         }
       }
@@ -1336,6 +1336,7 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "NODE_TEMPLATE_REFERENCE_UNAVAILABLE"},
           "404": {"description": "UNKNOWN_RESOURCE"},
           "500": {"description": "INTERNAL_ERROR"}
         }

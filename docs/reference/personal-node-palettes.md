@@ -8,7 +8,9 @@ Palette reads require the `ravenroot.palette.read` scope. Creating, renaming, mo
 
 Ravenroot derives saved behavior properties from the current trusted node descriptor. It stores ordinary authored properties and opaque workspace or broker profile references. It omits secret references, adapter bindings, undeclared fields, node IDs, coordinates, edges, runtime state, parser metadata, credentials, endpoints, and other server authority. Structural nodes use a small explicit allowlist for join settings.
 
-Before saving and again before insertion, package behaviors may validate operator-owned references for the authenticated tenant. The AMQP package resolves `brokerProfile` only as a tenant-scoped operator profile; its endpoint and credentials never enter the template. The Workbench also refuses workspace references that do not exist in the destination workflow.
+Before saving and again before insertion, package behaviors may validate operator-owned references for the authenticated tenant. The AMQP package resolves `brokerProfile` only as a tenant-scoped operator profile; its endpoint and credentials never enter the template. The Workbench also requires every workspace reference to name an existing `workspace` behavior node in the destination workflow.
+
+A missing plugin or a destination reference that the authenticated tenant cannot use returns `NODE_TEMPLATE_REFERENCE_UNAVAILABLE` with a fixed actionable message and no resolver detail. Malformed authored properties remain `INVALID_REQUEST`, so clients can distinguish editing the node from choosing an available plugin, profile, policy, or destination reference.
 
 Insertion creates a fresh node ID at the canvas center or drop point, adds no edges, and produces one undo entry. A saved START, END, or ERROR node is refused when the destination already contains that terminal kind.
 

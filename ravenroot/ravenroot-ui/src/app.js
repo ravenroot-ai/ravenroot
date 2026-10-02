@@ -796,6 +796,7 @@ function beginWorkspaceAuthority(client, state = 'pending') {
   void credentialsWindow?.setClient(null);
   runnerWindow?.setClient(null);
   void deploymentsWindow?.setClient(null);
+  clearPersonalPalettes();
   refreshCommands();
   return workspaceAuthority.generation;
 }
@@ -9579,6 +9580,11 @@ function renderPersonalPalettes() {
         () => runtimeClient.deleteNodeTemplate(template.id, template.version));
     },
   });
+}
+
+function clearPersonalPalettes() {
+  nodePaletteState = { pending: false, error: '', palettes: [], templates: [] };
+  renderPersonalPalettes();
 }
 
 async function loadPersonalPalettes(client = runtimeClient) {

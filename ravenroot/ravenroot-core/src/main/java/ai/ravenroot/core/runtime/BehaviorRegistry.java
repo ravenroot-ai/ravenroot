@@ -567,9 +567,19 @@ public final class BehaviorRegistry {
     public void validateTemplateReferences(GraphNode node, String tenantId) {
         if (node == null || node.behavior() == null) return;
         var factory = factories.get(node.behavior());
-        if (factory == null) throw new IllegalArgumentException("behavior is unavailable");
+        if (factory == null) {
+            throw new ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException();
+        }
+        // Schema validation remains an invalid authored payload. Only the behavior's destination
+        // authority lookup is translated to the stable, detail-free reference refusal.
         factory.validate(node);
-        factory.validateTemplateReferences(node, tenantId);
+        try {
+            factory.validateTemplateReferences(node, tenantId);
+        } catch (ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException unavailable) {
+            throw unavailable;
+        } catch (IllegalArgumentException unavailable) {
+            throw new ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException(unavailable);
+        }
     }
 
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */

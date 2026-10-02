@@ -46,14 +46,42 @@ describe('saved node insertion', () => {
     });
   });
 
-  it('refuses duplicate terminals and workspace references missing from the destination graph', () => {
+  it('refuses duplicate terminals and missing or wrong-kind workspace references without mutation', () => {
     const graph = createWorkflowDocument();
+    const history = createCommandHistory();
+    const before = { nodes: graph.nodes.length, revision: history.revision() };
     expect(addTemplateNodeAt(graph, { x: 1, y: 2 }, { name: 'End', node: { kind: 'END' } }).reason)
       .toContain('already has');
     expect(addTemplateNodeAt(graph, { x: 1, y: 2 }, { name: 'Worker', node: {
       kind: 'BEHAVIOR', behavior: 'workspace', properties: { workspace: 'missing' },
       workspaceReferences: ['workspace'],
-    } }).reason).toContain('outside this workflow');
+    } }, history).reason).toContain('outside this workflow');
+    expect(graph.nodes).toHaveLength(before.nodes);
+    expect(history.revision()).toBe(before.revision);
+
+    expect(addTemplateNodeAt(graph, { x: 1, y: 2 }, { name: 'Worker', node: {
+      kind: 'BEHAVIOR', behavior: 'probe', properties: { workspace: 'dosomething' },
+      workspaceReferences: ['workspace'],
+    } }, history).reason).toContain('must name a Workspace node');
+    expect(graph.nodes).toHaveLength(before.nodes);
+    expect(history.revision()).toBe(before.revision);
+  });
+
+  it('accepts a workspace reference only when the destination node is the workspace behavior', () => {
+    const graph = createWorkflowDocument();
+    const history = createCommandHistory();
+    const workspace = graph.nodeMap.dosomething;
+    workspace.kind = 'BEHAVIOR';
+    workspace.behavior = 'workspace';
+
+    const result = addTemplateNodeAt(graph, { x: 1, y: 2 }, { name: 'Worker', node: {
+      kind: 'BEHAVIOR', behavior: 'probe', properties: { workspace: 'dosomething' },
+      propertyTypes: { workspace: 'string' }, workspaceReferences: ['workspace'],
+    } }, history);
+
+    expect(result.reason).toBe('');
+    expect(result.node.properties.workspace).toBe('dosomething');
+    expect(history.state()).toMatchObject({ depth: 1 });
   });
 
   it.each(['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR'])(

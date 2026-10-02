@@ -2101,6 +2101,8 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, httpContext, code);
         } catch (PayloadException rejection) {
             failPayload(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException unavailable) {
+            fail(exchange, httpContext, ErrorCode.NODE_TEMPLATE_REFERENCE_UNAVAILABLE);
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }

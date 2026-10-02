@@ -152,8 +152,12 @@ export function addTemplateNodeAt(graph, position, template, history = null) {
   }
   for (const property of saved.workspaceReferences || []) {
     const referenced = String(saved.properties?.[property] || '').trim();
-    if (referenced && !graph.nodeMap?.[referenced]) {
+    const destination = referenced ? graph.nodeMap?.[referenced] : null;
+    if (referenced && !destination) {
       return { node: null, reason: `Saved reference ${property} names a node outside this workflow` };
+    }
+    if (destination && (destination.kind !== 'BEHAVIOR' || destination.behavior !== 'workspace')) {
+      return { node: null, reason: `Saved reference ${property} must name a Workspace node in this workflow` };
     }
   }
   const prefix = String(saved.behavior || kind.toLowerCase()).replace(/[^a-zA-Z0-9_-]/g, '-') || 'node';

@@ -22,6 +22,7 @@ abstract class ScheduledSourceNodeFactory implements CoreInboundSourceFactory {
     static final Duration MAX_CLOCK_RECHECK = Duration.ofSeconds(60);
     static final Duration REFUSAL_RETRY = Duration.ofSeconds(5);
     static final Duration FAILURE_RETRY = Duration.ofSeconds(15);
+    static final Duration START_RECHECK = Duration.ofSeconds(1);
     /** Scheduler jitter does not turn an otherwise timely tick into a missed occurrence. */
     static final Duration MISFIRE_GRACE = Duration.ofSeconds(30);
     private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -162,29 +163,58 @@ abstract class ScheduledSourceNodeFactory implements CoreInboundSourceFactory {
                         ? decode(baselineCursor.deliveredThrough()) : decode(cursor.deliveredThrough());
                 ScheduleDefinition.Occurrence first = configuration.schedule().nextAfter(after);
                 Instant now = clock.instant();
-                if (first.instant().isAfter(now)) {
+                // Check custody even after a backward clock correction: an already accepted
+                // occurrence must be resumed or checkpointed before its wall time comes around again.
+                String firstId = occurrenceId(owner, first);
+                DurableIngressStartState firstState = await(durable.startState(owner.identity(), OCCURRENCES, firstId));
+                if (first.instant().isAfter(now) && firstState == DurableIngressStartState.ABSENT) {
                     owner.reportHealthy();
                     schedule(Duration.between(now, first.instant()));
                     return;
                 }
+                // An accepted occurrence remains the first one after the cursor. Reconcile it
+                // before coalescing later missed ticks or applying SKIP after a long outage.
                 ScheduleDefinition.Occurrence selected = configuration.mode() == Mode.ONCE
+                        || firstState != DurableIngressStartState.ABSENT
                         ? first : configuration.schedule().previousAtOrBefore(now);
                 if (selected == null || !selected.instant().isAfter(after)) {
                     schedule(MAX_CLOCK_RECHECK); return;
                 }
+                String occurrenceId = selected.equals(first) ? firstId : occurrenceId(owner, selected);
+                DurableIngressStartState startState = selected.equals(first) ? firstState
+                        : await(durable.startState(owner.identity(), OCCURRENCES, occurrenceId));
+                if (startState == DurableIngressStartState.STARTED) {
+                    await(durable.advanceSourceCheckpoint(cursor, encode(selected.instant())));
+                    owner.reportHealthy();
+                    schedule(Duration.ZERO);
+                    return;
+                }
+                if (startState == DurableIngressStartState.TERMINAL_UNSTARTED) {
+                    owner.reportDegraded("scheduled occurrence ended before its first durable invocation");
+                    schedule(FAILURE_RETRY);
+                    return;
+                }
                 int missed = missedCount(after, selected.instant());
                 boolean misfire = missed > 1 || selected.instant().plus(MISFIRE_GRACE).isBefore(now);
-                if (configuration.misfire() == Misfire.SKIP && misfire) {
+                if (startState == DurableIngressStartState.ABSENT
+                        && configuration.misfire() == Misfire.SKIP && misfire) {
                     await(durable.advanceSourceCheckpoint(cursor, encode(selected.instant())));
                     owner.reportHealthy();
                     schedule(Duration.ZERO);
                     return;
                 }
 
+                if (!selected.equals(first)) {
+                    // LATEST_ONLY deliberately skips older unaccepted ticks. Commit that skip
+                    // before offering the selected tick, so a crash after acceptance leaves it as
+                    // the first uncheckpointed occurrence and recovery cannot jump past it.
+                    var predecessor = configuration.schedule().previousAtOrBefore(selected.instant().minusNanos(1));
+                    if (predecessor == null || !predecessor.instant().isAfter(after))
+                        throw new IllegalStateException("latest occurrence has no checkpoint predecessor");
+                    cursor = await(durable.advanceSourceCheckpoint(cursor, encode(predecessor.instant())));
+                }
+
                 Instant actual = clock.instant();
-                String occurrenceId = ScheduleDefinition.digest(owner.deploymentId().value() + '\0'
-                        + owner.nodeId() + '\0' + configuration.schedule().fingerprint() + '\0'
-                        + selected.instant() + '\0' + selected.offset());
                 Map<String, Object> payload = Map.ofEntries(
                         Map.entry("kind", configuration.kind()),
                         Map.entry("scheduledAt", selected.instant().toString()),
@@ -199,21 +229,32 @@ abstract class ScheduledSourceNodeFactory implements CoreInboundSourceFactory {
                         Map.entry("tzdbVersion", tzdbVersion(configuration.schedule().zone())));
                 IngressReceipt receipt = durable.offerDurably(owner.identity(), IngressTarget.start(), payload,
                         OCCURRENCES, occurrenceId);
-                if (receipt.acknowledgeable()) {
+                DurableIngressStartState afterOffer = await(durable.startState(owner.identity(), OCCURRENCES, occurrenceId));
+                if (afterOffer == DurableIngressStartState.STARTED) {
                     await(durable.advanceSourceCheckpoint(cursor, encode(selected.instant())));
                     owner.reportHealthy();
                     schedule(Duration.ZERO);
                 } else {
-                    if (receipt instanceof IngressReceipt.Ambiguous) {
+                    if (afterOffer == DurableIngressStartState.TERMINAL_UNSTARTED) {
+                        owner.reportDegraded("scheduled occurrence ended before its first durable invocation");
+                    } else if (receipt instanceof IngressReceipt.Ambiguous) {
                         owner.reportDegraded("scheduled occurrence acceptance is unresolved");
                     }
-                    schedule(receipt instanceof IngressReceipt.Refused ? REFUSAL_RETRY : FAILURE_RETRY);
+                    schedule(afterOffer == DurableIngressStartState.ACCEPTED_UNSTARTED
+                                    || afterOffer == DurableIngressStartState.INBOX_ONLY
+                            ? START_RECHECK : receipt instanceof IngressReceipt.Refused ? REFUSAL_RETRY : FAILURE_RETRY);
                 }
             } catch (RuntimeException failure) {
                 InboundSourceContext owner = context;
                 if (owner != null) owner.reportDegraded("scheduled source persistence or calculation failed");
                 schedule(FAILURE_RETRY);
             }
+        }
+
+        private String occurrenceId(InboundSourceContext owner, ScheduleDefinition.Occurrence occurrence) {
+            return ScheduleDefinition.digest(owner.deploymentId().value() + '\0'
+                    + owner.nodeId() + '\0' + configuration.schedule().fingerprint() + '\0'
+                    + occurrence.instant() + '\0' + occurrence.offset());
         }
 
         private int missedCount(Instant after, Instant through) {

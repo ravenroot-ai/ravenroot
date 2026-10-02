@@ -42,7 +42,9 @@ class PostgresSourceCheckpointStoreTest {
             var initial = owner.checkpoint("occurrences").toCompletableFuture().join();
             var advanced = owner.advance(initial, 42).toCompletableFuture().join();
             UUID event = UUID.randomUUID();
+            assertFalse(owner.containsInbox("occurrences", event).toCompletableFuture().join());
             assertTrue(owner.recordInbox("occurrences", event, Duration.ofDays(1)).toCompletableFuture().join());
+            assertTrue(owner.containsInbox("occurrences", event).toCompletableFuture().join());
 
             assertThrows(IllegalStateException.class,
                     () -> peerStore.openSourceCheckpointStore("tenant", "deployment/timer/schedule"));
@@ -50,6 +52,7 @@ class PostgresSourceCheckpointStoreTest {
 
             try (var successor = peerStore.openSourceCheckpointStore("tenant", "deployment/timer/schedule")) {
                 assertEquals(advanced, successor.checkpoint("occurrences").toCompletableFuture().join());
+                assertTrue(successor.containsInbox("occurrences", event).toCompletableFuture().join());
                 assertFalse(successor.recordInbox("occurrences", event, Duration.ofDays(1))
                         .toCompletableFuture().join());
             }

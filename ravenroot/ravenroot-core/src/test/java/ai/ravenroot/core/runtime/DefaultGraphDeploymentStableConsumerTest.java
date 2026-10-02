@@ -15,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -54,8 +55,22 @@ class DefaultGraphDeploymentStableConsumerTest {
             retired = behavior.context.ingress().openDurableConsumer("reader");
             var initial = retired.sourceCheckpoint(IDENTITY, "mailbox/42").toCompletableFuture().join();
             assertEquals(0, initial.deliveredThrough());
+            assertEquals(DurableIngressStartState.ABSENT,
+                    retired.startState(IDENTITY, "mailbox/42", "uid-7").toCompletableFuture().join());
+            String namespace = sourcePart("test.source") + "/" + sourcePart("source") + "/reader";
+            String destination = "source-v1:" + sourcePart(namespace) + "." + sourcePart("mailbox/42");
+            UUID inboxOnlyId = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + destination + '\0'
+                    + "uid-inbox-only").getBytes(StandardCharsets.UTF_8));
+            assertTrue(store.recordInboxDelivery(IDENTITY.tenantId(), destination, inboxOnlyId,
+                    Duration.ofDays(7)).toCompletableFuture().join());
+            assertEquals(DurableIngressStartState.INBOX_ONLY,
+                    retired.startState(IDENTITY, "mailbox/42", "uid-inbox-only").toCompletableFuture().join());
+            assertInstanceOf(IngressReceipt.Duplicate.class, retired.offerDurably(IDENTITY,
+                    IngressTarget.start(), "recovered mail", "mailbox/42", "uid-inbox-only"));
+            awaitStarted(retired, "uid-inbox-only");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, retired.offerDurably(IDENTITY,
                     IngressTarget.start(), "mail", "mailbox/42", "uid-7"));
+            awaitStarted(retired, "uid-7");
             recorded = retired.advanceSourceCheckpoint(initial, 8).toCompletableFuture().join();
             assertFalse(recorded.destination().contains("/"), "stable keys cannot collide with legacy deployment/source keys");
             assertThrows(CompletionException.class, () -> behavior.context.ingress()
@@ -127,6 +142,19 @@ class DefaultGraphDeploymentStableConsumerTest {
 
     private static SecurityContext identity(String tenant) {
         return new SecurityContext("request", tenant, "source", PrincipalType.WORKLOAD, "issuer");
+    }
+
+    private static String sourcePart(String value) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void awaitStarted(DurableConsumerIngress ingress, String key) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (ingress.startState(IDENTITY, "mailbox/42", key).toCompletableFuture().join()
+                != DurableIngressStartState.STARTED && System.nanoTime() < deadline) Thread.sleep(10);
+        assertEquals(DurableIngressStartState.STARTED,
+                ingress.startState(IDENTITY, "mailbox/42", key).toCompletableFuture().join(),
+                "only a persisted invocation establishes scheduler checkpoint custody");
     }
 
     private static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, SqliteExecutionStore store,

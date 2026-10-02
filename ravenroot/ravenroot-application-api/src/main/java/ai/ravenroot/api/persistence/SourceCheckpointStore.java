@@ -35,6 +35,8 @@ public interface SourceCheckpointStore extends AutoCloseable {
      * @return true for first custody, false for duplicate
      */
     CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId, Duration retention);
+    /** Reads whether this namespace still holds the event, without admitting a new delivery. */
+    CompletionStage<Boolean> containsInbox(String sourceId, UUID eventId);
     /** Revokes this handle and releases ownership after admitted operations settle. */
     @Override void close();
 }

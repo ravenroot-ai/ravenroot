@@ -1998,6 +1998,11 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    private static UUID durableEventId(String tenantId, String destination, String idempotentKey) {
+        return UUID.nameUUIDFromBytes((tenantId + '\0' + destination + '\0' + idempotentKey)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     /** Stable namespace, still fenced by the source context that opened it. */
     private final class StableConsumerIngress implements ai.ravenroot.api.deployment.DurableConsumerIngress {
         private final SourceContext context;
@@ -2021,6 +2026,42 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 if (!authorized(security)) return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
                 return ((IngressView) ingress).offerDurablyScoped(security, target, payload, sourceId,
                         idempotentKey, store, namespace);
+            }
+        }
+        @Override public CompletionStage<ai.ravenroot.api.deployment.DurableIngressStartState> startState(
+                SecurityContext security, String sourceId, String idempotentKey) {
+            Objects.requireNonNull(sourceId, "sourceId");
+            Objects.requireNonNull(idempotentKey, "idempotentKey");
+            synchronized (context) {
+                if (!authorized(security)) return CompletableFuture.failedFuture(
+                        new IllegalStateException("source authority is retired"));
+                String destination = "source-v1:" + encodeSourcePart(namespace) + "." + encodeSourcePart(sourceId);
+                UUID eventId = durableEventId(security.tenantId(), destination, idempotentKey);
+                UUID traversalId = UUID.nameUUIDFromBytes((eventId + "\0traversal")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                var key = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), eventId);
+                return executionStore.load(key).handle((stored, failure) -> {
+                    if (failure != null) {
+                        var classified = ai.ravenroot.api.persistence.ExecutionStoreException.unwrap(failure);
+                        if (classified != null && classified.failure()
+                                instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                            return ai.ravenroot.api.deployment.DurableIngressStartState.ABSENT;
+                        }
+                        throw new java.util.concurrent.CompletionException(failure);
+                    }
+                    var traversal = stored.state().traversals().get(traversalId);
+                    if (traversal == null) throw new IllegalStateException(
+                            "durable event execution has no matching traversal");
+                    if (!traversal.invocations().isEmpty())
+                        return ai.ravenroot.api.deployment.DurableIngressStartState.STARTED;
+                    if (stored.state().status() == ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED
+                            || stored.state().status() == ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING)
+                        return ai.ravenroot.api.deployment.DurableIngressStartState.ACCEPTED_UNSTARTED;
+                    return ai.ravenroot.api.deployment.DurableIngressStartState.TERMINAL_UNSTARTED;
+                }).thenCompose(state -> state == ai.ravenroot.api.deployment.DurableIngressStartState.ABSENT
+                        ? store.containsInbox(sourceId, eventId).thenApply(present -> present
+                                ? ai.ravenroot.api.deployment.DurableIngressStartState.INBOX_ONLY : state)
+                        : CompletableFuture.completedFuture(state));
             }
         }
         @Override public CompletionStage<JournalCursor> sourceCheckpoint(SecurityContext security, String sourceId) {
@@ -2602,9 +2643,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             String tenantId = security.tenantId();
             String destination = sourceStore == null ? id.value() + "/" + sourceId
                     : "source-v1:" + encodeSourcePart(sourceNamespace) + "." + encodeSourcePart(sourceId);
-            UUID eventId = UUID.nameUUIDFromBytes(
-                    (tenantId + '\0' + destination + '\0' + idempotentKey)
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            UUID eventId = durableEventId(tenantId, destination, idempotentKey);
 
             if (!activeDurableEvents.add(eventId)) {
                 permits.release();

@@ -1934,6 +1934,18 @@ public final class PostgresExecutionStore implements ExecutionStore {
         @Override public CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId, Duration retention) {
             return admitted(() -> recordInboxDelivery(tenant, destination(sourceId), eventId, retention));
         }
+        @Override public CompletionStage<Boolean> containsInbox(String sourceId, UUID eventId) {
+            return admitted(() -> async(() -> read(null, connection -> {
+                Objects.requireNonNull(eventId, "eventId");
+                try (PreparedStatement probe = connection.prepareStatement(
+                        "SELECT 1 FROM inbox_record WHERE tenant_id = ? AND consumer_id = ? AND event_id = ?")) {
+                    probe.setString(1, tenant);
+                    probe.setString(2, destination(sourceId));
+                    StoredUuid.bind(probe, 3, eventId);
+                    try (ResultSet rows = probe.executeQuery()) { return rows.next(); }
+                }
+            })));
+        }
         @Override public synchronized void close() {
             retired = true;
             if (pending == 0) releaseOwnership();

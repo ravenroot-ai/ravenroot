@@ -134,12 +134,23 @@ host filesystem ownership; PostgreSQL uses a session advisory lock that is relea
 connection or process ends. Ownership and cursors are scoped by tenant, deployment, node, and schedule
 fingerprint. A changed schedule begins a new timeline. A replacement instance with the same schedule
 resumes its cursor, and a stable occurrence key prevents a second traversal start.
-If a process stops after recording an occurrence but before its first node invocation, the source
-re-offers that occurrence on restart. Ravenroot resumes the existing execution after its prior lease
-expires; it does not create another process instance for the same occurrence.
+The occurrence cursor advances after the first `InvocationAdded` is durable, not merely after an
+inbox receipt or an accepted or running execution row. If a process stops after an inbox receipt or
+accepted execution but before that first invocation, the source retains and re-offers that exact
+occurrence on restart. This custody takes priority over `SKIP` and `LATEST_ONLY`, even when later
+ticks are due or the clock moves backward. A new `LATEST_ONLY` selection first checkpoints only
+its older unaccepted ticks, leaving the selected occurrence as the first uncheckpointed tick.
+Ravenroot resumes the same execution after its prior lease expires; it does not create another
+process instance for the same occurrence. An inbox-only receipt is also re-offered to finish
+execution creation.
 When a replacement graph has different content while an older occurrence is still accepted but
 unstarted, admission stays degraded until that pinned execution is recovered with its original
-graph. Ravenroot does not silently acknowledge it under the replacement definition.
+graph. Restore the graph bytes identified by the execution's graph version pin from the durable
+definition store or backup, then reactivate the matching source identity and schedule. After the
+old lease expires, the source re-offers the original occurrence and checkpoints it once the first
+invocation is durable. If the pinned graph cannot be restored, preserve the execution and cursor,
+keep the source degraded, and resolve it through an audited operator recovery process. Ravenroot
+does not automatically rebind the occurrence to a newer graph or skip it.
 
 Pause and drain close graph admission. The source retains the due occurrence and applies its misfire
 policy when admission reopens. Cancel affects active traversals and leaves the future schedule active.

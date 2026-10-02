@@ -5264,6 +5264,18 @@ public final class SqliteExecutionStore implements ExecutionStore {
         @Override public CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId, Duration retention) {
             return admitted(() -> recordInboxDelivery(tenant, destination(sourceId), eventId, retention));
         }
+        @Override public CompletionStage<Boolean> containsInbox(String sourceId, UUID eventId) {
+            return admitted(() -> async(() -> inReadTransaction(null, () -> {
+                Objects.requireNonNull(eventId, "eventId");
+                try (PreparedStatement probe = connection.prepareStatement(
+                        "SELECT 1 FROM inbox_record WHERE tenant_id = ? AND consumer_id = ? AND event_id = ?")) {
+                    probe.setString(1, tenant);
+                    probe.setString(2, destination(sourceId));
+                    probe.setString(3, eventId.toString());
+                    try (ResultSet rows = probe.executeQuery()) { return rows.next(); }
+                }
+            })));
+        }
         @Override public synchronized void close() {
             retired = true;
             if (pending == 0) releaseOwnership();

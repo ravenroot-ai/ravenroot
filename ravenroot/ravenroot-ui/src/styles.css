@@ -93,15 +93,16 @@
       --panel-scrollbar-w: 4px;
       --panel-header-control-w: 24px;
       /* Compact is a density projection, not a width. Its floor must carry BOTH of the shapes
-         inside the body: one complete grid cell with padding/scrollbar, and the visible grip plus
-         menu and Close controls. The wider requirement wins; the rail and physical column border
+         inside the body: one complete grid cell with padding/scrollbar, and the visible grip,
+         disclosure, menu and Close controls. The wider requirement wins; the rail and physical column border
          are then added exactly once. Keeping this as token arithmetic prevents splitter clamps,
          CSS and ARIA from drifting onto separate pixel constants. */
       --panel-compact-content-min-w: calc(
         var(--panel-short-cell) + 2 * var(--panel-short-pad) + var(--panel-scrollbar-w)
       );
       --panel-compact-header-min-w: calc(
-        var(--panel-header-control-w) + var(--panel-header-control-w) + var(--panel-header-control-w)
+        var(--panel-header-control-w) + var(--panel-header-control-w)
+        + var(--panel-header-control-w) + var(--panel-header-control-w)
       );
       --panel-compact-body-min-w: max(
         var(--panel-compact-content-min-w), var(--panel-compact-header-min-w)
@@ -2599,6 +2600,17 @@
 .palette-actions button, .palette-create button, .node-template button { min-height: 32px; }
 .node-template { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(7rem, auto) auto auto; gap: 5px; padding: 5px 8px; }
 .node-template-insert { text-align: left; overflow-wrap: anywhere; cursor: grab; }
+.panel--short #node-palettes { gap: 4px; }
+.panel--short .palette-create { gap: 4px; }
+.panel--short .palette-create label { gap: 0; font-size: 0; }
+.panel--short .palette-create input { font-size: 11px; padding-block: 4px; }
+.panel--short .node-palettes > .catalog-empty { margin: 0; }
+.panel--short .node-palette > summary { padding-block: 4px; }
+.panel--short .palette-actions { gap: 3px; padding: 0 4px 4px; }
+.panel--short .palette-actions button,
+.panel--short .palette-create button,
+.panel--short .node-template button { min-height: 28px; }
+.panel--short .node-template { grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px 4px; }
 @media (max-width: 720px) {
   .node-template { grid-template-columns: 1fr 1fr; }
 }

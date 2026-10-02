@@ -2143,6 +2143,30 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
 
+    def test_route_table_bound_clause_keys_follow_approved_identity_migrations(self) -> None:
+        document = {
+            "routeTableAuthorities": {audit.ROUTE_TABLE_AUTHORITY_ID: {
+                "candidateIdsByRole": {"summary": ["oc-old"]},
+                "descriptorCandidateIds": [{
+                    "candidateIds": {"summary": ["oc-old"]},
+                }],
+                "publishedBoundClauses": {
+                    "oc-old": ["StableEdgeId.MAX_UTF8_BYTES"],
+                },
+            }},
+            "reconciliationHistory": [{"candidateId": "oc-old"}],
+        }
+
+        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
+
+        authority = document["routeTableAuthorities"][audit.ROUTE_TABLE_AUTHORITY_ID]
+        self.assertEqual(["oc-new"], authority["candidateIdsByRole"]["summary"])
+        self.assertEqual(["oc-new"],
+                         authority["descriptorCandidateIds"][0]["candidateIds"]["summary"])
+        self.assertEqual({"oc-new": ["StableEdgeId.MAX_UTF8_BYTES"]},
+                         authority["publishedBoundClauses"])
+        self.assertEqual("oc-old", document["reconciliationHistory"][0]["candidateId"])
+
     def test_route_table_accepts_reviewed_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)

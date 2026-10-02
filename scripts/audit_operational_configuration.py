@@ -3545,6 +3545,18 @@ def remap_declared_candidate_references(document: dict[str, object],
                     if isinstance(candidate_ids, dict):
                         for role in ("methods", "path", "summary", "successStatuses"):
                             remap_list(candidate_ids, role)
+            # The bound clauses use candidate identities as object keys rather than list values.
+            # They are live RouteTable authority, so an approved identity migration must move the
+            # key along with the descriptor partitions. Historical reconciliation objects remain
+            # untouched by this narrowly scoped rewrite.
+            clauses = authority.get("publishedBoundClauses")
+            if isinstance(clauses, dict):
+                remapped_clauses = {
+                    replacements.get(identifier, identifier): fields
+                    for identifier, fields in clauses.items()
+                }
+                clauses.clear()
+                clauses.update(remapped_clauses)
 
     graph_authorities = document.get("graphLimitAuthorities")
     if isinstance(graph_authorities, dict):
@@ -14058,22 +14070,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-cc9f67f06f20ba0c8fd6": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-07b4e56d68f17a9da48c":
+    "oc-35f3e86559296beec654": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-7a3aa541ff26ba7af4d1":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-3f17b11cb22c6b70e918": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-b71ded858a75da64b9dc": (
+    "oc-271125271210c9c320dc": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-e25e3153a05cbbbeba10": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-667f50871e08532a7cbe": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-5735e9cbd3cfab36d29f": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-cc9f67f06f20ba0c8fd6": "/v1/events",
-    "oc-07b4e56d68f17a9da48c": "/v1/events",
-    "oc-3f17b11cb22c6b70e918": "/v1/events",
-    "oc-b71ded858a75da64b9dc": "/v1/events/recent",
-    "oc-667f50871e08532a7cbe": "/v1/events/recent",
+    "oc-35f3e86559296beec654": "/v1/events",
+    "oc-7a3aa541ff26ba7af4d1": "/v1/events",
+    "oc-271125271210c9c320dc": "/v1/events",
+    "oc-e25e3153a05cbbbeba10": "/v1/events/recent",
+    "oc-5735e9cbd3cfab36d29f": "/v1/events/recent",
 }
 
 

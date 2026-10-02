@@ -88,8 +88,15 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (schema.pattern && !new RegExp(`^(?:${schema.pattern})$`).test(value)) fail(path, "has an invalid format");
     if (schema.format === "sha256" && !/^[0-9a-f]{64}$/.test(value)) fail(path, "must be a lowercase SHA-256 digest");
     if (schema.format === "base64") {
-      try { if (btoa(atob(value)) !== value) fail(path, "must be canonical Base64"); }
+      let decoded: string;
+      try {
+        decoded = atob(value);
+        if (btoa(decoded) !== value) fail(path, "must be canonical Base64");
+      }
       catch { fail(path, "must be canonical Base64"); }
+      if (schema.maximumDecodedBytes !== undefined && decoded.length > schema.maximumDecodedBytes) {
+        fail(path, `must decode to at most ${schema.maximumDecodedBytes} bytes`);
+      }
     }
     if (schema.format === "uri") {
       let uri: URL; try { uri = new URL(value); } catch { fail(path, "must be an absolute URI"); }

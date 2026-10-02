@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import { CONTRACTS, serializeSelection, templateSelection } from "../src/registry.js";
 
@@ -157,6 +158,21 @@ describe("runtime contract fidelity", () => {
     const duplicate = structuredClone(accepted);
     duplicate.values.document.fixedHeaders = { "X-Trace": ["one"], "x-trace": ["two"] };
     expect(() => serializeSelection(duplicate)).toThrow("case-insensitive duplicate");
+  });
+
+  test("matches the OpenAPI decoded specification size boundary", () => {
+    const selection = templateSelection("openapi-client.profile") as { values: { document: Record<string, unknown> } };
+    const source = Buffer.from(String(selection.values.document.specBase64), "base64");
+    const withSize = (size: number): void => {
+      const specification = Buffer.concat([source, Buffer.alloc(size - source.length, 0x20)]);
+      selection.values.document.specBase64 = specification.toString("base64");
+      selection.values.document.specSha256 = createHash("sha256").update(specification).digest("hex");
+      expect(String(selection.values.document.specBase64)).toHaveLength(2_796_204);
+    };
+    withSize(2_097_152);
+    expect(() => serializeSelection(selection)).not.toThrow();
+    withSize(2_097_153);
+    expect(() => serializeSelection(selection)).toThrow("must decode to at most 2097152 bytes");
   });
 
   test("counts governed runner instructions in UTF-8 bytes", () => {

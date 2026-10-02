@@ -85,6 +85,12 @@ public final class ConfiguratorContractCompatibilityProbe {
 
     private static void verifyAssertion(String assertion, Object accepted, String id) throws Exception {
         if (assertion.isEmpty()) return;
+        if ("openapi-spec-2mib".equals(assertion)) {
+            Method specification = accepted.getClass().getMethod("specification");
+            require(((byte[]) specification.invoke(accepted)).length == 2_097_152,
+                    id + " did not preserve the exact 2 MiB decoded specification");
+            return;
+        }
         if (!"openapi-normalized".equals(assertion)) throw new AssertionError(id + " has unknown assertion " + assertion);
         Method origin = accepted.getClass().getMethod("origin");
         Method fixedHeaders = accepted.getClass().getMethod("fixedHeaders");

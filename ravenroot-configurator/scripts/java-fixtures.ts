@@ -1,6 +1,7 @@
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { CONTRACTS, DELIMITED_TEMPLATES, serializeSelection, templateSelection } from "../src/registry.js";
 import { validateValue } from "../src/schema.js";
 import type { ConfigurationSelection, ValueSchema } from "../src/types.js";
@@ -226,6 +227,15 @@ for (const [id, runtime] of Object.entries(RUNTIMES)) {
       mutations.push({ value: candidate, label: "cross-field:matrix-poll-timeout" });
     }
     if (id === "openapi-client.profile") {
+      const original = selection.values.document as Record<string, unknown>;
+      const baseSpec = Buffer.from(String(original.specBase64), "base64");
+      const sizedProfile = (size: number): Record<string, unknown> => {
+        const spec = Buffer.concat([baseSpec, Buffer.alloc(size - baseSpec.length, 0x20)]);
+        return { ...original, specBase64: spec.toString("base64"), specSha256: createHash("sha256").update(spec).digest("hex") };
+      };
+      const exactLimit = sizedProfile(2_097_152);
+      positives.push({ value: Object.values(serializeSelection({ ...selection, values: { document: exactLimit } }))[0]!, args: "", label: "canonical-spec-at-2097152-decoded-bytes", assertion: "openapi-spec-2mib" });
+      mutations.push({ value: sizedProfile(2_097_153), label: "specBase64:2097153-decoded-bytes" });
       const populated = structuredClone(selection.values.document) as Record<string, unknown>;
       populated.origin = "https://API.Example.Test:443/";
       populated.fixedHeaders = { "X-Mixed-Case": ["one", "two", "three", "four", "five", "six", "seven", "eight"] };

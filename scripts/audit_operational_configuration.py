@@ -14066,22 +14066,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-13c4f48afe77797882fb": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-cf7d30d69ce136bb9688":
+    "oc-056a4859c32cc562334a": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-e945fb94fdcff9a14183":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-ad837e2b28e9fd7c20d3": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-0c67d35c5c9f58f686c9": (
+    "oc-b7720bdb37a21b1d1120": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-6d7a3980c3fdc11b50fc": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-e54166553aac4602cd12": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-1814c131afe14c623c8f": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-13c4f48afe77797882fb": "/v1/events",
-    "oc-cf7d30d69ce136bb9688": "/v1/events",
-    "oc-ad837e2b28e9fd7c20d3": "/v1/events",
-    "oc-0c67d35c5c9f58f686c9": "/v1/events/recent",
-    "oc-e54166553aac4602cd12": "/v1/events/recent",
+    "oc-056a4859c32cc562334a": "/v1/events",
+    "oc-e945fb94fdcff9a14183": "/v1/events",
+    "oc-b7720bdb37a21b1d1120": "/v1/events",
+    "oc-6d7a3980c3fdc11b50fc": "/v1/events/recent",
+    "oc-1814c131afe14c623c8f": "/v1/events/recent",
 }
 
 

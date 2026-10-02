@@ -7,6 +7,7 @@ package ai.ravenroot.api.application;
  * behavior and resolver diagnostics remain server-side.</p>
  */
 public final class NodeTemplateReferenceUnavailableException extends IllegalArgumentException {
+    /** Creates the detail-free classification for an unavailable saved-node reference. */
     public NodeTemplateReferenceUnavailableException() {
         super("node template reference is unavailable");
     }

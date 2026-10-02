@@ -39,6 +39,11 @@ public final class ConfiguratorContractCompatibilityProbe {
             Method factory = type.getDeclaredMethod(required(id + ".method"), Map.class);
             factory.setAccessible(true);
             require(factory.invoke(null, Map.of(environmentKey, valid)) != null, id + " rejected configurator output");
+            for (int index = 0; index < Integer.parseInt(required(id + ".positiveCount")); index++) {
+                Object accepted = factory.invoke(null, Map.of(environmentKey, required(id + ".positive." + index + ".value")));
+                require(accepted != null, id + " rejected valid vector " + required(id + ".positive." + index + ".label"));
+                verifyAssertion(required(id + ".positive." + index + ".assertion"), accepted, id);
+            }
             for (int index = 0; index < Integer.parseInt(required(id + ".negativeCount")); index++) {
                 String invalid = required(id + ".negative." + index + ".value");
                 try { factory.invoke(null, Map.of(environmentKey, invalid)); throw new AssertionError(id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")"); }
@@ -60,6 +65,15 @@ public final class ConfiguratorContractCompatibilityProbe {
             Object optionalAccepted = resolve.invoke(constructor.newInstance(Map.of(environmentKey, alternate)), (Object[]) arguments);
             require(optionalAccepted instanceof Optional<?> && ((Optional<?>) optionalAccepted).isPresent(), id + " rejected valid omitted optional fields");
         }
+        for (int index = 0; index < Integer.parseInt(required(id + ".positiveCount")); index++) {
+            String rawArguments = required(id + ".positive." + index + ".args");
+            String[] positiveArguments = rawArguments.isEmpty() ? new String[0] : rawArguments.split("\u001f", -1);
+            Object result = resolve.invoke(constructor.newInstance(Map.of(environmentKey, required(id + ".positive." + index + ".value"))),
+                    (Object[]) positiveArguments);
+            require(result instanceof Optional<?> && ((Optional<?>) result).isPresent(),
+                    id + " rejected valid vector " + required(id + ".positive." + index + ".label"));
+            verifyAssertion(required(id + ".positive." + index + ".assertion"), ((Optional<?>) result).orElseThrow(), id);
+        }
         for (int index = 0; index < Integer.parseInt(required(id + ".negativeCount")); index++) {
             String invalid = required(id + ".negative." + index + ".value");
             String rawArguments = required(id + ".negative." + index + ".args");
@@ -67,6 +81,19 @@ public final class ConfiguratorContractCompatibilityProbe {
             Object refused = resolve.invoke(constructor.newInstance(Map.of(environmentKey, invalid)), (Object[]) invalidArguments);
             require(refused instanceof Optional<?> && ((Optional<?>) refused).isEmpty(), id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")");
         }
+    }
+
+    private static void verifyAssertion(String assertion, Object accepted, String id) throws Exception {
+        if (assertion.isEmpty()) return;
+        if (!"openapi-normalized".equals(assertion)) throw new AssertionError(id + " has unknown assertion " + assertion);
+        Method origin = accepted.getClass().getMethod("origin");
+        Method fixedHeaders = accepted.getClass().getMethod("fixedHeaders");
+        Method inputHeaders = accepted.getClass().getMethod("allowedInputHeaders");
+        Method responseHeaders = accepted.getClass().getMethod("projectedResponseHeaders");
+        require("https://api.example.test".equals(origin.invoke(accepted).toString()), id + " did not normalize HTTPS origin");
+        require(((Map<?, ?>) fixedHeaders.invoke(accepted)).containsKey("x-mixed-case"), id + " did not normalize fixed header name");
+        require(((java.util.Set<?>) inputHeaders.invoke(accepted)).contains("x-request-id"), id + " did not normalize input header name");
+        require(((java.util.Set<?>) responseHeaders.invoke(accepted)).contains("etag"), id + " did not normalize response header name");
     }
 
     private static Properties fixtures(Path path) {

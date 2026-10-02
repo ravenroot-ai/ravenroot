@@ -110,6 +110,13 @@ final class ConfiguratorCoreContractCompatibilityTest {
         assertNotNull(RunnerPlaneConfiguration.fromEnvironment(Map.of("RAVENROOT_RUNNER_CONFIG", runner.toString())));
         assertNotNull(RunnerPlaneConfiguration.fromEnvironment(Map.of("RAVENROOT_RUNNER_CONFIG",
                 document(fixtures, "core.runner", "alternateDocument", 0).toString())));
+        for (int index = 0; index < positiveCount(fixtures, "core.runner"); index++) {
+            int vector = index;
+            assertNotNull(RunnerPlaneConfiguration.fromEnvironment(Map.of(
+                    "RAVENROOT_RUNNER_CONFIG",
+                    document(fixtures, "core.runner", "positiveDocument." + vector + ".value", vector).toString())),
+                    () -> positiveLabel(fixtures, "core.runner", vector));
+        }
         for (int index = 0; index < negativeCount(fixtures, "core.runner"); index++) {
             int vector = index;
             assertThrows(RuntimeException.class, () -> RunnerPlaneConfiguration.fromEnvironment(Map.of(
@@ -158,6 +165,14 @@ final class ConfiguratorCoreContractCompatibilityTest {
 
     private static int negativeCount(Properties fixtures, String id) {
         return Integer.parseInt(fixtures.getProperty("core." + id + ".negativeDocumentCount"));
+    }
+
+    private static int positiveCount(Properties fixtures, String id) {
+        return Integer.parseInt(fixtures.getProperty("core." + id + ".positiveDocumentCount"));
+    }
+
+    private static String positiveLabel(Properties fixtures, String id, int index) {
+        return fixtures.getProperty("core." + id + ".positiveDocument." + index + ".label");
     }
 
     private static String negativeLabel(Properties fixtures, String id, int index) {

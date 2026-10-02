@@ -19,7 +19,7 @@ export interface FieldSpec {
 }
 
 export type ValueSchema =
-  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256" | "duration"; readonly schemes?: readonly string[]; readonly requireHost?: boolean; readonly allowFragment?: boolean; readonly authorityOnly?: boolean; readonly allowRootPath?: boolean; readonly nonBlank?: boolean }
+  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly maximumUtf8Bytes?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256" | "duration" | "http-header-name" | "http-header-value"; readonly schemes?: readonly string[]; readonly exactScheme?: boolean; readonly requireHost?: boolean; readonly javaCompatibleHost?: boolean; readonly forbidIpv6Host?: boolean; readonly allowFragment?: boolean; readonly authorityOnly?: boolean; readonly allowRootPath?: boolean; readonly nonBlank?: boolean }
   | { readonly kind: "integer"; readonly minimum?: number; readonly maximum?: number }
   | { readonly kind: "boolean" }
   | { readonly kind: "null" }
@@ -27,7 +27,7 @@ export type ValueSchema =
   | { readonly kind: "union"; readonly choices: readonly ValueSchema[] }
   | { readonly kind: "array"; readonly items: ValueSchema; readonly minimumItems?: number; readonly maximumItems?: number; readonly unique?: boolean }
   | { readonly kind: "object"; readonly properties: Readonly<Record<string, ValueSchema>>; readonly optional?: readonly string[] }
-  | { readonly kind: "map"; readonly values: ValueSchema; readonly minimumEntries?: number; readonly maximumEntries?: number; readonly keyPattern?: string };
+  | { readonly kind: "map"; readonly values: ValueSchema; readonly minimumEntries?: number; readonly maximumEntries?: number; readonly keyPattern?: string; readonly keyFormat?: "http-header-name"; readonly caseInsensitiveKeys?: boolean };
 
 export type ContractEncoding = "delimited" | "base64-json" | "plain-environment";
 

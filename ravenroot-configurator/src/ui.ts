@@ -103,14 +103,24 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
   const constraints: string[] = [];
   if (schema.kind === "string") {
     if (schema.minimumLength !== undefined || schema.maximumLength !== undefined) constraints.push(`length ${schema.minimumLength ?? 0}–${schema.maximumLength ?? "unbounded"}`);
+    if (schema.maximumUtf8Bytes !== undefined) constraints.push(`at most ${schema.maximumUtf8Bytes} UTF-8 bytes`);
     if (schema.schemes) constraints.push(`scheme ${schema.schemes.join("/")}`);
+    if (schema.exactScheme) constraints.push("scheme is case-sensitive");
+    if (schema.javaCompatibleHost) constraints.push("Java-compatible host name");
+    if (schema.forbidIpv6Host) constraints.push("non-IPv6 host");
     if (schema.pattern) constraints.push(`pattern ${schema.pattern}`);
     if (schema.nonBlank) constraints.push("non-whitespace text");
     if (schema.authorityOnly) constraints.push("authority only (no path, query, or fragment)");
     if (schema.format === "duration") constraints.push("positive ISO-8601 duration");
+    if (schema.format === "http-header-name") constraints.push("safe HTTP header name; forbidden credential and hop-by-hop names excluded");
+    if (schema.format === "http-header-value") constraints.push("no CR or LF");
   } else if (schema.kind === "integer") constraints.push(`range ${schema.minimum ?? "unbounded"}–${schema.maximum ?? "unbounded"}`);
   else if (schema.kind === "array") constraints.push(`items ${schema.minimumItems ?? 0}–${schema.maximumItems ?? "unbounded"}${schema.unique ? ", unique" : ""}`);
-  else if (schema.kind === "map") constraints.push(`entries ${schema.minimumEntries ?? 0}–${schema.maximumEntries ?? "unbounded"}`);
+  else if (schema.kind === "map") {
+    constraints.push(`entries ${schema.minimumEntries ?? 0}–${schema.maximumEntries ?? "unbounded"}`);
+    if (schema.keyFormat === "http-header-name") constraints.push("keys are safe HTTP header names");
+    if (schema.caseInsensitiveKeys) constraints.push("keys are unique ignoring case");
+  }
   if (constraints.length) { const hint = document.createElement("small"); hint.className = "constraint"; hint.textContent = ` (${constraints.join("; ")})`; wrapper.append(hint); }
   if (schema.kind === "union") {
     const select = document.createElement("select");

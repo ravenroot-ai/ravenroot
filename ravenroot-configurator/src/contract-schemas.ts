@@ -780,7 +780,10 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
         "schemes": [
           "https"
         ],
+        "exactScheme": true,
         "requireHost": true,
+        "javaCompatibleHost": true,
+        "forbidIpv6Host": true,
         "allowFragment": false,
         "authorityOnly": true,
         "allowRootPath": true
@@ -789,7 +792,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
         "kind": "string",
         "format": "base64",
         "minimumLength": 4,
-        "maximumLength": 2796204
+        "maximumLength": 2097152
       },
       "specSha256": {
         "kind": "string",
@@ -806,57 +809,68 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           "pattern": "[A-Za-z0-9._-]{1,128}"
         },
         "minimumItems": 1,
-        "maximumItems": 128,
-        "unique": true
+        "maximumItems": 128
       },
       "fixedHeaders": {
-        "kind": "map",
-        "values": {
-          "kind": "array",
-          "items": {
-            "kind": "string",
-            "minimumLength": 1,
-            "maximumLength": 512
+        "kind": "nullable",
+        "value": {
+          "kind": "map",
+          "values": {
+            "kind": "array",
+            "items": {
+              "kind": "string",
+              "minimumLength": 1,
+              "maximumLength": 512,
+              "nonBlank": true,
+              "format": "http-header-value"
+            },
+            "minimumItems": 1,
+            "maximumItems": 8
           },
-          "maximumItems": 256,
-          "unique": true
-        },
-        "maximumEntries": 32,
-        "keyPattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,159}"
+          "maximumEntries": 32,
+          "keyFormat": "http-header-name",
+          "caseInsensitiveKeys": true
+        }
       },
       "inputHeaders": {
         "kind": "array",
         "items": {
           "kind": "string",
           "minimumLength": 1,
-          "maximumLength": 128
+          "maximumLength": 64,
+          "format": "http-header-name"
         },
         "minimumItems": 0,
-        "maximumItems": 32,
-        "unique": true
+        "maximumItems": 32
       },
       "responseHeaders": {
         "kind": "array",
         "items": {
           "kind": "string",
           "minimumLength": 1,
-          "maximumLength": 128
+          "maximumLength": 64,
+          "format": "http-header-name"
         },
         "minimumItems": 0,
-        "maximumItems": 32,
-        "unique": true
+        "maximumItems": 32
       },
       "credentialBindingId": {
-        "kind": "string",
-        "minimumLength": 1,
-        "maximumLength": 256,
-        "pattern": "[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}"
+        "kind": "nullable",
+        "value": {
+          "kind": "string",
+          "minimumLength": 1,
+          "maximumLength": 256,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}"
+        }
       },
       "credentialReference": {
-        "kind": "string",
-        "minimumLength": 1,
-        "maximumLength": 256,
-        "pattern": "[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}"
+        "kind": "nullable",
+        "value": {
+          "kind": "string",
+          "minimumLength": 1,
+          "maximumLength": 256,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}"
+        }
       },
       "maxRequestBytes": {
         "kind": "integer",

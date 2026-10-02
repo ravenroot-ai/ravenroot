@@ -43,12 +43,12 @@ const definition: ValueSchema = {
   optional: ["budgets", "skillInstructions"],
   properties: {
     name: identifier(), version: integer(1, SAFE_LONG_MAX),
-    instructions: { kind: "string", minimumLength: 1, maximumLength: 65_536, nonBlank: true },
+    instructions: { kind: "string", minimumLength: 1, maximumLength: 65_536, maximumUtf8Bytes: 65_536, nonBlank: true },
     runtimeProfile: identifier(), modelProfile: identifier(),
     budgets: { kind: "object", properties: {
       modelTurns: integer(), toolCalls: integer(), modelTokens: integer(1, SAFE_LONG_MAX), tokensPerTurn: integer()
     } },
-    skillInstructions: { kind: "map", values: { kind: "string", minimumLength: 1, maximumLength: 65_536, nonBlank: true }, maximumEntries: 128, keyPattern: IDENTIFIER },
+    skillInstructions: { kind: "map", values: { kind: "string", minimumLength: 1, maximumLength: 65_536, maximumUtf8Bytes: 65_536, nonBlank: true }, maximumEntries: 128, keyPattern: IDENTIFIER },
     skills: identifiers(), runnerRequirements: identifiers(), policy: runnerPolicy,
     workspaceRetention: { kind: "string", pattern: "P(?:0D|(?=\\d|T\\d)(?:\\d+D)?(?:T(?=\\d)(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?)", minimumLength: 3, maximumLength: 64 },
     outputSchema: identifier(), commands: { kind: "array", items: command, minimumItems: 1, maximumItems: 64, unique: true }

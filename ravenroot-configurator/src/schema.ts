@@ -46,6 +46,28 @@ export function schemaFromTemplate(template: Readonly<Record<string, unknown>>):
 
 function fail(path: string, message: string): never { throw new Error(`${path} ${message}`); }
 
+const FORBIDDEN_HTTP_HEADERS = new Set([
+  "authorization", "cookie", "host", "content-length", "connection", "transfer-encoding", "upgrade", "proxy-authorization"
+]);
+
+function validateHttpHeaderName(value: string, path: string): void {
+  const normalized = value.toLowerCase();
+  if (value.length < 1 || value.length > 64 || !/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(value)) {
+    fail(path, "must be a 1 to 64 character HTTP token");
+  }
+  if (FORBIDDEN_HTTP_HEADERS.has(normalized) || normalized.startsWith("sec-")) fail(path, "is a forbidden HTTP header");
+}
+
+function validateJavaUriHost(value: string, path: string): void {
+  const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]+)/.exec(value)?.[1] ?? "";
+  const host = authority.replace(/:\d+$/, "").replace(/\.$/, "");
+  const labels = host.split(".");
+  if (!host || !/^[\x00-\x7f]+$/.test(host) || labels.some((label) =>
+    label.length < 1 || label.length > 63 || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label))) {
+    fail(path, "must use a Java-compatible host name");
+  }
+}
+
 export function validateValue(schema: ValueSchema, value: unknown, path = "value"): void {
   if (schema.kind === "union") {
     for (const choice of schema.choices) { try { validateValue(choice, value, path); return; } catch {} }
@@ -60,6 +82,7 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (typeof value !== "string") fail(path, "must be a string");
     if (schema.minimumLength !== undefined && value.length < schema.minimumLength) fail(path, `must contain at least ${schema.minimumLength} characters`);
     if (schema.maximumLength !== undefined && value.length > schema.maximumLength) fail(path, `must contain at most ${schema.maximumLength} characters`);
+    if (schema.maximumUtf8Bytes !== undefined && new TextEncoder().encode(value).length > schema.maximumUtf8Bytes) fail(path, `must contain at most ${schema.maximumUtf8Bytes} UTF-8 bytes`);
     if (schema.allowed && !schema.allowed.includes(value)) fail(path, `must be one of ${schema.allowed.join(", ")}`);
     if (schema.nonBlank && value.trim().length === 0) fail(path, "must contain non-whitespace text");
     if (schema.pattern && !new RegExp(`^(?:${schema.pattern})$`).test(value)) fail(path, "has an invalid format");
@@ -71,8 +94,12 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (schema.format === "uri") {
       let uri: URL; try { uri = new URL(value); } catch { fail(path, "must be an absolute URI"); }
       if (!uri.protocol || uri.username || uri.password) fail(path, "must be an absolute URI without credentials");
-      if (schema.schemes && !schema.schemes.includes(uri.protocol.slice(0, -1).toLowerCase())) fail(path, `must use ${schema.schemes.join(" or ")}`);
+      const rawScheme = value.slice(0, value.indexOf(":"));
+      const candidateScheme = schema.exactScheme ? rawScheme : rawScheme.toLowerCase();
+      if (schema.schemes && !schema.schemes.includes(candidateScheme)) fail(path, `must use ${schema.schemes.join(" or ")}`);
       if (schema.requireHost && !uri.hostname) fail(path, "must include a host");
+      if (schema.javaCompatibleHost) validateJavaUriHost(value, path);
+      if (schema.forbidIpv6Host && uri.hostname.includes(":")) fail(path, "must use a non-IPv6 host");
       if (schema.allowFragment === false && uri.hash) fail(path, "must not include a fragment");
       if (schema.authorityOnly) {
         const match = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]+(.*)$/.exec(value);
@@ -81,6 +108,8 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
       }
     }
     if (schema.format === "duration" && (!/^P(?=\d|T\d)(?:\d+D)?(?:T(?=\d)(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$/.test(value) || !/[1-9]/.test(value))) fail(path, "must be a positive ISO-8601 duration");
+    if (schema.format === "http-header-name") validateHttpHeaderName(value, path);
+    if (schema.format === "http-header-value" && /[\r\n]/.test(value)) fail(path, "must not contain CR or LF");
     if (schema.format === "absolute-path" && !value.startsWith("/")) fail(path, "must be an absolute path");
     return;
   }
@@ -107,8 +136,10 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (schema.maximumEntries !== undefined && entries.length > schema.maximumEntries) fail(path, `allows at most ${schema.maximumEntries} entries`);
     for (const [key, child] of entries) {
       if (schema.keyPattern && !new RegExp(`^(?:${schema.keyPattern})$`).test(key)) fail(`${path}.${key}`, "has an invalid key");
+      if (schema.keyFormat === "http-header-name") validateHttpHeaderName(key, `${path}.${key}`);
       validateValue(schema.values, child, `${path}.${key}`);
     }
+    if (schema.caseInsensitiveKeys && new Set(entries.map(([key]) => key.toLowerCase())).size !== entries.length) fail(path, "must not contain case-insensitive duplicate keys");
     return;
   }
   const optional = new Set(schema.optional ?? []);

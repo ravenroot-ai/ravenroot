@@ -120,4 +120,57 @@ describe("runtime contract fidelity", () => {
     for (const field of Object.keys(document.projection!)) expect(server).toContain(`"${field}"`);
     for (const field of Object.keys(Object.values(document.profiles!)[0] as Record<string, unknown>)) expect(server).toContain(`"${field}"`);
   });
+
+  test("matches OpenAPI origin and header safety semantics", () => {
+    const accepted = templateSelection("openapi-client.profile") as { values: { document: Record<string, unknown> } };
+    accepted.values.document.origin = "https://API.Example.Test:443/";
+    accepted.values.document.fixedHeaders = { "X-Mixed-Case": ["one", "two", "three", "four", "five", "six", "seven", "eight"] };
+    accepted.values.document.inputHeaders = ["X-Request-Id"];
+    accepted.values.document.responseHeaders = ["ETag"];
+    expect(() => serializeSelection(accepted)).not.toThrow();
+    const explicitNulls = structuredClone(accepted);
+    explicitNulls.values.document.fixedHeaders = null;
+    explicitNulls.values.document.credentialBindingId = null;
+    explicitNulls.values.document.credentialReference = null;
+    expect(() => serializeSelection(explicitNulls)).not.toThrow();
+
+    for (const origin of ["HTTPS://api.example.test", "https://[::1]", "https://invalid_host", "https://-invalid.example.test"]) {
+      const invalid = structuredClone(accepted); invalid.values.document.origin = origin;
+      expect(() => serializeSelection(invalid), origin).toThrow();
+    }
+    for (const values of [[], Array.from({ length: 9 }, (_, index) => `value-${index}`)]) {
+      const invalid = structuredClone(accepted); invalid.values.document.fixedHeaders = { "x-safe": values };
+      expect(() => serializeSelection(invalid), JSON.stringify(values)).toThrow();
+    }
+    for (const value of ["   ", "line-one\rline-two", "line-one\nline-two"]) {
+      const invalid = structuredClone(accepted); invalid.values.document.fixedHeaders = { "x-safe": [value] };
+      expect(() => serializeSelection(invalid), JSON.stringify(value)).toThrow();
+    }
+    const forbidden = ["authorization", "cookie", "host", "content-length", "connection", "transfer-encoding", "upgrade", "proxy-authorization", "sec-fetch-site", "AuThOrIzAtIoN", "SeC-Fetch-Site"];
+    for (const name of [...forbidden, "x".repeat(65), "bad header"]) {
+      for (const field of ["fixedHeaders", "inputHeaders", "responseHeaders"] as const) {
+        const invalid = structuredClone(accepted);
+        invalid.values.document[field] = field === "fixedHeaders" ? { [name]: ["value"] } : [name];
+        expect(() => serializeSelection(invalid), `${field}:${name}`).toThrow();
+      }
+    }
+    const duplicate = structuredClone(accepted);
+    duplicate.values.document.fixedHeaders = { "X-Trace": ["one"], "x-trace": ["two"] };
+    expect(() => serializeSelection(duplicate)).toThrow("case-insensitive duplicate");
+  });
+
+  test("counts governed runner instructions in UTF-8 bytes", () => {
+    const runner = templateSelection("core.runner") as { values: { runnerDocument: { tenants: Record<string, { definitions: { instructions: string; skills: string[]; skillInstructions: Record<string, string> }[] }> } } };
+    (runner.values.runnerDocument as unknown as { protocolVersion: number }).protocolVersion = 1;
+    const definition = Object.values(runner.values.runnerDocument.tenants)[0]!.definitions[0]!;
+    definition.skills = ["review-skill"];
+    definition.instructions = "é".repeat(32_768);
+    definition.skillInstructions = { "review-skill": "é".repeat(32_768) };
+    expect(() => serializeSelection(runner)).not.toThrow();
+    definition.instructions += "é";
+    expect(() => serializeSelection(runner)).toThrow("UTF-8 bytes");
+    definition.instructions = "bounded";
+    definition.skillInstructions["review-skill"] += "é";
+    expect(() => serializeSelection(runner)).toThrow("UTF-8 bytes");
+  });
 });

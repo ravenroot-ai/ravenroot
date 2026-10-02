@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 8618 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2199.
+Retired source candidates preserved in inventory history: 2203.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 129.
+Checked source reconciliations: 130.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 24703 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24549 |
-| Unchanged identities | 23810 |
-| Approved identity migrations | 739 |
-| Approved retirements | 0 |
-| Semantically classified additions | 154 |
+| Source inventory candidates | 24703 |
+| Unchanged identities | 24689 |
+| Approved identity migrations | 10 |
+| Approved retirements | 4 |
+| Semantically classified additions | 4 |
 | Current candidates | 24703 |
 
 ## Final semantic review

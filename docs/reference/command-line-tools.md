@@ -168,6 +168,9 @@ listings. `--help` and `help` print usage.
 | `cancel TRAVERSAL-ID` | Request cancellation and print the recorded outcome and note. |
 | `drain` | Stop new admission and begin controlled drain. |
 | `process PROCESS-INSTANCE-ID pause\|resume\|cancel\|drain\|stop EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Remote-only durable process control across every traversal in the instance. Use the inventory `revision` as the expected generation; the result reports the typed outcome, current generation, state, and retained reason. |
+| `derive-boundaries SOURCE-PROCESS-ID` | List payload-free retained boundary choices for a tenant-owned terminal source. Requires execution-read authority on that source. |
+| `derive-preview SOURCE-PROCESS-ID BOUNDARY-NODE-ID PREDECESSOR-INVOCATION-ID REASON [REPEATABILITY-DECISION] [--authorize-effects] [--key=IDEMPOTENCY-KEY]` | Preview a selective derived execution without admitting work. Prints the request key, admissibility and refusal codes, exact inherited invocation IDs, possible downstream scope, missing inputs, external-effect nodes, and graph/manifest pins. Requires execution-read authority on the source; `--authorize-effects` additionally requires execution-control authority and a repeatability decision. An inadmissible preview returns 2. |
+| `derive SOURCE-PROCESS-ID BOUNDARY-NODE-ID PREDECESSOR-INVOCATION-ID REASON [REPEATABILITY-DECISION] [--authorize-effects] [--key=IDEMPOTENCY-KEY]` | Admit and start the reviewed derived execution. Requires execution-read authority on the source and execution-start authority on the executions collection; `--authorize-effects` additionally requires execution-control authority on the source and a repeatability decision. Prints the request key and new process, traversal, and graph-version identities. |
 | `human-tasks list` | List the authenticated tenant's outstanding task summaries without review or response content. |
 | `human-tasks settle TASK-ID GENERATION resolve\|deny\|cancel [--response-file PATH] [--content-type TYPE] [--comment TEXT] [--override-reason TEXT]` | Use the canonical settlement model. Resolve requires the pinned typed response; override requires the server-side admin role/scope and records its reason. |
 | `deployments list` | List process-local deployment registrations. |
@@ -182,6 +185,16 @@ listings. `--help` and `help` print usage.
 | `backup DIRECTORY` | Create an offline recovery bundle from configured durable stores. |
 | `verify DIRECTORY` | Verify a bundle using only its contents. |
 | `restore DIRECTORY` | Restore configured durable stores from a verified bundle. |
+
+`derive-preview` and `derive` generate and print a random request key when `--key` is omitted. Reuse
+the preview's printed key with `derive` so the admitted request carries the reviewed identity. An
+identical `derive` retry under the same tenant, source process, and key returns the already admitted
+derived identities without consuming another execution slot. Reusing that key with a changed
+boundary, reason, repeatability decision, effect authorization, or requester is an idempotency
+conflict. `REASON` and `REPEATABILITY-DECISION` are each one shell argument, so quote values that
+contain spaces. See [Selective derived executions](../operator-guide/selective-derived-executions.md)
+for the supported proof boundary and operator sequence, and the [HTTP and CLI API](api-cli.md) for
+the corresponding resources and shared authorization boundary.
 
 `ravenroot events decode < capture.sse` reads local standard input, starts no engine, contacts no
 server and resolves no credentials; global `--server` and `--token-file` options are ignored by this

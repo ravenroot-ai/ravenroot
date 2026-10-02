@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - ravenroot-configurator/**
+      - ravenroot/ravenroot-extensions/**
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/PublicationPolicyConfiguration.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/audit/AuditTrailPublicationSink.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java
@@ -32,6 +33,12 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: pnpm example:amqp
-      - name: Verify packaged-server publication policy carrier
+      - name: Generate and verify exact extension resolver fixtures
         working-directory: .
-        run: mvn -f ravenroot/pom.xml -pl ravenroot-server -am -Dtest=PublicationPolicyConfigurationTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: |
+          pnpm --dir ravenroot-configurator fixtures:java
+          mvn -f ravenroot/pom.xml -pl ravenroot-extensions/ravenroot-extensions-all -am -DskipTests -Dmdep.outputFile=${{ github.workspace }}/ravenroot-configurator/.generated/extensions-classpath.txt test-compile org.apache.maven.plugins:maven-dependency-plugin:3.7.0:build-classpath
+          java -cp "ravenroot/ravenroot-extensions/ravenroot-extensions-all/target/test-classes:$(cat ravenroot-configurator/.generated/extensions-classpath.txt)" ai.ravenroot.extensions.all.ConfiguratorContractCompatibilityProbe ravenroot-configurator/.generated/configurator-contracts.properties
+      - name: Verify packaged-server core configuration carriers
+        working-directory: .
+        run: mvn -f ravenroot/pom.xml -pl ravenroot-server -am -Dtest=PublicationPolicyConfigurationTest,ConfiguratorCoreContractCompatibilityTest -Dsurefire.failIfNoSpecifiedTests=false -Dravenroot.configurator.fixtures=${{ github.workspace }}/ravenroot-configurator/.generated/configurator-contracts.properties test

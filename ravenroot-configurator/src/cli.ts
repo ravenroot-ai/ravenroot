@@ -131,8 +131,6 @@ export async function main(args: readonly string[]): Promise<void> {
     output.write(redactedPlanJson(prepared.plan));
     if (command === "apply") {
       await applyInstall(prepared, { targetRoot: root, replace: has(args, "--replace"), execute: has(args, "--execute") });
-      const baseUrl = pkg.manifest.target.options.verifyBaseUrl;
-      if (has(args, "--execute") && typeof baseUrl === "string" && baseUrl) await verifyTarget(pkg, baseUrl);
       output.write(`apply=complete restart=${has(args, "--execute") ? "executed" : "pending"}\n`);
     }
     return;

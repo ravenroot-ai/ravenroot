@@ -17,6 +17,84 @@ const SENSITIVE_DOCUMENT_FIELDS = new Set([
   "password", "passwordbase64", "privatekey", "secret", "secretaccesskey", "secretbase64",
   "signingsecret", "token", "tokenbase64"
 ]);
+const TARGET_OPTIONS: Readonly<Record<PackageTarget["kind"], Readonly<Record<string, "string" | "boolean" | "json-command">>>> = {
+  compose: { verifyBaseUrl: "string" },
+  kubernetes: { namespace: "string", release: "string", deploymentName: "string", chart: "string", baseImage: "string",
+    derivedImage: "string", pushImage: "boolean", verifyBaseUrl: "string" },
+  prestart: { restartCommandJson: "json-command", verifyCommandJson: "json-command", verifyBaseUrl: "string" }
+};
+
+function exactObject(value: unknown, allowed: readonly string[], label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  const record = value as Record<string, unknown>;
+  const extra = Object.keys(record).filter((key) => !allowed.includes(key));
+  if (extra.length) throw new Error(`${label} contains unsupported fields: ${extra.join(", ")}`);
+  return record;
+}
+
+function validateTarget(value: unknown): asserts value is PackageTarget {
+  const target = exactObject(value, ["kind", "id", "tenantIds", "options"], "Package target");
+  if (!new Set(["compose", "kubernetes", "prestart"]).has(String(target.kind))) throw new Error(`Unknown target kind: ${String(target.kind)}`);
+  if (typeof target.id !== "string") throw new Error("Package target id is invalid");
+  safeName(target.id, "target id");
+  if (!Array.isArray(target.tenantIds) || target.tenantIds.some((tenant) => typeof tenant !== "string")) throw new Error("Package target tenant identities are invalid");
+  const tenants = target.tenantIds.map((tenant) => safeName(tenant as string, "tenant id"));
+  if (new Set(tenants).size !== tenants.length) throw new Error("Target tenant identities must be unique");
+  const rules = TARGET_OPTIONS[target.kind as PackageTarget["kind"]];
+  const options = exactObject(target.options, Object.keys(rules), `${String(target.kind)} target options`);
+  for (const [key, item] of Object.entries(options)) {
+    const rule = rules[key];
+    if (rule === "boolean") { if (typeof item !== "boolean") throw new Error(`${key} must be true or false`); continue; }
+    if (typeof item !== "string" || !item) throw new Error(`${key} must be a non-empty string`);
+    if (rule === "json-command") {
+      let command: unknown; try { command = JSON.parse(item); } catch { throw new Error(`${key} must be a JSON command array`); }
+      if (!Array.isArray(command) || !command.length || command.some((part) => typeof part !== "string" || !part)) throw new Error(`${key} must be a non-empty JSON string array`);
+    }
+    if (key === "verifyBaseUrl") {
+      let url: URL; try { url = new URL(item); } catch { throw new Error("verifyBaseUrl must be an HTTP(S) URL"); }
+      if (!new Set(["http:", "https:"]).has(url.protocol) || url.username || url.password) throw new Error("verifyBaseUrl must be an HTTP(S) URL without credentials");
+    }
+  }
+}
+
+function validateSelection(selection: unknown, target: PackageTarget): asserts selection is ConfigurationSelection {
+  const value = exactObject(selection, ["contractId", "identity", "values"], "Configuration selection");
+  if (typeof value.contractId !== "string") throw new Error("Configuration contract id is invalid");
+  const contract = CONTRACT_BY_ID.get(value.contractId);
+  if (!contract) throw new Error(`Unknown configuration contract: ${value.contractId}`);
+  const identity = exactObject(value.identity, contract.identity, `${value.contractId} identity`);
+  for (const axis of contract.identity) if (typeof identity[axis] !== "string" || !identity[axis]) throw new Error(`${value.contractId} requires ${axis}`);
+  if (typeof identity.tenant === "string" && !target.tenantIds.includes(identity.tenant)) throw new Error(`${value.contractId} tenant is outside the target tenant identities`);
+  exactObject(value.values, Object.keys(value.values as object), `${value.contractId} values`);
+  serializeSelection(value as unknown as ConfigurationSelection);
+}
+
+function validateManifestShape(value: unknown): asserts value is PortableManifest {
+  const manifest = exactObject(value, ["schema", "createdAt", "connectorContractVersion", "target", "configurations", "secrets", "bundles", "requiredCapabilities", "entries", "plan"], "Package manifest");
+  if (manifest.schema !== "ravenroot.config-package.v1" || manifest.connectorContractVersion !== 1) throw new Error("Package schema or connector contract is unsupported");
+  if (typeof manifest.createdAt !== "string" || Number.isNaN(Date.parse(manifest.createdAt)) || new Date(manifest.createdAt).toISOString() !== manifest.createdAt) throw new Error("Package createdAt must be a canonical ISO timestamp");
+  validateTarget(manifest.target);
+  if (!Array.isArray(manifest.configurations) || !manifest.configurations.length) throw new Error("Package configurations are invalid");
+  for (const selection of manifest.configurations) validateSelection(selection, manifest.target);
+  if (!Array.isArray(manifest.secrets) || !Array.isArray(manifest.bundles) || !Array.isArray(manifest.entries) || !Array.isArray(manifest.requiredCapabilities)) throw new Error("Package manifest collections are invalid");
+  const plan = exactObject(manifest.plan, ["version", "targetKind", "targetId", "changes", "conflicts", "restartRequired", "restart", "verification"], "Package plan");
+  if (plan.version !== 1 || plan.targetKind !== manifest.target.kind || plan.targetId !== manifest.target.id || !Array.isArray(plan.changes)
+      || !Array.isArray(plan.conflicts) || typeof plan.restartRequired !== "boolean" || !Array.isArray(plan.restart) || !Array.isArray(plan.verification)) {
+    throw new Error("Package plan is not bound to its target");
+  }
+  for (const change of plan.changes) {
+    const row = exactObject(change, ["kind", "target", "action", "before", "after", "sensitive"], "Package plan change");
+    if (!new Set(["environment", "file", "bundle"]).has(String(row.kind)) || typeof row.target !== "string" || !row.target
+        || !new Set(["add", "keep", "replace", "remove"]).has(String(row.action)) || typeof row.sensitive !== "boolean"
+        || row.before !== undefined && typeof row.before !== "string" || row.after !== undefined && typeof row.after !== "string") {
+      throw new Error("Package plan change is invalid");
+    }
+  }
+  if (plan.conflicts.some((item) => typeof item !== "string") || plan.restart.some((item) => typeof item !== "string")
+      || plan.verification.some((item) => typeof item !== "string")) throw new Error("Package plan text is invalid");
+  if (manifest.requiredCapabilities.some((item) => typeof item !== "string" || !item)
+      || new Set(manifest.requiredCapabilities).size !== manifest.requiredCapabilities.length) throw new Error("Package required capabilities are invalid");
+}
 
 export interface PackageInput {
   readonly target: PackageTarget;
@@ -125,15 +203,14 @@ function preview(input: PackageInput): RedactedPlan {
 }
 
 export async function createPackage(input: PackageInput): Promise<PortablePackage> {
-  safeName(input.target.id, "target id");
+  validateTarget(input.target);
   if (!input.configurations.length) throw new Error("At least one configuration is required");
-  const tenantIds = new Set(input.target.tenantIds.map((tenant) => safeName(tenant, "tenant id")));
-  if (tenantIds.size !== input.target.tenantIds.length) throw new Error("Target tenant identities must be unique");
+  validateConfigurationSecrets(input.configurations, input.secrets.map((secret) => ({
+    mode: secret.mode, bindingId: secret.bindingId, environmentKey: secret.environmentKey
+  })));
+  const tenantIds = new Set(input.target.tenantIds);
   for (const selection of input.configurations) {
-    serializeSelection(selection);
-    if (selection.identity.tenant && !tenantIds.has(selection.identity.tenant)) {
-      throw new Error(`${selection.contractId} tenant is outside the target tenant identities`);
-    }
+    validateSelection(selection, input.target);
   }
   const supplied = new Map(input.bundles.map((bundle) => [bundle.manifest.id, bundle]));
   if (supplied.size !== input.bundles.length) throw new Error("Package contains duplicate bundle IDs");
@@ -228,21 +305,23 @@ export async function inspectPackage(bytes: Uint8Array): Promise<DecodedPackage>
   }
   const manifestBytes = entries[MANIFEST_PATH];
   if (!manifestBytes) throw new Error("Package has no manifest.json");
-  const manifest = JSON.parse(text(manifestBytes)) as PortableManifest;
-  if (manifest.schema !== "ravenroot.config-package.v1" || manifest.connectorContractVersion !== 1) throw new Error("Package schema or connector contract is unsupported");
-  if (!Array.isArray(manifest.entries) || !Array.isArray(manifest.configurations) || !Array.isArray(manifest.secrets)
-      || !Array.isArray(manifest.bundles) || !manifest.target || typeof manifest.target.id !== "string") {
-    throw new Error("Package manifest structure is invalid");
-  }
+  const parsed: unknown = JSON.parse(text(manifestBytes));
+  validateManifestShape(parsed);
+  const manifest = parsed;
   const secretIdentities = new Set<string>();
   for (const secret of manifest.secrets) {
+    const rawSecret = exactObject(secret, ["mode", "bindingId", "environmentKey", "entry", "composeVariable", "kubernetesSecret", "kubernetesKey"], "Package secret binding");
     if (!secret || !["embedded", "target-reference"].includes(secret.mode)
         || typeof secret.bindingId !== "string" || typeof secret.environmentKey !== "string"
         || secretIdentities.has(secret.bindingId) || secretIdentities.has(secret.environmentKey)) {
       throw new Error("Package secret binding structure is invalid or duplicated");
     }
+    exactObject(rawSecret, secret.mode === "embedded" ? ["mode", "bindingId", "environmentKey", "entry"]
+      : ["mode", "bindingId", "environmentKey", "composeVariable", "kubernetesSecret", "kubernetesKey"], "Package secret binding");
     secretIdentities.add(secret.bindingId);
     secretIdentities.add(secret.environmentKey);
+    safeName(secret.bindingId, "secret binding id");
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(secret.environmentKey)) throw new Error(`Invalid secret environment key: ${secret.environmentKey}`);
     if (secret.mode === "embedded" && (typeof secret.entry !== "string" || !secret.entry.startsWith("secrets/"))) {
       throw new Error(`Embedded secret ${secret.bindingId} has an invalid entry`);
     }
@@ -254,9 +333,36 @@ export async function inspectPackage(bytes: Uint8Array): Promise<DecodedPackage>
       throw new Error(`${manifest.target.kind} target reference ${secret.bindingId} is incomplete`);
     }
   }
-  for (const selection of manifest.configurations) serializeSelection(selection);
+  const configurationIdentities = new Set<string>();
+  for (const selection of manifest.configurations) {
+    serializeSelection(selection);
+    const identity = canonicalJson([selection.contractId, selection.identity]);
+    if (configurationIdentities.has(identity)) throw new Error(`Package contains duplicate configuration identity: ${selection.contractId}`);
+    configurationIdentities.add(identity);
+  }
   validateConfigurationSecrets(manifest.configurations, manifest.secrets);
+  for (const bundle of manifest.bundles) {
+    const row = exactObject(bundle, ["id", "version", "schemaVersion", "sdkContract", "artifacts", "entryPrefix", "digest"], "Package bundle");
+    if (typeof row.id !== "string" || typeof row.version !== "string" || typeof row.schemaVersion !== "string"
+        || typeof row.sdkContract !== "string" || typeof row.entryPrefix !== "string" || !row.entryPrefix.startsWith("bundles/")
+        || !row.entryPrefix.endsWith("/") || typeof row.digest !== "string" || !/^[0-9a-f]{64}$/.test(row.digest)
+        || !Array.isArray(row.artifacts)) throw new Error("Package bundle structure is invalid");
+    for (const artifact of row.artifacts) {
+      const file = exactObject(artifact, ["fileName", "sha256", "sizeBytes"], "Package bundle artifact");
+      if (typeof file.fileName !== "string" || !/^[A-Za-z0-9._-]+$/.test(file.fileName)
+          || typeof file.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(file.sha256)
+          || !Number.isSafeInteger(file.sizeBytes) || Number(file.sizeBytes) < 0) throw new Error("Package bundle artifact is invalid");
+    }
+  }
+  for (const entry of manifest.entries) {
+    exactObject(entry, ["path", "sha256", "sizeBytes"], "Package entry digest");
+    if (typeof entry.path !== "string" || !/^[A-Za-z0-9._/-]+$/.test(entry.path) || entry.path.startsWith("/") || entry.path.split("/").includes("..")
+        || typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.sha256) || !Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes < 0) {
+      throw new Error("Package entry digest is invalid");
+    }
+  }
   const declared = new Set(manifest.entries.map((entry) => entry.path));
+  if (declared.size !== manifest.entries.length) throw new Error("Package declares duplicate entries");
   const undeclared = Object.keys(entries).filter((path) => path !== MANIFEST_PATH && !declared.has(path));
   if (undeclared.length) throw new Error(`Package contains undeclared entries: ${undeclared.join(", ")}`);
   const allowedEntries = new Set(["configurations.json",
@@ -285,5 +391,10 @@ export async function inspectPackage(bytes: Uint8Array): Promise<DecodedPackage>
   const suppliedBundles = new Set(manifest.bundles.map((bundle) => bundle.id));
   if (suppliedBundles.size !== manifest.bundles.length) throw new Error("Package contains duplicate bundle IDs");
   validateBundleBindings(manifest.configurations, suppliedBundles);
+  const expectedCapabilities = [...new Set(manifest.configurations.flatMap((selection) =>
+    CONTRACT_BY_ID.get(selection.contractId)?.requiredCapabilities ?? []))].sort();
+  if (canonicalJson(expectedCapabilities) !== canonicalJson([...manifest.requiredCapabilities].sort())) {
+    throw new Error("Package required capabilities do not match its configurations");
+  }
   return { manifest, entries, digest: await sha256(bytes) };
 }

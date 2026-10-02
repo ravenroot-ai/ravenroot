@@ -1,9 +1,17 @@
 import { unzipSync, zipSync } from "fflate";
 import { describe, expect, test } from "vitest";
 import { createPackage, inspectPackage } from "../src/package-format.js";
+import { templateSelection } from "../src/registry.js";
 import { coreHttp, fakeBundle, serviceGrant, target } from "./helpers.js";
 
 describe("portable package", () => {
+  async function tamperedPackage(mutate: (manifest: Record<string, any>) => void): Promise<Uint8Array> {
+    const created = await createPackage({ target: target("compose"), configurations: [coreHttp], secrets: [], bundles: [] });
+    const entries = unzipSync(created.bytes);
+    const manifest = JSON.parse(Buffer.from(entries["manifest.json"]!).toString("utf8")) as Record<string, any>;
+    mutate(manifest); entries["manifest.json"] = Buffer.from(JSON.stringify(manifest)); return zipSync(entries);
+  }
+
   test("encrypts embedded secrets and verifies every declared entry", async () => {
     const secret = "correct horse battery staple";
     const created = await createPackage({
@@ -21,7 +29,7 @@ describe("portable package", () => {
   });
 
   test("requires exactly the prebuilt bundles selected by contracts", async () => {
-    const selection = { contractId: "ai.llm-profile", identity: { profile: "default" }, values: { document: { endpoint: "https://models.example.test", model: "m" } } };
+    const selection = templateSelection("ai.llm-profile");
     await expect(createPackage({ target: target("compose"), configurations: [selection], secrets: [], bundles: [] }))
       .rejects.toThrow("requires prebuilt bundles");
     await expect(createPackage({ target: target("compose"), configurations: [selection], secrets: [], bundles: [await fakeBundle()] }))
@@ -43,7 +51,9 @@ describe("portable package", () => {
 
   test("requires encrypted placeholders for credential material in JSON documents", async () => {
     const raw = { contractId: "core.human-task", identity: {}, values: { interactionDocument: {
-      schemaVersion: 1, capabilitySecretBase64: "raw-secret", profiles: []
+      schemaVersion: 1, capabilityTtlSeconds: 300, maxCompletionBytes: 65536, capabilitySecretBase64: "raw-secret",
+      profiles: [{ id: "review", version: 1, kind: "EXTERNAL", launchUri: "https://review.example.test/task",
+        origin: "https://review.example.test", completionSecretBase64: { $secret: "capability" } }]
     }, RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED: true } };
     await expect(createPackage({ target: target("compose"), configurations: [raw], secrets: [], bundles: [] }))
       .rejects.toThrow("is sensitive and must use an encrypted");
@@ -65,5 +75,13 @@ describe("portable package", () => {
     await expect(createPackage({ target: target("compose"), configurations: [coreHttp], bundles: [],
       secrets: [{ mode: "target-reference", bindingId: "token", environmentKey: "RAVENROOT_CREDENTIAL_TOKEN" }] }))
       .rejects.toThrow("requires composeVariable");
+  });
+
+  test("rejects semantically tampered target, identity, and plan fields during import", async () => {
+    await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.target.kind = "nomad"; }))).rejects.toThrow("Unknown target kind");
+    await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.target.options.unreviewed = "value"; }))).rejects.toThrow("unsupported fields");
+    await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.configurations[0].identity.profile = "foreign"; }))).rejects.toThrow("unsupported fields");
+    await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.plan.targetId = "another-target"; }))).rejects.toThrow("not bound to its target");
+    await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.plan.changes[0].action = "overwrite"; }))).rejects.toThrow("plan change is invalid");
   });
 });

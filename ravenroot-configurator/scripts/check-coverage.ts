@@ -34,6 +34,11 @@ function section(markdown: string, heading: string): string {
 const contractIds = new Set(CONTRACTS.map((contract) => contract.id));
 if (contractIds.size !== CONTRACTS.length) throw new Error("configuration contract IDs are not unique");
 if (!contractIds.has("bundle.service-grant")) throw new Error("managed node package service grants are omitted");
+for (const contract of CONTRACTS) {
+  if (!contract.runtimeVerifier) throw new Error(`${contract.id} has no runtime verifier mapping`);
+  if (contract.encoding === "base64-json" && !contract.schema) throw new Error(`${contract.id} has no executable document schema`);
+  if (contract.fields.some((field) => field.type === "json" && !field.schema)) throw new Error(`${contract.id} has an unguided JSON document`);
+}
 
 for (const row of [...NODE_COVERAGE, ...GOVERNED_NODE_COVERAGE]) {
   for (const contract of row.contracts) {

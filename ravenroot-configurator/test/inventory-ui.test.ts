@@ -24,7 +24,7 @@ describe("guided registry", () => {
     expect(document.body.textContent).toContain("Prebuilt bundles");
   });
 
-  test("renders operator identity and JSON as values without creating active markup", () => {
+  test("renders operator identity and guided scalar values without creating active markup", () => {
     const contract = document.querySelector<HTMLSelectElement>("#contract") as HTMLSelectElement;
     contract.value = "bundle.service-grant";
     (document.querySelector<HTMLButtonElement>("#add-contract") as HTMLButtonElement).click();
@@ -32,16 +32,37 @@ describe("guided registry", () => {
     const identity = document.querySelector<HTMLInputElement>("[data-axis]") as HTMLInputElement;
     identity.value = identityPayload;
     identity.dispatchEvent(new Event("input"));
-    const jsonPayload = `</textarea><img src=x onerror=\"globalThis.uiInjected=true\">`;
-    const documentInput = document.querySelector<HTMLTextAreaElement>("#configurations textarea") as HTMLTextAreaElement;
-    documentInput.value = JSON.stringify({ capabilities: [], note: jsonPayload });
+    const scalarPayload = `\"><img src=x onerror=\"globalThis.uiInjected=true\">`;
+    const documentInput = [...document.querySelectorAll<HTMLInputElement>("#configurations input[type=text]")]
+      .find((input) => !input.dataset.axis) as HTMLInputElement;
+    documentInput.value = scalarPayload;
     documentInput.dispatchEvent(new Event("input"));
 
     (document.querySelector<HTMLButtonElement>("#add-contract") as HTMLButtonElement).click();
 
     expect((document.querySelector<HTMLInputElement>("[data-axis]") as HTMLInputElement).value).toBe(identityPayload);
-    expect(JSON.parse((document.querySelector<HTMLTextAreaElement>("#configurations textarea") as HTMLTextAreaElement).value).note).toBe(jsonPayload);
+    expect([...document.querySelectorAll<HTMLInputElement>("#configurations input[type=text]")].some((input) => input.value === scalarPayload)).toBe(true);
     expect(document.querySelector("#configurations img")).toBeNull();
     expect((globalThis as typeof globalThis & { uiInjected?: boolean }).uiInjected).not.toBe(true);
+  });
+
+  test("provides guided controls for every contract and target including separate Kubernetes Secret coordinates", () => {
+    const contract = document.querySelector<HTMLSelectElement>("#contract") as HTMLSelectElement;
+    const add = document.querySelector<HTMLButtonElement>("#add-contract") as HTMLButtonElement;
+    for (const definition of CONTRACTS) { contract.value = definition.id; add.click(); }
+    expect(document.querySelector("#configurations textarea")).toBeNull();
+    expect(document.querySelectorAll("#configurations fieldset, #configurations label").length).toBeGreaterThan(CONTRACTS.length);
+
+    const kind = document.querySelector<HTMLSelectElement>("#target-kind") as HTMLSelectElement;
+    kind.value = "kubernetes"; kind.dispatchEvent(new Event("change"));
+    expect(document.querySelector('[data-target-option="namespace"]')).not.toBeNull();
+    expect(document.querySelector('[data-target-option="derivedImage"]')).not.toBeNull();
+    expect(document.querySelector("#secret-kubernetes-name")).not.toBeNull();
+    expect(document.querySelector("#secret-kubernetes-key")).not.toBeNull();
+    kind.value = "prestart"; kind.dispatchEvent(new Event("change"));
+    expect(document.querySelector('[data-target-option="restartCommandJson"]')).not.toBeNull();
+    expect(document.querySelector('[data-target-option="verifyCommandJson"]')).not.toBeNull();
+    kind.value = "compose"; kind.dispatchEvent(new Event("change"));
+    expect(document.querySelector('[data-target-option="verifyBaseUrl"]')).not.toBeNull();
   });
 });

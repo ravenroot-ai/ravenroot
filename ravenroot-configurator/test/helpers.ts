@@ -22,7 +22,7 @@ export function serviceGrant(bundleId: string, capabilities: readonly string[]):
     values: { document: {
       capabilities, origins: [{ scheme: "https", host: "service.example.test", port: 443 }],
       httpMethods: ["GET", "POST"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
-      webSocketSubprotocols: [], credentialBindings: [], awsSigV4Bindings: [], credentialReferences: [],
+      webSocketSubprotocols: [], credentialBindings: [], awsSigV4Bindings: [], credentialReferences: ["credential"],
       limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 }
     } }
   };

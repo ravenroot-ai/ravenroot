@@ -2,11 +2,11 @@ import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, chmod, copyFile, lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { parse, stringify } from "yaml";
+import { parse, parseAllDocuments, stringify } from "yaml";
 import { canonicalJson, sha256, text, utf8 } from "./codec.js";
 import { decryptSecret } from "./crypto.js";
 import { CONTRACT_BY_ID, serializeSelection } from "./registry.js";
-import type { DecodedPackage, EmbeddedSecretEnvelope, PlanChange, RedactedPlan, TargetKind } from "./types.js";
+import type { DecodedPackage, EmbeddedSecretEnvelope, ExternalMutationStep, PlanChange, RedactedPlan, TargetKind } from "./types.js";
 
 const STATE_DIR = ".ravenroot-config";
 const STATE_FILE = "state.json";
@@ -51,11 +51,22 @@ export interface InstallOptions {
 }
 
 export interface PreparedInstall {
+  readonly source: DecodedPackage;
   readonly plan: RedactedPlan;
   readonly artifacts: readonly GeneratedArtifact[];
   readonly environment: Readonly<Record<string, string>>;
   readonly commands: readonly (readonly string[])[];
+  readonly externalSteps: readonly ExternalMutationStep[];
+  readonly recoveryFiles: Readonly<Record<string, Uint8Array>>;
   readonly state: InstallerState;
+}
+
+interface TransactionJournal {
+  readonly version: 2;
+  readonly transaction: string;
+  readonly steps: readonly ExternalMutationStep[];
+  readonly completed: readonly string[];
+  readonly inFlight?: string;
 }
 
 function confined(root: string, relative: string): string {
@@ -93,7 +104,8 @@ async function resolveInputs(pkg: DecodedPackage, password?: string): Promise<{ 
   }
   for (const selection of pkg.manifest.configurations) {
     const resolved = { ...selection, values: replaceDocumentSecrets(selection.values, embeddedSecrets) as Readonly<Record<string, unknown>> };
-    for (const [key, value] of Object.entries(serializeSelection(resolved))) {
+    const serialized = serializeSelection(EXTERNAL_DOCUMENTS.has(selection.contractId) ? selection : resolved);
+    for (const [key, value] of Object.entries(serialized)) {
       if (environment[key] !== undefined && environment[key] !== value) throw new Error(`Package defines conflicting values for ${key}`);
       environment[key] = value;
     }
@@ -216,6 +228,24 @@ async function queryKubernetesObject(runner: (command: readonly string[]) => Pro
   return value as Record<string, unknown>;
 }
 
+interface HelmReleaseRow { readonly name: string; readonly revision: string; readonly status: string }
+
+async function helmRelease(runner: (command: readonly string[]) => Promise<string>, release: string,
+                           namespace: string): Promise<HelmReleaseRow | undefined> {
+  const raw = (await runner(["helm", "list", "--namespace", namespace, "--filter", `^${release.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "-o", "json"])).trim();
+  let value: unknown;
+  try { value = JSON.parse(raw || "[]"); } catch { throw new Error("Helm recovery preflight returned invalid JSON"); }
+  if (!Array.isArray(value)) throw new Error("Helm recovery preflight returned a non-list");
+  const matches = value.filter((entry) => entry && typeof entry === "object" && (entry as { name?: unknown }).name === release);
+  if (matches.length === 0) return undefined;
+  if (matches.length !== 1) throw new Error(`Helm recovery preflight returned duplicate release ${release}`);
+  const row = matches[0] as { name?: unknown; revision?: unknown; status?: unknown };
+  const revision = String(row.revision ?? "");
+  const status = String(row.status ?? "");
+  if (!/^\d+$/.test(revision) || !status) throw new Error("Helm recovery preflight returned an invalid release row");
+  return { name: release, revision, status };
+}
+
 async function kubernetesCollisions(pkg: DecodedPackage, environment: Readonly<Record<string, string>>,
                                     runner: (command: readonly string[]) => Promise<string>): Promise<string[]> {
   const namespace = String(pkg.manifest.target.options.namespace ?? "default");
@@ -233,6 +263,13 @@ async function kubernetesCollisions(pkg: DecodedPackage, environment: Readonly<R
   for (const [key, value] of Object.entries(environment)) {
     const existing = (secretData as Record<string, unknown> | undefined)?.[key];
     if (existing !== undefined && existing !== yamlScalar(value)) conflicts.push(`Kubernetes Secret ${secretName} key ${key} has a non-identical existing value`);
+  }
+  for (const binding of pkg.manifest.secrets.filter((candidate) => candidate.mode === "target-reference")) {
+    const referenced = await queryKubernetesObject(runner, get("secret", binding.kubernetesSecret as string));
+    const data = referenced?.data;
+    if (!data || typeof data !== "object" || Array.isArray(data) || typeof (data as Record<string, unknown>)[binding.kubernetesKey as string] !== "string") {
+      throw new Error(`Kubernetes target reference ${binding.bindingId} cannot verify Secret ${binding.kubernetesSecret} key ${binding.kubernetesKey}`);
+    }
   }
   if (!deployment) return conflicts;
   const spec = deployment.spec as { template?: { spec?: { containers?: unknown[] } } } | undefined;
@@ -414,6 +451,66 @@ function commands(pkg: DecodedPackage, root: string): readonly (readonly string[
   return [command as string[]];
 }
 
+async function prepareExternalSteps(pkg: DecodedPackage, root: string,
+                                    runner: (command: readonly string[]) => Promise<string>): Promise<{
+  steps: ExternalMutationStep[]; recoveryFiles: Record<string, Uint8Array>;
+}> {
+  const apply = commands(pkg, root);
+  if (pkg.manifest.target.kind === "compose") {
+    const restart = apply[0];
+    return { steps: restart ? [{ id: "compose-recreate", apply: restart, compensate: [restart], mutatesTarget: true }] : [], recoveryFiles: {} };
+  }
+  if (pkg.manifest.target.kind === "prestart") {
+    const restart = apply[0];
+    if (!restart) return { steps: [], recoveryFiles: {} };
+    const steps: ExternalMutationStep[] = [{ id: "prestart-restart", apply: restart, compensate: [restart], mutatesTarget: true }];
+    const verifyRaw = pkg.manifest.target.options.verifyCommandJson;
+    if (typeof verifyRaw === "string") {
+      const verify = JSON.parse(verifyRaw) as string[];
+      steps.push({ id: "prestart-effective-verification", apply: verify, compensate: [], mutatesTarget: false });
+    }
+    return { steps, recoveryFiles: {} };
+  }
+  const namespace = String(pkg.manifest.target.options.namespace ?? "default");
+  const release = String(pkg.manifest.target.options.release ?? "ravenroot");
+  const deployment = String(pkg.manifest.target.options.deploymentName ?? `${release}-ravenroot`);
+  const secretName = `ravenroot-config-${pkg.manifest.target.id.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40)}`;
+  const fileSecretName = `${secretName}-files`;
+  const get = (kind: string, name: string) => ["kubectl", "get", kind, name, "--namespace", namespace, "--ignore-not-found", "-o", "json"];
+  const recoveryFiles: Record<string, Uint8Array> = {};
+  const compensationFor = async (kind: string, name: string): Promise<readonly string[]> => {
+    const raw = (await runner(get(kind, name))).trim();
+    if (!raw) return ["kubectl", "delete", kind, name, "--namespace", namespace, "--ignore-not-found"];
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`Kubernetes recovery snapshot for ${kind}/${name} is invalid`);
+    const metadata = parsed.metadata as Record<string, unknown> | undefined;
+    if (metadata) { delete metadata.resourceVersion; delete metadata.uid; delete metadata.creationTimestamp; delete metadata.managedFields; }
+    delete parsed.status;
+    const path = `recovery/${kind}-${name}.json`;
+    recoveryFiles[path] = utf8(canonicalJson(parsed));
+    return ["kubectl", "apply", "-f", `__BACKUP__/${path}`];
+  };
+  const deploymentCompensation = await compensationFor("deployment", deployment);
+  const secretCompensations: (readonly string[])[] = [await compensationFor("secret", secretName)];
+  if (pkg.manifest.configurations.some((selection) => EXTERNAL_DOCUMENTS.has(selection.contractId))) {
+    secretCompensations.push(await compensationFor("secret", fileSecretName));
+  }
+  const previousRelease = await helmRelease(runner, release, namespace);
+  const helmCompensation: readonly string[] = previousRelease
+    ? ["helm", "rollback", release, previousRelease.revision, "--namespace", namespace, "--wait"]
+    : ["helm", "uninstall", release, "--namespace", namespace, "--wait"];
+  const steps: ExternalMutationStep[] = [];
+  let cursor = 0;
+  while (cursor < apply.length && apply[cursor]?.[0] === "docker") {
+    steps.push({ id: `image-stage-${cursor}`, apply: apply[cursor]!, compensate: [], mutatesTarget: false }); cursor += 1;
+  }
+  steps.push({ id: "kubernetes-secret-apply", apply: apply[cursor++]!, compensate: secretCompensations, mutatesTarget: true });
+  steps.push({ id: "helm-upgrade", apply: apply[cursor++]!, compensate: [helmCompensation], mutatesTarget: true });
+  steps.push({ id: "deployment-patch", apply: apply[cursor++]!, compensate: [deploymentCompensation], mutatesTarget: true });
+  steps.push({ id: "deployment-rollout", apply: apply[cursor++]!, compensate: [], mutatesTarget: false });
+  return { steps, recoveryFiles };
+}
+
 async function artifactChanges(root: string, artifacts: readonly GeneratedArtifact[], replace: boolean): Promise<{ changes: PlanChange[]; conflicts: string[]; digests: Record<string, string> }> {
   const changes: PlanChange[] = [];
   const conflicts: string[] = [];
@@ -479,6 +576,7 @@ export async function prepareInstall(pkg: DecodedPackage, options: InstallOption
     action: previous?.environmentDigests[secret.environmentKey] === environmentDigests[secret.environmentKey] ? "keep" : options.replace ? "replace" : "add",
     after: `<secret:${secret.bindingId}>`, sensitive: true });
   const targetCommands = commands(pkg, root);
+  const external = await prepareExternalSteps(pkg, root, options.queryRunner ?? defaultQueryRunner);
   const plan: RedactedPlan = {
     version: 1, targetKind: pkg.manifest.target.kind, targetId: pkg.manifest.target.id,
     changes, conflicts: [...new Set(evaluated.conflicts)].sort(), restartRequired: pkg.manifest.plan.restartRequired,
@@ -491,7 +589,8 @@ export async function prepareInstall(pkg: DecodedPackage, options: InstallOption
     version: 1, targetId: pkg.manifest.target.id, targetKind: pkg.manifest.target.kind,
     packageDigest: pkg.digest, environmentDigests, files: evaluated.digests
   };
-  return { plan, artifacts, environment, commands: targetCommands, state };
+  return { source: pkg, plan, artifacts, environment, commands: targetCommands, externalSteps: external.steps,
+    recoveryFiles: external.recoveryFiles, state };
 }
 
 async function atomicWrite(path: string, bytes: Uint8Array, mode: number): Promise<void> {
@@ -508,6 +607,112 @@ async function defaultRunner(command: readonly string[], environment: Readonly<R
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`${basename(command[0] as string)} exited with ${code}`)));
   });
+}
+
+async function verifyEffectiveInstall(prepared: PreparedInstall,
+                                      runner: (command: readonly string[]) => Promise<string>): Promise<void> {
+  const pkg = prepared.source;
+  if (pkg.manifest.target.kind === "prestart") return;
+  if (pkg.manifest.target.kind === "kubernetes") {
+    const namespace = String(pkg.manifest.target.options.namespace ?? "default");
+    const release = String(pkg.manifest.target.options.release ?? "ravenroot");
+    const deploymentName = String(pkg.manifest.target.options.deploymentName ?? `${release}-ravenroot`);
+    const get = (kind: string, name: string) => ["kubectl", "get", kind, name, "--namespace", namespace, "--ignore-not-found", "-o", "json"];
+    const secretArtifact = prepared.artifacts.find((artifact) => artifact.path.endsWith("configuration-secret.yaml"));
+    const patchArtifact = prepared.artifacts.find((artifact) => artifact.path.endsWith("deployment-patch.rrcfg.yaml"));
+    if (!secretArtifact || !patchArtifact) throw new Error("Kubernetes verification artifacts are incomplete");
+    const expectedSecrets = parseAllDocuments(text(secretArtifact.bytes)).map((document) => document.toJSON() as {
+      metadata: { name: string }; data: Record<string, string>
+    });
+    for (const expected of expectedSecrets) {
+      const actual = await queryKubernetesObject(runner, get("secret", expected.metadata.name));
+      if (!actual) throw new Error(`Effective Kubernetes configuration is missing Secret ${expected.metadata.name}`);
+      const data = actual.data;
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`Effective Kubernetes Secret ${expected.metadata.name} has invalid data`);
+      for (const [key, value] of Object.entries(expected.data)) {
+        if ((data as Record<string, unknown>)[key] !== value) throw new Error(`Effective Kubernetes Secret ${expected.metadata.name} differs for ${key}`);
+      }
+    }
+    for (const binding of pkg.manifest.secrets.filter((candidate) => candidate.mode === "target-reference")) {
+      const referenced = await queryKubernetesObject(runner, get("secret", binding.kubernetesSecret as string));
+      const data = referenced?.data;
+      if (!data || typeof data !== "object" || Array.isArray(data) || typeof (data as Record<string, unknown>)[binding.kubernetesKey as string] !== "string") {
+        throw new Error(`Effective Kubernetes target reference ${binding.bindingId} is missing Secret ${binding.kubernetesSecret} key ${binding.kubernetesKey}`);
+      }
+    }
+    const deployment = await queryKubernetesObject(runner, get("deployment", deploymentName));
+    if (!deployment) throw new Error(`Effective Kubernetes configuration is missing Deployment ${deploymentName}`);
+    const expectedPatch = parse(text(patchArtifact.bytes)) as {
+      spec: { template: { spec: { containers: Array<{ name: string; env?: unknown[]; volumeMounts?: unknown[] }>; volumes?: unknown[] } } }
+    };
+    const actualSpec = (deployment.spec as { template?: { spec?: { containers?: unknown[]; volumes?: unknown[] } } } | undefined)?.template?.spec;
+    const actualContainer = actualSpec?.containers?.find((entry) => entry && typeof entry === "object" && (entry as { name?: unknown }).name === "ravenroot") as {
+      env?: unknown[]; volumeMounts?: unknown[]; image?: unknown
+    } | undefined;
+    if (!actualContainer) throw new Error("Effective Kubernetes Deployment has no ravenroot container");
+    const expectedContainer = expectedPatch.spec.template.spec.containers[0]!;
+    const actualEnv = new Map((actualContainer.env ?? []).map((entry) => [(entry as { name: string }).name, entry]));
+    for (const entry of expectedContainer.env ?? []) {
+      const name = (entry as { name: string }).name;
+      if (canonicalJson(actualEnv.get(name)) !== canonicalJson(entry)) throw new Error(`Effective Kubernetes Deployment differs for environment ${name}`);
+    }
+    for (const required of expectedContainer.volumeMounts ?? []) {
+      if (!(actualContainer.volumeMounts ?? []).some((actual) => canonicalJson(actual) === canonicalJson(required))) {
+        throw new Error("Effective Kubernetes Deployment is missing a configuration file mount");
+      }
+    }
+    for (const required of expectedPatch.spec.template.spec.volumes ?? []) {
+      if (!(actualSpec?.volumes ?? []).some((actual) => canonicalJson(actual) === canonicalJson(required))) {
+        throw new Error("Effective Kubernetes Deployment is missing a configuration file Secret volume");
+      }
+    }
+    if (pkg.manifest.bundles.length && actualContainer.image !== pkg.manifest.target.options.derivedImage) {
+      throw new Error("Effective Kubernetes Deployment has not activated the configured bundle image");
+    }
+    const deploymentMetadata = deployment.metadata as { generation?: unknown } | undefined;
+    const desired = Number((deployment.spec as { replicas?: unknown } | undefined)?.replicas ?? 1);
+    const status = deployment.status as { observedGeneration?: unknown; updatedReplicas?: unknown; availableReplicas?: unknown; conditions?: unknown[] } | undefined;
+    if (!status || Number(status.observedGeneration) < Number(deploymentMetadata?.generation ?? 1)
+      || Number(status.updatedReplicas ?? 0) < desired || Number(status.availableReplicas ?? 0) < desired
+      || !status.conditions?.some((condition) => (condition as { type?: unknown; status?: unknown }).type === "Available"
+        && (condition as { status?: unknown }).status === "True")) {
+      throw new Error("Effective Kubernetes Deployment rollout is not available");
+    }
+    const activeRelease = await helmRelease(runner, release, namespace);
+    if (!activeRelease || activeRelease.status.toLowerCase() !== "deployed") {
+      throw new Error(`Effective Kubernetes Helm release ${release} is not deployed`);
+    }
+    return;
+  }
+  const root = dirname((prepared.externalSteps[0]?.apply[3] as string | undefined) ?? resolve("compose.yaml"));
+  const command = ["docker", "compose", "-f", join(root, "compose.yaml"), "-f",
+    confined(root, `${STATE_DIR}/compose/compose.rrcfg.yaml`), "config", "--format", "json"];
+  const raw = await runner(command);
+  let model: unknown; try { model = JSON.parse(raw); } catch { throw new Error("Compose effective configuration verification returned invalid JSON"); }
+  const service = (model as { services?: Record<string, { environment?: unknown }> } | null)?.services?.ravenroot;
+  if (!service) throw new Error("Compose effective configuration has no ravenroot service");
+  const actual = composeEnvironmentValues(service.environment);
+  for (const [key, digest] of Object.entries(prepared.state.environmentDigests)) {
+    const value = actual.get(key);
+    if (value === undefined || await sha256(utf8(value)) !== digest) throw new Error(`Compose effective configuration differs for ${key}`);
+  }
+  const composePrefix = command.slice(0, -3);
+  const containerId = (await runner([...composePrefix, "ps", "-q", "ravenroot"])).trim();
+  if (!/^[a-zA-Z0-9_.-]+$/.test(containerId)) throw new Error("Compose effective verification found no running ravenroot container");
+  let inspected: unknown;
+  try { inspected = JSON.parse(await runner(["docker", "inspect", containerId])); }
+  catch { throw new Error("Compose runtime inspection returned invalid JSON"); }
+  const row = Array.isArray(inspected) && inspected.length === 1 ? inspected[0] as {
+    Config?: { Env?: unknown[] }; State?: { Running?: unknown; Health?: { Status?: unknown } }
+  } : undefined;
+  if (!row || row.State?.Running !== true || row.State.Health?.Status === "unhealthy") {
+    throw new Error("Compose ravenroot container is not running and healthy");
+  }
+  const runtime = composeEnvironmentValues(row.Config?.Env);
+  for (const [key, digest] of Object.entries(prepared.state.environmentDigests)) {
+    const value = runtime.get(key);
+    if (value === undefined || await sha256(utf8(value)) !== digest) throw new Error(`Compose running container differs for ${key}`);
+  }
 }
 
 export async function applyInstall(prepared: PreparedInstall, options: InstallOptions): Promise<void> {
@@ -531,23 +736,47 @@ export async function applyInstall(prepared: PreparedInstall, options: InstallOp
     }
   }
   await atomicWrite(confined(backupRoot, "index.json"), utf8(canonicalJson(backupIndex)), 0o600);
-  await atomicWrite(confined(root, `${STATE_DIR}/${PENDING_FILE}`), utf8(canonicalJson({ version: 1, transaction })), 0o600);
+  for (const [path, bytes] of Object.entries(prepared.recoveryFiles)) await atomicWrite(confined(backupRoot, path), bytes, 0o600);
+  const steps = prepared.externalSteps.map((step) => ({
+    ...step,
+    compensate: step.compensate.map((command) => command.map((part) => part.replaceAll("__BACKUP__", backupRoot)))
+  }));
+  let journal: TransactionJournal = { version: 2, transaction, steps, completed: [] };
+  const journalPath = confined(backupRoot, "journal.json");
+  const pendingPath = confined(root, `${STATE_DIR}/${PENDING_FILE}`);
+  const persist = async (): Promise<void> => {
+    await atomicWrite(journalPath, utf8(canonicalJson(journal)), 0o600);
+    await atomicWrite(pendingPath, utf8(canonicalJson({ version: 2, transaction })), 0o600);
+  };
+  await persist();
   try {
     for (const artifact of prepared.artifacts) await atomicWrite(confined(root, artifact.path), artifact.bytes, artifact.mode);
     const state = { ...prepared.state, lastTransaction: transaction };
     await atomicWrite(confined(root, `${STATE_DIR}/${STATE_FILE}`), utf8(canonicalJson(state)), 0o600);
     if (options.execute) {
       const runner = options.commandRunner ?? defaultRunner;
-      for (const command of prepared.commands) await runner(command, prepared.environment);
+      if (prepared.plan.restartRequired && !steps.some((step) => step.mutatesTarget)) {
+        throw new Error("Executable installation requires a concrete target restart command");
+      }
+      const completed: string[] = [];
+      for (const step of steps) {
+        journal = { ...journal, completed: [...completed], inFlight: step.id }; await persist();
+        await runner(step.apply, prepared.environment);
+        completed.push(step.id); journal = { ...journal, completed: [...completed] }; delete (journal as { inFlight?: string }).inFlight; await persist();
+      }
+      await verifyEffectiveInstall(prepared, options.queryRunner ?? defaultQueryRunner);
+      const baseUrl = prepared.source.manifest.target.options.verifyBaseUrl;
+      if (typeof baseUrl === "string" && baseUrl) await verifyTarget(prepared.source, baseUrl);
     }
-    await rm(confined(root, `${STATE_DIR}/${PENDING_FILE}`));
+    await rm(pendingPath);
   } catch (failure) {
-    await rollback(root);
+    await rollback(root, options.commandRunner);
     throw failure;
   }
 }
 
-export async function rollback(targetRoot: string): Promise<void> {
+export async function rollback(targetRoot: string,
+                               commandRunner?: (command: readonly string[], environment: Readonly<Record<string, string>>) => Promise<void>): Promise<void> {
   const root = resolve(targetRoot);
   const state = await readState(root);
   const pendingPath = confined(root, `${STATE_DIR}/${PENDING_FILE}`);
@@ -566,6 +795,19 @@ export async function rollback(targetRoot: string): Promise<void> {
       await copyFile(backup, target);
     } else if (await exists(target)) {
       await rm(target);
+    }
+  }
+  const journalPath = confined(backupRoot, "journal.json");
+  if (await exists(journalPath)) {
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as TransactionJournal;
+    if (journal.version !== 2 || journal.transaction !== transaction) throw new Error("Installer recovery journal is invalid");
+    const applied = [...journal.completed];
+    if (journal.inFlight && !applied.includes(journal.inFlight)) applied.push(journal.inFlight);
+    const runner = commandRunner ?? defaultRunner;
+    for (const id of applied.reverse()) {
+      const step = journal.steps.find((candidate) => candidate.id === id);
+      if (!step || !step.mutatesTarget) continue;
+      for (const command of step.compensate) await runner(command, {});
     }
   }
   if (await exists(pendingPath)) await rm(pendingPath);

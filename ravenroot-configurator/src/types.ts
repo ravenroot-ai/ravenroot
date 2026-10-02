@@ -14,7 +14,19 @@ export interface FieldSpec {
   readonly allowed?: readonly string[];
   readonly minimum?: number;
   readonly maximum?: number;
+  readonly schema?: ValueSchema;
 }
+
+export type ValueSchema =
+  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256" }
+  | { readonly kind: "integer"; readonly minimum?: number; readonly maximum?: number }
+  | { readonly kind: "boolean" }
+  | { readonly kind: "null" }
+  | { readonly kind: "nullable"; readonly value: ValueSchema }
+  | { readonly kind: "union"; readonly choices: readonly ValueSchema[] }
+  | { readonly kind: "array"; readonly items: ValueSchema; readonly minimumItems?: number; readonly maximumItems?: number; readonly unique?: boolean }
+  | { readonly kind: "object"; readonly properties: Readonly<Record<string, ValueSchema>>; readonly optional?: readonly string[] }
+  | { readonly kind: "map"; readonly values: ValueSchema; readonly minimumEntries?: number; readonly maximumEntries?: number; readonly keyPattern?: string };
 
 export type ContractEncoding = "delimited" | "base64-json" | "plain-environment";
 
@@ -30,6 +42,8 @@ export interface ConfigurationContract {
   readonly fields: readonly FieldSpec[];
   readonly delimiter?: string;
   readonly jsonTemplate?: Readonly<Record<string, unknown>>;
+  readonly schema?: ValueSchema;
+  readonly runtimeVerifier: string;
   readonly requiredCapabilities?: readonly string[];
   readonly externalRequirements?: readonly string[];
   readonly restartRequired: boolean;
@@ -118,6 +132,13 @@ export interface PackageTarget {
   readonly id: string;
   readonly tenantIds: readonly string[];
   readonly options: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface ExternalMutationStep {
+  readonly id: string;
+  readonly apply: readonly string[];
+  readonly compensate: readonly (readonly string[])[];
+  readonly mutatesTarget: boolean;
 }
 
 export interface PackageEntryDigest {

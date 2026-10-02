@@ -1,4 +1,5 @@
 import { base64Json, safeName, utf8Hex } from "./codec.js";
+import { schemaFromTemplate, validateValue } from "./schema.js";
 import type { ConfigurationContract, ConfigurationSelection, FieldSpec } from "./types.js";
 
 const requiredString = (name: string, label = name): FieldSpec => ({ name, label, type: "string", required: true });
@@ -9,6 +10,9 @@ const requiredInt = (name: string, minimum = 1, maximum?: number): FieldSpec => 
 const requiredBoolean = (name: string): FieldSpec => ({ name, label: name, type: "boolean", required: true });
 const requiredCsv = (name: string): FieldSpec => ({ name, label: name, type: "csv", required: true });
 const optionalCsv = (name: string): FieldSpec => ({ name, label: name, type: "csv", required: false });
+const strictJson = (name: string, label: string, suggestion: Readonly<Record<string, unknown>>): FieldSpec => ({
+  name, label, type: "json", required: true, suggestion, schema: schemaFromTemplate(suggestion)
+});
 
 const jsonContract = (
   id: string,
@@ -30,8 +34,11 @@ const jsonContract = (
   environment,
   identity,
   encoding: "base64-json",
-  fields: [{ name: "document", label: "Configuration document", type: "json", required: true }],
+  fields: [{ name: "document", label: "Configuration document", type: "json", required: true,
+    schema: schemaFromTemplate(jsonTemplate) }],
   jsonTemplate,
+  schema: schemaFromTemplate(jsonTemplate),
+  runtimeVerifier: id,
   requiredCapabilities,
   externalRequirements,
   restartRequired: true,
@@ -64,6 +71,7 @@ const delimitedContract = (
   encoding: "delimited",
   delimiter: ";",
   fields,
+  runtimeVerifier: id,
   requiredCapabilities: options.capabilities ?? [],
   externalRequirements: options.external ?? [],
   restartRequired: true,
@@ -90,18 +98,68 @@ const projection = {
   maxHeaderValueBytes: 512
 };
 
+export const DELIMITED_TEMPLATES: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  "amqp.profile": { host: "localhost", port: 5672, tls: false, vhost: "/", username: "operator", credentialRef: "broker",
+    defaultExchange: "", additionalExchanges: [], defaultRoutingKey: "events", additionalRoutingKeys: [], approvedHeaders: ["trace-id"],
+    approvedReplyTo: [], allowPersistent: true, maxPriority: 5, maxExpirationMs: 60000, maxConcurrency: 2,
+    maxPerSecond: 10, timeoutMs: 1000, maxBodyBytes: 65536, retries: 1 },
+  "amqp.consumer": { queue: "events", prefetch: 8, approvedHeaders: ["trace-id"], identityHeader: "trace-id",
+    maxBodyBytes: 65536, maxHeaderBytes: 8192, retryBackoffMs: 100, maxRetryBackoffMs: 1000,
+    poisonAttempts: 3, poisonPolicy: "reject", drainTimeoutMs: 1000 },
+  "filesystem.profile": { canonicalAbsoluteRoot: "/", read: true, write: false, allowedRelativeGlobs: ["**"],
+    maxBytes: 65536, maxConcurrency: 2, deadlineMs: 1000 },
+  "kafka.producer-profile": { bootstrapServers: "localhost:9092", clientDnsLookup: "use_all_dns_ips", tls: false,
+    saslMechanism: "PLAIN", username: "operator", credentialRef: "broker", clientId: "ravenroot", defaultTopic: "events",
+    additionalTopics: [], approvedHeaders: ["trace-id"], allowPartition: false, maxPartition: 0, allowTimestamp: false,
+    compression: "none", acks: "all", idempotence: true, retries: 1, maxInFlight: 1, allowAutoCreate: false,
+    maxConcurrency: 2, maxPerSecond: 10, timeoutMs: 1000, maxRecordBytes: 65536, bufferMemoryBytes: 65536 },
+  "kafka.consumer-profile": { bootstrapServers: "localhost:9092", clientDnsLookup: "use_all_dns_ips", tls: false,
+    saslMechanism: "PLAIN", username: "operator", credentialRef: "broker", clientId: "ravenroot", groupLogicalName: "events",
+    groupId: "events", staticMemberId: "", topics: ["events"], anchoredTopicPattern: "", approvedHeaders: ["trace-id"],
+    assignmentStrategy: "cooperative-sticky", autoOffsetReset: "earliest", isolationLevel: "read_committed",
+    startupTimeoutMs: 1000, pollTimeoutMs: 100, maxPollIntervalMs: 10000, sessionTimeoutMs: 3000,
+    heartbeatIntervalMs: 1000, maxInFlight: 8, maxFetchBytes: 65536, maxPartitionFetchBytes: 65536,
+    maxRecordBytes: 32768, maxKeyBytes: 4096, maxValueBytes: 32768, maxHeaderBytes: 4096,
+    drainTimeoutMs: 1000, retryBackoffMs: 100, maxRetryBackoffMs: 1000, poisonAttempts: 3,
+    poisonPolicy: "halt", deadLetterTopic: "" },
+  "mail.smtp-profile": { host: "localhost", port: 465, securityMode: "SMTPS", allowPlaintext: false, username: "operator",
+    credentialRef: "mail", defaultFrom: "sender@example.test", allowedRecipients: ["recipient@example.test"],
+    allowedHeaders: ["subject"], maxConcurrency: 2, allowedReplyTo: ["sender@example.test"] },
+  "mail.imap-profile": { host: "localhost", port: 993, securityMode: "IMAPS", username: "operator", credentialRef: "mail",
+    folders: ["INBOX"], connectTimeoutMs: 1000, readTimeoutMs: 1000, maxConcurrency: 2, maxResults: 10, maxPreviewChars: 100 },
+  "mail.imap-consumer": { folder: "INBOX", pollIntervalMs: 1000, batchSize: 1, scanWindow: 8, retryBackoffMs: 100,
+    maxRetryBackoffMs: 1000, poisonAttempts: 3, maxMessageBytes: 65536, contentMode: "metadata", maxPreviewChars: 0,
+    allowedHeaders: ["subject"] },
+  "mail.imap-mutation": { operations: ["MOVE"], destinationFolders: ["Archive"], trashFolder: "" },
+  "ocr.profile": { absoluteExecutable: "/usr/bin/true", absoluteTessdata: "/tmp", allowedLanguages: ["eng"],
+    absoluteTempRoot: "/tmp", deadlineMs: 1000, maxInputBytes: 65536, maxOutputBytes: 65536, concurrency: 1, shutdownMs: 1000 },
+  "telegram.profile": { credentialRef: "telegram", allowedChats: ["*"], allowedMethods: ["sendMessage"],
+    allowedButtonHosts: ["example.test"], businessConnectionAuthority: false, maxConcurrency: 2, requestsPerSecond: 10,
+    connectTimeoutMs: 1000, requestTimeoutMs: 1000, maxTextChars: 1000, maxPhotoBytes: 65536, maxButtons: 10, retries: 1 }
+};
+
 export const CONTRACTS: readonly ConfigurationContract[] = [
   {
     id: "bundle.service-grant", title: "Node package managed-service grant", family: "Package activation",
     nodeIds: [], environment: "RAVENROOT_NODE_PACKAGE_SERVICES_", identity: ["profile"], encoding: "base64-json",
-    fields: [{ name: "document", label: "Strict managed-service grant", type: "json", required: true }],
+    fields: [{ name: "document", label: "Strict managed-service grant", type: "json", required: true,
+      schema: schemaFromTemplate({ capabilities: ["outbound-http"],
+        origins: [{ scheme: "https", host: "api.example.test", port: 443 }],
+        httpMethods: ["GET"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
+        webSocketSubprotocols: ["protocol"], credentialBindings: ["binding"], awsSigV4Bindings: ["binding"], credentialReferences: ["reference"],
+        limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 } }) }],
     jsonTemplate: { capabilities: ["outbound-http"],
       origins: [{ scheme: "https", host: "api.example.test", port: 443 }],
       httpMethods: ["GET", "POST"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
-      webSocketSubprotocols: [], credentialBindings: [], awsSigV4Bindings: [], credentialReferences: [],
+      webSocketSubprotocols: [], credentialBindings: [], awsSigV4Bindings: [], credentialReferences: ["credential"],
       limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 } },
     requiredCapabilities: [], externalRequirements: ["Use the exact plugin manifest ID as the profile identity."],
-    restartRequired: true, credentialResolver: "shared"
+    schema: schemaFromTemplate({ capabilities: ["outbound-http"],
+      origins: [{ scheme: "https", host: "api.example.test", port: 443 }],
+      httpMethods: ["GET"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
+      webSocketSubprotocols: ["protocol"], credentialBindings: ["binding"], awsSigV4Bindings: ["binding"], credentialReferences: ["reference"],
+      limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 } }),
+    runtimeVerifier: "bundle.service-grant", restartRequired: true, credentialResolver: "shared"
   },
   jsonContract("ai.llm-profile", "AI model profile", "AI / LLM", "ai.ravenroot.extensions.ai",
     ["llm-prompt", "agent"], "RAVENROOT_LLM_PROFILE_", ["profile"], {
@@ -112,13 +170,13 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
   jsonContract("ai.mcp-profile", "AI MCP server profile", "AI / MCP", "ai.ravenroot.extensions.ai",
     ["agent"], "RAVENROOT_MCP_SERVER_", ["profile"], {
       endpoint: "https://mcp.example.test/mcp", credentialBindingId: "mcp", credentialReference: "mcp-token",
-      timeoutMs: 30000, maxRequestBytes: 1048576, maxResponseBytes: 8388608, maxConcurrency: 4,
+      timeoutMs: 30000, maxRequestBytes: 1048576, maxResponseBytes: 1048576, maxConcurrency: 4,
       maxDiscoveredTools: 128, allowedTools: ["search"]
     }, ["outbound-http", "tool-authorization", "agent-resources"]),
   delimitedContract("amqp.profile", "AMQP publisher profile", "AMQP 0-9-1", "ai.ravenroot.extensions.amqp091",
     ["amqp.publish"], "RAVENROOT_AMQP091_PROFILE_", [
       requiredString("host"), requiredInt("port", 1, 65535), requiredBoolean("tls"), requiredString("vhost"),
-      optionalString("username"), optionalString("credentialRef"), requiredString("defaultExchange"), optionalCsv("additionalExchanges"),
+      requiredString("username"), requiredString("credentialRef"), optionalString("defaultExchange"), optionalCsv("additionalExchanges"),
       requiredString("defaultRoutingKey"), optionalCsv("additionalRoutingKeys"), optionalCsv("approvedHeaders"), optionalCsv("approvedReplyTo"),
       requiredBoolean("allowPersistent"), requiredInt("maxPriority", 0, 9), requiredInt("maxExpirationMs", 1, 86400000),
       requiredInt("maxConcurrency", 1, 16), requiredInt("maxPerSecond", 1, 100), requiredInt("timeoutMs", 1, 30000),
@@ -138,7 +196,7 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     ], { external: ["The canonical root must exist and support SecureDirectoryStream."] }),
   jsonContract("git-workspace.profile", "Git workspace profile", "Git workspace", "ai.ravenroot.extensions.gitworkspace",
     ["git-workspace"], "RAVENROOT_GIT_WORKSPACE_PROFILE_", ["tenant", "profile"], {
-      root: "/srv/ravenroot/git-authority", remote: "https://scm.example.test/team/repository.git",
+      root: "/", remote: "https://scm.example.test/team/repository.git",
       baseRef: "refs/heads/dev", issueRefPrefix: "refs/heads/issues/", gitExecutable: "/usr/bin/git",
       processShellExecutable: "/bin/sh", objectFormat: "sha1", deadlineMs: 30000, maxConcurrency: 4,
       maxOutputBytes: 262144, historyScanLimit: 1000, credentialRef: "git-token", credentialUsername: "git"
@@ -178,9 +236,9 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     ], { credentials: "family" }),
   delimitedContract("mail.smtp-profile", "Mail SMTP profile", "Mail / SMTP", "ai.ravenroot.extensions.mail",
     ["mail.send"], "RAVENROOT_MAIL_PROFILE_", [
-      requiredString("host"), requiredInt("port", 1, 65535), requiredString("securityMode"), optionalString("username"),
-      optionalString("credentialRef"), requiredString("defaultFrom"), requiredCsv("allowedFrom"), requiredCsv("allowedRecipients"),
-      optionalCsv("allowedHeaders"), requiredBoolean("allowPlaintext"), optionalCsv("allowedReplyTo")
+      requiredString("host"), requiredInt("port", 1, 65535), requiredString("securityMode"), requiredBoolean("allowPlaintext"),
+      optionalString("username"), optionalString("credentialRef"), requiredString("defaultFrom"), requiredCsv("allowedRecipients"),
+      optionalCsv("allowedHeaders"), requiredInt("maxConcurrency", 1, 16), optionalCsv("allowedReplyTo")
     ], { credentials: "family" }),
   delimitedContract("mail.imap-profile", "Mail IMAP profile", "Mail / IMAP", "ai.ravenroot.extensions.mail",
     ["mail.imap.query", "mail.imap.consume", "mail.imap.move", "mail.imap.delete"], "RAVENROOT_IMAP_PROFILE_", [
@@ -214,19 +272,23 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     { external: ["Tesseract, tessdata, and the temporary root must already exist on the target."] }),
   jsonContract("openapi-client.profile", "OpenAPI client profile", "OpenAPI client", "ai.ravenroot.extensions.openapi.client",
     ["openapi.call"], "RAVENROOT_OPENAPI_CLIENT_PROFILE_", ["profile"], {
-      origin: "https://api.example.test", documentBase64: "eyJvcGVuYXBpIjoiMy4wLjMifQ==",
-      documentSha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      operations: ["lookup"], fixedHeaders: {}, requestHeaders: ["content-type"], responseHeaders: ["content-type"],
+      origin: "https://api.example.test", specBase64: "eyJvcGVuYXBpIjoiMy4wLjMiLCJpbmZvIjp7InRpdGxlIjoiT3JkZXJzIiwidmVyc2lvbiI6IjEifSwicGF0aHMiOnsiL29yZGVycy97aWR9Ijp7InBvc3QiOnsib3BlcmF0aW9uSWQiOiJjcmVhdGVPcmRlciIsInBhcmFtZXRlcnMiOlt7Im5hbWUiOiJpZCIsImluIjoicGF0aCIsInJlcXVpcmVkIjp0cnVlLCJzY2hlbWEiOnsidHlwZSI6InN0cmluZyIsIm1heExlbmd0aCI6MzJ9fSx7Im5hbWUiOiJ2ZXJib3NlIiwiaW4iOiJxdWVyeSIsInNjaGVtYSI6eyJ0eXBlIjoiYm9vbGVhbiJ9fSx7Im5hbWUiOiJYLVRyYWNlIiwiaW4iOiJoZWFkZXIiLCJyZXF1aXJlZCI6dHJ1ZSwic2NoZW1hIjp7InR5cGUiOiJzdHJpbmciLCJtYXhMZW5ndGgiOjY0fX1dLCJyZXF1ZXN0Qm9keSI6eyJyZXF1aXJlZCI6dHJ1ZSwiY29udGVudCI6eyJhcHBsaWNhdGlvbi9qc29uIjp7InNjaGVtYSI6eyJ0eXBlIjoib2JqZWN0IiwicHJvcGVydGllcyI6eyJhbW91bnQiOnsidHlwZSI6ImludGVnZXIiLCJtaW5pbXVtIjoxfX0sInJlcXVpcmVkIjpbImFtb3VudCJdLCJhZGRpdGlvbmFsUHJvcGVydGllcyI6ZmFsc2V9fX19LCJyZXNwb25zZXMiOnsiMjAwIjp7ImRlc2NyaXB0aW9uIjoiY29tcGxldGVkIiwiaGVhZGVycyI6eyJyZXN1bHQtaWQiOnsic2NoZW1hIjp7InR5cGUiOiJzdHJpbmciLCJtYXhMZW5ndGgiOjY0fX19LCJjb250ZW50Ijp7ImFwcGxpY2F0aW9uL2pzb24iOnsic2NoZW1hIjp7InR5cGUiOiJvYmplY3QiLCJwcm9wZXJ0aWVzIjp7InJlc3VsdCI6eyJ0eXBlIjoic3RyaW5nIiwibWF4TGVuZ3RoIjo2NH19LCJyZXF1aXJlZCI6WyJyZXN1bHQiXSwiYWRkaXRpb25hbFByb3BlcnRpZXMiOmZhbHNlfX19fSwiMjAyIjp7ImRlc2NyaXB0aW9uIjoiYWNjZXB0ZWQifX19fSwiL29yZGVycy9zcGVjaWFsIjp7InBvc3QiOnsib3BlcmF0aW9uSWQiOiJzcGVjaWFsT3JkZXIiLCJyZXNwb25zZXMiOnsiMjAyIjp7ImRlc2NyaXB0aW9uIjoiYWNjZXB0ZWQifX19fX19Cg==",
+      specSha256: "31a19b3851da4630beff77bf3675b3ac6bb12c203d3b7d5c44cc3a60ff662424",
+      operations: ["createOrder"], fixedHeaders: {}, inputHeaders: ["content-type", "x-trace"], responseHeaders: ["content-type", "result-id"],
       credentialBindingId: "openapi", credentialReference: "openapi-token", maxRequestBytes: 1048576,
       maxResponseBytes: 8388608, timeoutMs: 30000, maxConcurrency: 8
     }, ["outbound-http"]),
   jsonContract("openapi-server.config", "OpenAPI server configuration", "OpenAPI server", "ai.ravenroot.extensions.openapi.server",
     ["openapi.receive", "openapi.request-reply"], "RAVENROOT_OPENAPI_SERVER_CONFIG", [], {
-      authority: { ...authority, listenerId: "main", pathPrefix: "/managed/openapi", requiredScopes: ["openapi:receive"] },
-      projection, profiles: { operations: { tenantId: "tenant-a", routeBase: "/orders",
-        documentBase64: "eyJvcGVuYXBpIjoiMy4wLjMifQ==", documentSha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        allowedOperations: ["receiveOrder"], principalTypes: ["service"], idempotencyHeader: "idempotency-key",
-        maxRequestBytes: 1048576, maxIdempotencyBytes: 128, deadlineMs: 30000, maxConcurrency: 8 } }
+      authority: { ...authority, listenerId: "main", pathPrefix: "/managed/openapi", requiredScopes: ["graph:execute"],
+        maxRoutes: 8, maxConcurrentRequests: 8, maxRequestBytes: 8192, maxResponseBytes: 1024, requestTimeoutMs: 2000 },
+      projection: { allowedHeaders: ["content-type", "idempotency-key", "x-trace"], idempotencyHeader: "idempotency-key",
+        maxRelativePathBytes: 1024, maxQueryParameters: 32, maxQueryBytes: 2048, maxHeaderCount: 8,
+        maxHeaderBytes: 2048, maxHeaderValueBytes: 256 },
+      profiles: { operations: { routeBase: "/api",
+        specBase64: "eyJvcGVuYXBpIjoiMy4wLjMiLCJpbmZvIjp7InRpdGxlIjoiT3JkZXJzIiwidmVyc2lvbiI6IjEifSwicGF0aHMiOnsiL29yZGVycy97aWR9Ijp7InBvc3QiOnsib3BlcmF0aW9uSWQiOiJjcmVhdGVPcmRlciIsInBhcmFtZXRlcnMiOlt7Im5hbWUiOiJpZCIsImluIjoicGF0aCIsInJlcXVpcmVkIjp0cnVlLCJzY2hlbWEiOnsidHlwZSI6InN0cmluZyIsIm1heExlbmd0aCI6MzJ9fSx7Im5hbWUiOiJ2ZXJib3NlIiwiaW4iOiJxdWVyeSIsInNjaGVtYSI6eyJ0eXBlIjoiYm9vbGVhbiJ9fSx7Im5hbWUiOiJYLVRyYWNlIiwiaW4iOiJoZWFkZXIiLCJyZXF1aXJlZCI6dHJ1ZSwic2NoZW1hIjp7InR5cGUiOiJzdHJpbmciLCJtYXhMZW5ndGgiOjY0fX1dLCJyZXF1ZXN0Qm9keSI6eyJyZXF1aXJlZCI6dHJ1ZSwiY29udGVudCI6eyJhcHBsaWNhdGlvbi9qc29uIjp7InNjaGVtYSI6eyJ0eXBlIjoib2JqZWN0IiwicHJvcGVydGllcyI6eyJhbW91bnQiOnsidHlwZSI6ImludGVnZXIiLCJtaW5pbXVtIjoxfX0sInJlcXVpcmVkIjpbImFtb3VudCJdLCJhZGRpdGlvbmFsUHJvcGVydGllcyI6ZmFsc2V9fX19LCJyZXNwb25zZXMiOnsiMjAwIjp7ImRlc2NyaXB0aW9uIjoiY29tcGxldGVkIiwiaGVhZGVycyI6eyJyZXN1bHQtaWQiOnsic2NoZW1hIjp7InR5cGUiOiJzdHJpbmciLCJtYXhMZW5ndGgiOjY0fX19LCJjb250ZW50Ijp7ImFwcGxpY2F0aW9uL2pzb24iOnsic2NoZW1hIjp7InR5cGUiOiJvYmplY3QiLCJwcm9wZXJ0aWVzIjp7InJlc3VsdCI6eyJ0eXBlIjoic3RyaW5nIiwibWF4TGVuZ3RoIjo2NH19LCJyZXF1aXJlZCI6WyJyZXN1bHQiXSwiYWRkaXRpb25hbFByb3BlcnRpZXMiOmZhbHNlfX19fSwiMjAyIjp7ImRlc2NyaXB0aW9uIjoiYWNjZXB0ZWQifX19fSwiL29yZGVycy9zcGVjaWFsIjp7InBvc3QiOnsib3BlcmF0aW9uSWQiOiJzcGVjaWFsT3JkZXIiLCJyZXNwb25zZXMiOnsiMjAyIjp7ImRlc2NyaXB0aW9uIjoiYWNjZXB0ZWQifX19fX19Cg==", specSha256: "31a19b3851da4630beff77bf3675b3ac6bb12c203d3b7d5c44cc3a60ff662424",
+        operations: ["createOrder", "specialOrder"], principalTypes: ["USER"], idempotencyHeader: "idempotency-key",
+        maxRequestBytes: 4096, maxIdempotencyBytes: 128, deadlineMs: 1000, maxConcurrency: 2 } }
     }),
   delimitedContract("telegram.profile", "Telegram bot profile", "Telegram", "ai.ravenroot.extensions.telegram",
     ["telegram.send", "telegram.answer.callback", "telegram.edit.message", "telegram.delete.message"],
@@ -247,7 +309,7 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
       authority: { ...authority, listenerId: "managed-main", pathPrefix: "/managed/discord", requiredScopes: ["discord:interactions"] },
       projection, store: { path: "/var/lib/ravenroot/discord-deliveries.db", maxDeliveries: 100000, retentionHours: 168 },
       profiles: { operations: { tenantId: "tenant-a", apiOrigin: "https://discord.com/api/v10",
-        applicationId: "123456789012345678", publicKeyHex: "0".repeat(64), guilds: {}, commands: ["deploy"],
+        applicationId: "123456789012345678", publicKeyHex: "0".repeat(64), guilds: { "123456789012345678": ["223456789012345678"] }, commands: ["deploy"],
         credentialBindingId: "discord-bot", credentialReference: "discord-bot-token", route: "/interactions",
         limits: { requestTimeoutMs: 2000, maxRequestBytes: 1048576, maxResponseBytes: 65536,
           maxContentChars: 2000, maxAttachmentBytes: 1048576, maxAttachments: 4, maxConcurrency: 4,
@@ -256,12 +318,17 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
   jsonContract("github.config", "GitHub automation configuration", "GitHub", "ai.ravenroot.extensions.github",
     ["github-events-source", "project-transition", "github-app-review", "github-workflow-watch", "release-prepare"],
     "RAVENROOT_GITHUB_CONFIG", [], {
-      authority: { ...authority, pathPrefix: "/managed/github", requiredScopes: ["github:webhook"] }, projection,
+      authority: { ...authority, pathPrefix: "/managed/github", requiredScopes: ["github:webhook"], requestTimeoutMs: 10000 }, projection,
       store: { path: "/var/lib/ravenroot/github-operations.db", maxOperations: 100000, retentionHours: 720, leaseMs: 30000 },
       profiles: { automation: { tenantId: "tenant-a", apiOrigin: "https://api.github.com", owner: "example",
         repository: "service", repositoryId: 1234, installationId: 5678, reviewerLogin: "reviewer[bot]",
         credentialBindingId: "github-installation", credentialReference: "github-token", webhookSecretReference: "github-webhook",
-        route: "/automation", events: { pull_request: ["opened"] }, project: {}, workflowIds: [1001], release: {},
+        route: "/automation", events: { pull_request: ["opened"] },
+        project: { projectId: "PVT_example", statusFieldId: "PVTSSF_status", attemptsFieldId: "PVTF_attempts",
+          generationFieldId: "PVTF_generation", statusOptions: { Todo: "todo-id", InProgress: "progress-id", Done: "done-id" },
+          allowedTransitions: ["Todo->InProgress", "InProgress->Done"], claimTransition: "Todo->InProgress" },
+        workflowIds: [1001], release: { branch: "main", versionPath: "ravenroot/pom.xml", fragmentsPath: ".changes",
+          allowedKinds: ["none", "patch", "minor", "major"], maxFiles: 256 },
         limits: { timeoutMs: 10000, maxRequestBytes: 1048576, maxResponseBytes: 1048576,
           maxConcurrency: 8, maxPolls: 120, pollIntervalMs: 5000 } } }
     }, ["credential-resolution", "outbound-http"]),
@@ -279,15 +346,16 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     ["mattermost.send", "mattermost.outgoing-webhook"], "RAVENROOT_MATTERMOST_CONFIG", [], {
       authority: { ...authority, pathPrefix: "/managed/mattermost", requiredScopes: ["mattermost:callbacks"] }, projection,
       store: { path: "/var/lib/ravenroot/mattermost-deliveries.db", maxDeliveries: 100000, retentionHours: 168 },
-      profiles: { operations: { tenantId: "tenant-a", origin: "https://mattermost.example.com", teamId: "team-id",
-        publicChannels: ["channel-id"], credentialBindingId: "mattermost-bearer", credentialReference: "mattermost-token",
+      profiles: { operations: { tenantId: "tenant-a", origin: "https://mattermost.example.com", teamId: "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+        publicChannels: ["bbbbbbbbbbbbbbbbbbbbbbbbbb"], credentialBindingId: "mattermost-bearer", credentialReference: "mattermost-token",
         webhookTokenReference: "mattermost-webhook", outgoingWebhookRoute: "/outgoing/operations",
         limits: { maxTextChars: 4000, maxRequestBytes: 1048576, maxResponseBytes: 65536,
           maxConcurrency: 4, maxPerSecond: 20, requestTimeoutMs: 2500, retries: 1 } } }
     }, ["credential-resolution", "outbound-http"]),
   jsonContract("slack.config", "Slack configuration", "Slack", "ai.ravenroot.extensions.slack",
     ["slack.events", "slack.commands", "slack.post-message"], "RAVENROOT_SLACK_CONFIG", [], {
-      authority: { ...authority, pathPrefix: "/managed/slack", requiredScopes: ["slack:callbacks"] }, projection,
+      authority: { ...authority, maxRoutes: 8, pathPrefix: "/managed/slack", requiredScopes: ["slack:callbacks"] },
+      projection: { ...projection, maxHeaderCount: 5 },
       store: { path: "/var/lib/ravenroot/slack-deliveries.db", maxDeliveries: 100000, retentionHours: 168 },
       profiles: { operations: { tenantId: "tenant-a", apiOrigin: "https://slack.com", teamId: "T01234567",
         applicationId: "A01234567", credentialBindingId: "slack-bot", credentialReference: "slack-token",
@@ -298,10 +366,10 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     }, ["credential-resolution", "outbound-http"]),
   jsonContract("teams.config", "Microsoft Teams configuration", "Microsoft Teams", "ai.ravenroot.extensions.teams",
     ["teams.send", "teams.outgoing-webhook"], "RAVENROOT_TEAMS_CONFIG", [], {
-      authority: { ...authority, pathPrefix: "/managed/teams", requiredScopes: ["teams:callbacks"] }, projection,
+      authority: { ...authority, pathPrefix: "/managed/teams", requiredScopes: ["teams:callbacks"], requestTimeoutMs: 4500 }, projection,
       store: { path: "/var/lib/ravenroot/teams-deliveries.db", maxDeliveries: 100000, retentionHours: 168 },
       profiles: { operations: { tenantId: "tenant-a", workflowEndpoint: "https://example.logic.azure.com/workflows/example",
-        microsoftTenantId: "00000000-0000-0000-0000-000000000000", teamId: "19:team@thread.tacv2",
+        microsoftTenantId: "00000000-0000-4000-8000-000000000000", teamId: "19:team@thread.tacv2",
         channels: ["19:channel@thread.tacv2"], credentialBindingId: "teams-workflow", credentialReference: "teams-token",
         signingSecretReference: "teams-signing", webhookRoute: "/outgoing",
         limits: { requestTimeoutMs: 2500, maxRequestBytes: 1048576, maxResponseBytes: 65536,
@@ -309,50 +377,57 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     }, ["credential-resolution", "outbound-http"]),
   {
     id: "core.http", title: "Built-in HTTP policy", family: "Built-in HTTP", nodeIds: ["http-request"], environment: "*",
-    identity: [], encoding: "plain-environment", restartRequired: true, credentialResolver: "shared",
+    identity: [], encoding: "plain-environment", runtimeVerifier: "core.http", restartRequired: true, credentialResolver: "shared",
     fields: [
-      requiredCsv("RAVENROOT_HTTP_ALLOWED_HOSTS"), requiredCsv("RAVENROOT_HTTP_ALLOWED_PORTS"),
-      optionalCsv("RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"), requiredInt("RAVENROOT_HTTP_MAX_REQUEST_BYTES"),
-      requiredInt("RAVENROOT_HTTP_MAX_RESPONSE_BYTES"), requiredCsv("RAVENROOT_ALLOWED_TOOLS")
+      { ...requiredCsv("RAVENROOT_HTTP_ALLOWED_HOSTS"), suggestion: ["api.example.test"] },
+      { ...requiredCsv("RAVENROOT_HTTP_ALLOWED_PORTS"), suggestion: ["443"] },
+      { ...optionalCsv("RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"), suggestion: [] },
+      { ...requiredInt("RAVENROOT_HTTP_MAX_REQUEST_BYTES"), suggestion: 65536 },
+      { ...requiredInt("RAVENROOT_HTTP_MAX_RESPONSE_BYTES"), suggestion: 1048576 },
+      { ...requiredCsv("RAVENROOT_ALLOWED_TOOLS"), suggestion: ["lookup"] }
     ]
   },
   {
     id: "core.program", title: "Built-in program runtime", family: "Built-in program", nodeIds: ["program"], environment: "*",
-    identity: [], encoding: "plain-environment", restartRequired: true, credentialResolver: "none",
+    identity: [], encoding: "plain-environment", runtimeVerifier: "core.program", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["A configured sandbox supervisor is required for effectful program execution."],
-    fields: [requiredString("RAVENROOT_PROGRAM_RUNTIME"), requiredString("RAVENROOT_GRAAL_SANDBOX_SUPERVISOR"),
-      requiredInt("RAVENROOT_PROGRAM_TIMEOUT_MS"), requiredInt("RAVENROOT_PROGRAM_MAX_HEAP_MB"),
-      requiredCsv("RAVENROOT_ALLOWED_TOOLS")]
+    fields: [{ ...requiredString("RAVENROOT_PROGRAM_RUNTIME"), allowed: ["graalvm", "disabled"], suggestion: "graalvm" },
+      { ...requiredString("RAVENROOT_GRAAL_SANDBOX_SUPERVISOR"), suggestion: "/usr/bin/true" },
+      { ...requiredInt("RAVENROOT_PROGRAM_TIMEOUT_MS", 100, 300000), suggestion: 5000 },
+      { ...requiredInt("RAVENROOT_PROGRAM_MAX_HEAP_MB", 32, 1024), suggestion: 64 },
+      { ...requiredCsv("RAVENROOT_ALLOWED_TOOLS"), suggestion: ["program"] }]
   },
   {
     id: "core.human-task", title: "Human task registered presentation", family: "Built-in human task", nodeIds: ["human-task"],
-    environment: "*", identity: [], encoding: "plain-environment", restartRequired: true, credentialResolver: "none",
+    environment: "*", identity: [], encoding: "plain-environment", runtimeVerifier: "core.human-task", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["The configurator installs the strict interaction document as a mounted operator-owned JSON file."],
-    fields: [{ name: "interactionDocument", label: "Interaction registry JSON", type: "json", required: true,
-      suggestion: { schemaVersion: 1, capabilityTtlSeconds: 300, maxCompletionBytes: 65536,
+    fields: [strictJson("interactionDocument", "Interaction registry", { schemaVersion: 1, capabilityTtlSeconds: 300, maxCompletionBytes: 65536,
         capabilitySecretBase64: { $secret: "human-task-capability" }, profiles: [{ id: "review", version: 1,
           kind: "EXTERNAL", launchUri: "https://review.example.test/task", origin: "https://review.example.test",
-          completionSecretBase64: { $secret: "human-task-provider" } }] } },
+          completionSecretBase64: { $secret: "human-task-provider" } }] }),
       { name: "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED", label: "Responder enforcement", type: "boolean", required: true }]
   },
   {
     id: "core.publication-policies", title: "Publication boundary policies", family: "Built-in publication guard",
     nodeIds: ["boundary-guard"], environment: "*", identity: [], encoding: "plain-environment",
-    restartRequired: true, credentialResolver: "none",
+    runtimeVerifier: "core.publication-policies", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["The configurator installs the immutable policy registry as a mounted operator-owned JSON file."],
-    fields: [{ name: "policyDocument", label: "Publication policy registry JSON", type: "json", required: true,
-      suggestion: { schemaVersion: 1, policies: [{ id: "public", version: "v1", maxCandidateBytes: 1048576,
+    fields: [strictJson("policyDocument", "Publication policy registry", { schemaVersion: 1, policies: [{ id: "public", version: "v1", maxCandidateBytes: 1048576,
         rules: [{ type: "destination", id: "destination.approved", allowedTypes: ["repository"],
-          allowedAddresses: ["public"] }, { type: "provenance", id: "provenance.complete", allowedSourceTypes: ["graph"] }] }] } }]
+          allowedAddresses: ["public"] }, { type: "provenance", id: "provenance.complete", allowedSourceTypes: ["graph"] }] }] })]
   },
   {
     id: "core.runner", title: "Governed runner and workspace configuration", family: "Governed runner",
     nodeIds: ["agent", "workspace"], environment: "*", identity: [], encoding: "plain-environment",
-    restartRequired: true, credentialResolver: "shared",
+    runtimeVerifier: "core.runner", restartRequired: true, credentialResolver: "shared",
     externalRequirements: ["The configured artifact directory and runner identity files must exist on the target."],
-    fields: [{ name: "runnerDocument", label: "Runner control-plane JSON", type: "json", required: true,
-      suggestion: { protocolVersion: 1, runnerIssuer: "https://identity.example.test",
-        artifactDirectory: "/var/lib/ravenroot/runner-artifacts", tenants: {} } }]
+    fields: [strictJson("runnerDocument", "Runner control-plane configuration", { protocolVersion: 1, runnerIssuer: "https://identity.example.test",
+        artifactDirectory: "/var/lib/ravenroot/runner-artifacts", tenants: { "tenant-a": {
+          policy: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
+            wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
+            artifactBytes: 131072, logBytes: 8192, payloadBytes: 16384 } },
+          definitions: [], runners: [], workspaceProfiles: []
+        } } })]
   }
 ] as const;
 
@@ -398,6 +473,7 @@ function scalar(field: FieldSpec, value: unknown): string {
   if (field.type === "json") {
     const object = typeof value === "string" ? JSON.parse(value) : value;
     if (object === null || typeof object !== "object" || Array.isArray(object)) throw new Error(`${field.label} must be a JSON object`);
+    if (field.schema) validateValue(field.schema, object, field.label);
     return JSON.stringify(object);
   }
   const string = String(value);
@@ -409,7 +485,13 @@ function scalar(field: FieldSpec, value: unknown): string {
 export function serializeSelection(selection: ConfigurationSelection): Readonly<Record<string, string>> {
   const contract = CONTRACT_BY_ID.get(selection.contractId);
   if (!contract) throw new Error(`Unknown configuration contract: ${selection.contractId}`);
+  const identityKeys = Object.keys(selection.identity);
+  if (identityKeys.some((key) => !contract.identity.includes(key as "tenant" | "profile" | "reference"))) throw new Error(`${contract.id} identity contains unsupported axes`);
   for (const axis of contract.identity) identityPart(selection, axis);
+
+  const allowedValues = contract.encoding === "base64-json" ? new Set(["document"]) : new Set(contract.fields.map((field) => field.name));
+  const unsupported = Object.keys(selection.values).filter((key) => !allowedValues.has(key));
+  if (unsupported.length) throw new Error(`${contract.id} contains unsupported values: ${unsupported.join(", ")}`);
 
   if (contract.encoding === "plain-environment") {
     const result: Record<string, string> = {};
@@ -420,10 +502,12 @@ export function serializeSelection(selection: ConfigurationSelection): Readonly<
     return result;
   }
   if (contract.encoding === "base64-json") {
-    const document = selection.values.document ?? selection.values;
+    const document = selection.values.document;
     if (document === null || typeof document !== "object" || Array.isArray(document)) {
       throw new Error(`${contract.title} document must be a JSON object`);
     }
+    if (!contract.schema) throw new Error(`${contract.id} has no executable schema`);
+    validateValue(contract.schema, document, `${contract.id}.document`);
     return { [environmentKey(contract, selection)]: base64Json(document) };
   }
   const parts = contract.fields.map((field) => scalar(field, selection.values[field.name]));
@@ -437,9 +521,11 @@ export function templateSelection(contractId: string): ConfigurationSelection {
   if (contract.encoding === "base64-json") {
     return { contractId, identity, values: { document: structuredClone(contract.jsonTemplate ?? {}) } };
   }
-  const values: Record<string, unknown> = {};
+  const values: Record<string, unknown> = { ...(DELIMITED_TEMPLATES[contractId] ?? {}) };
   for (const field of contract.fields) {
-    values[field.name] = field.suggestion ?? field.runtimeDefault ?? (field.type === "boolean" ? false : field.type === "integer" ? field.minimum ?? 1 : "");
+    if (field.name in values) continue;
+    values[field.name] = field.suggestion ?? field.runtimeDefault ?? (field.type === "boolean" ? false : field.type === "integer" ? field.minimum ?? 1
+      : field.type === "csv" ? ["example"] : field.allowed?.[0] ?? "configured");
   }
   return { contractId, identity, values };
 }

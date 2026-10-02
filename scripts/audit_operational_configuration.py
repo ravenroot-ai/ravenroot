@@ -8187,7 +8187,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'e3c75dd071adc670b7243fd08ec53b95a0d4b4495aff5eee9766bcf36e3414d5',
+  'fa82cebc21ff9fc91ffd62fd6bbbd5b15430e5ed653816320783ccfb2bea5661',
   1),
  ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
   'file',
@@ -10913,6 +10913,12 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                         'oc-9819575b4746216caa6f',
                                                         'oc-cf86d4964468bbcc6453',
                                                         'oc-125c11a21e7762c3900d']},
+ 'github.release-draft-visibility-bound': {'classification': 'security-ceiling-or-default',
+                                           'status': 'retained',
+                                           'rationale': 'The fixed retry count and interval bound draft-listing '
+                                                        'eventual consistency before immutable release work continues.',
+                                           'candidateIds': ['oc-178f1c6b2fef488d4ec4',
+                                                            'oc-744c938a64bbb148937a']},
  'github.release-tool-diagnostic': {'classification': 'presentation-text',
                                     'status': 'retained',
                                     'rationale': 'The text is a CLI diagnostic/help contract and contains no '

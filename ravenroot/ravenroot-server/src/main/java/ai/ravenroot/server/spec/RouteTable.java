@@ -330,18 +330,6 @@ public final class RouteTable {
                             ErrorCode.CONFLICT.code(), ErrorCode.EXECUTION_POLICY_UNSUPPORTED.code(),
                             ActiveExecutionRegistry.TENANT_LIMIT_CODE,
                             ActiveExecutionRegistry.GLOBAL_LIMIT_CODE), CONFIRM, false),
-            new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived/preview",
-                    "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure.",
-                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
-                            ErrorCode.UNKNOWN_RESOURCE.code()), NEVER, true),
-            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/derived/boundaries",
-                    "Lists payload-free retained downstream boundary choices for one positively settled source execution.",
-                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
-                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), READ, true),
-            new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived",
-                    "Idempotently admits a fresh execution from a proven retained boundary. Completed predecessor effects remain historical; selected downstream effects require explicit authorization.",
-                    true, false, Set.of(200, 202), concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
-                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/source-sessions",
                     "Starts or idempotently rejoins one authenticated tenant's process-local inbound-source "
                             + "session from GraphML. Requires ?id=... and at least one trusted effective SOURCE. "
@@ -1002,7 +990,19 @@ public final class RouteTable {
                             + "to /v1/executions naming a stored "
                             + "credential the submitter does not own is refused with access denied.",
                     true, true, 200,
-                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false));
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived/preview",
+                    "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code()), NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/derived/boundaries",
+                    "Lists payload-free retained downstream boundary choices for one positively settled source execution.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived",
+                    "Idempotently admits a fresh execution from a proven retained boundary. Completed predecessor effects remain historical; selected downstream effects require explicit authorization.",
+                    true, false, Set.of(200, 202), concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), NEVER, false));
 
     private static List<String> concat(List<String> base, String... extra) {
         var combined = new java.util.ArrayList<>(base);

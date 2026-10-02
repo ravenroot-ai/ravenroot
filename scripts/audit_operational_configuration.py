@@ -7442,7 +7442,10 @@ def external_io_policy_authority_from_source(
             "lease = admission.tryAcquire(message.tenantId(), settings.profile().name(),",
         ),
         EXTERNAL_IO_GRAPH_RUNNER_PATH: (
-            ".whenComplete((ignored, failure) -> behaviors.releaseOperationalPolicy(traversalId));",
+            """return teardown.whenComplete((ignored, failure) -> {
+            activeBudgets.remove(traversalId, activeBudget);
+            behaviors.releaseOperationalPolicy(traversalId);
+        });""",
         ),
         EXTERNAL_IO_APPLICATION_PATH: (
             "policyForNodeAdmission(behaviorNodes)",

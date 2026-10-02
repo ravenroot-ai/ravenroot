@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1788,7 +1788,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -2479,12 +2479,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/EmbeddedBackend.java",
-          "digest": "b8fe4f0126dbddc440a02c5d7af67776417df4983cc1c548e82e0f2fc012565c",
+          "digest": "df818bb12e45875183ae4463638a300bd80213d0f3a9717741aa6ac4422630eb",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/RemoteBackend.java",
-          "digest": "d0e7063076c91493578ea2fbc04079490bcc0047c49a1a8adf3e8b3ec34eed2b",
+          "digest": "a421f73ed3bb7bd2ed341eb695a18aec10f177eec4180f68d290d674d3ff40d3",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -4730,7 +4730,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
+          "digest": "76aef1d615dc0f3e4b691bff62a54f7ebc0585a9780de5fa394f1a70fec911ca",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5201,7 +5201,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
+          "digest": "76aef1d615dc0f3e4b691bff62a54f7ebc0585a9780de5fa394f1a70fec911ca",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5538,7 +5538,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "55add05e3147d6e3184e36a6e75193c70d1ec099744ae9c4aecb4b75768cde8e",
+          "digest": "76aef1d615dc0f3e4b691bff62a54f7ebc0585a9780de5fa394f1a70fec911ca",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5658,12 +5658,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "021bf0568773d2c14af86020a45a199acb4ca388cc817f38ec392e41796e3aa9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+          "digest": "372518d2aff70a6dcaea339841d6da8d0a614e36e96d2943bb5fd92aec9972ce",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "021bf0568773d2c14af86020a45a199acb4ca388cc817f38ec392e41796e3aa9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -5761,7 +5761,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "021bf0568773d2c14af86020a45a199acb4ca388cc817f38ec392e41796e3aa9",
           "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "021bf0568773d2c14af86020a45a199acb4ca388cc817f38ec392e41796e3aa9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "34fadbc4f296775ce5a0e03dff660dc6f7f422558a8e5fdbc505e9aaf7053340",
+          "digest": "021bf0568773d2c14af86020a45a199acb4ca388cc817f38ec392e41796e3aa9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
         }
       ],
@@ -11434,7 +11434,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "d56501bf95f759b50519b9eed75e4fcfd7c39c1f52835ef8f7c3807552901554",
+          "digest": "4f763b3c72925e756afd149ae979fcc89ec459aceafc6637aba2c6b166b66e6f",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],

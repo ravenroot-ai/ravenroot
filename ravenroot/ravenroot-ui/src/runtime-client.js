@@ -1050,6 +1050,44 @@ export class RavenrootRuntimeClient {
     });
   }
 
+  async previewDerivedExecution(sourceProcessInstanceId, request, { signal } = {}) {
+    return this.#derivedExecution(sourceProcessInstanceId, request, true, signal);
+  }
+
+  async derivedExecutionBoundaries(sourceProcessInstanceId, { signal } = {}) {
+    const id = String(sourceProcessInstanceId || '');
+    if (!id) throw new Error('Derived boundary discovery requires a source process');
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived/boundaries`, {
+      method: 'GET', signal, headers: { Accept: 'application/json' },
+    });
+    if (!Array.isArray(result?.boundaries)) throw new Error('Derived boundary response is invalid');
+    return result.boundaries;
+  }
+
+  async startDerivedExecution(sourceProcessInstanceId, request, { signal } = {}) {
+    return this.#derivedExecution(sourceProcessInstanceId, request, false, signal);
+  }
+
+  async #derivedExecution(sourceProcessInstanceId, request, preview, signal) {
+    const id = String(sourceProcessInstanceId || '');
+    if (!id || !request || !Array.isArray(request.boundaries) || request.boundaries.length === 0) {
+      throw new Error('Selective derived execution requires a source and boundary');
+    }
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived${preview ? '/preview' : ''}`, {
+      method: 'POST', signal, headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schemaVersion: 1, ...request }),
+    });
+    if (preview && (typeof result?.admissible !== 'boolean' || !Array.isArray(result.refusalCodes)
+        || !Array.isArray(result.inheritedInvocationIds) || !Array.isArray(result.possibleScopeNodeIds)
+        || !Array.isArray(result.missingInputs) || !Array.isArray(result.externalEffectNodes))) {
+      throw new Error('Selective replay preview response is invalid');
+    }
+    if (!preview && (!result?.processInstanceId || !result?.traversalId || !result?.graphVersion)) {
+      throw new Error('Derived execution response is invalid');
+    }
+    return result;
+  }
+
   /** Reads the bounded, tenant-authorized actionable Human Task projection for one exact graph
    * context. The runtime configuration supplies page and polling limits; this method supplies no
    * browser-owned defaults. */

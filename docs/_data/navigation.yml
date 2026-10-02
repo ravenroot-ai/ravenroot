@@ -48,6 +48,8 @@
       url: /operator-guide/persistence-lifecycle.html
     - title: Global lifecycle console
       url: /operator-guide/lifecycle-console.html
+    - title: Selective derived executions
+      url: /operator-guide/selective-derived-executions.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle

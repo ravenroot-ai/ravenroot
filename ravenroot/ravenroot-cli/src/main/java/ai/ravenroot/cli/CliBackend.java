@@ -99,6 +99,33 @@ public interface CliBackend {
         throw new IOException("durable process lifecycle requires --server");
     }
 
+    default DerivedPreviewView previewDerived(String sourceProcessInstanceId, String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) throws IOException {
+        throw new IOException("selective derived execution requires a capable backend");
+    }
+
+    default List<DerivedBoundaryView> derivedBoundaries(String sourceProcessInstanceId) throws IOException {
+        throw new IOException("selective derived execution requires a capable backend");
+    }
+
+    default DerivedStartView startDerived(String sourceProcessInstanceId, String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) throws IOException {
+        throw new IOException("selective derived execution requires a capable backend");
+    }
+
+    record DerivedPreviewView(boolean admissible, List<String> refusalCodes,
+                              List<String> inheritedInvocationIds, List<String> possibleScopeNodeIds,
+                              List<String> missingInputs, List<String> externalEffectNodes,
+                              String graphContentId, String manifestDigest) { }
+
+    record DerivedStartView(String processInstanceId, String traversalId, String graphVersion) { }
+
+    record DerivedBoundaryView(String nodeId, String predecessorInvocationId,
+                               String predecessorNodeId, String outcome,
+                               String recordedAt, String retainedUntil) { }
+
     /** Lists this tenant's durable Human Tasks without response or review content. */
     default List<HumanTaskView> humanTasks() throws IOException {
         throw new IOException("human-task operations require --server");

@@ -14,6 +14,10 @@ import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.persistence.ExecutionManifestDigest;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.GraphVersionPin;
@@ -29,6 +33,9 @@ import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeMessage;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.Set;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -232,9 +239,47 @@ public final class ExecutionRecorder implements AutoCloseable {
     /** Adds durable agent accounting to the same fenced commit as its lifecycle and audit events. */
     public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations) {
+        record(transitions, events, agentBudgetOperations, List.of());
+    }
+
+    java.util.Optional<ReplayInvocationEvidence> replayEvidence(UUID traversalId, UUID invocationId,
+                                             UUID attemptId,
+                                             String nodeId, Set<UUID> parents,
+                                             ai.ravenroot.api.execution.NodeCommand command,
+                                             String outcome, Map<String, Integer> iteration,
+                                             ai.ravenroot.api.persistence.OpaquePayload output,
+                                             ai.ravenroot.api.persistence.OpaquePayload attributes,
+                                             Instant captured) {
+        if (!store.supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)
+                || output.size() > store.maxPayloadBytes() || attributes.size() > store.maxPayloadBytes()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new ReplayInvocationEvidence(key, traversalId, invocationId, attemptId, nodeId, parents,
+                command, outcome, iteration, output, attributes, captured,
+                captured.plus(store.terminalRetention())));
+    }
+
+    /** Records positive quiescence while this worker still owns the terminal source fence. */
+    public synchronized void recordReplaySettlement(ExecutionManifestDigest manifestDigest) {
+        requireFence();
+        if (!store.supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) return;
+        StoredProcessInstance source = await(store.load(key));
+        var inventory = await(store.findProcessInstance(key)).orElseThrow(() ->
+                new IllegalStateException("terminal source inventory disappeared before settlement"));
+        Instant now = Instant.now();
+        Instant retainedUntil = inventory.retainedUntil().orElseGet(() -> now.plus(store.terminalRetention()));
+        await(store.recordReplaySettlement(new ReplaySourceSettlement(key, source.revision(),
+                lease.fencingToken(), manifestDigest, now, retainedUntil), lease));
+    }
+
+    /** Commits completed invocation evidence atomically with its lifecycle transition. */
+    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+                                    List<AgentBudgetOperation> agentBudgetOperations,
+                                    List<ReplayInvocationEvidence> replayEvidence) {
         requireFence();
         if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
-                && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())) {
+                && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())
+                && (replayEvidence == null || replayEvidence.isEmpty())) {
             return;
         }
         var batch = ExecutionBatch.to(key)
@@ -261,6 +306,7 @@ public final class ExecutionRecorder implements AutoCloseable {
         if (agentBudgetOperations != null) {
             agentBudgetOperations.forEach(batch::applyAgentBudget);
         }
+        if (replayEvidence != null) replayEvidence.forEach(batch::captureReplayEvidence);
         try {
             StoredProcessInstance applied = await(store.apply(batch.build()));
             revision = applied.revision();

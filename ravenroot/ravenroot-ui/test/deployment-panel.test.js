@@ -66,6 +66,12 @@ function stubClient(overrides = {}) {
     undeployDeployment: vi.fn(async id => ({ ...READY, deploymentId: id, state: 'STOPPED' })),
     processInventory: vi.fn(async () => ({ items: [], nextCursor: null,
       retainedFrom: '2026-01-01T00:00:00Z', maxPageSize: 100 })),
+    derivedExecutionBoundaries: vi.fn(async () => []),
+    previewDerivedExecution: vi.fn(async () => ({ admissible: false, refusalCodes: ['TEST'],
+      inheritedInvocationIds: [], possibleScopeNodeIds: [], missingInputs: [],
+      externalEffectNodes: [], graphContentId: null, manifestDigest: null })),
+    startDerivedExecution: vi.fn(async () => ({ processInstanceId: 'derived-process',
+      traversalId: 'derived-traversal', graphVersion: 'graph-v3' })),
     ...overrides,
   };
 }
@@ -85,6 +91,69 @@ describe('deploymentRowActions: which buttons a truthful state offers', () => {
   it('offers nothing for a transient state -- it is mid-flight, not actionable', () => {
     expect(deploymentRowActions('STARTING')).toEqual([]);
     expect(deploymentRowActions('STOPPING')).toEqual([]);
+  });
+});
+
+describe('selective derived execution controls', () => {
+  const boundary = { nodeId: 'B', predecessorInvocationId: 'aaaaaaaa-0000-0000-0000-000000000010',
+    predecessorNodeId: 'A', outcome: 'continue', recordedAt: '2026-01-01T00:00:00Z',
+    retainedUntil: '2026-01-02T00:00:00Z' };
+
+  async function prepared(client) {
+    createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    field('derived-source-id').value = 'aaaaaaaa-0000-0000-0000-000000000001';
+    field('derived-discover').click();
+    await vi.waitFor(() => expect(client.derivedExecutionBoundaries).toHaveBeenCalled());
+    await vi.waitFor(() => expect(field('derived-boundary-choice').options.length).toBe(2));
+    field('derived-boundary-choice').value = '0';
+    field('derived-boundary-choice').dispatchEvent(new Event('input', { bubbles: true }));
+    field('derived-reason').value = 'resume B';
+    field('derived-reason').dispatchEvent(new Event('input', { bubbles: true }));
+    field('derived-authorize-effects').checked = true;
+    field('derived-authorize-effects').dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('generates a request key and discovers payload-free boundary choices', async () => {
+    const client = stubClient({ derivedExecutionBoundaries: vi.fn(async () => [boundary]) });
+    await prepared(client);
+    expect(field('derived-idempotency-key').value).toMatch(/.+/);
+    expect(field('derived-boundary-choice').selectedOptions[0].textContent).toContain('A → B');
+    expect(field('derived-boundary-choice').labels[0].textContent).toMatch(/retained downstream boundary/i);
+  });
+
+  it('invalidates an in-flight preview when the request is edited', async () => {
+    let resolvePreview;
+    const client = stubClient({
+      derivedExecutionBoundaries: vi.fn(async () => [boundary]),
+      previewDerivedExecution: vi.fn(() => new Promise(resolve => { resolvePreview = resolve; })),
+    });
+    await prepared(client);
+    field('derived-preview').click();
+    await vi.waitFor(() => expect(client.previewDerivedExecution).toHaveBeenCalledTimes(1));
+    field('derived-reason').value = 'changed after preview began';
+    field('derived-reason').dispatchEvent(new Event('input', { bubbles: true }));
+    resolvePreview({ admissible: true, refusalCodes: [], inheritedInvocationIds: [],
+      possibleScopeNodeIds: ['B'], missingInputs: [], externalEffectNodes: ['B'],
+      graphContentId: 'graph', manifestDigest: 'manifest' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(field('derived-start').disabled).toBe(true);
+  });
+
+  it('coalesces duplicate preview clicks and reports authorization errors', async () => {
+    let rejectPreview;
+    const client = stubClient({
+      derivedExecutionBoundaries: vi.fn(async () => [boundary]),
+      previewDerivedExecution: vi.fn(() => new Promise((_resolve, reject) => { rejectPreview = reject; })),
+    });
+    await prepared(client);
+    field('derived-preview').click();
+    field('derived-preview').click();
+    expect(client.previewDerivedExecution).toHaveBeenCalledTimes(1);
+    rejectPreview(new Error('403 authorization denied'));
+    await vi.waitFor(() => expect(field('derived-execution-status').textContent)
+      .toMatch(/403 authorization denied/i));
+    expect(field('derived-start').disabled).toBe(true);
   });
 });
 

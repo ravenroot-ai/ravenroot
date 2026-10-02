@@ -57,6 +57,9 @@ import ai.ravenroot.api.persistence.ProcessInventoryEntry;
 import ai.ravenroot.api.persistence.ProcessInventoryPage;
 import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
@@ -114,6 +117,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<String, Map<String, ai.ravenroot.api.runner.GovernedRunnerResource>> runnerCatalog =
             new HashMap<>();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
+    private final Map<ExecutionKey, LinkedHashMap<UUID, ReplayInvocationEvidence>> replayEvidence =
+            new LinkedHashMap<>();
+    private final Map<ExecutionKey, ReplaySourceSettlement> replaySettlements = new LinkedHashMap<>();
+    private final Map<ExecutionKey, DerivedExecutionAncestry> derivedAncestries = new LinkedHashMap<>();
     private final Map<IdempotencyKey, IdempotencyRecord> idempotency = new LinkedHashMap<>();
     /**
      * Per-tenant temporal low-water-mark. Every record whose {@code expiresAt} is at or after the
@@ -293,7 +300,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // medium, and this adapter honours every one of them exactly. What it
                 // cannot honour is survival of process death, which is what DURABLE
                 // says and what this adapter still does not say.
-                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
+                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
+                StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
     }
 
     @Override
@@ -341,6 +349,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             batch.idempotency().ifPresent(write -> {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
+            });
+            batch.replayEvidence().forEach(evidence -> {
+                requireWithinPayloadLimit(evidence.output());
+                requireWithinPayloadLimit(evidence.attributes());
+                if (!batch.key().equals(evidence.source())) {
+                    throw failure(ExecutionStoreFailure.invalid("replay evidence source does not match batch"));
+                }
             });
             requireEnvelopesMatchBatch(batch);
 
@@ -464,6 +479,73 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.executionPauses);
                 applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
 
+                for (ReplayInvocationEvidence evidence : batch.replayEvidence()) {
+                    var traversal = folded.traversals().get(evidence.traversalId());
+                    var invocation = traversal == null ? null : traversal.invocations().get(evidence.invocationId());
+                    if (invocation == null || invocation.status() != ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED
+                            || !invocation.nodeId().equals(evidence.nodeId())
+                            || !invocation.command().equals(evidence.command())
+                            || !invocation.parentInvocationIds().equals(evidence.parentInvocationIds())) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay evidence must name the completed post-fold invocation"));
+                    }
+                    var attempt = invocation.attempts().stream()
+                            .filter(value -> value.attemptId().equals(evidence.attemptId()))
+                            .findFirst().orElse(null);
+                    if (attempt == null || attempt.status() != ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay evidence must name the completed post-fold attempt"));
+                    }
+                    ReplayInvocationEvidence prior = replayEvidence.getOrDefault(key, new LinkedHashMap<>())
+                            .get(evidence.invocationId());
+                    if (prior != null && !prior.equals(evidence)) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay evidence conflicts with the retained invocation value"));
+                    }
+                }
+                batch.derivedAncestry().ifPresent(ancestry -> {
+                    if (!ancestry.derived().equals(key)) {
+                        throw failure(ExecutionStoreFailure.invalid("derived ancestry must address the batch execution"));
+                    }
+                    if (!instances.containsKey(ancestry.source())) {
+                        throw failure(new ExecutionStoreFailure.NotFound(ancestry.source()));
+                    }
+                    var work = ancestry.pendingWork();
+                    var workTraversal = folded.traversals().get(work.traversalId());
+                    var workInvocation = workTraversal == null ? null
+                            : workTraversal.invocations().get(work.invocationId());
+                    var workAttempt = workInvocation == null ? null : workInvocation.attempts().stream()
+                            .filter(value -> value.attemptId().equals(work.attemptId())).findFirst().orElse(null);
+                    if (workInvocation == null || workAttempt == null
+                            || !workInvocation.nodeId().equals(work.boundary().nodeId())
+                            || !workInvocation.command().equals(work.command())
+                            || workAttempt.status() != ai.ravenroot.api.application.NodeAttemptStatus.SCHEDULED
+                            || work.payload().size() > maxPayloadBytes()
+                            || work.attributes().size() > maxPayloadBytes()) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "derived work must match the scheduled post-fold boundary attempt"));
+                    }
+                    DerivedExecutionAncestry prior = derivedAncestries.get(key);
+                    if (prior != null && !prior.equals(ancestry)) {
+                        throw failure(ExecutionStoreFailure.invalid("derived ancestry already differs"));
+                    }
+                });
+                batch.replaySourceExpectation().ifPresent(expected -> {
+                    var sourceEntry = instances.get(expected.source());
+                    var current = replaySettlements.get(expected.source());
+                    if (sourceEntry == null || current == null || !current.equals(expected)
+                            || sourceEntry.revision != expected.sourceRevision()
+                            || sourceEntry.fencingToken != expected.fencingToken()
+                            || !now.isBefore(expected.retainedUntil())) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay source settlement changed before derived admission"));
+                    }
+                    batch.derivedAncestry().ifPresent(ancestry -> {
+                        if (!ancestry.source().equals(expected.source())) throw failure(
+                                ExecutionStoreFailure.invalid("derived ancestry and source settlement differ"));
+                    });
+                });
+
                 var runnerWorkspace = existing == null ? null : existing.runnerWorkspace;
                 try {
                     for (var operation : batch.runnerOperations()) {
@@ -516,6 +598,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // what makes the shared transactional boundary real rather than described: there is
                 // no instant at which the transition is visible and its events are not.
                 instances.put(key, next);
+                batch.derivedAncestry().ifPresent(ancestry -> derivedAncestries.putIfAbsent(key, ancestry));
+                if (!batch.replayEvidence().isEmpty()) {
+                    var retained = replayEvidence.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
+                    batch.replayEvidence().forEach(value -> retained.putIfAbsent(value.invocationId(), value));
+                }
                 appendToJournal(key, batch, revision, now);
                 return next.toStored();
             }
@@ -1077,6 +1164,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 doomed.forEach(instances::remove);
                 doomed.forEach(streamSequences::remove);
+                doomed.forEach(replayEvidence::remove);
+                doomed.forEach(replaySettlements::remove);
+                doomed.forEach(derivedAncestries::remove);
                 // The floor is the LATEST retention deadline this run actually crossed. It has to be
                 // the latest, because the guarantee runs in the direction "everything past it is still
                 // here": a run removing two rows whose deadlines are further apart than the retention
@@ -1097,6 +1187,95 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public CompletionStage<List<ReplayInvocationEvidence>> replayEvidence(ExecutionKey source, int limit) {
+        return complete(() -> {
+            Objects.requireNonNull(source, "source");
+            requireLimit(limit);
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                Entry entry = instances.get(source);
+                if (entry == null || retainedUntilOf(entry).filter(clock.instant()::isBefore).isEmpty()) {
+                    return List.of();
+                }
+                Instant deadline = retainedUntilOf(entry).orElseThrow();
+                return replayEvidence.getOrDefault(source, new LinkedHashMap<>()).values().stream()
+                        .limit(limit)
+                        .map(value -> new ReplayInvocationEvidence(value.source(), value.traversalId(),
+                                value.invocationId(), value.attemptId(), value.nodeId(),
+                                value.parentInvocationIds(), value.command(), value.outcome(), value.iteration(),
+                                value.output(), value.attributes(), value.recordedAt(), deadline))
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<ReplaySourceSettlement> recordReplaySettlement(
+            ReplaySourceSettlement settlement, LeaseHandle lease) {
+        return complete(() -> {
+            Objects.requireNonNull(settlement, "settlement");
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                Entry entry = requireCurrentReplayLease(settlement.source(), lease);
+                if (!entry.state.status().terminal()) {
+                    throw failure(ExecutionStoreFailure.invalid("replay source is not terminal"));
+                }
+                Instant retainedUntil = retainedUntilOf(entry).orElseThrow();
+                var authoritative = new ReplaySourceSettlement(settlement.source(), entry.revision,
+                        entry.fencingToken, settlement.manifestDigest(), clock.instant(), retainedUntil);
+                ReplaySourceSettlement existing = replaySettlements.get(settlement.source());
+                if (existing != null && !existing.equals(authoritative)) {
+                    throw failure(ExecutionStoreFailure.invalid("replay source settlement already differs"));
+                }
+                replaySettlements.putIfAbsent(settlement.source(), authoritative);
+                return replaySettlements.get(settlement.source());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ReplaySourceSettlement>> replaySettlement(ExecutionKey source) {
+        return complete(() -> {
+            Objects.requireNonNull(source, "source");
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                ReplaySourceSettlement settlement = replaySettlements.get(source);
+                Entry entry = instances.get(source);
+                if (settlement == null || entry == null || !clock.instant().isBefore(settlement.retainedUntil())
+                        || entry.fencingToken != settlement.fencingToken()) {
+                    return Optional.empty();
+                }
+                return Optional.of(settlement);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DerivedExecutionAncestry>> derivedAncestry(ExecutionKey derived) {
+        return complete(() -> {
+            Objects.requireNonNull(derived, "derived");
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                return instances.containsKey(derived)
+                        ? Optional.ofNullable(derivedAncestries.get(derived)) : Optional.empty();
+            }
+        });
+    }
+
+    private Entry requireCurrentReplayLease(ExecutionKey key, LeaseHandle lease) {
+        Objects.requireNonNull(lease, "lease");
+        Entry entry = instances.get(key);
+        if (entry == null) throw failure(new ExecutionStoreFailure.NotFound(key));
+        if (!key.equals(lease.key()) || entry.lease == null
+                || !entry.lease.workerId().equals(lease.workerId())
+                || entry.fencingToken != lease.fencingToken()
+                || !clock.instant().isBefore(entry.lease.expiresAt())) {
+            throw failure(new ExecutionStoreFailure.LeaseLost(key, lease.workerId()));
+        }
+        return entry;
+    }
 
     @Override
     public Duration executionResultRetention() {

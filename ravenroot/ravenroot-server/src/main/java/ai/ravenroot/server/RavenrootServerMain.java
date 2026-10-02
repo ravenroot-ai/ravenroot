@@ -332,6 +332,11 @@ public final class RavenrootServerMain {
             // leaves the fence unchanged under the runtime's recorder.
             String recoveryWorker = executionOwnershipConfiguration.recoveryIdentity().value();
             var dispatchers = new java.util.ArrayList<ai.ravenroot.core.recovery.RecoveryDispatcher>();
+            if (executionStore.supports(
+                    ai.ravenroot.api.persistence.StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) {
+                dispatchers.add(application.derivedExecutionRecoveryDispatcher(
+                        recoveryWorker, recoveryConfiguration.leaseTtl()));
+            }
             if (toolApprovals != null) {
                 toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
                 var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(

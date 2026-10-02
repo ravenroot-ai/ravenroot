@@ -1065,6 +1065,50 @@ public interface RavenrootApplication extends AutoCloseable {
         return new ExecutionLookup.Unknown(java.util.Objects.requireNonNull(executionId, "executionId"));
     }
 
+    /**
+     * Lists payload-free retained downstream boundary choices for one settled source.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence is inspected
+     * @return bounded boundary choices; empty when no retained edge can seed downstream work
+     */
+    default java.util.List<DerivedBoundaryOption> derivedExecutionBoundaries(
+            SecurityContext security, UUID sourceProcessInstanceId) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
+    /** Previews an exact retained boundary without admitting new work.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence is inspected
+     * @param request bounded proposed derived request
+     * @return proof-oriented preview and typed refusal codes
+     */
+    default DerivedExecutionPreview previewDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                            DerivedExecutionRequest request) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
+    /** Finds an already admitted request without launching or recovering its work.
+     * @param security authenticated tenant identity
+     * @param sourceProcessInstanceId immutable source process
+     * @param request exact idempotent request
+     * @return existing derived identities, or empty when the request has not been admitted
+     */
+    default java.util.Optional<DerivedExecutionStart> existingDerivedExecution(
+            SecurityContext security, UUID sourceProcessInstanceId, DerivedExecutionRequest request) {
+        return java.util.Optional.empty();
+    }
+
+    /** Admits fresh derived work after repeating every preview proof under the same pins.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence seeds the derivation
+     * @param request bounded derived request and idempotency identity
+     * @return fresh derived process and traversal identities
+     */
+    default DerivedExecutionStart startDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                        DerivedExecutionRequest request) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
     @Override
     void close();
 }

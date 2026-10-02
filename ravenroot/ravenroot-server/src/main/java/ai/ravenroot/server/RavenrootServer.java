@@ -2620,6 +2620,23 @@ public final class RavenrootServer implements AutoCloseable {
                 readProcessInstanceTraversals(exchange, httpContext, segments[1]);
                 return;
             }
+            if (segments.length == 4 && !segments[1].isBlank()
+                    && "derived".equals(segments[2]) && "preview".equals(segments[3])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                derivedExecution(exchange, httpContext, segments[1], true);
+                return;
+            }
+            if (segments.length == 4 && !segments[1].isBlank()
+                    && "derived".equals(segments[2]) && "boundaries".equals(segments[3])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                derivedBoundaries(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 3 && !segments[1].isBlank() && "derived".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                derivedExecution(exchange, httpContext, segments[1], false);
+                return;
+            }
             if (segments.length == 5 && !segments[1].isBlank()
                     && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
                     && ("approve".equals(segments[4]) || "deny".equals(segments[4])
@@ -2662,6 +2679,151 @@ public final class RavenrootServer implements AutoCloseable {
             }
             submitExecution(exchange, httpContext, policy);
         }
+    }
+
+    private void derivedExecution(HttpExchange exchange, HttpRequestContext httpContext,
+            String sourceText, boolean previewOnly) throws IOException {
+        final java.util.UUID sourceId;
+        final ai.ravenroot.api.application.DerivedExecutionRequest request;
+        try {
+            sourceId = java.util.UUID.fromString(sourceText);
+            byte[] body = boundedBody(exchange, 32_768);
+            var root = strictJsonMap(body, java.util.Set.of("schemaVersion", "boundaries",
+                    "idempotencyKey", "reason", "repeatabilityDecision", "authorizeExternalEffects"));
+            if (integer(root, "schemaVersion") != 1) throw new IllegalArgumentException("unsupported schema");
+            if (!(root.entries().get("boundaries")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.ListValue boundaryValues)) {
+                throw new IllegalArgumentException("boundaries must be a list");
+            }
+            var boundaries = new java.util.ArrayList<ai.ravenroot.api.persistence.ReplayBoundarySeed>();
+            for (var value : boundaryValues.values()) {
+                if (!(value instanceof ai.ravenroot.api.payload.PayloadValue.MapValue boundary)
+                        || !boundary.entries().keySet().equals(
+                                java.util.Set.of("nodeId", "predecessorInvocationIds"))
+                        || !(boundary.entries().get("predecessorInvocationIds")
+                                instanceof ai.ravenroot.api.payload.PayloadValue.ListValue predecessorValues)) {
+                    throw new IllegalArgumentException("invalid boundary");
+                }
+                var predecessors = new java.util.LinkedHashSet<java.util.UUID>();
+                for (var predecessor : predecessorValues.values()) {
+                    if (!(predecessor instanceof ai.ravenroot.api.payload.PayloadValue.TextValue id)) {
+                        throw new IllegalArgumentException("predecessor id must be text");
+                    }
+                    predecessors.add(java.util.UUID.fromString(id.value()));
+                }
+                boundaries.add(new ai.ravenroot.api.persistence.ReplayBoundarySeed(
+                        text(boundary, "nodeId"), predecessors));
+            }
+            if (!(root.entries().get("authorizeExternalEffects")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.BooleanValue effects)) {
+                throw new IllegalArgumentException("authorizeExternalEffects must be boolean");
+            }
+            request = new ai.ravenroot.api.application.DerivedExecutionRequest(boundaries,
+                    text(root, "idempotencyKey"), text(root, "reason"),
+                    textAllowEmpty(root, "repeatabilityDecision"), effects.value());
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var context = httpContext.applicationContext();
+            if (previewOnly) {
+                json(exchange, 200, derivedPreviewJson(
+                        authorizedApplication.previewDerivedExecution(context, sourceId, request)));
+            } else {
+                var principal = httpContext.requirePrincipal();
+                var submissionBudget = rateLimiter.checkSubmissionRate(principal.tenantId());
+                if (!submissionBudget.isAllowed()) {
+                    refuse(exchange, httpContext, submissionBudget);
+                    return;
+                }
+                try (var slot = rateLimiter.acquireSubmissionSlot(principal.tenantId())) {
+                    if (!slot.granted()) {
+                        refuse(exchange, httpContext, slot.refusal());
+                        return;
+                    }
+                    var existing = authorizedApplication.existingDerivedExecution(context, sourceId, request);
+                    if (existing.isPresent()) {
+                        json(exchange, 202, derivedStartJson(existing.orElseThrow()));
+                        return;
+                    }
+                    var admission = rateLimiter.activeExecutions().checkAdmission(principal.tenantId());
+                    if (!admission.isAllowed()) {
+                        refuse(exchange, httpContext, admission);
+                        return;
+                    }
+                    json(exchange, 202, derivedStartJson(
+                            authorizedApplication.startDerivedExecution(context, sourceId, request)));
+                }
+            }
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException conflict) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        } catch (IllegalStateException refused) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        }
+    }
+
+    private static String derivedStartJson(ai.ravenroot.api.application.DerivedExecutionStart started) {
+        return "{\"processInstanceId\":\"" + started.processInstanceId()
+                + "\",\"traversalId\":\"" + started.traversalId()
+                + "\",\"graphVersion\":\"" + escape(started.graphVersion()) + "\"}";
+    }
+
+    private void derivedBoundaries(HttpExchange exchange, HttpRequestContext httpContext,
+                                   String sourceText) throws IOException {
+        final java.util.UUID sourceId;
+        try {
+            sourceId = java.util.UUID.fromString(sourceText);
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        final java.util.List<ai.ravenroot.api.application.DerivedBoundaryOption> values;
+        try {
+            values = authorizedApplication.derivedExecutionBoundaries(
+                    httpContext.applicationContext(), sourceId);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException | IllegalStateException unavailable) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+            return;
+        }
+        var json = new StringBuilder("{\"boundaries\":[");
+        for (int index = 0; index < values.size(); index++) {
+            if (index > 0) json.append(',');
+            var value = values.get(index);
+            json.append("{\"nodeId\":\"").append(escape(value.nodeId()))
+                    .append("\",\"predecessorInvocationId\":\"")
+                    .append(value.predecessorInvocationId())
+                    .append("\",\"predecessorNodeId\":\"").append(escape(value.predecessorNodeId()))
+                    .append("\",\"outcome\":\"").append(escape(value.outcome()))
+                    .append("\",\"recordedAt\":\"").append(value.recordedAt())
+                    .append("\",\"retainedUntil\":\"").append(value.retainedUntil()).append("\"}");
+        }
+        json.append("]}");
+        json(exchange, 200, json.toString());
+    }
+
+    private static String derivedPreviewJson(ai.ravenroot.api.application.DerivedExecutionPreview value) {
+        return "{\"admissible\":" + value.admissible()
+                + ",\"refusalCodes\":" + stringArrayJson(value.refusalCodes())
+                + ",\"inheritedInvocationIds\":" + stringArrayJson(value.inheritedEvidence().stream()
+                        .map(java.util.UUID::toString).sorted().toList())
+                + ",\"possibleScopeNodeIds\":" + stringArrayJson(value.scopeNodeIds())
+                + ",\"missingInputs\":" + stringArrayJson(value.missingInputs())
+                + ",\"externalEffectNodes\":" + stringArrayJson(value.externalEffectNodes())
+                + ",\"graphContentId\":" + nullableJson(value.graphContentId() == null
+                        ? null : value.graphContentId().value())
+                + ",\"manifestDigest\":" + nullableJson(value.manifestDigest() == null
+                        ? null : value.manifestDigest().value())
+                + ",\"compatibilityDimensions\":" + stringArrayJson(value.compatibilityDimensions().stream()
+                        .sorted().toList()) + "}";
+    }
+
+    private static String nullableJson(String value) {
+        return value == null ? "null" : "\"" + escape(value) + "\"";
     }
 
     /** Authenticated, tenant-derived decision path; no stored content is serialized. */

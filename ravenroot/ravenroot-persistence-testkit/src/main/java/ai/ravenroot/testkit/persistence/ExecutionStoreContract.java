@@ -11,6 +11,14 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
+import ai.ravenroot.api.persistence.DerivedExecutionWork;
+import ai.ravenroot.api.persistence.ExecutionManifestDigest;
+import ai.ravenroot.api.persistence.ReplayBoundarySeed;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
 import ai.ravenroot.api.persistence.DurableHumanTask;
@@ -226,6 +234,122 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tenant that lost no record.</p>
  */
 public abstract class ExecutionStoreContract {
+
+    @Test
+    final void selectiveReplayEvidenceSettlementAndDerivedAdmissionAreDurableAndAtomic() {
+        assumeCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+        ExecutionKey source = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(source, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        LeaseHandle lease = await(store().claim(source, "replay-source", TTL));
+        Instant recordedAt = clock().instant();
+        var evidence = new ReplayInvocationEvidence(source, traversalId, invocationId, attemptId,
+                "work", Set.of(), NodeCommand.PROCESS, "continue", Map.of(),
+                OpaquePayload.of("{\"answer\":42}".getBytes(StandardCharsets.UTF_8), "application/json"),
+                OpaquePayload.of("{}".getBytes(StandardCharsets.UTF_8), "application/json"),
+                recordedAt, recordedAt.plus(store().terminalRetention()));
+        StoredProcessInstance terminal = await(store().apply(ExecutionBatch.to(source)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .fencedBy(lease.fencingToken())
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.COMPLETED))
+                .apply(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                        NodeInvocationStatus.COMPLETED))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED))
+                .captureReplayEvidence(evidence).build()));
+        assertEquals(List.of(evidence), await(store().replayEvidence(source, 2)));
+
+        var digest = new ExecutionManifestDigest("00".repeat(32));
+        ReplaySourceSettlement settlement = await(store().recordReplaySettlement(
+                new ReplaySourceSettlement(source, terminal.revision(), lease.fencingToken(), digest,
+                        recordedAt, recordedAt.plus(store().terminalRetention())), lease));
+        assertEquals(settlement, await(store().replaySettlement(source)).orElseThrow());
+
+        ExecutionKey derived = newKey();
+        UUID derivedTraversal = UUID.randomUUID();
+        UUID derivedInvocation = UUID.randomUUID();
+        UUID derivedAttempt = UUID.randomUUID();
+        var seed = new ReplayBoundarySeed("next", Set.of(invocationId));
+        var work = new DerivedExecutionWork(derived, derivedTraversal, derivedInvocation, derivedAttempt,
+                seed, "work", NodeCommand.PROCESS, evidence.output(), evidence.attributes(),
+                new SecurityContext("request", derived.tenantId(), "operator", PrincipalType.USER, "test"));
+        var ancestry = new DerivedExecutionAncestry(derived, source, List.of(seed), work, "fingerprint",
+                "operator", "recover downstream work", "effects explicitly reviewed", clock().instant());
+        var acceptedTraversal = new Traversal(derivedTraversal, "next", TraversalStatus.ACCEPTED, Map.of());
+        await(store().apply(ExecutionBatch.to(derived).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(derived.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of(derivedTraversal, acceptedTraversal)),
+                        new GraphVersionPin("graph-v1")))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(derivedTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(derivedTraversal,
+                        new NodeInvocation(derivedInvocation, "next", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.InvocationTransitioned(derivedTraversal, derivedInvocation,
+                        NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(derivedTraversal, derivedInvocation,
+                        new NodeAttempt(derivedAttempt, 1, NodeAttemptStatus.SCHEDULED)))
+                .recordDerivedAncestry(ancestry)
+                .requiringReplaySourceSettlement(settlement)
+                .build()));
+        assertEquals(ancestry, await(store().derivedAncestry(derived)).orElseThrow());
+        if (store().supports(StoreCapability.DURABLE)) {
+            reopen();
+            assertEquals(ancestry, await(store().derivedAncestry(derived)).orElseThrow(),
+                    "ancestry, copied seed, and admitted identities must survive a store reopen");
+            assertEquals(List.of(evidence), await(store().replayEvidence(source, 2)),
+                    "retained evidence must survive a store reopen");
+            assertEquals(settlement, await(store().replaySettlement(source)).orElseThrow(),
+                    "positive settlement must survive a store reopen");
+        }
+
+        ExecutionKey rejected = newKey();
+        var rejectedWork = new DerivedExecutionWork(rejected, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                seed, "work", NodeCommand.PROCESS, evidence.output(), evidence.attributes(),
+                new SecurityContext("request", rejected.tenantId(), "operator", PrincipalType.USER, "test"));
+        var rejectedAncestry = new DerivedExecutionAncestry(rejected, source, List.of(seed), rejectedWork, "other",
+                "operator", "stale source proof", "reviewed", clock().instant());
+        clock().advance(TTL.plusMillis(1));
+        await(store().claim(source, "replay-takeover", TTL));
+        var rejectedTraversal = new Traversal(rejectedWork.traversalId(), "next",
+                TraversalStatus.ACCEPTED, Map.of());
+        ExecutionStoreFailure stale = failureOf(() -> await(store().apply(ExecutionBatch.to(rejected)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(rejected.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED,
+                        Map.of(rejectedWork.traversalId(), rejectedTraversal)), new GraphVersionPin("graph-v1")))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(rejectedWork.traversalId(),
+                        TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(rejectedWork.traversalId(),
+                        new NodeInvocation(rejectedWork.invocationId(), "next", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.InvocationTransitioned(rejectedWork.traversalId(),
+                        rejectedWork.invocationId(), NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(rejectedWork.traversalId(),
+                        rejectedWork.invocationId(), new NodeAttempt(rejectedWork.attemptId(), 1,
+                                NodeAttemptStatus.SCHEDULED)))
+                .recordDerivedAncestry(rejectedAncestry)
+                .requiringReplaySourceSettlement(settlement).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, stale);
+        assertThrows(CompletionException.class, () -> await(store().load(rejected)),
+                "a stale source proof must roll the entire derived admission back");
+
+        clock().advance(Duration.between(clock().instant(), settlement.retainedUntil()).plusMillis(1));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(source.tenantId())));
+        assertTrue(await(store().replayEvidence(source, 2)).isEmpty(),
+                "source evidence must be physically purged with its retained process");
+        assertTrue(await(store().replaySettlement(source)).isEmpty(),
+                "the source settlement must be physically purged with its retained process");
+        assertEquals(ancestry, await(store().derivedAncestry(derived)).orElseThrow(),
+                "immutable ancestry and copied pending work must survive source deletion");
+    }
 
     @Test
     final void humanTaskInteractionRevocationIsTenantScopedIdempotentAndExpires() {

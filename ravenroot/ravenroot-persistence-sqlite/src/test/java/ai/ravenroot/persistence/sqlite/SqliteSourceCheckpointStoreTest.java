@@ -162,7 +162,10 @@ class SqliteSourceCheckpointStoreTest {
             assertEquals(41, await(first.checkpoint(STREAM)).deliveredThrough());
             assertEquals(7, await(second.checkpoint(STREAM)).deliveredThrough());
             assertEquals(12, await(otherTenant.checkpoint(STREAM)).deliveredThrough());
+            assertFalse(await(first.containsInbox(STREAM, EVENT)));
             assertTrue(await(first.recordInbox(STREAM, EVENT, RETENTION)));
+            assertTrue(await(first.containsInbox(STREAM, EVENT)));
+            assertFalse(await(first.containsInbox("other-stream", EVENT)));
             assertTrue(await(second.recordInbox(STREAM, EVENT, RETENTION)));
             assertTrue(await(otherTenant.recordInbox(STREAM, EVENT, RETENTION)));
             assertFalse(await(first.recordInbox(STREAM, EVENT, RETENTION)));

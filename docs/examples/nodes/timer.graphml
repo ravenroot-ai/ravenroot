@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Admission-ready timer graph. This calendar source starts the graph without an incoming payload.
+     Success reaches end through the documented descriptor outcome; failure reaches error. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="property-zoneId" for="node" attr.name="zoneId" attr.type="string"/>
+  <key id="property-times" for="node" attr.name="times" attr.type="string"/>
+  <key id="property-mode" for="node" attr.name="mode" attr.type="string"/>
+  <graph id="example-timer" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="action">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">timer</data>
+      <data key="property-zoneId">UTC</data>
+      <data key="property-times">09:00</data>
+      <data key="property-mode">ONCE</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="start-action" source="start" target="action"><data key="outcome">continue</data></edge>
+    <edge id="action-end-0" source="action" target="end"><data key="outcome">continue</data></edge>
+    <edge id="action-error" source="action" target="error"/>
+  </graph>
+</graphml>

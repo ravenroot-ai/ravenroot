@@ -30,6 +30,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-persistence-testkit</artifactId>
             <scope>test</scope>

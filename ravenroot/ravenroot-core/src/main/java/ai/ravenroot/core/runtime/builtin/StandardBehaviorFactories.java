@@ -70,6 +70,8 @@ public final class StandardBehaviorFactories {
         return List.of(
                 new LogNodeBehaviorFactory(),
                 new DelayNodeBehaviorFactory(),
+                new TimerNodeBehaviorFactory(),
+                new CrontabNodeBehaviorFactory(),
                 new HumanTaskNodeBehaviorFactory(humanTasks, humanTaskPolicy),
                 new TemplateNodeBehaviorFactory(),
                 new JsonParseNodeBehaviorFactory(),

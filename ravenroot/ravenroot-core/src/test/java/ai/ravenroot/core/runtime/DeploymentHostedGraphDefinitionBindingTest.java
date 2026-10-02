@@ -98,14 +98,16 @@ class DeploymentHostedGraphDefinitionBindingTest {
     @Test
     void aDeploymentHostedTraversalIsBoundToADurablyStoredDocument() throws Exception {
         Path database = databaseDirectory.resolve("bound.db");
-        UUID processInstanceId = UUID.randomUUID();
+        DeploymentId deploymentId = DeploymentId.of("bound-" + UUID.randomUUID());
+        UUID processInstanceId = durableProcessId(deploymentId);
 
         try (var engine = new JoinTestEngine();
              var executions = new SqliteExecutionStore(database, clock());
              var definitions = new SqliteGraphDefinitionStore(database, clock(),
                      GraphDefinitionReferences.NONE)) {
 
-            var deployment = deployment(engine, executions, definitions, fixedIdentities(processInstanceId));
+            var deployment = deployment(deploymentId, engine, executions, definitions,
+                    fixedIdentities(processInstanceId));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
@@ -141,7 +143,8 @@ class DeploymentHostedGraphDefinitionBindingTest {
     @Test
     void aDeploymentHostedTraversalRecordsTheDependencySetItWasAcceptedAgainst() throws Exception {
         Path database = databaseDirectory.resolve("manifest.db");
-        UUID processInstanceId = UUID.randomUUID();
+        DeploymentId deploymentId = DeploymentId.of("manifest-" + UUID.randomUUID());
+        UUID processInstanceId = durableProcessId(deploymentId);
 
         try (var engine = new JoinTestEngine();
              var executions = new SqliteExecutionStore(database, clock());
@@ -156,7 +159,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                             executions.capabilities(), behaviors,
                             UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null),
                     clock());
-            var deployment = new DefaultGraphDeployment(DeploymentId.of("manifest-" + UUID.randomUUID()),
+            var deployment = new DefaultGraphDeployment(deploymentId,
                     engine, behaviors, new ExecutionMonitor(), fixedIdentities(processInstanceId),
                     graphBytes(), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executions,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "worker-" + UUID.randomUUID(),
@@ -187,7 +190,8 @@ class DeploymentHostedGraphDefinitionBindingTest {
     @Test
     void theDocumentIsCommittedBeforeTheTraversalIsPinnedToIt() throws Exception {
         Path database = databaseDirectory.resolve("ordering.db");
-        UUID processInstanceId = UUID.randomUUID();
+        DeploymentId deploymentId = DeploymentId.of("bound-" + UUID.randomUUID());
+        UUID processInstanceId = durableProcessId(deploymentId);
         var pinExistedWhenTheDocumentWasWritten = new AtomicReference<Boolean>();
 
         try (var engine = new JoinTestEngine();
@@ -200,7 +204,8 @@ class DeploymentHostedGraphDefinitionBindingTest {
             var definitions = new ProbingDefinitionStore(real, () -> pinExistedWhenTheDocumentWasWritten
                     .set(instanceExists(executions, IDENTITY.tenantId(), processInstanceId)));
 
-            var deployment = deployment(engine, executions, definitions, fixedIdentities(processInstanceId));
+            var deployment = deployment(deploymentId, engine, executions, definitions,
+                    fixedIdentities(processInstanceId));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             assertInstanceOf(IngressReceipt.DurablyCommitted.class,
@@ -222,12 +227,13 @@ class DeploymentHostedGraphDefinitionBindingTest {
     @Test
     void aRefusedDocumentRefusesTheTraversalAndLeavesNoExecutionBehind() throws Exception {
         Path database = databaseDirectory.resolve("refused.db");
-        UUID processInstanceId = UUID.randomUUID();
+        DeploymentId deploymentId = DeploymentId.of("bound-" + UUID.randomUUID());
+        UUID processInstanceId = durableProcessId(deploymentId);
 
         try (var engine = new JoinTestEngine();
              var executions = new SqliteExecutionStore(database, clock())) {
 
-            var deployment = deployment(engine, executions, new RefusingDefinitionStore(),
+            var deployment = deployment(deploymentId, engine, executions, new RefusingDefinitionStore(),
                     fixedIdentities(processInstanceId));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
@@ -291,16 +297,21 @@ class DeploymentHostedGraphDefinitionBindingTest {
         }
     }
 
-    private DefaultGraphDeployment deployment(JoinTestEngine engine, ExecutionStore executions,
+    private DefaultGraphDeployment deployment(DeploymentId deploymentId, JoinTestEngine engine, ExecutionStore executions,
                                               GraphDefinitionStore definitions,
                                               ExecutionIdentitySource identities) {
-        return new DefaultGraphDeployment(DeploymentId.of("bound-" + UUID.randomUUID()), engine,
+        return new DefaultGraphDeployment(deploymentId, engine,
                 BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
                 identities, graphBytes(), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY,
                 executions, DefaultGraphDeployment.DEFAULT_INBOX_RETENTION,
                 "worker-" + UUID.randomUUID(), Duration.ofSeconds(30),
                 RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
                 definitions);
+    }
+
+    private static UUID durableProcessId(DeploymentId deploymentId) {
+        return UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + deploymentId.value()
+                + "/poller-1" + '\0' + "key-A").getBytes(StandardCharsets.UTF_8));
     }
 
     private static ExecutionIdentitySource fixedIdentities(UUID processInstanceId) {

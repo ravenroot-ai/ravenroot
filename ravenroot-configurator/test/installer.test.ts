@@ -30,16 +30,17 @@ describe("target adapters", () => {
     const directory = await root();
     await writeFile(join(directory, "compose.yaml"), "services:\n  ravenroot:\n    image: ravenroot:test\n");
     const document = { schemaVersion: 1, capabilityTtlSeconds: 60, maxCompletionBytes: 4096,
-      capabilitySecretBase64: { $secret: "capability" }, profiles: [] };
+      capabilitySecretBase64: { $secret: "capability" }, profiles: [{ id: "custom", version: 1, kind: "CUSTOM",
+        launchUri: "https://custom.example.test/task", origin: "https://custom.example.test" }] };
     const pkg = await inspectPackage((await createPackage({ target: target("compose"),
       configurations: [{ contractId: "core.human-task", identity: {}, values: { interactionDocument: document,
         RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED: true } }],
       password: "package-password", secrets: [{ mode: "embedded", bindingId: "capability",
-        environmentKey: "RAVENROOT_UNUSED_DOCUMENT_SECRET", value: "c2VjcmV0LW1hdGVyaWFs" }], bundles: [] })).bytes);
+        environmentKey: "RAVENROOT_UNUSED_DOCUMENT_SECRET", value: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" }], bundles: [] })).bytes);
     const prepared = await prepareInstall(pkg, { targetRoot: directory, password: "package-password" });
     await applyInstall(prepared, { targetRoot: directory });
     const installed = await readFile(join(directory, ".ravenroot-config/compose/config/human-task-interactions.json"), "utf8");
-    expect(installed).toContain("c2VjcmV0LW1hdGVyaWFs");
+    expect(installed).toContain("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
     expect(installed).not.toContain("$secret");
   });
 

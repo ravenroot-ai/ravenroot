@@ -19,7 +19,7 @@ export interface FieldSpec {
 }
 
 export type ValueSchema =
-  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256"; readonly schemes?: readonly string[]; readonly requireHost?: boolean; readonly allowFragment?: boolean }
+  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256" | "duration"; readonly schemes?: readonly string[]; readonly requireHost?: boolean; readonly allowFragment?: boolean; readonly authorityOnly?: boolean; readonly allowRootPath?: boolean; readonly nonBlank?: boolean }
   | { readonly kind: "integer"; readonly minimum?: number; readonly maximum?: number }
   | { readonly kind: "boolean" }
   | { readonly kind: "null" }

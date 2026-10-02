@@ -1,8 +1,9 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { CONTRACTS, DELIMITED_TEMPLATES, serializeSelection, templateSelection } from "../src/registry.js";
 import { validateValue } from "../src/schema.js";
-import type { ValueSchema } from "../src/types.js";
+import type { ConfigurationSelection, ValueSchema } from "../src/types.js";
 
 interface Runtime {
   readonly className: string;
@@ -113,9 +114,17 @@ function boundaryMutations(schema: ValueSchema, value: unknown, path = "document
     if (schema.minimumLength !== undefined && schema.minimumLength > 0) result.push({ value: "", label: `${path}:minimumLength` });
     if (schema.maximumLength !== undefined) result.push({ value: "x".repeat(schema.maximumLength + 1), label: `${path}:maximumLength` });
     if (schema.allowed) result.push({ value: "not-an-allowed-value", label: `${path}:allowed` });
-    if (schema.pattern) result.push({ value: "!invalid!", label: `${path}:pattern` });
+    if (schema.pattern) result.push({ value: " ", label: `${path}:pattern` });
+    if (schema.nonBlank) result.push({ value: "   ", label: `${path}:nonBlank` });
     if (schema.schemes) result.push({ value: `ftp://${new URL(value).host}/invalid`, label: `${path}:scheme` });
     if (schema.allowFragment === false && schema.format === "uri") result.push({ value: `${value}#fragment`, label: `${path}:fragment` });
+    if (schema.authorityOnly && schema.format === "uri") {
+      const uri = new URL(value); uri.pathname = "/not-an-authority";
+      result.push({ value: uri.toString(), label: `${path}:authority-path` });
+      uri.pathname = ""; uri.search = "?unexpected=true";
+      result.push({ value: uri.toString(), label: `${path}:authority-query` });
+    }
+    if (schema.format === "duration") result.push({ value: "PT0S", label: `${path}:positive-duration` });
     if (schema.format === "sha256") result.push({ value: "A".repeat(64), label: `${path}:sha256` });
     if (schema.format === "base64") result.push({ value: "not base64", label: `${path}:base64` });
   }
@@ -123,12 +132,26 @@ function boundaryMutations(schema: ValueSchema, value: unknown, path = "document
     for (const mutation of boundaryMutations(childSchema, childValue, childPath)) result.push({ value: replace(mutation.value), label: mutation.label });
   };
   if (schema.kind === "object" && value && typeof value === "object" && !Array.isArray(value)) {
+    const optional = new Set(schema.optional ?? []);
+    for (const key of Object.keys(schema.properties)) if (!optional.has(key) && key in (value as Record<string, unknown>)) {
+      const copy = { ...(value as Record<string, unknown>) }; delete copy[key];
+      result.push({ value: copy, label: `${path}.${key}:required` });
+    }
     for (const [key, childSchema] of Object.entries(schema.properties)) if (key in (value as Record<string, unknown>)) {
       child(childSchema, (value as Record<string, unknown>)[key], `${path}.${key}`,
         (replacement) => ({ ...(value as Record<string, unknown>), [key]: replacement }));
     }
   }
   if (schema.kind === "map" && value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>; const entries = Object.entries(record);
+    if (schema.minimumEntries !== undefined && entries.length < schema.minimumEntries) throw new Error(`${path} fixture does not meet minimumEntries`);
+    if (schema.minimumEntries !== undefined && schema.minimumEntries > 0) result.push({ value: {}, label: `${path}:minimumEntries` });
+    if (schema.keyPattern && entries.length) result.push({ value: { ...record, "": entries[0]![1] }, label: `${path}:keyPattern` });
+    if (schema.maximumEntries !== undefined && entries.length) {
+      const expanded: Record<string, unknown> = {};
+      for (let index = 0; index <= schema.maximumEntries; index++) expanded[`entry-${index}`] = structuredClone(entries[0]![1]);
+      result.push({ value: expanded, label: `${path}:maximumEntries` });
+    }
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) child(schema.values, item, `${path}.${key}`,
       (replacement) => ({ ...(value as Record<string, unknown>), [key]: replacement }));
   }
@@ -141,7 +164,7 @@ function boundaryMutations(schema: ValueSchema, value: unknown, path = "document
     value.forEach((item, index) => child(schema.items, item, `${path}[${index}]`, (replacement) => { const copy = [...value]; copy[index] = replacement; return copy; }));
   }
   if (schema.kind === "nullable" && value !== null) child(schema.value, value, path, (replacement) => replacement);
-  if (schema.kind === "union") for (const choice of schema.choices) { try { child(choice, value, path, (replacement) => replacement); break; } catch {} }
+  if (schema.kind === "union") for (const choice of schema.choices) { try { validateValue(choice, value); child(choice, value, path, (replacement) => replacement); break; } catch {} }
   return result;
 }
 
@@ -253,6 +276,7 @@ for (const [id, runtime] of Object.entries(RUNTIMES)) {
 }
 const coreIds = ["bundle.service-grant", "core.http", "core.program", "core.human-task", "core.publication-policies", "core.runner"];
 lines.push(`core.ids=${coreIds.join(",")}`);
+const runnerExample = JSON.parse(await readFile(fileURLToPath(new URL("../../docs/examples/governed-runner/control-plane.json", import.meta.url)), "utf8")) as Record<string, unknown>;
 const resolveFixtureSecrets = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(resolveFixtureSecrets);
   if (value && typeof value === "object") {
@@ -263,26 +287,102 @@ const resolveFixtureSecrets = (value: unknown): unknown => {
   return value;
 };
 for (const id of coreIds) {
-  const selection = templateSelection(id);
+  const selection = templateSelection(id) as ConfigurationSelection & { values: Record<string, unknown> };
+  const templateDocument = selection.values.runnerDocument;
+  if (id === "core.runner") selection.values.runnerDocument = runnerExample;
   const environment = serializeSelection(selection);
   lines.push(`core.${id}.environment=${property(Buffer.from(JSON.stringify(environment), "utf8").toString("base64"))}`);
   lines.push(`core.${id}.environmentKeys=${property(Object.keys(environment).join(","))}`);
   for (const [key, value] of Object.entries(environment)) lines.push(`core.${id}.env.${key}=${property(value)}`);
+  const negativeEnvironments: { readonly environment: Readonly<Record<string, string>>; readonly label: string }[] = [];
   if (id === "bundle.service-grant") {
     const key = Object.keys(environment)[0]!;
     const document = { ...(selection.values.document as Record<string, unknown>), unsupportedByRuntime: true };
     lines.push(`core.${id}.invalidEnvironmentKey=${property(key)}`,
       `core.${id}.invalidEnvironmentValue=${property(Buffer.from(JSON.stringify(document), "utf8").toString("base64"))}`);
+    const contract = CONTRACTS.find((candidate) => candidate.id === id)!;
+    for (const mutation of boundaryMutations(contract.schema!, selection.values.document, `${id}.document`)) {
+      const invalid = { ...selection, values: { document: mutation.value } };
+      try { serializeSelection(invalid); throw new Error(`${id} schema accepted generated negative ${mutation.label}`); }
+      catch (error) { if (error instanceof Error && error.message.includes("schema accepted generated negative")) throw error; }
+      negativeEnvironments.push({ environment: { [key]: Buffer.from(JSON.stringify(mutation.value), "utf8").toString("base64") }, label: mutation.label });
+    }
+    negativeEnvironments.push({ environment: { [key]: Buffer.from(JSON.stringify(document), "utf8").toString("base64") }, label: "unknown-field" });
   } else if (id === "core.http") {
     lines.push(`core.${id}.invalidEnvironmentKey=RAVENROOT_HTTP_ALLOWED_PORTS`, `core.${id}.invalidEnvironmentValue=70000`);
+    for (const [value, label] of [["0", "ports:minimum"], ["65536", "ports:maximum"], ["not-a-port", "ports:integer"], ["0", "max-request:minimum"], ["0", "max-response:minimum"]] as const) {
+      const key = label.startsWith("ports") ? "RAVENROOT_HTTP_ALLOWED_PORTS" : label.startsWith("max-request") ? "RAVENROOT_HTTP_MAX_REQUEST_BYTES" : "RAVENROOT_HTTP_MAX_RESPONSE_BYTES";
+      negativeEnvironments.push({ environment: { ...environment, [key]: value }, label });
+    }
   } else if (id === "core.program") {
     lines.push(`core.${id}.invalidEnvironmentKey=RAVENROOT_PROGRAM_RUNTIME`, `core.${id}.invalidEnvironmentValue=unknown`);
+    for (const [key, value, label] of [
+      ["RAVENROOT_PROGRAM_RUNTIME", "unknown", "runtime:allowed"],
+      ["RAVENROOT_PROGRAM_TIMEOUT_MS", "99", "timeout:minimum"], ["RAVENROOT_PROGRAM_TIMEOUT_MS", "300001", "timeout:maximum"],
+      ["RAVENROOT_PROGRAM_MAX_HEAP_MB", "31", "heap:minimum"], ["RAVENROOT_PROGRAM_MAX_HEAP_MB", "1025", "heap:maximum"]
+    ] as const) negativeEnvironments.push({ environment: { ...environment, [key]: value }, label });
   }
+  lines.push(`core.${id}.negativeEnvironmentCount=${negativeEnvironments.length}`);
+  negativeEnvironments.forEach((negative, index) => {
+    lines.push(`core.${id}.negativeEnvironment.${index}.keys=${property(Object.keys(negative.environment).join(","))}`,
+      `core.${id}.negativeEnvironment.${index}.label=${property(negative.label)}`);
+    for (const [key, value] of Object.entries(negative.environment)) lines.push(
+      `core.${id}.negativeEnvironment.${index}.env.${key}=${property(value)}`);
+  });
   const document = selection.values.interactionDocument ?? selection.values.policyDocument ?? selection.values.runnerDocument;
   if (document) {
     const resolved = resolveFixtureSecrets(document) as Record<string, unknown>;
     lines.push(`core.${id}.document=${property(Buffer.from(JSON.stringify(resolved), "utf8").toString("base64"))}`);
-    lines.push(`core.${id}.invalidDocument=${property(Buffer.from(JSON.stringify({ ...resolved, unsupportedByRuntime: true }), "utf8").toString("base64"))}`);
+    if (id === "core.runner" && templateDocument) {
+      const alternate = resolveFixtureSecrets(templateDocument);
+      lines.push(`core.${id}.alternateDocument=${property(Buffer.from(JSON.stringify(alternate), "utf8").toString("base64"))}`);
+    }
+    if (id === "core.human-task") {
+      const custom = structuredClone(document) as { profiles: Record<string, unknown>[] };
+      custom.profiles = [{ id: "custom-review", version: 1, kind: "CUSTOM", launchUri: "https://custom.example.test/task", origin: "https://custom.example.test" }];
+      const accepted = { ...selection, values: { ...selection.values, interactionDocument: custom } }; serializeSelection(accepted);
+      lines.push(`core.${id}.alternateDocument=${property(Buffer.from(JSON.stringify(resolveFixtureSecrets(custom)), "utf8").toString("base64"))}`);
+    }
+    const field = CONTRACTS.find((contract) => contract.id === id)?.fields.find((candidate) => candidate.schema);
+    if (!field?.schema) throw new Error(`${id} has no explicit core document schema`);
+    const mutations = boundaryMutations(field.schema, document, `${id}.document`)
+      .filter((mutation) => !mutation.label.includes(".$secret:"));
+    mutations.push({ value: { ...(document as object), unsupportedByRuntime: true }, label: `${id}.document:unknown-field` });
+    if (id === "core.human-task") {
+      const mismatch = structuredClone(document) as { profiles: Record<string, unknown>[] };
+      mismatch.profiles[0] = { ...mismatch.profiles[0], origin: "https://different.example.test" };
+      mutations.push({ value: mismatch, label: "cross-field:human-task-origin" });
+      const shortSecret = structuredClone(document) as { capabilitySecretBase64: unknown };
+      shortSecret.capabilitySecretBase64 = "c2hvcnQ=";
+      mutations.push({ value: shortSecret, label: "core.human-task.document.capabilitySecretBase64:decoded-minimum" });
+    }
+    if (id === "core.publication-policies") {
+      const pair = structuredClone(document) as { policies: { rules: Record<string, unknown>[] }[] };
+      const rule = pair.policies[0]!.rules.find((candidate) => candidate.type === "required-file-pair")!;
+      rule.requiredSuffix = rule.firstSuffix;
+      mutations.push({ value: pair, label: "cross-field:publication-file-pair" });
+    }
+    if (id === "core.runner") {
+      const storage = structuredClone(document) as { tenants: Record<string, { workspaceProfiles: { capacity: Record<string, unknown>; policy: { limits: Record<string, unknown> } }[] }> };
+      const workspace = Object.values(storage.tenants)[0]!.workspaceProfiles[0]!;
+      workspace.capacity.aggregateStorageBytes = Number(workspace.policy.limits.workspaceBytes) - 1;
+      mutations.push({ value: storage, label: "cross-field:runner-workspace-storage" });
+      const skill = structuredClone(document) as { tenants: Record<string, { definitions: { skillInstructions: Record<string, string> }[] }> };
+      Object.values(skill.tenants)[0]!.definitions[0]!.skillInstructions = { unapproved: "body" };
+      mutations.push({ value: skill, label: "cross-field:runner-skill-body" });
+    }
+    const negativeDocuments: Mutation[] = [];
+    for (const mutation of mutations) {
+      const valueName = id === "core.human-task" ? "interactionDocument" : id === "core.publication-policies" ? "policyDocument" : "runnerDocument";
+      const invalidSelection = { ...selection, values: { ...selection.values, [valueName]: mutation.value } };
+      try { serializeSelection(invalidSelection); throw new Error(`${id} schema accepted generated negative ${mutation.label}`); }
+      catch (error) { if (error instanceof Error && error.message.includes("schema accepted generated negative")) throw error; }
+      negativeDocuments.push(mutation);
+    }
+    lines.push(`core.${id}.negativeDocumentCount=${negativeDocuments.length}`);
+    negativeDocuments.forEach((negative, index) => lines.push(
+      `core.${id}.negativeDocument.${index}.value=${property(Buffer.from(JSON.stringify(resolveFixtureSecrets(negative.value)), "utf8").toString("base64"))}`,
+      `core.${id}.negativeDocument.${index}.label=${property(negative.label)}`));
   }
 }
 const content = `${lines.join("\n")}\n`;

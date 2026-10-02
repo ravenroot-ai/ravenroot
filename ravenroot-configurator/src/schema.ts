@@ -61,6 +61,7 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (schema.minimumLength !== undefined && value.length < schema.minimumLength) fail(path, `must contain at least ${schema.minimumLength} characters`);
     if (schema.maximumLength !== undefined && value.length > schema.maximumLength) fail(path, `must contain at most ${schema.maximumLength} characters`);
     if (schema.allowed && !schema.allowed.includes(value)) fail(path, `must be one of ${schema.allowed.join(", ")}`);
+    if (schema.nonBlank && value.trim().length === 0) fail(path, "must contain non-whitespace text");
     if (schema.pattern && !new RegExp(`^(?:${schema.pattern})$`).test(value)) fail(path, "has an invalid format");
     if (schema.format === "sha256" && !/^[0-9a-f]{64}$/.test(value)) fail(path, "must be a lowercase SHA-256 digest");
     if (schema.format === "base64") {
@@ -73,7 +74,13 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
       if (schema.schemes && !schema.schemes.includes(uri.protocol.slice(0, -1).toLowerCase())) fail(path, `must use ${schema.schemes.join(" or ")}`);
       if (schema.requireHost && !uri.hostname) fail(path, "must include a host");
       if (schema.allowFragment === false && uri.hash) fail(path, "must not include a fragment");
+      if (schema.authorityOnly) {
+        const match = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]+(.*)$/.exec(value);
+        const suffix = match?.[1];
+        if (suffix === undefined || (suffix !== "" && !(schema.allowRootPath && suffix === "/"))) fail(path, "must contain only an authority");
+      }
     }
+    if (schema.format === "duration" && (!/^P(?=\d|T\d)(?:\d+D)?(?:T(?=\d)(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$/.test(value) || !/[1-9]/.test(value))) fail(path, "must be a positive ISO-8601 duration");
     if (schema.format === "absolute-path" && !value.startsWith("/")) fail(path, "must be an absolute path");
     return;
   }

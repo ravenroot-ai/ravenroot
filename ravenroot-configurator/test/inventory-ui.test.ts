@@ -59,6 +59,12 @@ describe("guided registry", () => {
     expect(document.querySelector('[data-target-option="derivedImage"]')).not.toBeNull();
     expect(document.querySelector("#secret-kubernetes-name")).not.toBeNull();
     expect(document.querySelector("#secret-kubernetes-key")).not.toBeNull();
+    expect(document.querySelector("#configurations")?.textContent).toContain("sample suggestion");
+    expect(document.querySelector("#configurations")?.textContent).toContain("otherwise runtime default");
+    expect(document.querySelector("#configurations")?.textContent).toContain("operator input required");
+    expect(document.querySelector("#configurations")?.textContent).toContain("Connector constraints");
+    expect(document.querySelector("#configurations")?.textContent).toContain("Required runtime capability: outbound-http");
+    expect(document.querySelector("#configurations")?.textContent).toContain("External requirement: A configured sandbox supervisor");
     kind.value = "prestart"; kind.dispatchEvent(new Event("change"));
     expect(document.querySelector('[data-target-option="restartCommandJson"]')).not.toBeNull();
     expect(document.querySelector('[data-target-option="verifyCommandJson"]')).not.toBeNull();

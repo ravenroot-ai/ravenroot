@@ -423,8 +423,13 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     runtimeVerifier: "core.publication-policies", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["The configurator installs the immutable policy registry as a mounted operator-owned JSON file."],
     fields: [strictJson("core.publication-policies", "policyDocument", "Publication policy registry", { schemaVersion: 1, policies: [{ id: "public", version: "v1", maxCandidateBytes: 1048576,
-        rules: [{ type: "destination", id: "destination.approved", allowedTypes: ["repository"],
-          allowedAddresses: ["public"] }, { type: "provenance", id: "provenance.complete", allowedSourceTypes: ["graph"] }] }] })]
+        rules: [{ type: "destination", id: "destination.approved", allowedTypes: ["repository"], allowedAddresses: ["public"] },
+          { type: "logical-path", id: "path.private", privatePrefixes: ["private/"], denyAbsolute: true, denyParentTraversal: true, denyHomeRelative: true },
+          { type: "sensitive-content", id: "content.secret", kind: "SECRET", signatures: [{ literal: "sanitized-example-marker", mode: "TOKEN" }], inspectEncodings: true, joinFragments: true, inspectConfusables: true, maxNormalizedCharacters: 1048576 },
+          { type: "language", id: "language.approved", allowedLanguages: ["en"], allowSubtags: true },
+          { type: "artifact-type", id: "artifact.approved", allowedTypes: ["text/markdown"], allowBinary: false },
+          { type: "required-file-pair", id: "files.paired", firstSuffix: ".sig", requiredSuffix: ".json" },
+          { type: "provenance", id: "provenance.complete", allowedSourceTypes: ["graph"] }] }] })]
   },
   {
     schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -433,11 +438,32 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     runtimeVerifier: "core.runner", restartRequired: true, credentialResolver: "shared",
     externalRequirements: ["The configured artifact directory and runner identity files must exist on the target."],
     fields: [strictJson("core.runner", "runnerDocument", "Runner control-plane configuration", { protocolVersion: 1, runnerIssuer: "https://identity.example.test",
-        artifactDirectory: "/var/lib/ravenroot/runner-artifacts", tenants: { "tenant-a": {
+        artifactDirectory: "/var/lib/ravenroot/runner-artifacts", control: { continuationThreads: 4, continuationQueue: 16, recoveryPageSize: 16,
+          recoveryInterval: "PT2S", continuationLease: "PT30S", nodeTimeout: "PT10S" }, tenants: { "tenant-a": {
           policy: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
             wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
             artifactBytes: 131072, logBytes: 8192, payloadBytes: 16384 } },
-          definitions: [], runners: [], workspaceProfiles: []
+          definitions: [{ name: "reviewer", version: 1, instructions: "Review the supplied workspace.", runtimeProfile: "agent",
+            modelProfile: "governed-model", budgets: { modelTurns: 12, toolCalls: 24, modelTokens: 20000, tokensPerTurn: 2048 },
+            skillInstructions: {}, skills: [], runnerRequirements: ["development"],
+            policy: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
+              wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
+              artifactBytes: 131072, logBytes: 8192, payloadBytes: 16384 } },
+            workspaceRetention: "PT1H", outputSchema: "review-result", commands: [{ name: "review", readOnly: true,
+              policy: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
+                wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
+                artifactBytes: 131072, logBytes: 8192, payloadBytes: 16384 } }, outcomes: ["approved", "changes-requested"] }] }],
+          runners: [{ protocolVersion: 1, runnerId: "workspace-runner", trustProfile: "local-container-v1", labels: ["development"],
+            capabilities: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
+              wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
+              artifactBytes: 131072, logBytes: 8192, payloadBytes: 16384 } } }],
+          workspaceProfiles: [{ name: "development", version: 1, workspaceScope: "PROCESS_INSTANCE", runtimeLifecycle: "PER_WORKSPACE",
+            runnerPool: "development", runtimeProfile: "agent", policy: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
+              wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
+              artifactBytes: 131072, logBytes: 8192, payloadBytes: 16384 } },
+            capacity: { mutatingUsers: 1, readOnlyUsers: 4, materializedWorkspaces: 8, aggregateStorageBytes: 536870912,
+              queuedJobs: 32, retainedJobs: 256, admission: "QUEUE" }, retention: "PT1H", completionPolicy: "REQUIRE_CLOSED",
+            allowedAgents: ["reviewer"] }]
         } } })]
   }
 ] as const;
@@ -494,6 +520,52 @@ function scalar(field: FieldSpec, value: unknown): string {
   return string;
 }
 
+function validateCoreDocumentRelations(contractId: string, values: Readonly<Record<string, unknown>>): void {
+  const document = (values.interactionDocument ?? values.policyDocument ?? values.runnerDocument) as Record<string, unknown> | undefined;
+  if (!document) return;
+  if (contractId === "core.human-task") {
+    for (const profile of document.profiles as Record<string, unknown>[]) {
+      const launch = new URL(String(profile.launchUri)); const origin = new URL(String(profile.origin));
+      const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(origin.hostname);
+      if (origin.protocol !== "https:" && !(origin.protocol === "http:" && loopback)) throw new Error("core.human-task origin must use HTTPS or loopback HTTP");
+      const port = (uri: URL): string => uri.port || (uri.protocol === "https:" ? "443" : "80");
+      if (launch.protocol.toLowerCase() !== origin.protocol.toLowerCase() || launch.hostname.toLowerCase() !== origin.hostname.toLowerCase() || port(launch) !== port(origin)) {
+        throw new Error("core.human-task launchUri must use its registered origin");
+      }
+    }
+  }
+  if (contractId === "core.publication-policies") {
+    const policies = document.policies as Record<string, unknown>[];
+    const identities = policies.map((policy) => `${policy.id}\u0000${policy.version}`);
+    if (new Set(identities).size !== identities.length) throw new Error("core.publication-policies policy id and version must be unique");
+    for (const policy of policies) {
+      const rules = policy.rules as Record<string, unknown>[]; const ids = rules.map((rule) => String(rule.id));
+      if (new Set(ids).size !== ids.length) throw new Error("core.publication-policies rule ids must be unique");
+      if (ids.some((id) => id.startsWith("boundary."))) throw new Error("core.publication-policies rule ids cannot use the reserved boundary namespace");
+      for (const rule of rules) if (rule.type === "required-file-pair" && rule.firstSuffix === rule.requiredSuffix) {
+        throw new Error("core.publication-policies required file suffixes must differ");
+      }
+    }
+  }
+  if (contractId === "core.runner") {
+    for (const tenant of Object.values(document.tenants as Record<string, Record<string, unknown>>)) {
+      const definitions = tenant.definitions as Record<string, unknown>[];
+      for (const definition of definitions) {
+        const skills = new Set((definition.skills as string[]) ?? []);
+        if (Object.keys((definition.skillInstructions as Record<string, string>) ?? {}).some((name) => !skills.has(name))) throw new Error("core.runner skillInstructions must belong to configured skills");
+        const commands = definition.commands as Record<string, unknown>[]; const names = commands.map((command) => String(command.name));
+        if (new Set(names).size !== names.length) throw new Error("core.runner command names must be unique");
+        for (const command of commands) if (["plan", "read", "research", "review", "summarize"].includes(String(command.name)) && command.readOnly !== true) throw new Error("core.runner reserved read-only commands must be readOnly");
+      }
+      for (const profile of (tenant.workspaceProfiles as Record<string, unknown>[] | undefined) ?? []) {
+        const workspace = Number(((profile.policy as Record<string, unknown>).limits as Record<string, unknown>).workspaceBytes);
+        const aggregate = Number((profile.capacity as Record<string, unknown>).aggregateStorageBytes);
+        if (aggregate < workspace) throw new Error("core.runner aggregateStorageBytes must admit one workspace");
+      }
+    }
+  }
+}
+
 export function serializeSelection(selection: ConfigurationSelection): Readonly<Record<string, string>> {
   const contract = CONTRACT_BY_ID.get(selection.contractId);
   if (!contract) throw new Error(`Unknown configuration contract: ${selection.contractId}`);
@@ -506,6 +578,7 @@ export function serializeSelection(selection: ConfigurationSelection): Readonly<
   if (unsupported.length) throw new Error(`${contract.id} contains unsupported values: ${unsupported.join(", ")}`);
 
   if (contract.encoding === "plain-environment") {
+    validateCoreDocumentRelations(contract.id, selection.values);
     const result: Record<string, string> = {};
     for (const field of contract.fields) {
       scalar(field, selection.values[field.name]);

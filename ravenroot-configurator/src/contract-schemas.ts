@@ -1,4 +1,5 @@
 // Generated from the reviewed Java resolver contracts. Edit deliberately; never infer this catalog from examples.
+import { CORE_CONTRACT_SCHEMAS } from "./core-contract-schemas.js";
 import type { ValueSchema } from "./types.js";
 
 export const CONTRACT_SCHEMA_VERSION = 1 as const;
@@ -61,7 +62,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           }
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "httpMethods": {
@@ -69,11 +70,11 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
         "items": {
           "kind": "string",
           "minimumLength": 1,
-          "maximumLength": 16,
+          "maximumLength": 32,
           "pattern": "[A-Z]+"
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "requestHeaders": {
@@ -84,7 +85,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           "maximumLength": 128
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "responseHeaders": {
@@ -95,7 +96,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           "maximumLength": 128
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "webSocketSubprotocols": {
@@ -106,7 +107,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           "maximumLength": 128
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "credentialBindings": {
@@ -117,7 +118,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
             "bindingId": {
               "kind": "string",
               "minimumLength": 1,
-              "maximumLength": 128
+              "maximumLength": 256
             },
             "origin": {
               "kind": "object",
@@ -157,7 +158,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           }
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "awsSigV4Bindings": {
@@ -168,7 +169,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
             "bindingId": {
               "kind": "string",
               "minimumLength": 1,
-              "maximumLength": 128
+              "maximumLength": 256
             },
             "origin": {
               "kind": "object",
@@ -198,12 +199,12 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
             "credentialReference": {
               "kind": "string",
               "minimumLength": 1,
-              "maximumLength": 128
+              "maximumLength": 256
             },
             "region": {
               "kind": "string",
               "minimumLength": 1,
-              "maximumLength": 63
+              "maximumLength": 64
             },
             "service": {
               "kind": "string",
@@ -214,7 +215,7 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           }
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "credentialReferences": {
@@ -222,10 +223,10 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
         "items": {
           "kind": "string",
           "minimumLength": 1,
-          "maximumLength": 128
+          "maximumLength": 4096
         },
         "minimumItems": 0,
-        "maximumItems": 64,
+        "maximumItems": 256,
         "unique": true
       },
       "limits": {
@@ -287,17 +288,17 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           "maxDeadlineMs": {
             "kind": "integer",
             "minimum": 1,
-            "maximum": 2147483647
+            "maximum": 9223372036854
           },
           "maxWebSocketLifetimeMs": {
             "kind": "integer",
             "minimum": 1,
-            "maximum": 2147483647
+            "maximum": 9223372036854
           },
           "maxWebSocketIdleMs": {
             "kind": "integer",
             "minimum": 1,
-            "maximum": 2147483647
+            "maximum": 9223372036854
           }
         }
       }
@@ -321,7 +322,8 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
       "model": {
         "kind": "string",
         "minimumLength": 1,
-        "maximumLength": 256
+        "maximumLength": 256,
+        "nonBlank": true
       },
       "credentialBindingId": {
         "kind": "string",
@@ -764,6 +766,11 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
   },
   "openapi-client.profile": {
     "kind": "object",
+    "optional": [
+      "fixedHeaders",
+      "credentialBindingId",
+      "credentialReference"
+    ],
     "properties": {
       "origin": {
         "kind": "string",
@@ -774,7 +781,9 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
           "https"
         ],
         "requireHost": true,
-        "allowFragment": false
+        "allowFragment": false,
+        "authorityOnly": true,
+        "allowRootPath": true
       },
       "specBase64": {
         "kind": "string",
@@ -876,6 +885,9 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
     "properties": {
       "authority": {
         "kind": "object",
+        "optional": [
+          "requiredScopes"
+        ],
         "properties": {
           "listenerId": {
             "kind": "string",
@@ -1424,6 +1436,9 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
     "properties": {
       "authority": {
         "kind": "object",
+        "optional": [
+          "requiredScopes"
+        ],
         "properties": {
           "listenerId": {
             "kind": "string",
@@ -1790,6 +1805,9 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
         "kind": "map",
         "values": {
           "kind": "object",
+          "optional": [
+            "initialSince"
+          ],
           "properties": {
             "tenantId": {
               "kind": "string",
@@ -2636,362 +2654,5 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
       }
     }
   },
-  "core.human-task:interactionDocument": {
-    "kind": "object",
-    "properties": {
-      "schemaVersion": {
-        "kind": "integer",
-        "minimum": 1,
-        "maximum": 9007199254740991
-      },
-      "capabilityTtlSeconds": {
-        "kind": "integer",
-        "minimum": 1,
-        "maximum": 9007199254740991
-      },
-      "maxCompletionBytes": {
-        "kind": "integer",
-        "minimum": 1,
-        "maximum": 9007199254740991
-      },
-      "capabilitySecretBase64": {
-        "kind": "object",
-        "properties": {
-          "$secret": {
-            "kind": "string",
-            "minimumLength": 1,
-            "maximumLength": 4096
-          }
-        }
-      },
-      "profiles": {
-        "kind": "array",
-        "items": {
-          "kind": "object",
-          "properties": {
-            "id": {
-              "kind": "string",
-              "minimumLength": 1,
-              "maximumLength": 4096
-            },
-            "version": {
-              "kind": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            },
-            "kind": {
-              "kind": "string",
-              "minimumLength": 1,
-              "maximumLength": 4096
-            },
-            "launchUri": {
-              "kind": "string",
-              "minimumLength": 1,
-              "maximumLength": 4096
-            },
-            "origin": {
-              "kind": "string",
-              "format": "uri",
-              "minimumLength": 1,
-              "maximumLength": 2048,
-              "schemes": [
-                "http",
-                "https"
-              ],
-              "requireHost": true,
-              "allowFragment": false
-            },
-            "completionSecretBase64": {
-              "kind": "object",
-              "properties": {
-                "$secret": {
-                  "kind": "string",
-                  "minimumLength": 1,
-                  "maximumLength": 4096
-                }
-              }
-            }
-          }
-        },
-        "minimumItems": 0,
-        "maximumItems": 1024,
-        "unique": true
-      }
-    }
-  },
-  "core.publication-policies:policyDocument": {
-    "kind": "object",
-    "properties": {
-      "schemaVersion": {
-        "kind": "integer",
-        "minimum": 1,
-        "maximum": 9007199254740991
-      },
-      "policies": {
-        "kind": "array",
-        "items": {
-          "kind": "object",
-          "properties": {
-            "id": {
-              "kind": "string",
-              "minimumLength": 1,
-              "maximumLength": 4096
-            },
-            "version": {
-              "kind": "string",
-              "minimumLength": 1,
-              "maximumLength": 4096
-            },
-            "maxCandidateBytes": {
-              "kind": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            },
-            "rules": {
-              "kind": "array",
-              "items": {
-                "kind": "union",
-                "choices": [
-                  {
-                    "kind": "object",
-                    "properties": {
-                      "type": {
-                        "kind": "string",
-                        "minimumLength": 1,
-                        "maximumLength": 4096
-                      },
-                      "id": {
-                        "kind": "string",
-                        "minimumLength": 1,
-                        "maximumLength": 4096
-                      },
-                      "allowedTypes": {
-                        "kind": "array",
-                        "items": {
-                          "kind": "string",
-                          "minimumLength": 1,
-                          "maximumLength": 4096
-                        },
-                        "minimumItems": 0,
-                        "maximumItems": 1024,
-                        "unique": true
-                      },
-                      "allowedAddresses": {
-                        "kind": "array",
-                        "items": {
-                          "kind": "string",
-                          "minimumLength": 1,
-                          "maximumLength": 4096
-                        },
-                        "minimumItems": 0,
-                        "maximumItems": 1024,
-                        "unique": true
-                      }
-                    }
-                  },
-                  {
-                    "kind": "object",
-                    "properties": {
-                      "type": {
-                        "kind": "string",
-                        "minimumLength": 1,
-                        "maximumLength": 4096
-                      },
-                      "id": {
-                        "kind": "string",
-                        "minimumLength": 1,
-                        "maximumLength": 4096
-                      },
-                      "allowedSourceTypes": {
-                        "kind": "array",
-                        "items": {
-                          "kind": "string",
-                          "minimumLength": 1,
-                          "maximumLength": 4096
-                        },
-                        "minimumItems": 0,
-                        "maximumItems": 1024,
-                        "unique": true
-                      }
-                    }
-                  }
-                ]
-              },
-              "minimumItems": 0,
-              "maximumItems": 1024,
-              "unique": true
-            }
-          }
-        },
-        "minimumItems": 0,
-        "maximumItems": 1024,
-        "unique": true
-      }
-    }
-  },
-  "core.runner:runnerDocument": {
-    "kind": "object",
-    "properties": {
-      "protocolVersion": {
-        "kind": "integer",
-        "minimum": 1,
-        "maximum": 9007199254740991
-      },
-      "runnerIssuer": {
-        "kind": "string",
-        "minimumLength": 1,
-        "maximumLength": 4096
-      },
-      "artifactDirectory": {
-        "kind": "string",
-        "format": "absolute-path",
-        "minimumLength": 1,
-        "maximumLength": 4096
-      },
-      "tenants": {
-        "kind": "map",
-        "values": {
-          "kind": "object",
-          "properties": {
-            "policy": {
-              "kind": "object",
-              "properties": {
-                "capabilities": {
-                  "kind": "array",
-                  "items": {
-                    "kind": "string",
-                    "minimumLength": 1,
-                    "maximumLength": 4096
-                  },
-                  "minimumItems": 0,
-                  "maximumItems": 1024,
-                  "unique": true
-                },
-                "tools": {
-                  "kind": "array",
-                  "items": {
-                    "kind": "string",
-                    "minimumLength": 1,
-                    "maximumLength": 4096
-                  },
-                  "minimumItems": 0,
-                  "maximumItems": 1024,
-                  "unique": true
-                },
-                "network": {
-                  "kind": "array",
-                  "items": {
-                    "kind": "string",
-                    "minimumLength": 1,
-                    "maximumLength": 4096
-                  },
-                  "minimumItems": 0,
-                  "maximumItems": 1024,
-                  "unique": true
-                },
-                "secrets": {
-                  "kind": "array",
-                  "items": {
-                    "kind": "string",
-                    "minimumLength": 1,
-                    "maximumLength": 4096
-                  },
-                  "minimumItems": 0,
-                  "maximumItems": 1024,
-                  "unique": true
-                },
-                "mounts": {
-                  "kind": "array",
-                  "items": {
-                    "kind": "string",
-                    "minimumLength": 1,
-                    "maximumLength": 4096
-                  },
-                  "minimumItems": 0,
-                  "maximumItems": 1024,
-                  "unique": true
-                },
-                "limits": {
-                  "kind": "object",
-                  "properties": {
-                    "wallTime": {
-                      "kind": "string",
-                      "minimumLength": 1,
-                      "maximumLength": 4096
-                    },
-                    "memoryBytes": {
-                      "kind": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    },
-                    "processes": {
-                      "kind": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    },
-                    "workspaceBytes": {
-                      "kind": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    },
-                    "artifactBytes": {
-                      "kind": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    },
-                    "logBytes": {
-                      "kind": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    },
-                    "payloadBytes": {
-                      "kind": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    }
-                  }
-                }
-              }
-            },
-            "definitions": {
-              "kind": "array",
-              "items": {
-                "kind": "string",
-                "minimumLength": 1,
-                "maximumLength": 4096
-              },
-              "minimumItems": 0,
-              "maximumItems": 1024,
-              "unique": true
-            },
-            "runners": {
-              "kind": "array",
-              "items": {
-                "kind": "string",
-                "minimumLength": 1,
-                "maximumLength": 4096
-              },
-              "minimumItems": 0,
-              "maximumItems": 1024,
-              "unique": true
-            },
-            "workspaceProfiles": {
-              "kind": "array",
-              "items": {
-                "kind": "string",
-                "minimumLength": 1,
-                "maximumLength": 4096
-              },
-              "minimumItems": 0,
-              "maximumItems": 1024,
-              "unique": true
-            }
-          }
-        },
-        "minimumEntries": 1,
-        "maximumEntries": 256,
-        "keyPattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,159}"
-      }
-    }
-  }
+  ...CORE_CONTRACT_SCHEMAS
 } as const satisfies Readonly<Record<string, ValueSchema>>;

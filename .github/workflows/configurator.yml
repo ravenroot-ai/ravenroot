@@ -26,8 +26,21 @@ on:
       - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadJson.java
       - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java
       - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadValue.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HandlerRegistration.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/publication/PublicationPolicy.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/publication/PublicationPolicyReference.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/publication/PublicationRule.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/publication/PublicationRuleId.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/runner/AgentCommand.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/runner/AgentDefinition.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/runner/RunnerFleetLimits.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/runner/RunnerPolicy.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/runner/RunnerRegistration.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/runner/WorkspaceProfile.java
       - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/EnvironmentKeyCodec.java
       - ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/NodePackageEgressPolicy.java
+      - ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/RunnerControlConfiguration.java
+      - ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/RunnerJson.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java

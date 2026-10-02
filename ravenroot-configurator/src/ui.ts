@@ -92,16 +92,22 @@ function emptyValue(schema: ValueSchema): unknown {
   }
 }
 
-function schemaControl(schema: ValueSchema, current: unknown, update: (value: unknown) => void, labelText: string): HTMLElement {
+type ValueProvenance = "sample suggestion" | "runtime default" | "sample suggestion; operator input required";
+
+function schemaControl(schema: ValueSchema, current: unknown, update: (value: unknown) => void, labelText: string, provenance?: ValueProvenance): HTMLElement {
+  const displayedLabel = provenance ? `${labelText} — ${provenance}` : labelText;
   const composite = schema.kind === "object" || schema.kind === "map" || schema.kind === "array" || schema.kind === "union";
   const wrapper = document.createElement(composite ? "fieldset" : "label");
-  if (wrapper instanceof HTMLFieldSetElement) { const legend = document.createElement("legend"); legend.textContent = labelText; wrapper.append(legend); }
-  else wrapper.append(document.createTextNode(labelText));
+  if (wrapper instanceof HTMLFieldSetElement) { const legend = document.createElement("legend"); legend.textContent = displayedLabel; wrapper.append(legend); }
+  else wrapper.append(document.createTextNode(displayedLabel));
   const constraints: string[] = [];
   if (schema.kind === "string") {
     if (schema.minimumLength !== undefined || schema.maximumLength !== undefined) constraints.push(`length ${schema.minimumLength ?? 0}–${schema.maximumLength ?? "unbounded"}`);
     if (schema.schemes) constraints.push(`scheme ${schema.schemes.join("/")}`);
     if (schema.pattern) constraints.push(`pattern ${schema.pattern}`);
+    if (schema.nonBlank) constraints.push("non-whitespace text");
+    if (schema.authorityOnly) constraints.push("authority only (no path, query, or fragment)");
+    if (schema.format === "duration") constraints.push("positive ISO-8601 duration");
   } else if (schema.kind === "integer") constraints.push(`range ${schema.minimum ?? "unbounded"}–${schema.maximum ?? "unbounded"}`);
   else if (schema.kind === "array") constraints.push(`items ${schema.minimumItems ?? 0}–${schema.maximumItems ?? "unbounded"}${schema.unique ? ", unique" : ""}`);
   else if (schema.kind === "map") constraints.push(`entries ${schema.minimumEntries ?? 0}–${schema.maximumEntries ?? "unbounded"}`);
@@ -112,18 +118,18 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
     const slot = document.createElement("div");
     const matching = schema.choices.findIndex((choice) => { try { validateValue(choice, current); return true; } catch { return false; } });
     select.value = String(Math.max(0, matching));
-    const refresh = (replace: boolean): void => { const value = replace ? emptyValue(schema.choices[Number(select.value)]!) : current; if (replace) update(value); slot.replaceChildren(schemaControl(schema.choices[Number(select.value)]!, value, update, labelText)); };
+    const refresh = (replace: boolean): void => { const value = replace ? emptyValue(schema.choices[Number(select.value)]!) : current; if (replace) update(value); slot.replaceChildren(schemaControl(schema.choices[Number(select.value)]!, value, update, labelText, provenance)); };
     select.addEventListener("change", () => refresh(true)); wrapper.append(select, slot); refresh(false); return wrapper;
   }
   if (schema.kind === "object") {
     const object = (current && typeof current === "object" && !Array.isArray(current) ? current : emptyValue(schema)) as Record<string, unknown>;
     const optional = new Set(schema.optional ?? []);
     for (const [name, child] of Object.entries(schema.properties)) {
-      if (!optional.has(name)) { wrapper.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, name)); continue; }
+      if (!optional.has(name)) { wrapper.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, name, provenance)); continue; }
       const slot = document.createElement("div"); const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = name in object;
       const caption = document.createElement("span"); caption.textContent = `Set optional ${name} (otherwise runtime default)`; slot.append(toggle, caption);
       const control = document.createElement("div");
-      const refresh = (): void => { control.replaceChildren(); if (toggle.checked) { if (!(name in object)) object[name] = emptyValue(child); control.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, `${name} sample suggestion`)); } else delete object[name]; update(object); };
+      const refresh = (): void => { control.replaceChildren(); if (toggle.checked) { if (!(name in object)) object[name] = emptyValue(child); control.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, name, "sample suggestion")); } else delete object[name]; update(object); };
       toggle.addEventListener("change", refresh); refresh(); slot.append(control); wrapper.append(slot);
     }
     return wrapper;
@@ -134,7 +140,7 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
     const refresh = (): void => {
       list.replaceChildren(...array.map((item, index) => {
         const row = document.createElement("div"); row.className = "row";
-        row.append(schemaControl(schema.items, item, (value) => { array[index] = value; update(array); }, `${labelText} ${index + 1}`));
+        row.append(schemaControl(schema.items, item, (value) => { array[index] = value; update(array); }, `${labelText} ${index + 1}`, provenance));
         const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary"; remove.textContent = "Remove";
         remove.addEventListener("click", () => { array.splice(index, 1); update(array); refresh(); }); row.append(remove); return row;
       }));
@@ -150,7 +156,7 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
         const row = document.createElement("div"); row.className = "panel";
         const key = document.createElement("input"); key.value = name; key.setAttribute("aria-label", `${labelText} key`);
         key.addEventListener("change", () => { const next = key.value.trim(); if (next && next !== name) { map[next] = map[name]; delete map[name]; update(map); refresh(); } });
-        row.append(key, schemaControl(schema.values, item, (value) => { map[name] = value; update(map); }, name));
+        row.append(key, schemaControl(schema.values, item, (value) => { map[name] = value; update(map); }, name, provenance));
         const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary"; remove.textContent = "Remove";
         remove.addEventListener("click", () => { delete map[name]; update(map); refresh(); }); row.append(remove); return row;
       }));
@@ -161,7 +167,7 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
   if (schema.kind === "nullable") {
     const enabled = document.createElement("input"); enabled.type = "checkbox"; enabled.checked = current !== null;
     const slot = document.createElement("span");
-    const refresh = (): void => { slot.replaceChildren(); if (enabled.checked) slot.append(schemaControl(schema.value, current ?? emptyValue(schema.value), update, labelText)); else update(null); };
+    const refresh = (): void => { slot.replaceChildren(); if (enabled.checked) slot.append(schemaControl(schema.value, current ?? emptyValue(schema.value), update, labelText, provenance)); else update(null); };
     enabled.addEventListener("change", refresh); wrapper.append(enabled, slot); refresh(); return wrapper;
   }
   if (schema.kind === "null") { wrapper.append(document.createTextNode("none")); return wrapper; }
@@ -191,20 +197,28 @@ function configurationView(): void {
     const heading = document.createElement("div"); heading.className = "row"; const title = document.createElement("strong"); title.textContent = contract.title;
     const remove = document.createElement("button"); remove.className = "secondary"; remove.type = "button"; remove.textContent = "Remove"; remove.addEventListener("click", () => { selections.splice(index, 1); configurationView(); }); heading.append(title, remove); panel.append(heading);
     const grid = document.createElement("div"); grid.className = "grid";
-    for (const axis of contract.identity) { const label = document.createElement("label"); label.append(document.createTextNode(axis)); const input = document.createElement("input"); input.dataset.axis = axis; input.value = selection.identity[axis] ?? ""; input.addEventListener("input", () => { (selection.identity as Record<string, string>)[axis] = input.value; }); label.append(input); grid.append(label); }
+    for (const axis of contract.identity) { const label = document.createElement("label"); label.append(document.createTextNode(`${axis} — sample suggestion; operator input required`)); const input = document.createElement("input"); input.dataset.axis = axis; input.value = selection.identity[axis] ?? ""; input.required = true; input.addEventListener("input", () => { (selection.identity as Record<string, string>)[axis] = input.value; }); label.append(input); grid.append(label); }
     if (contract.encoding === "base64-json" && contract.schema) {
       const note = document.createElement("p"); note.className = "constraint"; note.textContent = `Schema v${contract.schemaVersion}. Values shown are editable sample suggestions; omitted optional members use runtime defaults.`; grid.append(note);
-      grid.append(schemaControl(contract.schema, selection.values.document, (value) => { (selection.values as Record<string, unknown>).document = value; }, "Configuration"));
+      grid.append(schemaControl(contract.schema, selection.values.document, (value) => { (selection.values as Record<string, unknown>).document = value; }, "Configuration", "sample suggestion"));
     }
     else for (const field of contract.fields) {
-      if (field.schema) { grid.append(schemaControl(field.schema, selection.values[field.name], (value) => { (selection.values as Record<string, unknown>)[field.name] = value; }, field.label)); continue; }
+      const provenance: ValueProvenance = field.suggestion !== undefined ? "sample suggestion" : field.runtimeDefault !== undefined ? "runtime default" : "sample suggestion; operator input required";
+      if (field.schema) { grid.append(schemaControl(field.schema, selection.values[field.name], (value) => { (selection.values as Record<string, unknown>)[field.name] = value; }, field.label, provenance)); continue; }
       const schema: ValueSchema = field.type === "integer" ? { kind: "integer", minimum: field.minimum, maximum: field.maximum } : field.type === "boolean" ? { kind: "boolean" }
         : field.type === "csv" ? { kind: "array", items: { kind: "string", minimumLength: 1, maximumLength: 4096 }, unique: true }
           : { kind: "string", minimumLength: field.required && !field.allowEmpty ? 1 : 0, maximumLength: 4096, allowed: field.allowed };
-      grid.append(schemaControl(schema, selection.values[field.name], (value) => { (selection.values as Record<string, unknown>)[field.name] = value; }, field.label));
+      grid.append(schemaControl(schema, selection.values[field.name], (value) => { (selection.values as Record<string, unknown>)[field.name] = value; }, field.label, provenance));
     }
     const nodes = document.createElement("p"); for (const node of contract.nodeIds) { const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = node; nodes.append(chip); }
-    panel.append(grid, nodes); root.append(panel);
+    const requirements = document.createElement("div"); requirements.className = "constraint";
+    const capabilityHeading = document.createElement("strong"); capabilityHeading.textContent = "Connector constraints"; requirements.append(capabilityHeading);
+    const capabilityList = document.createElement("ul");
+    for (const capability of contract.requiredCapabilities ?? []) { const item = document.createElement("li"); item.textContent = `Required runtime capability: ${capability}`; capabilityList.append(item); }
+    for (const requirement of contract.externalRequirements ?? []) { const item = document.createElement("li"); item.textContent = `External requirement: ${requirement}`; capabilityList.append(item); }
+    if (!capabilityList.childElementCount) { const item = document.createElement("li"); item.textContent = "No additional connector capability or external dependency."; capabilityList.append(item); }
+    requirements.append(capabilityList);
+    panel.append(grid, requirements, nodes); root.append(panel);
   });
 }
 

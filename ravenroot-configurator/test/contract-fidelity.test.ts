@@ -83,6 +83,30 @@ describe("runtime contract fidelity", () => {
     const identity = templateSelection("ai.llm-profile") as { identity: { profile?: string } };
     identity.identity.profile = "x".repeat(65);
     expect(() => serializeSelection(identity)).toThrow("1 to 64 characters");
+    const blankModel = templateSelection("ai.llm-profile") as { values: { document: Record<string, unknown> } };
+    blankModel.values.document.model = "   ";
+    expect(() => serializeSelection(blankModel)).toThrow("non-whitespace");
+    for (const origin of ["https://api.example.test/v1", "https://api.example.test?tenant=a"]) {
+      const openapi = templateSelection("openapi-client.profile") as { values: { document: Record<string, unknown> } };
+      openapi.values.document.origin = origin;
+      expect(() => serializeSelection(openapi)).toThrow("only an authority");
+    }
+  });
+
+  test("models every governed runner catalog entry and protocol boundary", async () => {
+    const runner = templateSelection("core.runner") as { values: { runnerDocument: Record<string, unknown> } };
+    expect(() => serializeSelection(runner)).not.toThrow();
+    const tenant = Object.values(runner.values.runnerDocument.tenants as Record<string, Record<string, unknown>>)[0]!;
+    expect((tenant.definitions as unknown[])[0]).toBeTypeOf("object");
+    expect((tenant.runners as unknown[])[0]).toBeTypeOf("object");
+    expect((tenant.workspaceProfiles as unknown[])[0]).toBeTypeOf("object");
+    runner.values.runnerDocument.protocolVersion = 2;
+    expect(() => serializeSelection(runner)).toThrow("at most 1");
+
+    const documented = JSON.parse(await readFile(resolve("..", "docs/examples/governed-runner/control-plane.json"), "utf8"));
+    const documentedSelection = templateSelection("core.runner") as { values: { runnerDocument: Record<string, unknown> } };
+    documentedSelection.values.runnerDocument = documented;
+    expect(() => serializeSelection(documentedSelection)).not.toThrow();
   });
 
   test("matches the OpenAPI runtime resolver's exact field sets", async () => {

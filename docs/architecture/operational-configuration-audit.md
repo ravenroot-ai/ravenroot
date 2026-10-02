@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 24544 |
+| Atomic operational candidates discovered | 24549 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 24544 |
+| Reviewed | 24549 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1972 |
+| Retained security ceilings or defaults | 1974 |
 | Retained protocol or format invariants | 10076 |
 | Retained published contract descriptions | 530 |
 | Retained presentation text | 700 |
 | Retained derived values | 1093 |
-| Test fixtures | 8512 |
+| Test fixtures | 8515 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 2199.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 125.
+Checked source reconciliations: 128.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 24544 candidates.
+zero-count or unclassified rows as needed and sums to 24549 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 24544 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 22883 |
+| retained | 22888 |
 
 ### Classification counts
 
@@ -88,8 +88,8 @@ zero-count or unclassified rows as needed and sums to 24544 candidates.
 | presentation-text | 700 |
 | protocol-or-format-invariant | 10076 |
 | published-contract-description | 530 |
-| security-ceiling-or-default | 1972 |
-| test-fixture | 8512 |
+| security-ceiling-or-default | 1974 |
+| test-fixture | 8515 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 24544 candidates.
 | deployment | 2864 |
 | deployment-example | 20 |
 | java | 7305 |
-| script | 2386 |
-| test-fixture | 8512 |
+| script | 2388 |
+| test-fixture | 8515 |
 | ui | 3457 |
 
 ### Owning remediation counts
@@ -116,9 +116,9 @@ assigned to an issue retroactively.
 | #317 | 149 |
 | #318 | 107 |
 | #319 | 287 |
-| #320 | 1471 |
+| #320 | 1473 |
 | #321 | 8508 |
-| Retained; no remediation required | 14016 |
+| Retained; no remediation required | 14019 |
 
 ## Latest reconciliation
 
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 24544 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 24544 |
+| Semantically classified additions | 5 |
+| Current candidates | 24549 |
 
 ## Final semantic review
 
@@ -804,6 +804,7 @@ structural validation and consumer evidence without fabricated candidate IDs.
 | github.published-schema-bounds | security-ceiling-or-default | 39 |
 | github.published-schema-description | published-contract-description | 2 |
 | github.published-schema-format | protocol-or-format-invariant | 664 |
+| github.release-draft-visibility-bound | security-ceiling-or-default | 2 |
 | github.release-file-path-bound | derived | 1 |
 | github.release-file-path-bound.security-ceiling-or-default | security-ceiling-or-default | 1 |
 | github.release-result-format | protocol-or-format-invariant | 1 |
@@ -15690,47 +15691,49 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-400691183723d68d6fb2` | `scripts/github_release.py:2` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
 | `oc-a48db9f13ca0a70c04c3` | `scripts/github_release.py:2` `module` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
 | `oc-ad91689d9238147fdfe3` | `scripts/github_release.py:2` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-258efc9677236628602a` | `scripts/github_release.py:16` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-2e991215fb7eee7f322f` | `scripts/github_release.py:20` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-3b6b9a4e0e3cddfee8c2` | `scripts/github_release.py:20` `module` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-f2541096576b865f0885` | `scripts/github_release.py:20` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-9819575b4746216caa6f` | `scripts/github_release.py:35` `digest` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-a942d555f11f6207f679` | `scripts/github_release.py:47` `release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-c3f41f1be4a106c9eee2` | `scripts/github_release.py:61` `release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-3656d5bfbee93b6d808c` | `scripts/github_release.py:67` `create_release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-59eb471b66ab7b600dbe` | `scripts/github_release.py:79` `create_release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-1182e8806a9ca1a01c86` | `scripts/github_release.py:87` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-6fb97c7d541b3489ec89` | `scripts/github_release.py:89` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-28f90c2a68b76d4164e5` | `scripts/github_release.py:90` `verify_release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-4deb53b8dc09b60e477d` | `scripts/github_release.py:91` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-18b54569910224826522` | `scripts/github_release.py:93` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-e7dd399425db3a82f7f4` | `scripts/github_release.py:95` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-961d55730e27e07a3cfe` | `scripts/github_release.py:109` `reconcile_assets` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-31ece5f0f8caa3142fc7` | `scripts/github_release.py:111` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-e7479958796f9e79b52c` | `scripts/github_release.py:118` `reconcile_assets` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-5606f42005cebdf0e433` | `scripts/github_release.py:120` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-c26fc8a52e3ce9e63d25` | `scripts/github_release.py:120` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-f29fd92d76ea3f5d69b5` | `scripts/github_release.py:120` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-cf86d4964468bbcc6453` | `scripts/github_release.py:138` `reconcile_assets` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-fdef11e900edb53e5c9a` | `scripts/github_release.py:138` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-d54ad04aaff817431f12` | `scripts/github_release.py:141` `reconcile_assets` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-20783b3efccf634d2d3b` | `scripts/github_release.py:146` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-2ab126d7ee53a6b2d7e1` | `scripts/github_release.py:146` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-2f467d22377e2fa0acbd` | `scripts/github_release.py:146` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-b8e4f0c06ef313d33f4d` | `scripts/github_release.py:146` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-46991401e3dfd4c8c13a` | `scripts/github_release.py:147` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-f2f8701325793c73ed72` | `scripts/github_release.py:147` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-0772b43643e80307bc75` | `scripts/github_release.py:155` `parser` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-0f3cc683dec8b02276b1` | `scripts/github_release.py:161` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-251b1ccfdda0685f2eae` | `scripts/github_release.py:161` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-5fac131ed20618b5ad0d` | `scripts/github_release.py:161` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-125c11a21e7762c3900d` | `scripts/github_release.py:162` `main` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
-| `oc-03a33af413c9ca467f7f` | `scripts/github_release.py:172` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
-| `oc-ff3614e05a9f0763b165` | `scripts/github_release.py:178` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-53b3e46de09d2be4e720` | `scripts/github_release.py:184` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-915d328eaac25d34e6b3` | `scripts/github_release.py:190` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-a2bbfc5341ec45a8a026` | `scripts/github_release.py:194` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
-| `oc-760f27be591db3129a74` | `scripts/github_release.py:196` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-258efc9677236628602a` | `scripts/github_release.py:17` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
+| `oc-744c938a64bbb148937a` | `scripts/github_release.py:18` `module` | script | retained | security-ceiling-or-default | The fixed retry count and interval bound draft-listing eventual consistency before immutable release work continues. |
+| `oc-178f1c6b2fef488d4ec4` | `scripts/github_release.py:19` `module` | script | retained | security-ceiling-or-default | The fixed retry count and interval bound draft-listing eventual consistency before immutable release work continues. |
+| `oc-2e991215fb7eee7f322f` | `scripts/github_release.py:23` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
+| `oc-3b6b9a4e0e3cddfee8c2` | `scripts/github_release.py:23` `module` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-f2541096576b865f0885` | `scripts/github_release.py:23` `module` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
+| `oc-9819575b4746216caa6f` | `scripts/github_release.py:38` `digest` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
+| `oc-a942d555f11f6207f679` | `scripts/github_release.py:50` `release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-c3f41f1be4a106c9eee2` | `scripts/github_release.py:64` `release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-3656d5bfbee93b6d808c` | `scripts/github_release.py:70` `create_release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-59eb471b66ab7b600dbe` | `scripts/github_release.py:82` `create_release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-1182e8806a9ca1a01c86` | `scripts/github_release.py:101` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-6fb97c7d541b3489ec89` | `scripts/github_release.py:103` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-28f90c2a68b76d4164e5` | `scripts/github_release.py:104` `verify_release` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-4deb53b8dc09b60e477d` | `scripts/github_release.py:105` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-18b54569910224826522` | `scripts/github_release.py:107` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-e7dd399425db3a82f7f4` | `scripts/github_release.py:109` `verify_release` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-961d55730e27e07a3cfe` | `scripts/github_release.py:123` `reconcile_assets` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-31ece5f0f8caa3142fc7` | `scripts/github_release.py:125` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-e7479958796f9e79b52c` | `scripts/github_release.py:132` `reconcile_assets` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-5606f42005cebdf0e433` | `scripts/github_release.py:134` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-c26fc8a52e3ce9e63d25` | `scripts/github_release.py:134` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-f29fd92d76ea3f5d69b5` | `scripts/github_release.py:134` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-cf86d4964468bbcc6453` | `scripts/github_release.py:152` `reconcile_assets` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
+| `oc-fdef11e900edb53e5c9a` | `scripts/github_release.py:152` `reconcile_assets` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-d54ad04aaff817431f12` | `scripts/github_release.py:155` `reconcile_assets` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-20783b3efccf634d2d3b` | `scripts/github_release.py:160` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-2ab126d7ee53a6b2d7e1` | `scripts/github_release.py:160` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-2f467d22377e2fa0acbd` | `scripts/github_release.py:160` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-b8e4f0c06ef313d33f4d` | `scripts/github_release.py:160` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-46991401e3dfd4c8c13a` | `scripts/github_release.py:161` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-f2f8701325793c73ed72` | `scripts/github_release.py:161` `publish_draft` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-0772b43643e80307bc75` | `scripts/github_release.py:169` `parser` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-0f3cc683dec8b02276b1` | `scripts/github_release.py:175` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-251b1ccfdda0685f2eae` | `scripts/github_release.py:175` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-5fac131ed20618b5ad0d` | `scripts/github_release.py:175` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-125c11a21e7762c3900d` | `scripts/github_release.py:176` `main` | script | retained | derived | The value is a local path/I/O/sentinel normalization used by the release tool. |
+| `oc-03a33af413c9ca467f7f` | `scripts/github_release.py:186` `main` | script | retained | protocol-or-format-invariant | The route, GitHub CLI verb/flag, field, or repository release path is a GitHub/tool protocol invariant. |
+| `oc-ff3614e05a9f0763b165` | `scripts/github_release.py:192` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-53b3e46de09d2be4e720` | `scripts/github_release.py:198` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-915d328eaac25d34e6b3` | `scripts/github_release.py:204` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-a2bbfc5341ec45a8a026` | `scripts/github_release.py:208` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
+| `oc-760f27be591db3129a74` | `scripts/github_release.py:210` `main` | script | retained | presentation-text | The text is a CLI diagnostic/help contract and contains no configurable authority. |
 | `oc-dc1902330bb7cb66ed78` | `scripts/lib/java-runtime.sh:23` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-148fb03663db370705a4` | `scripts/lib/java-runtime.sh:24` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-28e57de023cef1a2442c` | `scripts/lib/java-runtime.sh:24` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |

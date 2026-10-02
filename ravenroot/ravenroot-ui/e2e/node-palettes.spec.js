@@ -125,7 +125,9 @@ test('saves and manages a real selected node, then inserts by click and drop wit
   await authenticate(page, ALICE);
   await expect(page.locator('.node-palette summary')).toContainText(['Daily', 'Archive']);
   await page.locator('#btn-modify').click();
-  await page.evaluate(() => window.cy.getElementById('dosomething').select());
+  await page.evaluate(() => {
+    window.cy.getElementById('dosomething').select();
+  });
 
   const daily = await openPalette(page, 'Daily');
   page.once('dialog', dialog => dialog.accept('Saved behavior'));

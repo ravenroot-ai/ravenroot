@@ -8,7 +8,9 @@ The source is never mutated. The derived process receives new process, traversal
 
 The current contract accepts one acyclic pending node with one completed predecessor invocation. The predecessor closure may include a completed parallel join: the join evidence must identify all contributing parent invocations, and every parent must still have retained evidence. The preview reports the exact inherited invocation set and the possible downstream graph scope. Conditional routes in that scope may or may not run according to new outputs; it is not a historical invocation list.
 
-Ravenroot refuses a request when proof is absent or ambiguous. Stable refusal codes cover missing retained inputs, changed source settlement or pins, direct join or mapped boundaries, unsupported iteration or cycle closure, incompatible runtime dimensions, missing external-effect authorization, and an absent repeatability decision when effects are authorized. A terminal source alone is insufficient. The source must also have a positive post-quiescence fence recorded after runtime callbacks and invocations have returned. Timeout or an unknown external outcome does not become safe merely because no actor is currently visible.
+Ravenroot refuses a request when proof is absent or ambiguous. Stable refusal codes cover missing retained inputs, changed source settlement or pins, direct join or mapped boundaries, unsupported iteration or cycle closure, incompatible runtime dimensions, missing external-effect authorization, and an absent repeatability decision when effects are authorized. A terminal source alone is insufficient. The source must also have a positive post-quiescence fence recorded after runtime callbacks and invocations have returned.
+
+Quiescence and outcome certainty are separate. If a begun source attempt failed, retried, or returned only after cancellation made its traversal terminal, the settlement retains `sourceOutcomeAmbiguous=true`. This source-wide fact applies even when the attempt is in a parallel sibling outside the selected downstream scope. Preview then returns `AMBIGUOUS_SOURCE_OUTCOME_AUTHORIZATION_REQUIRED`, or `AMBIGUOUS_SOURCE_OUTCOME_DECISION_REQUIRED` when authorization was requested without a decision. Admission requires both a non-empty reconciliation decision and execution-control authority. Work that stayed queued and never began does not create source-outcome ambiguity. Legacy settlement rows predate this distinction and migrate as ambiguous. Ravenroot does not infer causal independence from topology, a failed aggregate row, or the absence of a live actor.
 
 ## Operator flow
 
@@ -27,7 +29,7 @@ Ravenroot refuses a request when proof is absent or ambiguous. Stable refusal co
      "operator reason" "repeatability decision" --authorize-effects
    ```
 
-4. Review `admissible`, refusal codes, exact inherited invocation ids, possible scope nodes, missing inputs, and possible external-effect nodes.
+4. Review `admissible`, refusal codes, exact inherited invocation ids, possible scope nodes, missing inputs, possible external-effect nodes, and `sourceOutcomeAmbiguous`. Future effect nodes describe the new execution; source-outcome ambiguity describes begun historical attempts whose external result requires reconciliation.
 5. Start only after the effect decision is authorized:
 
    ```text

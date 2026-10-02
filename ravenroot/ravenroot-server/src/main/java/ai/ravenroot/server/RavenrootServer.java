@@ -2814,6 +2814,7 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"possibleScopeNodeIds\":" + stringArrayJson(value.scopeNodeIds())
                 + ",\"missingInputs\":" + stringArrayJson(value.missingInputs())
                 + ",\"externalEffectNodes\":" + stringArrayJson(value.externalEffectNodes())
+                + ",\"sourceOutcomeAmbiguous\":" + value.sourceOutcomeAmbiguous()
                 + ",\"graphContentId\":" + nullableJson(value.graphContentId() == null
                         ? null : value.graphContentId().value())
                 + ",\"manifestDigest\":" + nullableJson(value.manifestDigest() == null

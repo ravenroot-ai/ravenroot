@@ -165,6 +165,7 @@ public final class RavenrootCli {
             output.println("possible-scope-node-ids=" + String.join(",", value.possibleScopeNodeIds()));
             output.println("missing-inputs=" + String.join(",", value.missingInputs()));
             output.println("external-effect-nodes=" + String.join(",", value.externalEffectNodes()));
+            output.println("source-outcome-ambiguous=" + value.sourceOutcomeAmbiguous());
             output.println("graph-content-id=" + value.graphContentId());
             output.println("manifest-digest=" + value.manifestDigest());
             return value.admissible() ? 0 : 2;

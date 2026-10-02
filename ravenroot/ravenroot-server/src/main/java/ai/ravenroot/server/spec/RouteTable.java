@@ -992,7 +992,7 @@ public final class RouteTable {
                     true, true, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived/preview",
-                    "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure.",
+                    "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure. sourceOutcomeAmbiguous separately reports begun source attempts with unresolved external outcome, including parallel siblings outside that scope.",
                     true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code()), NEVER, true),
             new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/derived/boundaries",

@@ -1079,7 +1079,8 @@ export class RavenrootRuntimeClient {
     });
     if (preview && (typeof result?.admissible !== 'boolean' || !Array.isArray(result.refusalCodes)
         || !Array.isArray(result.inheritedInvocationIds) || !Array.isArray(result.possibleScopeNodeIds)
-        || !Array.isArray(result.missingInputs) || !Array.isArray(result.externalEffectNodes))) {
+        || !Array.isArray(result.missingInputs) || !Array.isArray(result.externalEffectNodes)
+        || typeof result.sourceOutcomeAmbiguous !== 'boolean')) {
       throw new Error('Selective replay preview response is invalid');
     }
     if (!preview && (!result?.processInstanceId || !result?.traversalId || !result?.graphVersion)) {

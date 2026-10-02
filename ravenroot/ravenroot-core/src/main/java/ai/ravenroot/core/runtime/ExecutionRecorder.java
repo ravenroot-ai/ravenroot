@@ -120,6 +120,7 @@ public final class ExecutionRecorder implements AutoCloseable {
 
     private LeaseHandle lease;
     private long revision;
+    private boolean sourceOutcomeAmbiguous;
     private volatile boolean closed;
     private volatile boolean fenceLost;
     private volatile ExecutionStoreFailure fenceLostBecause;
@@ -269,7 +270,18 @@ public final class ExecutionRecorder implements AutoCloseable {
         Instant now = Instant.now();
         Instant retainedUntil = inventory.retainedUntil().orElseGet(() -> now.plus(store.terminalRetention()));
         await(store.recordReplaySettlement(new ReplaySourceSettlement(key, source.revision(),
-                lease.fencingToken(), manifestDigest, now, retainedUntil), lease));
+                lease.fencingToken(), manifestDigest, sourceOutcomeAmbiguous, now, retainedUntil), lease));
+    }
+
+    /**
+     * Remembers that a dispatched source attempt lacks durable successful outcome proof.
+     *
+     * <p>This bit is monotonic for the recorder's lease. It includes a callback that arrives only
+     * after cancellation made the aggregate terminal, because local quiescence cannot turn that
+     * masked outcome into proof that no external effect occurred.</p>
+     */
+    public synchronized void markReplaySourceOutcomeAmbiguous() {
+        sourceOutcomeAmbiguous = true;
     }
 
     /** Commits completed invocation evidence atomically with its lifecycle transition. */

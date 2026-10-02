@@ -654,9 +654,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
             if (!meta.status().terminal()) throw failure(ExecutionStoreFailure.invalid("replay source is not terminal"));
             Instant now = clock.instant();
             var value = new ReplaySourceSettlement(proposed.source(), meta.revision(), meta.fencingToken(),
-                    proposed.manifestDigest(), now, retentionDueAt(meta.retainedUntil(), meta.updatedAt()));
+                    proposed.manifestDigest(), proposed.sourceOutcomeAmbiguous(), now,
+                    retentionDueAt(meta.retainedUntil(), meta.updatedAt()));
             try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT OR IGNORE INTO replay_source_settlement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                    "INSERT OR IGNORE INTO replay_source_settlement (tenant_id, process_instance_id, "
+                            + "source_revision, fencing_token, manifest_digest, settled_at_epoch_second, "
+                            + "settled_at_nano, retained_until_epoch_second, retained_until_nano, "
+                            + "source_outcome_ambiguous) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                 int index = 1;
                 insert.setString(index++, proposed.source().tenantId());
                 insert.setString(index++, proposed.source().processInstanceId().toString());
@@ -664,7 +668,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 insert.setLong(index++, value.fencingToken());
                 insert.setString(index++, value.manifestDigest().value());
                 index = StoredInstant.bindValue(insert, index, value.settledAt());
-                StoredInstant.bindValue(insert, index, value.retainedUntil());
+                index = StoredInstant.bindValue(insert, index, value.retainedUntil());
+                insert.setInt(index, value.sourceOutcomeAmbiguous() ? 1 : 0);
                 insert.executeUpdate();
             }
             ReplaySourceSettlement stored = readReplaySettlement(proposed.source());
@@ -5842,6 +5847,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return new ReplaySourceSettlement(key, rows.getLong("source_revision"),
                         rows.getLong("fencing_token"),
                         new ai.ravenroot.api.persistence.ExecutionManifestDigest(rows.getString("manifest_digest")),
+                        rows.getInt("source_outcome_ambiguous") != 0,
                         StoredInstant.read(rows, "settled_at"), StoredInstant.read(rows, "retained_until"));
             }
         }

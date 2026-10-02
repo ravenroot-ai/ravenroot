@@ -790,15 +790,20 @@ public final class PostgresExecutionStore implements ExecutionStore {
             if (!meta.status().terminal()) throw failure(ExecutionStoreFailure.invalid("replay source is not terminal"));
             Instant now = clock.instant();
             var value = new ReplaySourceSettlement(proposed.source(), meta.revision(), meta.fencingToken(),
-                    proposed.manifestDigest(), now, retentionDueAt(meta.retainedUntil(), meta.updatedAt()));
+                    proposed.manifestDigest(), proposed.sourceOutcomeAmbiguous(), now,
+                    retentionDueAt(meta.retainedUntil(), meta.updatedAt()));
             try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO replay_source_settlement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
+                    "INSERT INTO replay_source_settlement (tenant_id, process_instance_id, source_revision, "
+                            + "fencing_token, manifest_digest, settled_at_epoch_second, settled_at_nano, "
+                            + "retained_until_epoch_second, retained_until_nano, source_outcome_ambiguous) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
                 int index = 1; insert.setString(index++, proposed.source().tenantId());
                 insert.setObject(index++, proposed.source().processInstanceId());
                 insert.setLong(index++, value.sourceRevision()); insert.setLong(index++, value.fencingToken());
                 insert.setString(index++, value.manifestDigest().value());
                 index = StoredInstant.bindValue(insert, index, value.settledAt());
-                StoredInstant.bindValue(insert, index, value.retainedUntil()); insert.executeUpdate();
+                index = StoredInstant.bindValue(insert, index, value.retainedUntil());
+                insert.setBoolean(index, value.sourceOutcomeAmbiguous()); insert.executeUpdate();
             }
             ReplaySourceSettlement stored = readReplaySettlement(connection, proposed.source());
             if (!stored.equals(value)) throw failure(ExecutionStoreFailure.invalid("replay source settlement already differs"));
@@ -6251,6 +6256,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 return new ReplaySourceSettlement(key, rows.getLong("source_revision"),
                         rows.getLong("fencing_token"),
                         new ai.ravenroot.api.persistence.ExecutionManifestDigest(rows.getString("manifest_digest")),
+                        rows.getBoolean("source_outcome_ambiguous"),
                         StoredInstant.read(rows, "settled_at"), StoredInstant.read(rows, "retained_until"));
             }
         }

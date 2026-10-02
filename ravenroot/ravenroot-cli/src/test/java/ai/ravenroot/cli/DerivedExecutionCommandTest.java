@@ -30,6 +30,7 @@ class DerivedExecutionCommandTest {
         assertTrue(backend.authorize);
         assertTrue(output.toString().contains("idempotency-key=" + backend.key));
         assertTrue(output.toString().contains("possible-scope-node-ids=B,C"));
+        assertTrue(output.toString().contains("source-outcome-ambiguous=true"));
     }
 
     @Test
@@ -54,7 +55,7 @@ class DerivedExecutionCommandTest {
                 String reason, String decision, boolean authorize) {
             capture(key, decision, authorize);
             return new DerivedPreviewView(true, List.of(), List.of(predecessor), List.of("B", "C"),
-                    List.of(), List.of("B"), "graph", "manifest");
+                    List.of(), List.of("B"), true, "graph", "manifest");
         }
 
         @Override

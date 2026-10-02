@@ -69,7 +69,7 @@ function stubClient(overrides = {}) {
     derivedExecutionBoundaries: vi.fn(async () => []),
     previewDerivedExecution: vi.fn(async () => ({ admissible: false, refusalCodes: ['TEST'],
       inheritedInvocationIds: [], possibleScopeNodeIds: [], missingInputs: [],
-      externalEffectNodes: [], graphContentId: null, manifestDigest: null })),
+      externalEffectNodes: [], sourceOutcomeAmbiguous: false, graphContentId: null, manifestDigest: null })),
     startDerivedExecution: vi.fn(async () => ({ processInstanceId: 'derived-process',
       traversalId: 'derived-traversal', graphVersion: 'graph-v3' })),
     ...overrides,
@@ -134,9 +134,26 @@ describe('selective derived execution controls', () => {
     field('derived-reason').dispatchEvent(new Event('input', { bubbles: true }));
     resolvePreview({ admissible: true, refusalCodes: [], inheritedInvocationIds: [],
       possibleScopeNodeIds: ['B'], missingInputs: [], externalEffectNodes: ['B'],
+      sourceOutcomeAmbiguous: false,
       graphContentId: 'graph', manifestDigest: 'manifest' });
     await Promise.resolve();
     await Promise.resolve();
+    expect(field('derived-start').disabled).toBe(true);
+  });
+
+  it('separately displays source ambiguity from future effect nodes', async () => {
+    const client = stubClient({
+      derivedExecutionBoundaries: vi.fn(async () => [boundary]),
+      previewDerivedExecution: vi.fn(async () => ({ admissible: false,
+        refusalCodes: ['AMBIGUOUS_SOURCE_OUTCOME_DECISION_REQUIRED'], inheritedInvocationIds: [],
+        possibleScopeNodeIds: ['B'], missingInputs: [], externalEffectNodes: [],
+        sourceOutcomeAmbiguous: true, graphContentId: 'graph', manifestDigest: 'manifest' })),
+    });
+    await prepared(client);
+    field('derived-preview').click();
+    await vi.waitFor(() => expect(field('derived-execution-preview').textContent)
+      .toContain('Source outcome ambiguous: yes'));
+    expect(field('derived-execution-preview').textContent).toContain('External effect nodes: none');
     expect(field('derived-start').disabled).toBe(true);
   });
 

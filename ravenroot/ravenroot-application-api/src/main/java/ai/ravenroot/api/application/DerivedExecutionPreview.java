@@ -15,6 +15,7 @@ import java.util.UUID;
  * @param scopeNodeIds possible downstream nodes, including conditional routes
  * @param missingInputs retained predecessor identities that are unavailable
  * @param externalEffectNodes possible downstream behavior nodes
+ * @param sourceOutcomeAmbiguous whether retained source history contains an attempt without successful outcome proof
  * @param graphContentId verified source graph content identity
  * @param manifestDigest verified source execution manifest digest
  * @param compatibilityDimensions incompatible runtime dimensions, without secret values
@@ -22,7 +23,8 @@ import java.util.UUID;
 public record DerivedExecutionPreview(boolean admissible, List<String> refusalCodes,
                                       List<ReplayBoundarySeed> boundaries, Set<UUID> inheritedEvidence,
                                       List<String> scopeNodeIds, List<String> missingInputs,
-                                      List<String> externalEffectNodes, GraphContentId graphContentId,
+                                      List<String> externalEffectNodes, boolean sourceOutcomeAmbiguous,
+                                      GraphContentId graphContentId,
                                       ExecutionManifestDigest manifestDigest,
                                       Set<String> compatibilityDimensions) {
     /** Defensively copies preview collections. */

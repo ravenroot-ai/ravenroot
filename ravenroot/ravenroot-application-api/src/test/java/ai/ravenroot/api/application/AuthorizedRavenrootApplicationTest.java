@@ -35,6 +35,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AuthorizedRavenrootApplicationTest {
     @Test
+    void derivedExternalOutcomeDecisionCannotBypassExecutionControl() {
+        var raw = new FakeApplication();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, true);
+        UUID source = UUID.randomUUID();
+        var request = new DerivedExecutionRequest(List.of(new ai.ravenroot.api.persistence.ReplayBoundarySeed(
+                "B", Set.of(UUID.randomUUID()))), "reconcile", "continue after ambiguous outcome",
+                "operator reconciled the external attempt", true);
+        var withoutControl = context("tenant-a", Role.OPERATOR, "ravenroot.execute", "ravenroot.observe");
+
+        assertThrows(AuthorizationDeniedException.class,
+                () -> facade.startDerivedExecution(withoutControl, source, request));
+        assertEquals(0, raw.derivedStartCalls,
+                "a claimed reconciliation decision must not reach admission without control authority");
+
+        var withControl = context("tenant-a", Role.OPERATOR, "ravenroot.execute", "ravenroot.observe",
+                "ravenroot.execution.control");
+        facade.startDerivedExecution(withControl, source, request);
+        assertEquals(1, raw.derivedStartCalls);
+    }
+
+    @Test
     void sourceSessionsRequireDistinctPermissionsAndAlwaysDelegateTheAuthenticatedTenant() throws Exception {
         var raw = new FakeApplication();
         var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
@@ -1170,6 +1192,7 @@ class AuthorizedRavenrootApplicationTest {
         private int activationCalls;
         private int retirementCalls;
         private int startCalls;
+        private int derivedStartCalls;
         private ExecutionPolicy observedPolicy;
         private boolean publishEventDuringStart;
         private RuntimeException startFailure;
@@ -1254,6 +1277,13 @@ class AuthorizedRavenrootApplicationTest {
                 throw failure;
             }
             return new ExecutionSubmission(executionId, "graph");
+        }
+        @Override
+        public DerivedExecutionStart startDerivedExecution(ai.ravenroot.api.security.SecurityContext security,
+                                                           UUID sourceProcessInstanceId,
+                                                           DerivedExecutionRequest request) {
+            derivedStartCalls++;
+            return new DerivedExecutionStart(UUID.randomUUID(), UUID.randomUUID(), "graph");
         }
         @Override public ExecutionSubmission startGraphMl(ai.ravenroot.api.security.SecurityContext security,
                                                           UUID executionId, InputStream graphMl, Object payload,

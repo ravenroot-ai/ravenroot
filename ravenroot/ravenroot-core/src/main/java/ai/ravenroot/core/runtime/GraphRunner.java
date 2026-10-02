@@ -5957,6 +5957,7 @@ public final class GraphRunner implements AutoCloseable {
                                                 String nodeId, Set<UUID> parents, NodeCommand command,
                                                 NodeResult result, IterationContext iteration) {
             if (terminal) {
+                if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
                 return null;
             }
             var transitions = List.<ExecutionTransition>of(
@@ -6025,6 +6026,7 @@ public final class GraphRunner implements AutoCloseable {
          *         ordinary successor — or {@code null} when nothing was journalled
          */
         private synchronized UUID nodeFailed(UUID invocationId, UUID attemptId, UUID startedEventId) {
+            if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
             if (terminal) {
                 return null;
             }
@@ -6080,6 +6082,7 @@ public final class GraphRunner implements AutoCloseable {
         private synchronized RetryCommit retryScheduled(UUID invocationId, UUID failedAttemptId,
                                                         NodeAttempt nextAttempt, UUID startedEventId,
                                                         boolean amplified, long payloadBytes) {
+            if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
             if (closing || terminal) {
                 return null;
             }

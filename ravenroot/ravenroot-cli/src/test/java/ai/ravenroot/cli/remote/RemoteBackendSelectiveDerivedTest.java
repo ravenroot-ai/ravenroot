@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.concurrent.Flow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RemoteBackendSelectiveDerivedTest {
@@ -30,12 +31,13 @@ class RemoteBackendSelectiveDerivedTest {
                     requests.add(request);
                     String path = request.uri().getPath();
                     if (path.endsWith("/boundaries")) return response(200, "{\"boundaries\":[]}", request);
-                    if (path.endsWith("/preview")) return response(200, "{\"admissible\":true,\"refusalCodes\":[],\"inheritedInvocationIds\":[],\"possibleScopeNodeIds\":[\"B\"],\"missingInputs\":[],\"externalEffectNodes\":[],\"graphContentId\":\"graph\",\"manifestDigest\":\"manifest\"}", request);
+                    if (path.endsWith("/preview")) return response(200, "{\"admissible\":true,\"refusalCodes\":[],\"inheritedInvocationIds\":[],\"possibleScopeNodeIds\":[\"B\"],\"missingInputs\":[],\"externalEffectNodes\":[],\"sourceOutcomeAmbiguous\":false,\"graphContentId\":\"graph\",\"manifestDigest\":\"manifest\"}", request);
                     return response(202, "{\"processInstanceId\":\"p\",\"traversalId\":\"t\",\"graphVersion\":\"graph\"}", request);
                 });
 
         backend.derivedBoundaries(SOURCE);
-        backend.previewDerived(SOURCE, "B", PREDECESSOR, "key", "reason", "reviewed", true);
+        var preview = backend.previewDerived(SOURCE, "B", PREDECESSOR, "key", "reason", "reviewed", true);
+        assertFalse(preview.sourceOutcomeAmbiguous());
         backend.startDerived(SOURCE, "B", PREDECESSOR, "key", "reason", "reviewed", true);
 
         assertEquals(List.of("GET", "POST", "POST"), requests.stream().map(HttpRequest::method).toList());

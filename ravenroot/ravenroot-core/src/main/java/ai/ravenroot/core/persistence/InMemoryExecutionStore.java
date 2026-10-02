@@ -1224,7 +1224,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 Instant retainedUntil = retainedUntilOf(entry).orElseThrow();
                 var authoritative = new ReplaySourceSettlement(settlement.source(), entry.revision,
-                        entry.fencingToken, settlement.manifestDigest(), clock.instant(), retainedUntil);
+                        entry.fencingToken, settlement.manifestDigest(), settlement.sourceOutcomeAmbiguous(),
+                        clock.instant(), retainedUntil);
                 ReplaySourceSettlement existing = replaySettlements.get(settlement.source());
                 if (existing != null && !existing.equals(authoritative)) {
                     throw failure(ExecutionStoreFailure.invalid("replay source settlement already differs"));

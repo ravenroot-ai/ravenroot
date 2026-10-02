@@ -118,6 +118,7 @@ public interface CliBackend {
     record DerivedPreviewView(boolean admissible, List<String> refusalCodes,
                               List<String> inheritedInvocationIds, List<String> possibleScopeNodeIds,
                               List<String> missingInputs, List<String> externalEffectNodes,
+                              boolean sourceOutcomeAmbiguous,
                               String graphContentId, String manifestDigest) { }
 
     record DerivedStartView(String processInstanceId, String traversalId, String graphVersion) { }

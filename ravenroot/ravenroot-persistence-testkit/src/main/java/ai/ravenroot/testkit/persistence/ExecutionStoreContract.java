@@ -268,8 +268,22 @@ public abstract class ExecutionStoreContract {
         var digest = new ExecutionManifestDigest("00".repeat(32));
         ReplaySourceSettlement settlement = await(store().recordReplaySettlement(
                 new ReplaySourceSettlement(source, terminal.revision(), lease.fencingToken(), digest,
-                        recordedAt, recordedAt.plus(store().terminalRetention())), lease));
+                        true, recordedAt, recordedAt.plus(store().terminalRetention())), lease));
         assertEquals(settlement, await(store().replaySettlement(source)).orElseThrow());
+        assertTrue(settlement.sourceOutcomeAmbiguous(),
+                "source-wide ambiguity must survive authoritative settlement storage");
+        var falselyClear = new ReplaySourceSettlement(source, settlement.sourceRevision(),
+                settlement.fencingToken(), settlement.manifestDigest(), false,
+                settlement.settledAt(), settlement.retainedUntil());
+        ExecutionKey mismatch = newKey();
+        ExecutionStoreFailure mismatchFailure = failureOf(() -> await(store().apply(ExecutionBatch.to(mismatch)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(mismatch.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of()), new GraphVersionPin("graph-v1")))
+                .requiringReplaySourceSettlement(falselyClear).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, mismatchFailure);
+        assertThrows(CompletionException.class, () -> await(store().load(mismatch)),
+                "admission must compare the ambiguity bit in the atomic source proof");
 
         ExecutionKey derived = newKey();
         UUID derivedTraversal = UUID.randomUUID();

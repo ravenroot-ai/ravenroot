@@ -123,7 +123,8 @@ public final class RemoteBackend implements CliBackend {
         return new DerivedPreviewView(MinimalJson.asBoolean(body.get("admissible")),
                 strings(body, "refusalCodes"), strings(body, "inheritedInvocationIds"),
                 strings(body, "possibleScopeNodeIds"), strings(body, "missingInputs"),
-                strings(body, "externalEffectNodes"), nullableString(body.get("graphContentId")),
+                strings(body, "externalEffectNodes"), MinimalJson.asBoolean(body.get("sourceOutcomeAmbiguous")),
+                nullableString(body.get("graphContentId")),
                 nullableString(body.get("manifestDigest")));
     }
 

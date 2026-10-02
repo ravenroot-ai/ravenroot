@@ -32,13 +32,35 @@ class PostgresSelectiveReplayMigrationUpgradeTest {
             assertFalse(tableExists(connection, "replay_invocation_evidence"));
             assertFalse(tableExists(connection, "replay_source_settlement"));
             assertFalse(tableExists(connection, "derived_execution_ancestry"));
-            assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
+            var throughReplay = PostgresSchema.migrations().stream()
+                    .filter(migration -> migration.version() <= replayVersion).toList();
+            assertEquals(replayVersion, SchemaRunner.migrate(connection, throughReplay, CLOCK));
             assertTrue(tableExists(connection, "replay_invocation_evidence"));
             assertTrue(tableExists(connection, "replay_source_settlement"));
             assertTrue(tableExists(connection, "derived_execution_ancestry"));
+            try (var statement = connection.createStatement()) {
+                statement.execute("INSERT INTO process_instance (tenant_id, process_instance_id, status, "
+                        + "graph_version_pin, revision, fencing_token, lifecycle_generation, "
+                        + "created_at_epoch_second, created_at_nano, updated_at_epoch_second, updated_at_nano) "
+                        + "VALUES ('tenant', '00000000-0000-0000-0000-000000000001', 'COMPLETED', "
+                        + "'graph', 1, 1, 0, 1, 0, 1, 0)");
+                statement.execute("INSERT INTO replay_source_settlement VALUES ('tenant', "
+                        + "'00000000-0000-0000-0000-000000000001', 1, 1, '" + "00".repeat(32)
+                        + "', 1, 0, 2, 0)");
+            }
+            assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
+            assertTrue(legacyOutcomeIsAmbiguous(connection),
+                    "legacy local-quiescence proof must fail closed after upgrade");
             assertEquals(1, historyRows(connection, replayVersion));
             assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
             assertEquals(1, historyRows(connection, replayVersion));
+        }
+    }
+
+    private static boolean legacyOutcomeIsAmbiguous(Connection connection) throws Exception {
+        try (var rows = connection.createStatement().executeQuery(
+                "SELECT source_outcome_ambiguous FROM replay_source_settlement")) {
+            return rows.next() && rows.getBoolean(1);
         }
     }
 

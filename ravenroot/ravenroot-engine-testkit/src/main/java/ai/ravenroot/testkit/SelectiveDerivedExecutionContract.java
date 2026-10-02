@@ -76,6 +76,171 @@ public abstract class SelectiveDerivedExecutionContract {
             </graphml>
             """;
 
+    private static final String RETRIED_PREDECESSOR_GRAPH = GRAPH
+            .replace("<graph id=\"selective\"", "<key id=\"retry-max\" for=\"node\" "
+                    + "attr.name=\"retry.maxAttempts\" attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-initial\" for=\"node\" attr.name=\"retry.initialBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-multiplier\" for=\"node\" attr.name=\"retry.backoffMultiplier\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-ceiling\" for=\"node\" attr.name=\"retry.maxBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-on\" for=\"node\" attr.name=\"retry.retryOn\" "
+                    + "attr.type=\"string\"/>\n<graph id=\"selective\"")
+            .replace("<node id=\"A\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">effect-a</data></node>",
+                    "<node id=\"A\"><data key=\"kind\">BEHAVIOR</data>"
+                            + "<data key=\"behavior\">effect-a</data>"
+                            + "<data key=\"retry-max\">2</data><data key=\"retry-initial\">0</data>"
+                            + "<data key=\"retry-multiplier\">1.0</data><data key=\"retry-ceiling\">0</data>"
+                            + "<data key=\"retry-on\">IllegalStateException</data></node>");
+
+    @Test
+    protected void successfulRetryInInheritedClosureRetainsEarlierOutcomeAmbiguity() throws Exception {
+        var aCalls = new AtomicInteger();
+        var behaviors = new BehaviorRegistry()
+                .register("effect-a", message -> aCalls.incrementAndGet() == 1
+                        ? CompletableFuture.failedFuture(new IllegalStateException("first effect outcome unknown"))
+                        : CompletableFuture.completedFuture(NodeResult.continueWith("a")))
+                .register("effect-b", message -> CompletableFuture.completedFuture(
+                        NodeResult.continueWith(message.payload())));
+        try (var engine = createEngine("selective-derived-retry-" + UUID.randomUUID());
+             var executions = new InMemoryExecutionStore();
+             var definitions = new InMemoryGraphDefinitionStore(Clock.systemUTC(),
+                     executions.graphDefinitionReferences());
+             var manifests = new InMemoryExecutionManifestStore(Clock.systemUTC(),
+                     ExecutionManifestReferences.NONE);
+             var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                     new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                     new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                     ExecutionIdentitySource.randomUuids(), executions, 0,
+                     UnknownBehaviorPolicy.passThrough(), definitions, null, null,
+                     GraphExecutionLimits.DEFAULTS, null, manifests)) {
+            var submission = app.startGraphMl(IDENTITY, UUID.randomUUID(),
+                    new ByteArrayInputStream(RETRIED_PREDECESSOR_GRAPH.getBytes(StandardCharsets.UTF_8)), Map.of());
+            var source = new ExecutionKey(IDENTITY.tenantId(), submission.processInstanceId());
+            awaitCondition(() -> executions.replaySettlement(source).toCompletableFuture().join().isPresent());
+            assertEquals(2, aCalls.get());
+            assertTrue(executions.replaySettlement(source).toCompletableFuture().join().orElseThrow()
+                    .sourceOutcomeAmbiguous());
+            var a = executions.replayEvidence(source, 32).toCompletableFuture().join().stream()
+                    .filter(value -> value.nodeId().equals("A")).findFirst().orElseThrow();
+            var request = new DerivedExecutionRequest(
+                    List.of(new ReplayBoundarySeed("B", Set.of(a.invocationId()))),
+                    "retried-predecessor", "derive from successful retry", "", false);
+
+            var preview = app.previewDerivedExecution(IDENTITY, source.processInstanceId(), request);
+            assertTrue(preview.inheritedEvidence().contains(a.invocationId()));
+            assertTrue(preview.sourceOutcomeAmbiguous());
+            assertTrue(preview.refusalCodes().contains("AMBIGUOUS_SOURCE_OUTCOME_AUTHORIZATION_REQUIRED"));
+        }
+    }
+
+    private static final String AMBIGUOUS_PARALLEL_GRAPH = """
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <graph id="ambiguous-parallel" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="A"><data key="kind">BEHAVIOR</data><data key="behavior">parallel-root</data></node>
+                <node id="P"><data key="kind">BEHAVIOR</data><data key="behavior">parallel-predecessor</data></node>
+                <node id="X"><data key="kind">BEHAVIOR</data><data key="behavior">parallel-unknown</data></node>
+                <node id="endB"><data key="kind">END</data></node>
+                <edge id="s-a" source="start" target="A"/>
+                <edge id="a-p" source="A" target="P"/>
+                <edge id="a-x" source="A" target="X"/>
+                <edge id="p-b" source="P" target="endB"/>
+                <edge id="x-e" source="X" target="error"/>
+              </graph>
+            </graphml>
+            """;
+
+    @Test
+    protected void ambiguousStartedParallelSiblingRequiresAuthorizedDecisionAfterQuiescence() throws Exception {
+        var pGate = new CompletableFuture<NodeResult>();
+        var xGate = new CompletableFuture<NodeResult>();
+        var pCalls = new AtomicInteger();
+        var xCalls = new AtomicInteger();
+        var behaviors = new BehaviorRegistry()
+                .register("parallel-root", message -> CompletableFuture.completedFuture(
+                        NodeResult.continueWith("a")))
+                .register("parallel-predecessor", message -> {
+                    pCalls.incrementAndGet();
+                    return pGate;
+                })
+                .register("parallel-unknown", message -> {
+                    xCalls.incrementAndGet();
+                    return xGate;
+                });
+        try (var engine = createEngine("selective-derived-ambiguous-" + UUID.randomUUID());
+             var executions = new InMemoryExecutionStore();
+             var definitions = new InMemoryGraphDefinitionStore(Clock.systemUTC(),
+                     executions.graphDefinitionReferences());
+             var manifests = new InMemoryExecutionManifestStore(Clock.systemUTC(),
+                     ExecutionManifestReferences.NONE);
+             var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                     new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                     new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                     ExecutionIdentitySource.randomUuids(), executions, 0,
+                     UnknownBehaviorPolicy.passThrough(), definitions, null, null,
+                     GraphExecutionLimits.DEFAULTS, null, manifests)) {
+            var sourceSubmission = app.startGraphMl(IDENTITY, UUID.randomUUID(),
+                    new ByteArrayInputStream(AMBIGUOUS_PARALLEL_GRAPH.getBytes(StandardCharsets.UTF_8)), Map.of());
+            awaitCondition(() -> pCalls.get() == 1 && xCalls.get() == 1);
+            assertTrue(app.pauseTraversal(sourceSubmission.traversalId()));
+            pGate.complete(NodeResult.continueWith(Map.of("from", "P")));
+            var source = new ExecutionKey(IDENTITY.tenantId(), sourceSubmission.processInstanceId());
+            Thread.sleep(100);
+            assertTrue(app.cancelTraversal(sourceSubmission.traversalId()));
+            xGate.completeExceptionally(new IllegalStateException("external outcome unknown"));
+            awaitCondition(() -> executions.replaySettlement(source).toCompletableFuture().join().isPresent());
+
+            var settlement = executions.replaySettlement(source).toCompletableFuture().join().orElseThrow();
+            assertTrue(settlement.sourceOutcomeAmbiguous(),
+                    "positive local quiescence must retain the masked external outcome");
+            var sourceAggregateBefore = executions.load(source).toCompletableFuture().join();
+            var sourceResultBefore = app.executionResult(IDENTITY.tenantId(), sourceSubmission.traversalId());
+            var sourceEventsBefore = executions.readProcessJournal(source, 0, 1_000)
+                    .toCompletableFuture().join();
+            var predecessor = executions.replayEvidence(source, 32).toCompletableFuture().join().stream()
+                    .filter(value -> value.nodeId().equals("P")).findFirst().orElseThrow();
+            var boundary = List.of(new ReplayBoundarySeed("endB", Set.of(predecessor.invocationId())));
+
+            var refused = app.previewDerivedExecution(IDENTITY, source.processInstanceId(),
+                    new DerivedExecutionRequest(boundary, "parallel-refused", "continue end", "", false));
+            assertFalse(refused.admissible());
+            assertTrue(refused.sourceOutcomeAmbiguous());
+            assertEquals(List.of("endB"), refused.scopeNodeIds(),
+                    "the ambiguous sibling is outside the selected forward scope");
+            assertTrue(refused.externalEffectNodes().isEmpty());
+            assertTrue(refused.refusalCodes().contains("AMBIGUOUS_SOURCE_OUTCOME_AUTHORIZATION_REQUIRED"));
+
+            var undecided = app.previewDerivedExecution(IDENTITY, source.processInstanceId(),
+                    new DerivedExecutionRequest(boundary, "parallel-undecided", "continue end", "", true));
+            assertTrue(undecided.refusalCodes().contains("AMBIGUOUS_SOURCE_OUTCOME_DECISION_REQUIRED"));
+
+            var authorized = new DerivedExecutionRequest(boundary, "parallel-authorized", "continue end",
+                    "X may have effected externally; operator reconciled before continuing", true);
+            var preview = app.previewDerivedExecution(IDENTITY, source.processInstanceId(), authorized);
+            assertTrue(preview.admissible(), () -> preview.refusalCodes().toString());
+            var started = app.startDerivedExecution(IDENTITY, source.processInstanceId(), authorized);
+            awaitCondition(() -> app.executionResult(IDENTITY.tenantId(), started.traversalId())
+                    instanceof ExecutionLookup.Found found && found.outcome().status().terminal());
+            var changedDecision = new DerivedExecutionRequest(boundary, authorized.idempotencyKey(),
+                    authorized.reason(), "a different reconciliation", true);
+            assertThrows(IllegalStateException.class, () -> app.startDerivedExecution(
+                    IDENTITY, source.processInstanceId(), changedDecision),
+                    "the authorized decision is part of the canonical idempotency fingerprint");
+            assertEquals(1, pCalls.get(), "derived execution must not repeat the retained predecessor");
+            assertEquals(1, xCalls.get(), "derived execution must not repeat the ambiguous sibling");
+            assertEquals(sourceAggregateBefore, executions.load(source).toCompletableFuture().join());
+            assertEquals(sourceResultBefore,
+                    app.executionResult(IDENTITY.tenantId(), sourceSubmission.traversalId()));
+            assertEquals(sourceEventsBefore, executions.readProcessJournal(source, 0, 1_000)
+                    .toCompletableFuture().join(), "derived reconciliation must not rewrite source history");
+        }
+    }
+
     @Test
     protected void boundaryAfterCompletedJoinUsesExactParentClosureAndRefusesTheJoinItself() throws Exception {
         var bCalls = new AtomicInteger();

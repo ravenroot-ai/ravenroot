@@ -939,7 +939,7 @@
     },
     "/v1/executions/{id}/derived/preview": {
       "post": {
-        "summary": "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure.",
+        "summary": "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure. sourceOutcomeAmbiguous separately reports begun source attempts with unresolved external outcome, including parallel siblings outside that scope.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [

@@ -295,6 +295,7 @@ export function createDeploymentsWindow({
         `Possible downstream scope: ${preview.possibleScopeNodeIds.join(', ') || 'none'}`,
         `Missing inputs: ${preview.missingInputs.join(', ') || 'none'}`,
         `External effect nodes: ${preview.externalEffectNodes.join(', ') || 'none'}`,
+        `Source outcome ambiguous: ${preview.sourceOutcomeAmbiguous ? 'yes' : 'no'}`,
         `Graph pin: ${preview.graphContentId || 'unavailable'}`,
         `Manifest pin: ${preview.manifestDigest || 'unavailable'}`];
       derivedOutput.textContent = lines.join('\n');

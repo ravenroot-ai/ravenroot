@@ -1463,7 +1463,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException incompatible) {
             return new ai.ravenroot.api.application.DerivedExecutionPreview(false,
                     List.of("INCOMPATIBLE_RUNTIME"), request.boundaries(), java.util.Set.of(), List.of(), List.of(),
-                    List.of(), null, settlement == null ? null : settlement.manifestDigest(),
+                    List.of(), settlement != null && settlement.sourceOutcomeAmbiguous(), null,
+                    settlement == null ? null : settlement.manifestDigest(),
                     incompatible.report().dimensions().stream().map(Enum::name)
                             .collect(java.util.stream.Collectors.toSet()));
         }
@@ -1548,14 +1549,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             }
         }
         if (!missing.isEmpty()) refusals.add("MISSING_RETAINED_INPUT");
-        if (!effects.isEmpty() && !request.authorizeExternalEffects()) refusals.add("EXTERNAL_EFFECT_AUTHORIZATION_REQUIRED");
-        if (!effects.isEmpty() && request.authorizeExternalEffects()
+        boolean sourceOutcomeAmbiguous = settlement != null && settlement.sourceOutcomeAmbiguous();
+        boolean effectDecisionRequired = !effects.isEmpty() || sourceOutcomeAmbiguous;
+        if (sourceOutcomeAmbiguous && !request.authorizeExternalEffects()) {
+            refusals.add("AMBIGUOUS_SOURCE_OUTCOME_AUTHORIZATION_REQUIRED");
+        } else if (!effects.isEmpty() && !request.authorizeExternalEffects()) {
+            refusals.add("EXTERNAL_EFFECT_AUTHORIZATION_REQUIRED");
+        }
+        if (effectDecisionRequired && request.authorizeExternalEffects()
                 && request.repeatabilityDecision().isBlank()) {
-            refusals.add("EFFECT_REPEATABILITY_DECISION_REQUIRED");
+            refusals.add(sourceOutcomeAmbiguous
+                    ? "AMBIGUOUS_SOURCE_OUTCOME_DECISION_REQUIRED"
+                    : "EFFECT_REPEATABILITY_DECISION_REQUIRED");
         }
         return new ai.ravenroot.api.application.DerivedExecutionPreview(refusals.isEmpty(),
                 List.copyOf(new java.util.LinkedHashSet<>(refusals)), request.boundaries(), inherited,
-                scope, missing, effects, manifest.manifest().graphContentId(), manifest.digest(), java.util.Set.of());
+                scope, missing, effects, sourceOutcomeAmbiguous, manifest.manifest().graphContentId(),
+                manifest.digest(), java.util.Set.of());
     }
 
     @Override

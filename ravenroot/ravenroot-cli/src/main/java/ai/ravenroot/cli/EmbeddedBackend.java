@@ -57,6 +57,7 @@ final class EmbeddedBackend implements CliBackend {
             return new DerivedPreviewView(value.admissible(), value.refusalCodes(),
                     value.inheritedEvidence().stream().map(UUID::toString).sorted().toList(),
                     value.scopeNodeIds(), value.missingInputs(), value.externalEffectNodes(),
+                    value.sourceOutcomeAmbiguous(),
                     value.graphContentId() == null ? null : value.graphContentId().value(),
                     value.manifestDigest() == null ? null : value.manifestDigest().value());
         } catch (IllegalArgumentException invalid) {

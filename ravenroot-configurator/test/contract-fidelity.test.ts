@@ -66,6 +66,25 @@ describe("runtime contract fidelity", () => {
     }
   });
 
+  test("publishes versioned resolver limits and refuses representative boundary mismatches", () => {
+    expect(CONTRACTS.every((contract) => contract.schemaVersion === 1)).toBe(true);
+    const llm = templateSelection("ai.llm-profile") as { values: { document: Record<string, unknown> } };
+    llm.values.document.maxConcurrency = 0;
+    expect(() => serializeSelection(llm)).toThrow("must be at least 1");
+    const insecure = templateSelection("ai.llm-profile") as { values: { document: Record<string, unknown> } };
+    insecure.values.document.endpoint = "ftp://models.example.test/v1";
+    expect(() => serializeSelection(insecure)).toThrow("must use http or https");
+    const fragment = templateSelection("ai.llm-profile") as { values: { document: Record<string, unknown> } };
+    fragment.values.document.endpoint = "https://models.example.test/v1#fragment";
+    expect(() => serializeSelection(fragment)).toThrow("must not include a fragment");
+    const partialCredential = templateSelection("ai.llm-profile") as { values: { document: Record<string, unknown> } };
+    delete partialCredential.values.document.credentialReference;
+    expect(() => serializeSelection(partialCredential)).toThrow("must be supplied together");
+    const identity = templateSelection("ai.llm-profile") as { identity: { profile?: string } };
+    identity.identity.profile = "x".repeat(65);
+    expect(() => serializeSelection(identity)).toThrow("1 to 64 characters");
+  });
+
   test("matches the OpenAPI runtime resolver's exact field sets", async () => {
     const client = await readFile(resolve("..", "ravenroot", RUNTIME_SOURCES["openapi-client.profile"]!), "utf8");
     for (const field of Object.keys((templateSelection("openapi-client.profile").values.document as Record<string, unknown>))) {

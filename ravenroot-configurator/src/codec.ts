@@ -53,8 +53,8 @@ export async function sha256(bytes: Uint8Array): Promise<string> {
 }
 
 export function safeName(value: string, label: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
-    throw new Error(`${label} must start with an alphanumeric and contain only letters, digits, dot, underscore, or hyphen`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) {
+    throw new Error(`${label} must be 1 to 64 characters, start with an alphanumeric, and contain only letters, digits, dot, underscore, or hyphen`);
   }
   return value;
 }

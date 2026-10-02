@@ -70,6 +70,9 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (schema.format === "uri") {
       let uri: URL; try { uri = new URL(value); } catch { fail(path, "must be an absolute URI"); }
       if (!uri.protocol || uri.username || uri.password) fail(path, "must be an absolute URI without credentials");
+      if (schema.schemes && !schema.schemes.includes(uri.protocol.slice(0, -1).toLowerCase())) fail(path, `must use ${schema.schemes.join(" or ")}`);
+      if (schema.requireHost && !uri.hostname) fail(path, "must include a host");
+      if (schema.allowFragment === false && uri.hash) fail(path, "must not include a fragment");
     }
     if (schema.format === "absolute-path" && !value.startsWith("/")) fail(path, "must be an absolute path");
     return;

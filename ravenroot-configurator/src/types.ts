@@ -7,6 +7,7 @@ export interface FieldSpec {
   readonly label: string;
   readonly type: ScalarType;
   readonly required: boolean;
+  readonly allowEmpty?: boolean;
   readonly sensitive?: boolean;
   readonly description?: string;
   readonly suggestion?: unknown;
@@ -18,7 +19,7 @@ export interface FieldSpec {
 }
 
 export type ValueSchema =
-  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256" }
+  | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256"; readonly schemes?: readonly string[]; readonly requireHost?: boolean; readonly allowFragment?: boolean }
   | { readonly kind: "integer"; readonly minimum?: number; readonly maximum?: number }
   | { readonly kind: "boolean" }
   | { readonly kind: "null" }
@@ -31,6 +32,7 @@ export type ValueSchema =
 export type ContractEncoding = "delimited" | "base64-json" | "plain-environment";
 
 export interface ConfigurationContract {
+  readonly schemaVersion: 1;
   readonly id: string;
   readonly title: string;
   readonly family: string;
@@ -48,6 +50,7 @@ export interface ConfigurationContract {
   readonly externalRequirements?: readonly string[];
   readonly restartRequired: boolean;
   readonly credentialResolver: "none" | "shared" | "family";
+  readonly crossFieldRules?: readonly ("credential-pair" | "credential-requires-tls" | "mcp-tools-bound" | "jdbc-total-cell" | "storage-virtual-host")[];
 }
 
 export interface ContractIdentity {

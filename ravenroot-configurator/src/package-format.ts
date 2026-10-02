@@ -3,6 +3,7 @@ import { validateBundleFiles } from "./bundles.js";
 import { canonicalJson, safeName, sha256, text, utf8 } from "./codec.js";
 import { encryptSecret } from "./crypto.js";
 import { CONTRACT_BY_ID, serializeSelection } from "./registry.js";
+import { ociImageReference } from "./oci.js";
 import type {
   BundlePayload, ConfigurationSelection, DecodedPackage, PackageEntryDigest, PackageTarget,
   PlanChange, PortableManifest, PortablePackage, RedactedPlan, SecretBindingManifest, SecretInput
@@ -54,6 +55,8 @@ function validateTarget(value: unknown): asserts value is PackageTarget {
       let url: URL; try { url = new URL(item); } catch { throw new Error("verifyBaseUrl must be an HTTP(S) URL"); }
       if (!new Set(["http:", "https:"]).has(url.protocol) || url.username || url.password) throw new Error("verifyBaseUrl must be an HTTP(S) URL without credentials");
     }
+    if (key === "baseImage") ociImageReference(item, "baseImage", true);
+    if (key === "derivedImage") ociImageReference(item, "derivedImage");
   }
 }
 

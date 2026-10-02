@@ -97,6 +97,15 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
   const wrapper = document.createElement(composite ? "fieldset" : "label");
   if (wrapper instanceof HTMLFieldSetElement) { const legend = document.createElement("legend"); legend.textContent = labelText; wrapper.append(legend); }
   else wrapper.append(document.createTextNode(labelText));
+  const constraints: string[] = [];
+  if (schema.kind === "string") {
+    if (schema.minimumLength !== undefined || schema.maximumLength !== undefined) constraints.push(`length ${schema.minimumLength ?? 0}–${schema.maximumLength ?? "unbounded"}`);
+    if (schema.schemes) constraints.push(`scheme ${schema.schemes.join("/")}`);
+    if (schema.pattern) constraints.push(`pattern ${schema.pattern}`);
+  } else if (schema.kind === "integer") constraints.push(`range ${schema.minimum ?? "unbounded"}–${schema.maximum ?? "unbounded"}`);
+  else if (schema.kind === "array") constraints.push(`items ${schema.minimumItems ?? 0}–${schema.maximumItems ?? "unbounded"}${schema.unique ? ", unique" : ""}`);
+  else if (schema.kind === "map") constraints.push(`entries ${schema.minimumEntries ?? 0}–${schema.maximumEntries ?? "unbounded"}`);
+  if (constraints.length) { const hint = document.createElement("small"); hint.className = "constraint"; hint.textContent = ` (${constraints.join("; ")})`; wrapper.append(hint); }
   if (schema.kind === "union") {
     const select = document.createElement("select");
     schema.choices.forEach((_, index) => { const option = document.createElement("option"); option.value = String(index); option.textContent = `Variant ${index + 1}`; select.append(option); });
@@ -108,7 +117,15 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
   }
   if (schema.kind === "object") {
     const object = (current && typeof current === "object" && !Array.isArray(current) ? current : emptyValue(schema)) as Record<string, unknown>;
-    for (const [name, child] of Object.entries(schema.properties)) wrapper.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, name));
+    const optional = new Set(schema.optional ?? []);
+    for (const [name, child] of Object.entries(schema.properties)) {
+      if (!optional.has(name)) { wrapper.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, name)); continue; }
+      const slot = document.createElement("div"); const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = name in object;
+      const caption = document.createElement("span"); caption.textContent = `Set optional ${name} (otherwise runtime default)`; slot.append(toggle, caption);
+      const control = document.createElement("div");
+      const refresh = (): void => { control.replaceChildren(); if (toggle.checked) { if (!(name in object)) object[name] = emptyValue(child); control.append(schemaControl(child, object[name], (value) => { object[name] = value; update(object); }, `${name} sample suggestion`)); } else delete object[name]; update(object); };
+      toggle.addEventListener("change", refresh); refresh(); slot.append(control); wrapper.append(slot);
+    }
     return wrapper;
   }
   if (schema.kind === "array") {
@@ -175,12 +192,15 @@ function configurationView(): void {
     const remove = document.createElement("button"); remove.className = "secondary"; remove.type = "button"; remove.textContent = "Remove"; remove.addEventListener("click", () => { selections.splice(index, 1); configurationView(); }); heading.append(title, remove); panel.append(heading);
     const grid = document.createElement("div"); grid.className = "grid";
     for (const axis of contract.identity) { const label = document.createElement("label"); label.append(document.createTextNode(axis)); const input = document.createElement("input"); input.dataset.axis = axis; input.value = selection.identity[axis] ?? ""; input.addEventListener("input", () => { (selection.identity as Record<string, string>)[axis] = input.value; }); label.append(input); grid.append(label); }
-    if (contract.encoding === "base64-json" && contract.schema) grid.append(schemaControl(contract.schema, selection.values.document, (value) => { (selection.values as Record<string, unknown>).document = value; }, "Configuration"));
+    if (contract.encoding === "base64-json" && contract.schema) {
+      const note = document.createElement("p"); note.className = "constraint"; note.textContent = `Schema v${contract.schemaVersion}. Values shown are editable sample suggestions; omitted optional members use runtime defaults.`; grid.append(note);
+      grid.append(schemaControl(contract.schema, selection.values.document, (value) => { (selection.values as Record<string, unknown>).document = value; }, "Configuration"));
+    }
     else for (const field of contract.fields) {
       if (field.schema) { grid.append(schemaControl(field.schema, selection.values[field.name], (value) => { (selection.values as Record<string, unknown>)[field.name] = value; }, field.label)); continue; }
       const schema: ValueSchema = field.type === "integer" ? { kind: "integer", minimum: field.minimum, maximum: field.maximum } : field.type === "boolean" ? { kind: "boolean" }
         : field.type === "csv" ? { kind: "array", items: { kind: "string", minimumLength: 1, maximumLength: 4096 }, unique: true }
-          : { kind: "string", minimumLength: field.required ? 1 : 0, maximumLength: 4096, allowed: field.allowed };
+          : { kind: "string", minimumLength: field.required && !field.allowEmpty ? 1 : 0, maximumLength: 4096, allowed: field.allowed };
       grid.append(schemaControl(schema, selection.values[field.name], (value) => { (selection.values as Record<string, unknown>)[field.name] = value; }, field.label));
     }
     const nodes = document.createElement("p"); for (const node of contract.nodeIds) { const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = node; nodes.append(chip); }

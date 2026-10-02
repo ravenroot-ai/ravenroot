@@ -119,7 +119,7 @@ describe("target adapters", () => {
     const prepared = await prepareInstall(pkg, { targetRoot: directory,
       queryRunner: async (command) => command[0] === "helm" ? "[]" : "" });
     expect(prepared.externalSteps.find((step) => step.id === "helm-upgrade")?.compensate[0]).toEqual([
-      "helm", "uninstall", "ravenroot", "--namespace", "ravenroot", "--wait"
+      "helm", "uninstall", "ravenroot", "--namespace", "ravenroot", "--wait", "--ignore-not-found"
     ]);
     await expect(prepareInstall(pkg, { targetRoot: directory,
       queryRunner: async (command) => { if (command[0] === "helm") throw new Error("helm authorization refused"); return ""; } }))
@@ -194,20 +194,95 @@ describe("target adapters", () => {
       configurations: [coreHttp], secrets: [], bundles: [] })).bytes);
     const prepared = await prepareInstall(pkg, { targetRoot: directory,
       queryRunner: async (command) => command[0] === "helm" ? "[]" : "" });
-    const commands: string[] = [];
+    const commands: string[] = []; let releasePresent = false; let deploymentPresent = false; let secretPresent = false;
     let refuseCompensation = true;
     const commandRunner = async (command: readonly string[]): Promise<void> => {
       const rendered = command.join(" "); commands.push(rendered);
-      if (rendered.includes("kubectl patch")) throw new Error("injected patch failure");
-      if (rendered.includes("helm uninstall") && refuseCompensation) { refuseCompensation = false; throw new Error("injected compensation interruption"); }
+      if (rendered.includes("kubectl apply")) secretPresent = true;
+      if (rendered.includes("helm upgrade")) releasePresent = true;
+      if (rendered.includes("kubectl patch")) deploymentPresent = true;
+      if (rendered.includes("kubectl rollout")) throw new Error("injected rollout failure");
+      if (rendered.includes("delete deployment")) deploymentPresent = false;
+      if (rendered.includes("helm uninstall")) { releasePresent = false; if (refuseCompensation) { refuseCompensation = false; throw new Error("injected compensation interruption after side effect"); } }
+      if (rendered.includes("delete secret")) secretPresent = false;
+    };
+    const queryRunner = async (command: readonly string[]): Promise<string> => {
+      if (command[0] === "helm") return releasePresent ? '[{"name":"ravenroot","revision":"1","status":"deployed"}]' : "[]";
+      if (command[2] === "deployment") return deploymentPresent ? '{"metadata":{"name":"ravenroot-ravenroot"}}' : "";
+      return secretPresent ? '{"metadata":{"name":"ravenroot-config-test-target"}}' : "";
     };
     await expect(applyInstall(prepared, { targetRoot: directory, execute: true, commandRunner,
-      queryRunner: async () => "" })).rejects.toThrow("injected compensation interruption");
+      queryRunner })).rejects.toThrow("injected compensation interruption after side effect");
     await expect(access(join(directory, ".ravenroot-config/pending.json"))).resolves.toBeUndefined();
-    await rollback(directory, commandRunner);
-    expect(commands.slice(-3).map((command) => command.split(" ").slice(0, 3).join(" "))).toEqual([
-      "kubectl delete deployment", "helm uninstall ravenroot", "kubectl delete secret"
-    ]);
+    await rollback(directory, commandRunner, queryRunner);
+    expect(commands.filter((command) => command.includes("helm uninstall"))).toHaveLength(1);
+    expect(commands.at(-1)).toContain("kubectl delete secret");
+    expect(releasePresent || deploymentPresent || secretPresent).toBe(false);
     await expect(access(join(directory, ".ravenroot-config/pending.json"))).rejects.toThrow();
+  });
+
+  test("reconciles an ambiguous successful Helm rollback by manifest and values", async () => {
+    const directory = await root();
+    const pkg = await inspectPackage((await createPackage({ target: target("kubernetes", { namespace: "ravenroot" }),
+      configurations: [coreHttp], secrets: [], bundles: [] })).bytes);
+    let revision = "7"; let manifest = "prior-manifest"; let values = '{"prior":true}'; let interrupt = true;
+    const queryRunner = async (command: readonly string[]): Promise<string> => {
+      if (command[0] === "helm" && command[1] === "list") return JSON.stringify([{ name: "ravenroot", revision, status: "deployed" }]);
+      if (command[0] === "helm" && command[1] === "get") {
+        const targetRevision = command.includes("--revision") ? command[command.indexOf("--revision") + 1] : undefined;
+        if (command[2] === "manifest") return targetRevision === "7" ? "prior-manifest" : manifest;
+        return targetRevision === "7" ? '{"prior":true}' : values;
+      }
+      if (command[0] === "kubectl" && command[2] === "deployment") return JSON.stringify({ apiVersion: "apps/v1", kind: "Deployment",
+        metadata: { name: command[3] }, spec: { template: { spec: { containers: [{ name: "ravenroot", env: [] }] } } } });
+      if (command[0] === "kubectl") return JSON.stringify({ apiVersion: "v1", kind: "Secret", metadata: { name: command[3] }, data: {} });
+      return "";
+    };
+    const prepared = await prepareInstall(pkg, { targetRoot: directory, queryRunner });
+    const commands: string[] = [];
+    const commandRunner = async (command: readonly string[]): Promise<void> => {
+      const rendered = command.join(" "); commands.push(rendered);
+      if (rendered.includes("helm upgrade")) { revision = "8"; manifest = "new-manifest"; values = '{"prior":false}'; }
+      if (rendered.includes("kubectl rollout")) throw new Error("injected rollout failure");
+      if (rendered.includes("helm rollback")) {
+        revision = "9"; manifest = "prior-manifest"; values = '{"prior":true}';
+        if (interrupt) { interrupt = false; throw new Error("lost Helm rollback response"); }
+      }
+    };
+    await expect(applyInstall(prepared, { targetRoot: directory, execute: true, commandRunner, queryRunner }))
+      .rejects.toThrow("lost Helm rollback response");
+    await rollback(directory, commandRunner, queryRunner);
+    expect(commands.filter((item) => item.includes("helm rollback"))).toHaveLength(1);
+    await expect(access(join(directory, ".ravenroot-config/pending.json"))).rejects.toThrow();
+  });
+
+  test.each(["delete deployment", "delete secret"])("reconciles an interrupted %s compensation after its side effect", async (fault) => {
+    const directory = await root();
+    const pkg = await inspectPackage((await createPackage({ target: target("kubernetes", { namespace: "ravenroot" }),
+      configurations: [coreHttp], secrets: [], bundles: [] })).bytes);
+    let releasePresent = false; let deploymentPresent = false; let secretPresent = false; let interrupted = false;
+    const queryRunner = async (command: readonly string[]): Promise<string> => {
+      if (command[0] === "helm") return releasePresent ? '[{"name":"ravenroot","revision":"1","status":"deployed"}]' : "[]";
+      if (command[2] === "deployment") return deploymentPresent ? '{"metadata":{"name":"ravenroot-ravenroot"}}' : "";
+      return secretPresent ? '{"metadata":{"name":"ravenroot-config-test-target"}}' : "";
+    };
+    const prepared = await prepareInstall(pkg, { targetRoot: directory, queryRunner });
+    const commands: string[] = [];
+    const commandRunner = async (command: readonly string[]): Promise<void> => {
+      const rendered = command.join(" "); commands.push(rendered);
+      if (rendered.includes("kubectl apply")) secretPresent = true;
+      if (rendered.includes("helm upgrade")) releasePresent = true;
+      if (rendered.includes("kubectl patch")) deploymentPresent = true;
+      if (rendered.includes("kubectl rollout")) throw new Error("force compensation");
+      if (rendered.includes("delete deployment")) deploymentPresent = false;
+      if (rendered.includes("helm uninstall")) releasePresent = false;
+      if (rendered.includes("delete secret")) secretPresent = false;
+      if (!interrupted && rendered.includes(fault)) { interrupted = true; throw new Error(`lost ${fault} response`); }
+    };
+    await expect(applyInstall(prepared, { targetRoot: directory, execute: true, commandRunner, queryRunner }))
+      .rejects.toThrow(`lost ${fault} response`);
+    await rollback(directory, commandRunner, queryRunner);
+    expect(commands.filter((item) => item.includes(fault))).toHaveLength(1);
+    expect(releasePresent || deploymentPresent || secretPresent).toBe(false);
   });
 });

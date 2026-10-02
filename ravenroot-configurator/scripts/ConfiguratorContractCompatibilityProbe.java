@@ -32,7 +32,6 @@ public final class ConfiguratorContractCompatibilityProbe {
         String mode = required(id + ".mode");
         String environmentKey = required(id + ".environmentKey");
         String valid = required(id + ".valid");
-        String invalid = required(id + ".invalid");
         String[] arguments = required(id + ".args").isEmpty()
                 ? new String[0] : required(id + ".args").split("\u001f", -1);
         Class<?> type = Class.forName(className);
@@ -40,8 +39,11 @@ public final class ConfiguratorContractCompatibilityProbe {
             Method factory = type.getDeclaredMethod(required(id + ".method"), Map.class);
             factory.setAccessible(true);
             require(factory.invoke(null, Map.of(environmentKey, valid)) != null, id + " rejected configurator output");
-            try { factory.invoke(null, Map.of(environmentKey, invalid)); throw new AssertionError(id + " accepted malformed output"); }
-            catch (InvocationTargetException expected) { require(expected.getCause() != null, id + " rejection lost its cause"); }
+            for (int index = 0; index < Integer.parseInt(required(id + ".negativeCount")); index++) {
+                String invalid = required(id + ".negative." + index + ".value");
+                try { factory.invoke(null, Map.of(environmentKey, invalid)); throw new AssertionError(id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")"); }
+                catch (InvocationTargetException expected) { require(expected.getCause() != null, id + " rejection lost its cause"); }
+            }
             return;
         }
         Constructor<?> constructor = type.getDeclaredConstructor(Map.class);
@@ -53,8 +55,18 @@ public final class ConfiguratorContractCompatibilityProbe {
         resolve.setAccessible(true);
         Object accepted = resolve.invoke(constructor.newInstance(Map.of(environmentKey, valid)), (Object[]) arguments);
         require(accepted instanceof Optional<?> && ((Optional<?>) accepted).isPresent(), id + " rejected configurator output");
-        Object refused = resolve.invoke(constructor.newInstance(Map.of(environmentKey, invalid)), (Object[]) arguments);
-        require(refused instanceof Optional<?> && ((Optional<?>) refused).isEmpty(), id + " accepted a malformed configurator value");
+        String alternate = required(id + ".alternateValid");
+        if (!alternate.isEmpty()) {
+            Object optionalAccepted = resolve.invoke(constructor.newInstance(Map.of(environmentKey, alternate)), (Object[]) arguments);
+            require(optionalAccepted instanceof Optional<?> && ((Optional<?>) optionalAccepted).isPresent(), id + " rejected valid omitted optional fields");
+        }
+        for (int index = 0; index < Integer.parseInt(required(id + ".negativeCount")); index++) {
+            String invalid = required(id + ".negative." + index + ".value");
+            String rawArguments = required(id + ".negative." + index + ".args");
+            String[] invalidArguments = rawArguments.isEmpty() ? new String[0] : rawArguments.split("\u001f", -1);
+            Object refused = resolve.invoke(constructor.newInstance(Map.of(environmentKey, invalid)), (Object[]) invalidArguments);
+            require(refused instanceof Optional<?> && ((Optional<?>) refused).isEmpty(), id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")");
+        }
     }
 
     private static Properties fixtures(Path path) {

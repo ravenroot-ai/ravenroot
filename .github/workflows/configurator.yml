@@ -5,11 +5,41 @@ on:
   pull_request:
     paths:
       - ravenroot-configurator/**
-      - ravenroot/ravenroot-extensions/**
-      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/PublicationPolicyConfiguration.java
-      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/audit/AuditTrailPublicationSink.java
+      - docs/reference/node-descriptor-contracts.tsv
+      - docs/reference/governed-node-descriptor-contracts.tsv
+      - docs/reference/environment-variables.md
+      - docs/reference/bundles/**
+      - ravenroot/ravenroot-extensions/**/src/main/java/**/*Configuration.java
+      - ravenroot/ravenroot-extensions/**/src/main/java/**/*Profile.java
+      - ravenroot/ravenroot-extensions/**/src/main/java/**/*Policy.java
+      - ravenroot/ravenroot-extensions/**/src/main/java/**/*Resolver.java
+      - ravenroot/ravenroot-extensions/**/src/main/java/**/*Values.java
+      - ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceProfile.java
+      - ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverArtifactName.java
+      - ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcStatementProfile.java
+      - ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/NamedSql.java
+      - ravenroot/ravenroot-extensions/ravenroot-object-storage/src/main/java/ai/ravenroot/extensions/storage/StorageUri.java
+      - ravenroot/ravenroot-extensions/**/src/main/resources/**/ravenroot-plugin.json
+      - ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentOperationalConfiguration.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadJson.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadValue.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/EnvironmentKeyCodec.java
+      - ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/NodePackageEgressPolicy.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/PublicationPolicyConfiguration.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/humantaskinteraction/HumanTaskInteractionConfiguration.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/plugin/EnvironmentNodePackageServiceGrants.java
+      - ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java
+      - ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ConfiguratorCoreContractCompatibilityTest.java
       - ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/PublicationPolicyConfigurationTest.java
+      - Dockerfile
+      - compose.yaml
+      - plugin.sh
       - .github/workflows/configurator.yml
 
 permissions:
@@ -32,7 +62,6 @@ jobs:
       - run: pnpm audit --audit-level moderate
       - run: pnpm build
       - run: pnpm test
-      - run: pnpm example:amqp
       - name: Generate and verify exact extension resolver fixtures
         working-directory: .
         run: |
@@ -43,3 +72,10 @@ jobs:
       - name: Verify packaged-server core configuration carriers
         working-directory: .
         run: mvn -f ravenroot/pom.xml -pl ravenroot-server -am -Dtest=PublicationPolicyConfigurationTest,ConfiguratorCoreContractCompatibilityTest -Dsurefire.failIfNoSpecifiedTests=false -Dravenroot.configurator.fixtures=${{ github.workspace }}/ravenroot-configurator/.generated/configurator-contracts.properties test
+      - name: Build the reproducible local runtime used by the real AMQP transfer exercise
+        working-directory: .
+        run: |
+          ./plugin.sh build amqp091 --skip-tests
+          docker build --build-arg RAVENROOT_PLUGINS_DIR=ravenroot-configurator/examples/amqp/empty-plugins -t ravenroot:local .
+      - name: Exercise a closed AMQP bundle through real Compose and Ravenroot
+        run: pnpm example:amqp

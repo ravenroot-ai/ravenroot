@@ -6,6 +6,7 @@ import { parse, parseAllDocuments, stringify } from "yaml";
 import { canonicalJson, sha256, text, utf8 } from "./codec.js";
 import { decryptSecret } from "./crypto.js";
 import { CONTRACT_BY_ID, serializeSelection } from "./registry.js";
+import { ociImageReference } from "./oci.js";
 import type { DecodedPackage, EmbeddedSecretEnvelope, ExternalMutationStep, PlanChange, RedactedPlan, TargetKind } from "./types.js";
 
 const STATE_DIR = ".ravenroot-config";
@@ -62,11 +63,13 @@ export interface PreparedInstall {
 }
 
 interface TransactionJournal {
-  readonly version: 2;
+  readonly version: 3;
   readonly transaction: string;
   readonly steps: readonly ExternalMutationStep[];
   readonly completed: readonly string[];
   readonly inFlight?: string;
+  readonly compensationCompleted: readonly string[];
+  readonly compensationInFlight?: string;
 }
 
 function confined(root: string, relative: string): string {
@@ -378,8 +381,8 @@ function kubernetesArtifacts(pkg: DecodedPackage, environment: Record<string, st
     { path: `${STATE_DIR}/kubernetes/deployment-patch.rrcfg.yaml`, bytes: utf8(stringify(patch)), mode: 0o600, sensitive: true }
   ];
   if (pkg.manifest.bundles.length) {
-    const baseImage = String(pkg.manifest.target.options.baseImage ?? "");
-    const derivedImage = String(pkg.manifest.target.options.derivedImage ?? "");
+    const baseImage = ociImageReference(pkg.manifest.target.options.baseImage, "baseImage", true);
+    const derivedImage = ociImageReference(pkg.manifest.target.options.derivedImage, "derivedImage");
     if (!baseImage || !derivedImage) throw new Error("Kubernetes bundle application requires target options baseImage and derivedImage");
     artifacts.push({
       path: `${STATE_DIR}/kubernetes/bundle-image/Dockerfile`, mode: 0o644, sensitive: false,
@@ -498,7 +501,7 @@ async function prepareExternalSteps(pkg: DecodedPackage, root: string,
   const previousRelease = await helmRelease(runner, release, namespace);
   const helmCompensation: readonly string[] = previousRelease
     ? ["helm", "rollback", release, previousRelease.revision, "--namespace", namespace, "--wait"]
-    : ["helm", "uninstall", release, "--namespace", namespace, "--wait"];
+    : ["helm", "uninstall", release, "--namespace", namespace, "--wait", "--ignore-not-found"];
   const steps: ExternalMutationStep[] = [];
   let cursor = 0;
   while (cursor < apply.length && apply[cursor]?.[0] === "docker") {
@@ -741,12 +744,12 @@ export async function applyInstall(prepared: PreparedInstall, options: InstallOp
     ...step,
     compensate: step.compensate.map((command) => command.map((part) => part.replaceAll("__BACKUP__", backupRoot)))
   }));
-  let journal: TransactionJournal = { version: 2, transaction, steps, completed: [] };
+  let journal: TransactionJournal = { version: 3, transaction, steps, completed: [], compensationCompleted: [] };
   const journalPath = confined(backupRoot, "journal.json");
   const pendingPath = confined(root, `${STATE_DIR}/${PENDING_FILE}`);
   const persist = async (): Promise<void> => {
     await atomicWrite(journalPath, utf8(canonicalJson(journal)), 0o600);
-    await atomicWrite(pendingPath, utf8(canonicalJson({ version: 2, transaction })), 0o600);
+    await atomicWrite(pendingPath, utf8(canonicalJson({ version: 3, transaction })), 0o600);
   };
   await persist();
   try {
@@ -770,13 +773,14 @@ export async function applyInstall(prepared: PreparedInstall, options: InstallOp
     }
     await rm(pendingPath);
   } catch (failure) {
-    await rollback(root, options.commandRunner);
+    await rollback(root, options.commandRunner, options.queryRunner);
     throw failure;
   }
 }
 
 export async function rollback(targetRoot: string,
-                               commandRunner?: (command: readonly string[], environment: Readonly<Record<string, string>>) => Promise<void>): Promise<void> {
+                               commandRunner?: (command: readonly string[], environment: Readonly<Record<string, string>>) => Promise<void>,
+                               queryRunner?: (command: readonly string[]) => Promise<string>): Promise<void> {
   const root = resolve(targetRoot);
   const state = await readState(root);
   const pendingPath = confined(root, `${STATE_DIR}/${PENDING_FILE}`);
@@ -799,18 +803,75 @@ export async function rollback(targetRoot: string,
   }
   const journalPath = confined(backupRoot, "journal.json");
   if (await exists(journalPath)) {
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as TransactionJournal;
-    if (journal.version !== 2 || journal.transaction !== transaction) throw new Error("Installer recovery journal is invalid");
+    let journal = JSON.parse(await readFile(journalPath, "utf8")) as TransactionJournal;
+    if (journal.version !== 3 || journal.transaction !== transaction || !Array.isArray(journal.compensationCompleted)) throw new Error("Installer recovery journal is invalid");
     const applied = [...journal.completed];
     if (journal.inFlight && !applied.includes(journal.inFlight)) applied.push(journal.inFlight);
     const runner = commandRunner ?? defaultRunner;
+    const query = queryRunner ?? defaultQueryRunner;
+    const persistJournal = async (): Promise<void> => atomicWrite(journalPath, utf8(canonicalJson(journal)), 0o600);
     for (const id of applied.reverse()) {
       const step = journal.steps.find((candidate) => candidate.id === id);
       if (!step || !step.mutatesTarget) continue;
-      for (const command of step.compensate) await runner(command, {});
+      for (let commandIndex = 0; commandIndex < step.compensate.length; commandIndex += 1) {
+        const key = `${step.id}:${commandIndex}`;
+        if (journal.compensationCompleted.includes(key)) continue;
+        const command = step.compensate[commandIndex]!;
+        if (journal.compensationInFlight === key && await compensationAlreadyEffective(command, query)) {
+          journal = { ...journal, compensationCompleted: [...journal.compensationCompleted, key] };
+          delete (journal as { compensationInFlight?: string }).compensationInFlight;
+          await persistJournal();
+          continue;
+        }
+        journal = { ...journal, compensationInFlight: key }; await persistJournal();
+        let replay = command;
+        if (step.id === "compose-recreate") {
+          const usable: string[] = [];
+          for (let index = 0; index < command.length; index += 1) {
+            if (command[index] === "-f" && command[index + 1] && !await exists(command[index + 1] as string)) { index += 1; continue; }
+            usable.push(command[index] as string);
+          }
+          replay = usable;
+        }
+        await runner(replay, {});
+        journal = { ...journal, compensationCompleted: [...journal.compensationCompleted, key] };
+        delete (journal as { compensationInFlight?: string }).compensationInFlight;
+        await persistJournal();
+      }
     }
   }
   if (await exists(pendingPath)) await rm(pendingPath);
+}
+
+async function compensationAlreadyEffective(command: readonly string[], query: (command: readonly string[]) => Promise<string>): Promise<boolean> {
+  if (command[0] === "helm" && command[1] === "uninstall") {
+    const release = command[2] as string;
+    const namespace = command[command.indexOf("--namespace") + 1] as string;
+    return await helmRelease(query, release, namespace) === undefined;
+  }
+  if (command[0] === "helm" && command[1] === "rollback") {
+    const release = command[2] as string;
+    const revision = command[3] as string;
+    const namespace = command[command.indexOf("--namespace") + 1] as string;
+    const active = await helmRelease(query, release, namespace);
+    if (!active || active.status.toLowerCase() !== "deployed") return false;
+    const common = [release, "--namespace", namespace];
+    const [currentManifest, targetManifest, currentValues, targetValues] = await Promise.all([
+      query(["helm", "get", "manifest", ...common]),
+      query(["helm", "get", "manifest", ...common, "--revision", revision]),
+      query(["helm", "get", "values", ...common, "--all", "-o", "json"]),
+      query(["helm", "get", "values", ...common, "--revision", revision, "--all", "-o", "json"])
+    ]);
+    return currentManifest === targetManifest && canonicalJson(JSON.parse(currentValues)) === canonicalJson(JSON.parse(targetValues));
+  }
+  if (command[0] === "kubectl" && command[1] === "delete") {
+    const kind = command[2] as string;
+    const name = command[3] as string;
+    const namespace = command[command.indexOf("--namespace") + 1] as string;
+    return await queryKubernetesObject(query, ["kubectl", "get", kind, name, "--namespace", namespace, "--ignore-not-found", "-o", "json"]) === undefined;
+  }
+  // apply, patch, Compose recreation and explicit pre-start commands are designed to be replay-safe.
+  return false;
 }
 
 export function redactedPlanJson(plan: RedactedPlan): string {

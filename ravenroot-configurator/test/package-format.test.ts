@@ -84,4 +84,19 @@ describe("portable package", () => {
     await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.plan.targetId = "another-target"; }))).rejects.toThrow("not bound to its target");
     await expect(inspectPackage(await tamperedPackage((manifest) => { manifest.plan.changes[0].action = "overwrite"; }))).rejects.toThrow("plan change is invalid");
   });
+
+  test("requires pinned single-line OCI references on export and import", async () => {
+    const digest = `sha256:${"1".repeat(64)}`;
+    await expect(createPackage({ target: target("kubernetes", { baseImage: "ravenroot:latest", derivedImage: "registry.example.test/ravenroot:configured" }),
+      configurations: [coreHttp], secrets: [], bundles: [] })).rejects.toThrow("pinned by a sha256 digest");
+    for (const hostile of ["ravenroot@" + digest + "\nRUN id", "ravenroot@" + digest + " RUN id", "ravenroot@sha256:" + "A".repeat(64)]) {
+      await expect(createPackage({ target: target("kubernetes", { baseImage: hostile, derivedImage: "registry.example.test/ravenroot:configured" }),
+        configurations: [coreHttp], secrets: [], bundles: [] })).rejects.toThrow("single-line OCI image reference");
+    }
+    await expect(inspectPackage(await tamperedPackage((manifest) => {
+      manifest.target.kind = "kubernetes";
+      manifest.target.options = { baseImage: `ravenroot@${digest}\nUSER 0`, derivedImage: "registry.example.test/ravenroot:configured" };
+      manifest.plan.targetKind = "kubernetes";
+    }))).rejects.toThrow("single-line OCI image reference");
+  });
 });

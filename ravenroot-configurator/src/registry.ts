@@ -1,8 +1,16 @@
 import { base64Json, safeName, utf8Hex } from "./codec.js";
-import { schemaFromTemplate, validateValue } from "./schema.js";
-import type { ConfigurationContract, ConfigurationSelection, FieldSpec } from "./types.js";
+import { validateValue } from "./schema.js";
+import { CONTRACT_SCHEMA_VERSION, EXPLICIT_CONTRACT_SCHEMAS } from "./contract-schemas.js";
+import type { ConfigurationContract, ConfigurationSelection, FieldSpec, ValueSchema } from "./types.js";
+
+const schemaFor = (id: string): ValueSchema => {
+  const schema = (EXPLICIT_CONTRACT_SCHEMAS as Readonly<Record<string, ValueSchema>>)[id];
+  if (!schema) throw new Error(`Missing explicit configuration schema ${id}`);
+  return schema;
+};
 
 const requiredString = (name: string, label = name): FieldSpec => ({ name, label, type: "string", required: true });
+const requiredPossiblyEmptyString = (name: string, label = name): FieldSpec => ({ name, label, type: "string", required: true, allowEmpty: true });
 const optionalString = (name: string, label = name): FieldSpec => ({ name, label, type: "string", required: false });
 const requiredInt = (name: string, minimum = 1, maximum?: number): FieldSpec => ({
   name, label: name, type: "integer", required: true, minimum, ...(maximum === undefined ? {} : { maximum })
@@ -10,8 +18,8 @@ const requiredInt = (name: string, minimum = 1, maximum?: number): FieldSpec => 
 const requiredBoolean = (name: string): FieldSpec => ({ name, label: name, type: "boolean", required: true });
 const requiredCsv = (name: string): FieldSpec => ({ name, label: name, type: "csv", required: true });
 const optionalCsv = (name: string): FieldSpec => ({ name, label: name, type: "csv", required: false });
-const strictJson = (name: string, label: string, suggestion: Readonly<Record<string, unknown>>): FieldSpec => ({
-  name, label, type: "json", required: true, suggestion, schema: schemaFromTemplate(suggestion)
+const strictJson = (contractId: string, name: string, label: string, suggestion: Readonly<Record<string, unknown>>): FieldSpec => ({
+  name, label, type: "json", required: true, suggestion, schema: schemaFor(`${contractId}:${name}`)
 });
 
 const jsonContract = (
@@ -26,6 +34,7 @@ const jsonContract = (
   requiredCapabilities: readonly string[] = [],
   externalRequirements: readonly string[] = []
 ): ConfigurationContract => ({
+  schemaVersion: CONTRACT_SCHEMA_VERSION,
   id,
   title,
   family,
@@ -35,15 +44,18 @@ const jsonContract = (
   identity,
   encoding: "base64-json",
   fields: [{ name: "document", label: "Configuration document", type: "json", required: true,
-    schema: schemaFromTemplate(jsonTemplate) }],
+    schema: schemaFor(id) }],
   jsonTemplate,
-  schema: schemaFromTemplate(jsonTemplate),
+  schema: schemaFor(id),
   runtimeVerifier: id,
   requiredCapabilities,
   externalRequirements,
   restartRequired: true,
   credentialResolver: requiredCapabilities.includes("credential-resolution") || requiredCapabilities.includes("outbound-http")
-    ? "shared" : "none"
+    ? "shared" : "none",
+  crossFieldRules: ["ai.llm-profile", "ai.mcp-profile", "git-workspace.profile", "openapi-client.profile", "websocket.profile"].includes(id)
+    ? ["credential-pair", "credential-requires-tls", ...(id === "ai.mcp-profile" ? ["mcp-tools-bound" as const] : [])]
+    : id === "jdbc.profile" ? ["jdbc-total-cell"] : id === "object-storage.profile" ? ["storage-virtual-host"] : []
 });
 
 const delimitedContract = (
@@ -61,6 +73,7 @@ const delimitedContract = (
     credentials?: "none" | "shared" | "family";
   } = {}
 ): ConfigurationContract => ({
+  schemaVersion: CONTRACT_SCHEMA_VERSION,
   id,
   title,
   family,
@@ -140,25 +153,18 @@ export const DELIMITED_TEMPLATES: Readonly<Record<string, Readonly<Record<string
 
 export const CONTRACTS: readonly ConfigurationContract[] = [
   {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "bundle.service-grant", title: "Node package managed-service grant", family: "Package activation",
     nodeIds: [], environment: "RAVENROOT_NODE_PACKAGE_SERVICES_", identity: ["profile"], encoding: "base64-json",
     fields: [{ name: "document", label: "Strict managed-service grant", type: "json", required: true,
-      schema: schemaFromTemplate({ capabilities: ["outbound-http"],
-        origins: [{ scheme: "https", host: "api.example.test", port: 443 }],
-        httpMethods: ["GET"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
-        webSocketSubprotocols: ["protocol"], credentialBindings: ["binding"], awsSigV4Bindings: ["binding"], credentialReferences: ["reference"],
-        limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 } }) }],
+      schema: EXPLICIT_CONTRACT_SCHEMAS["bundle.service-grant"] }],
     jsonTemplate: { capabilities: ["outbound-http"],
       origins: [{ scheme: "https", host: "api.example.test", port: 443 }],
       httpMethods: ["GET", "POST"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
       webSocketSubprotocols: [], credentialBindings: [], awsSigV4Bindings: [], credentialReferences: ["credential"],
       limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 } },
     requiredCapabilities: [], externalRequirements: ["Use the exact plugin manifest ID as the profile identity."],
-    schema: schemaFromTemplate({ capabilities: ["outbound-http"],
-      origins: [{ scheme: "https", host: "api.example.test", port: 443 }],
-      httpMethods: ["GET"], requestHeaders: ["content-type"], responseHeaders: ["content-type"],
-      webSocketSubprotocols: ["protocol"], credentialBindings: ["binding"], awsSigV4Bindings: ["binding"], credentialReferences: ["reference"],
-      limits: { maxRequestBytes: 1048576, maxResponseBytes: 4194304, maxDeadlineMs: 15000 } }),
+    schema: EXPLICIT_CONTRACT_SCHEMAS["bundle.service-grant"],
     runtimeVerifier: "bundle.service-grant", restartRequired: true, credentialResolver: "shared"
   },
   jsonContract("ai.llm-profile", "AI model profile", "AI / LLM", "ai.ravenroot.extensions.ai",
@@ -175,19 +181,19 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     }, ["outbound-http", "tool-authorization", "agent-resources"]),
   delimitedContract("amqp.profile", "AMQP publisher profile", "AMQP 0-9-1", "ai.ravenroot.extensions.amqp091",
     ["amqp.publish"], "RAVENROOT_AMQP091_PROFILE_", [
-      requiredString("host"), requiredInt("port", 1, 65535), requiredBoolean("tls"), requiredString("vhost"),
+      requiredString("host"), requiredInt("port", 1, 65535), requiredBoolean("tls"), requiredPossiblyEmptyString("vhost"),
       requiredString("username"), requiredString("credentialRef"), optionalString("defaultExchange"), optionalCsv("additionalExchanges"),
       requiredString("defaultRoutingKey"), optionalCsv("additionalRoutingKeys"), optionalCsv("approvedHeaders"), optionalCsv("approvedReplyTo"),
-      requiredBoolean("allowPersistent"), requiredInt("maxPriority", 0, 9), requiredInt("maxExpirationMs", 1, 86400000),
-      requiredInt("maxConcurrency", 1, 16), requiredInt("maxPerSecond", 1, 100), requiredInt("timeoutMs", 1, 30000),
+      requiredBoolean("allowPersistent"), requiredInt("maxPriority", 0, 9), requiredInt("maxExpirationMs", 0, 86400000),
+      requiredInt("maxConcurrency", 1, 16), requiredInt("maxPerSecond", 1, 100), requiredInt("timeoutMs", 100, 30000),
       requiredInt("maxBodyBytes", 1, 1048576), requiredInt("retries", 0, 3)
     ], { credentials: "family" }),
   delimitedContract("amqp.consumer", "AMQP consumer policy", "AMQP 0-9-1", "ai.ravenroot.extensions.amqp091",
     ["amqp.consume"], "RAVENROOT_AMQP091_CONSUMER_", [
-      requiredString("queue"), requiredInt("prefetch"), optionalCsv("approvedHeaders"), optionalString("identityHeader"),
-      requiredInt("maxBodyBytes"), requiredInt("maxHeaderBytes"), requiredInt("retryBackoffMs", 100),
-      requiredInt("maxRetryBackoffMs", 1000), requiredInt("poisonAttempts"),
-      { ...requiredString("poisonPolicy"), allowed: ["reject", "dead-letter"] }, requiredInt("drainTimeoutMs")
+      requiredString("queue"), requiredInt("prefetch", 1, 1024), optionalCsv("approvedHeaders"), optionalString("identityHeader"),
+      requiredInt("maxBodyBytes", 1, 1048576), requiredInt("maxHeaderBytes", 0, 65536), requiredInt("retryBackoffMs", 100, 60000),
+      requiredInt("maxRetryBackoffMs", 1000, 60000), requiredInt("poisonAttempts", 1, 100),
+      { ...requiredString("poisonPolicy"), allowed: ["reject", "dead-letter"] }, requiredInt("drainTimeoutMs", 0, 30000)
     ], { credentials: "family" }),
   delimitedContract("filesystem.profile", "Filesystem profile", "Filesystem", "ai.ravenroot.extensions.filesystem",
     ["filesystem.read", "filesystem.write"], "RAVENROOT_FILESYSTEM_PROFILE_", [
@@ -215,24 +221,24 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
   delimitedContract("kafka.producer-profile", "Kafka producer profile", "Kafka", "ai.ravenroot.extensions.kafka",
     ["kafka.produce"], "RAVENROOT_KAFKA_PROFILE_", [
       requiredString("bootstrapServers"), requiredString("clientDnsLookup"), requiredBoolean("tls"), requiredString("saslMechanism"),
-      optionalString("username"), optionalString("credentialRef"), requiredString("clientId"), requiredString("defaultTopic"),
-      optionalCsv("additionalTopics"), optionalCsv("approvedHeaders"), requiredBoolean("allowPartition"), requiredInt("maxPartition", 0),
-      requiredBoolean("allowTimestamp"), requiredString("compression"), requiredString("acks"), requiredBoolean("idempotence"),
-      requiredInt("retries", 1), requiredInt("maxInFlight", 1, 5), requiredBoolean("allowAutoCreate"),
-      requiredInt("maxConcurrency"), requiredInt("maxPerSecond"), requiredInt("timeoutMs"), requiredInt("maxRecordBytes"),
-      requiredInt("bufferMemoryBytes")
+      requiredString("username"), requiredString("credentialRef"), requiredString("clientId"), requiredString("defaultTopic"),
+      optionalCsv("additionalTopics"), optionalCsv("approvedHeaders"), requiredBoolean("allowPartition"), requiredInt("maxPartition", 0, 100000),
+      requiredBoolean("allowTimestamp"), { ...requiredString("compression"), allowed: ["none", "gzip", "snappy", "lz4", "zstd"] }, { ...requiredString("acks"), allowed: ["all"] }, requiredBoolean("idempotence"),
+      requiredInt("retries", 1, 1000000), requiredInt("maxInFlight", 1, 5), requiredBoolean("allowAutoCreate"),
+      requiredInt("maxConcurrency", 1, 16), requiredInt("maxPerSecond", 1, 1000), requiredInt("timeoutMs", 100, 30000), requiredInt("maxRecordBytes", 1, 1048576),
+      requiredInt("bufferMemoryBytes", 1, 16777216)
     ], { credentials: "family" }),
   delimitedContract("kafka.consumer-profile", "Kafka consumer profile", "Kafka", "ai.ravenroot.extensions.kafka",
     ["kafka.consume"], "RAVENROOT_KAFKA_CONSUMER_PROFILE_", [
       requiredString("bootstrapServers"), requiredString("clientDnsLookup"), requiredBoolean("tls"), requiredString("saslMechanism"),
-      optionalString("username"), optionalString("credentialRef"), requiredString("clientId"), requiredString("groupLogicalName"),
+      requiredString("username"), requiredString("credentialRef"), requiredString("clientId"), requiredString("groupLogicalName"),
       requiredString("groupId"), optionalString("staticMemberId"), optionalCsv("topics"), optionalString("anchoredTopicPattern"),
-      optionalCsv("approvedHeaders"), requiredString("assignmentStrategy"), requiredString("autoOffsetReset"),
-      requiredString("isolationLevel"), requiredInt("startupTimeoutMs"), requiredInt("pollTimeoutMs"), requiredInt("maxPollIntervalMs"),
-      requiredInt("sessionTimeoutMs"), requiredInt("heartbeatIntervalMs"), requiredInt("maxInFlight"), requiredInt("maxFetchBytes"),
-      requiredInt("maxPartitionFetchBytes"), requiredInt("maxRecordBytes"), requiredInt("maxKeyBytes"), requiredInt("maxValueBytes"),
-      requiredInt("maxHeaderBytes"), requiredInt("drainTimeoutMs"), requiredInt("retryBackoffMs"), requiredInt("maxRetryBackoffMs"),
-      requiredInt("poisonAttempts"), requiredString("poisonPolicy"), optionalString("deadLetterTopic")
+      optionalCsv("approvedHeaders"), { ...requiredString("assignmentStrategy"), allowed: ["range", "round-robin", "cooperative-sticky"] }, { ...requiredString("autoOffsetReset"), allowed: ["earliest", "latest", "none"] },
+      { ...requiredString("isolationLevel"), allowed: ["read_committed"] }, requiredInt("startupTimeoutMs", 100, 120000), requiredInt("pollTimeoutMs", 10, 5000), requiredInt("maxPollIntervalMs", 1000, 1800000),
+      requiredInt("sessionTimeoutMs", 1000, 1799999), requiredInt("heartbeatIntervalMs", 100, 599999), requiredInt("maxInFlight", 1, 10000), requiredInt("maxFetchBytes", 1, 67108864),
+      requiredInt("maxPartitionFetchBytes", 1, 67108864), requiredInt("maxRecordBytes", 1, 67108864), requiredInt("maxKeyBytes", 0, 67108864), requiredInt("maxValueBytes", 1, 67108864),
+      requiredInt("maxHeaderBytes", 0, 67108864), requiredInt("drainTimeoutMs", 0, 120000), requiredInt("retryBackoffMs", 1, 60000), requiredInt("maxRetryBackoffMs", 1, 300000),
+      requiredInt("poisonAttempts", 1, 1000), { ...requiredString("poisonPolicy"), allowed: ["halt", "dead-letter"] }, optionalString("deadLetterTopic")
     ], { credentials: "family" }),
   delimitedContract("mail.smtp-profile", "Mail SMTP profile", "Mail / SMTP", "ai.ravenroot.extensions.mail",
     ["mail.send"], "RAVENROOT_MAIL_PROFILE_", [
@@ -376,6 +382,7 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
           maxTextChars: 4000, maxConcurrency: 4, maxPerSecond: 20, ackTimeoutMs: 4000, signatureMaxAgeSeconds: 300 } } }
     }, ["credential-resolution", "outbound-http"]),
   {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "core.http", title: "Built-in HTTP policy", family: "Built-in HTTP", nodeIds: ["http-request"], environment: "*",
     identity: [], encoding: "plain-environment", runtimeVerifier: "core.http", restartRequired: true, credentialResolver: "shared",
     fields: [
@@ -388,6 +395,7 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     ]
   },
   {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "core.program", title: "Built-in program runtime", family: "Built-in program", nodeIds: ["program"], environment: "*",
     identity: [], encoding: "plain-environment", runtimeVerifier: "core.program", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["A configured sandbox supervisor is required for effectful program execution."],
@@ -398,30 +406,33 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
       { ...requiredCsv("RAVENROOT_ALLOWED_TOOLS"), suggestion: ["program"] }]
   },
   {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "core.human-task", title: "Human task registered presentation", family: "Built-in human task", nodeIds: ["human-task"],
     environment: "*", identity: [], encoding: "plain-environment", runtimeVerifier: "core.human-task", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["The configurator installs the strict interaction document as a mounted operator-owned JSON file."],
-    fields: [strictJson("interactionDocument", "Interaction registry", { schemaVersion: 1, capabilityTtlSeconds: 300, maxCompletionBytes: 65536,
+    fields: [strictJson("core.human-task", "interactionDocument", "Interaction registry", { schemaVersion: 1, capabilityTtlSeconds: 300, maxCompletionBytes: 65536,
         capabilitySecretBase64: { $secret: "human-task-capability" }, profiles: [{ id: "review", version: 1,
           kind: "EXTERNAL", launchUri: "https://review.example.test/task", origin: "https://review.example.test",
           completionSecretBase64: { $secret: "human-task-provider" } }] }),
       { name: "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED", label: "Responder enforcement", type: "boolean", required: true }]
   },
   {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "core.publication-policies", title: "Publication boundary policies", family: "Built-in publication guard",
     nodeIds: ["boundary-guard"], environment: "*", identity: [], encoding: "plain-environment",
     runtimeVerifier: "core.publication-policies", restartRequired: true, credentialResolver: "none",
     externalRequirements: ["The configurator installs the immutable policy registry as a mounted operator-owned JSON file."],
-    fields: [strictJson("policyDocument", "Publication policy registry", { schemaVersion: 1, policies: [{ id: "public", version: "v1", maxCandidateBytes: 1048576,
+    fields: [strictJson("core.publication-policies", "policyDocument", "Publication policy registry", { schemaVersion: 1, policies: [{ id: "public", version: "v1", maxCandidateBytes: 1048576,
         rules: [{ type: "destination", id: "destination.approved", allowedTypes: ["repository"],
           allowedAddresses: ["public"] }, { type: "provenance", id: "provenance.complete", allowedSourceTypes: ["graph"] }] }] })]
   },
   {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "core.runner", title: "Governed runner and workspace configuration", family: "Governed runner",
     nodeIds: ["agent", "workspace"], environment: "*", identity: [], encoding: "plain-environment",
     runtimeVerifier: "core.runner", restartRequired: true, credentialResolver: "shared",
     externalRequirements: ["The configured artifact directory and runner identity files must exist on the target."],
-    fields: [strictJson("runnerDocument", "Runner control-plane configuration", { protocolVersion: 1, runnerIssuer: "https://identity.example.test",
+    fields: [strictJson("core.runner", "runnerDocument", "Runner control-plane configuration", { protocolVersion: 1, runnerIssuer: "https://identity.example.test",
         artifactDirectory: "/var/lib/ravenroot/runner-artifacts", tenants: { "tenant-a": {
           policy: { capabilities: ["WORKSPACE_READ"], tools: [], network: [], secrets: [], mounts: [], limits: {
             wallTime: "PT2M", memoryBytes: 134217728, processes: 32, workspaceBytes: 67108864,
@@ -448,6 +459,7 @@ export function environmentKey(contract: ConfigurationContract, selection: Confi
 
 function scalar(field: FieldSpec, value: unknown): string {
   if (value === undefined || value === null || value === "") {
+    if (value === "" && field.allowEmpty) return "";
     if (field.required) throw new Error(`${field.label} is required`);
     return "";
   }
@@ -508,7 +520,61 @@ export function serializeSelection(selection: ConfigurationSelection): Readonly<
     }
     if (!contract.schema) throw new Error(`${contract.id} has no executable schema`);
     validateValue(contract.schema, document, `${contract.id}.document`);
+    if (contract.crossFieldRules?.includes("credential-pair")) {
+      const record = document as Record<string, unknown>;
+      const leftName = "credentialBindingId" in record || "credentialReference" in record ? "credentialBindingId" : "credentialRef";
+      const rightName = leftName === "credentialBindingId" ? "credentialReference" : "credentialUsername";
+      const binding = typeof record[leftName] === "string" && record[leftName].trim().length > 0;
+      const reference = typeof record[rightName] === "string" && record[rightName].trim().length > 0;
+      if (binding !== reference) throw new Error(`${contract.id}.document ${leftName} and ${rightName} must be supplied together`);
+      const endpoint = record.endpoint ?? record.origin ?? record.remote ?? record.destination;
+      if (binding && contract.crossFieldRules.includes("credential-requires-tls") && !/^(?:https|wss):\/\//i.test(String(endpoint))) {
+        throw new Error(`${contract.id}.document credentials require an https endpoint`);
+      }
+    }
+    if (contract.crossFieldRules?.includes("mcp-tools-bound")) {
+      const record = document as Record<string, unknown>; const tools = record.allowedTools;
+      if (Array.isArray(tools) && typeof record.maxDiscoveredTools === "number" && tools.length > record.maxDiscoveredTools) throw new Error(`${contract.id}.document allowedTools exceeds maxDiscoveredTools`);
+    }
+    if (contract.crossFieldRules?.includes("jdbc-total-cell")) {
+      const record = document as Record<string, unknown>;
+      if (Number(record.maxTotalBytes) < Number(record.maxCellBytes)) throw new Error(`${contract.id}.document maxTotalBytes must be at least maxCellBytes`);
+    }
+    if (contract.crossFieldRules?.includes("storage-virtual-host")) {
+      const record = document as Record<string, unknown>;
+      if (record.addressingStyle === "virtual-hosted" && !new URL(String(record.origin)).hostname.startsWith(`${record.bucket}.`)) throw new Error(`${contract.id}.document virtual-hosted origin must begin with the bucket name`);
+    }
+    if (contract.id === "matrix.config") {
+      const profiles = (document as { profiles?: Record<string, { limits?: Record<string, unknown> }> }).profiles ?? {};
+      for (const [name, profile] of Object.entries(profiles)) {
+        const limits = profile.limits ?? {};
+        if (Number(limits.requestTimeoutMs) <= Number(limits.pollTimeoutMs)) throw new Error(`${contract.id}.document.profiles.${name} requestTimeoutMs must exceed pollTimeoutMs`);
+      }
+    }
     return { [environmentKey(contract, selection)]: base64Json(document) };
+  }
+  if (contract.id === "kafka.producer-profile") {
+    const values = selection.values;
+    if (values.idempotence !== true) throw new Error(`${contract.id} requires idempotence`);
+    if (Number(values.bufferMemoryBytes) < Number(values.maxRecordBytes)) throw new Error(`${contract.id} bufferMemoryBytes must be at least maxRecordBytes`);
+    const servers = String(values.bootstrapServers).split(",");
+    if (values.tls === false && servers.some((server) => !/^(?:localhost|127\.0\.0\.1|\[::1]):[0-9]+$/i.test(server))) throw new Error(`${contract.id} plaintext bootstrap servers must be loopback`);
+  }
+  if (contract.id === "kafka.consumer-profile") {
+    const values = selection.values;
+    const topics = Array.isArray(values.topics) ? values.topics.map(String) : String(values.topics ?? "").split(",").filter(Boolean);
+    const pattern = String(values.anchoredTopicPattern ?? "").trim();
+    if ((topics.length > 0) === (pattern.length > 0)) throw new Error(`${contract.id} requires exactly one topic subscription form`);
+    if (Number(values.sessionTimeoutMs) >= Number(values.maxPollIntervalMs)) throw new Error(`${contract.id} sessionTimeoutMs must be less than maxPollIntervalMs`);
+    if (Number(values.heartbeatIntervalMs) * 3 > Number(values.sessionTimeoutMs)) throw new Error(`${contract.id} heartbeatIntervalMs must fit three times within sessionTimeoutMs`);
+    if (Number(values.maxPartitionFetchBytes) > Number(values.maxFetchBytes)) throw new Error(`${contract.id} maxPartitionFetchBytes exceeds maxFetchBytes`);
+    for (const field of ["maxRecordBytes", "maxKeyBytes", "maxValueBytes", "maxHeaderBytes"]) if (Number(values[field]) > Number(values.maxPartitionFetchBytes) && field === "maxRecordBytes" || field !== "maxRecordBytes" && Number(values[field]) > Number(values.maxRecordBytes)) throw new Error(`${contract.id} ${field} exceeds its enclosing record limit`);
+    if (Number(values.maxRetryBackoffMs) < Number(values.retryBackoffMs)) throw new Error(`${contract.id} maxRetryBackoffMs must be at least retryBackoffMs`);
+    const deadLetter = String(values.deadLetterTopic ?? "").trim();
+    if (values.poisonPolicy === "dead-letter" && !deadLetter) throw new Error(`${contract.id} dead-letter policy requires deadLetterTopic`);
+    if (deadLetter && topics.includes(deadLetter)) throw new Error(`${contract.id} deadLetterTopic must differ from subscribed topics`);
+    const servers = String(values.bootstrapServers).split(",");
+    if (values.tls === false && servers.some((server) => !/^(?:localhost|127\.0\.0\.1|\[::1]):[0-9]+$/i.test(server))) throw new Error(`${contract.id} plaintext bootstrap servers must be loopback`);
   }
   const parts = contract.fields.map((field) => scalar(field, selection.values[field.name]));
   return { [environmentKey(contract, selection)]: parts.join(contract.delimiter ?? ";") };

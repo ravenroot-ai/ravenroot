@@ -1774,8 +1774,8 @@ public final class GraphRunner implements AutoCloseable {
                 else quiescence.complete(false);
             });
             CompletableFuture.runAsync(() -> quiescence.complete(false),
-                    CompletableFuture.delayedExecutor(shutdownBound.toMillis(),
-                            java.util.concurrent.TimeUnit.MILLISECONDS));
+                    CompletableFuture.delayedExecutor(shutdownWaitNanos(shutdownBound),
+                            java.util.concurrent.TimeUnit.NANOSECONDS));
         }
         cancelledTraversals.remove(traversalId);
         // ON_CALLER: this runs on the traversal's own completion path, not on anyone's request

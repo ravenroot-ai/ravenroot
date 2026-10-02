@@ -570,16 +570,11 @@ public final class BehaviorRegistry {
         if (factory == null) {
             throw new ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException();
         }
-        // Schema validation remains an invalid authored payload. Only the behavior's destination
-        // authority lookup is translated to the stable, detail-free reference refusal.
+        // Schema and cross-property validation remain invalid authored payloads. The behavior hook
+        // owns the classification boundary because only the behavior knows whether a refusal came
+        // from authored settings or from an operator-owned destination reference.
         factory.validate(node);
-        try {
-            factory.validateTemplateReferences(node, tenantId);
-        } catch (ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException unavailable) {
-            throw unavailable;
-        } catch (IllegalArgumentException unavailable) {
-            throw new ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException(unavailable);
-        }
+        factory.validateTemplateReferences(node, tenantId);
     }
 
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */

@@ -27,7 +27,7 @@ class NodeTemplateReferenceValidationTest {
 
     @Test
     void preservesMalformedNodeConfigurationAsAnInvalidAuthoredPayload() {
-        var registry = new BehaviorRegistry().registerFactory(new ProbeFactory(true, false));
+        var registry = new BehaviorRegistry().registerFactory(new ProbeFactory(true, false, false));
 
         var failure = assertThrows(IllegalArgumentException.class,
                 () -> registry.validateTemplateReferences(node("test.palette-reference"), "tenant-a"));
@@ -36,8 +36,8 @@ class NodeTemplateReferenceValidationTest {
     }
 
     @Test
-    void classifiesOnlyDestinationLookupFailureAndKeepsItsDetailPrivate() {
-        var registry = new BehaviorRegistry().registerFactory(new ProbeFactory(false, true));
+    void preservesBehaviorClassifiedDestinationFailureAndKeepsItsDetailPrivate() {
+        var registry = new BehaviorRegistry().registerFactory(new ProbeFactory(false, true, false));
 
         var failure = assertThrows(NodeTemplateReferenceUnavailableException.class,
                 () -> registry.validateTemplateReferences(node("test.palette-reference"), "tenant-a"));
@@ -47,11 +47,23 @@ class NodeTemplateReferenceValidationTest {
         assertEquals("private-reference-canary", failure.getCause().getMessage());
     }
 
+    @Test
+    void doesNotReclassifyAnAuthoredSettingRejectedByTheReferenceHook() {
+        var registry = new BehaviorRegistry().registerFactory(new ProbeFactory(false, false, true));
+
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> registry.validateTemplateReferences(node("test.palette-reference"), "tenant-a"));
+
+        assertEquals(IllegalArgumentException.class, failure.getClass());
+        assertEquals("invalid-setting-canary", failure.getMessage());
+    }
+
     private static GraphNode node(String behavior) {
         return new GraphNode("saved", NodeKind.BEHAVIOR, behavior, Map.of());
     }
 
-    private record ProbeFactory(boolean malformed, boolean unavailable) implements NodeBehaviorFactory {
+    private record ProbeFactory(boolean malformed, boolean unavailable, boolean invalidSetting)
+            implements NodeBehaviorFactory {
         @Override
         public NodeTypeDescriptor descriptor() {
             return new NodeTypeDescriptor("test.palette-reference", "Palette reference", "General",
@@ -65,7 +77,9 @@ class NodeTemplateReferenceValidationTest {
 
         @Override
         public void validateTemplateReferences(GraphNode node, String tenantId) {
-            if (unavailable) throw new IllegalArgumentException("private-reference-canary");
+            if (unavailable) throw new NodeTemplateReferenceUnavailableException(
+                    new IllegalArgumentException("private-reference-canary"));
+            if (invalidSetting) throw new IllegalArgumentException("invalid-setting-canary");
         }
 
         @Override

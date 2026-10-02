@@ -48,6 +48,9 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param tenantId authenticated destination tenant
      * @param behavior installed behavior identifier
      * @param properties descriptor-filtered authored properties
+     * @throws IllegalArgumentException when the authored properties are malformed
+     * @throws NodeTemplateReferenceUnavailableException when the behavior or a destination authority
+     *         reference is unavailable to the authenticated tenant
      */
     default void validateNodeTemplateReferences(String tenantId, String behavior,
                                                 Map<String, String> properties) { }

@@ -1,11 +1,13 @@
 package ai.ravenroot.extensions.amqp091;
 
+import ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException;
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.catalog.PropertyCondition;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.deployment.SourceStartException;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeAction;
@@ -102,19 +104,36 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
     @Override public void validateTemplateReferences(NodeConfiguration configuration, String tenantId) {
         String name = configuration.property("brokerProfile")
                 .orElseThrow(() -> new IllegalArgumentException("AMQP broker profile is required"));
+        if (!name.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
+            throw new IllegalArgumentException("invalid authored AMQP consumer settings");
+        }
         try {
-            AmqpProfile profile = profiles.resolve(tenantId, name).orElse(null);
-            AmqpConsumerPolicy policy = policies.resolve(tenantId, name).orElse(null);
-            if (profile == null || policy == null || !tenantId.equals(profile.tenant())
-                    || !name.equals(profile.name()) || !tenantId.equals(policy.tenant())
-                    || !name.equals(policy.profile())) {
-                throw new IllegalArgumentException("AMQP template references are unavailable for this tenant");
-            }
-            AmqpConsumerSource.validateTemplateSettings(configuration, policy);
-        } catch (IllegalArgumentException refusal) {
-            throw refusal;
+            AmqpConsumerSource.validateTemplateAuthoredSettings(configuration);
+        } catch (SourceStartException refusal) {
+            throw new IllegalArgumentException("invalid authored AMQP consumer settings", refusal);
+        }
+        final AmqpProfile profile;
+        final AmqpConsumerPolicy policy;
+        try {
+            var resolvedProfile = profiles.resolve(tenantId, name);
+            var resolvedPolicy = policies.resolve(tenantId, name);
+            profile = resolvedProfile == null ? null : resolvedProfile.orElse(null);
+            policy = resolvedPolicy == null ? null : resolvedPolicy.orElse(null);
         } catch (RuntimeException unavailable) {
-            throw new IllegalArgumentException("AMQP template references are unavailable for this tenant");
+            throw new NodeTemplateReferenceUnavailableException(unavailable);
+        }
+        if (profile == null || policy == null || !tenantId.equals(profile.tenant())
+                || !name.equals(profile.name()) || !tenantId.equals(policy.tenant())
+                || !name.equals(policy.profile())) {
+            throw new NodeTemplateReferenceUnavailableException();
+        }
+        try {
+            AmqpConsumerSource.validateTemplateSettings(configuration, policy);
+        } catch (SourceStartException refusal) {
+            if (AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED.code().equals(refusal.code())) {
+                throw new NodeTemplateReferenceUnavailableException(refusal);
+            }
+            throw new IllegalArgumentException("invalid authored AMQP consumer settings", refusal);
         }
     }
 

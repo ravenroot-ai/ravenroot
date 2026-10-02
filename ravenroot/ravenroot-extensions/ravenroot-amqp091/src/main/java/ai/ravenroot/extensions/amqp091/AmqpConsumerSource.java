@@ -401,6 +401,59 @@ final class AmqpConsumerSource implements InboundSource {
         }
     }
 
+    /** Validates graph-authored syntax and absolute bounds before consulting operator authority. */
+    static void validateTemplateAuthoredSettings(NodeConfiguration configuration) {
+        if (!AmqpConsumeNodeBehavior.knownConfiguration().containsAll(configuration.properties().keySet())) {
+            throw sourceFailure(AmqpSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
+        }
+        String queue = configuration.property("queue", "");
+        if (!queue.isEmpty() && (queue.length() > 255 || !AmqpWireLimits.isShortstr(queue)
+                || queue.codePoints().anyMatch(Character::isISOControl))) {
+            throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
+        }
+        authoredInteger(configuration, "prefetch", 1, 1_024,
+                AmqpSourceStartFailure.INVALID_PREFETCH);
+        authoredInteger(configuration, "maxInFlight", 1, 1_024,
+                AmqpSourceStartFailure.INVALID_MAX_IN_FLIGHT);
+        int retry = authoredInteger(configuration, "retryBackoffMs",
+                AmqpConsumerPolicy.MIN_RETRY_BACKOFF_MS, 60_000,
+                AmqpSourceStartFailure.INVALID_RETRY_BACKOFF);
+        int maximum = authoredInteger(configuration, "maxRetryBackoffMs",
+                AmqpConsumerPolicy.MIN_MAX_RETRY_BACKOFF_MS, 60_000,
+                AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);
+        if (retry >= 0 && maximum >= 0 && maximum < retry) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);
+        }
+        authoredInteger(configuration, "drainTimeoutMs", 0, 30_000,
+                AmqpSourceStartFailure.INVALID_DRAIN_TIMEOUT);
+        authoredInteger(configuration, "poisonAttempts", 1, 100,
+                AmqpSourceStartFailure.INVALID_POISON_ATTEMPTS);
+        String poisonPolicy = configuration.property("poisonPolicy", "profile");
+        if (!poisonPolicy.equals("profile") && !poisonPolicy.equals("dead-letter")) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_POISON_POLICY);
+        }
+        if (poisonPolicy.equals("dead-letter")
+                && !configuration.property("deadLetterMode", "").equals("broker-dlx")) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_DEAD_LETTER_MODE);
+        }
+        if (!configuration.property("checkpointPolicy", "require-durable").equals("require-durable")) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_CHECKPOINT_POLICY);
+        }
+    }
+
+    private static int authoredInteger(NodeConfiguration configuration, String name, int minimum, int maximum,
+                                       AmqpSourceStartFailure reason) {
+        String raw = configuration.property(name, "");
+        if (raw.isEmpty()) return -1;
+        try {
+            int value = Integer.parseInt(raw);
+            if (value < minimum || value > maximum) throw new NumberFormatException();
+            return value;
+        } catch (RuntimeException invalid) {
+            throw sourceFailure(reason);
+        }
+    }
+
     /** Reuses source-start authority checks without opening a connection or resolving a credential. */
     static void validateTemplateSettings(NodeConfiguration configuration, AmqpConsumerPolicy policy) {
         Settings.resolve(configuration, policy);

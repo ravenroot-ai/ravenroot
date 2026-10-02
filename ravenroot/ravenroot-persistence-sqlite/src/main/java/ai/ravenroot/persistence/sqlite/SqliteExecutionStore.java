@@ -629,9 +629,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 statement.setInt(3, limit);
                 try (ResultSet rows = statement.executeQuery()) {
                     while (rows.next()) values.add(new ReplayInvocationEvidence(source,
-                            UUID.fromString(rows.getString("traversal_id")),
-                            UUID.fromString(rows.getString("invocation_id")),
-                            UUID.fromString(rows.getString("attempt_id")), rows.getString("node_id"),
+                            StoredUuid.required(rows, "replay_invocation_evidence", "traversal_id", source),
+                            StoredUuid.required(rows, "replay_invocation_evidence", "invocation_id", source),
+                            StoredUuid.required(rows, "replay_invocation_evidence", "attempt_id", source),
+                            rows.getString("node_id"),
                             ReplayMetadataCodec.parents(rows.getString("parent_ids")),
                             ai.ravenroot.api.execution.NodeCommand.parse(rows.getString("command")),
                             rows.getString("outcome"),
@@ -5858,9 +5859,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         rows.getString("work_boundary_node_id"),
                         ReplayMetadataCodec.parents(rows.getString("work_predecessor_ids")));
                 var work = new DerivedExecutionWork(key,
-                        UUID.fromString(rows.getString("work_traversal_id")),
-                        UUID.fromString(rows.getString("work_invocation_id")),
-                        UUID.fromString(rows.getString("work_attempt_id")), boundary,
+                        StoredUuid.required(rows, "derived_execution_ancestry", "work_traversal_id", key),
+                        StoredUuid.required(rows, "derived_execution_ancestry", "work_invocation_id", key),
+                        StoredUuid.required(rows, "derived_execution_ancestry", "work_attempt_id", key), boundary,
                         rows.getString("work_source_node_id"),
                         NodeCommand.parse(rows.getString("work_command")),
                         OpaquePayload.of(rows.getBytes("work_payload_bytes"),
@@ -5872,7 +5873,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 PrincipalType.valueOf(rows.getString("request_principal_type")),
                                 rows.getString("request_issuer")));
                 return new DerivedExecutionAncestry(key,
-                        new ExecutionKey(key.tenantId(), UUID.fromString(rows.getString("source_process_instance_id"))),
+                        new ExecutionKey(key.tenantId(), StoredUuid.required(rows,
+                                "derived_execution_ancestry", "source_process_instance_id", key)),
                         ReplayMetadataCodec.seeds(rows.getString("boundary_seeds")), work,
                         rows.getString("request_fingerprint"), rows.getString("requester"),
                         rows.getString("reason"), rows.getString("repeatability_decision"),

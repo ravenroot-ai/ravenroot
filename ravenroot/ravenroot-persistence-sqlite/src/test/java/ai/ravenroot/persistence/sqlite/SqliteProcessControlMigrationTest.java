@@ -42,6 +42,12 @@ class SqliteProcessControlMigrationTest {
         }
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database); var statement = connection.createStatement()) {
+            // These tables arrived in migration 36. A synthetic downgrade must remove later
+            // structures as well as lowering user_version; leaving them behind creates a shape no
+            // released database could have and correctly makes the non-idempotent migration fail.
+            statement.execute("DROP TABLE replay_invocation_evidence");
+            statement.execute("DROP TABLE replay_source_settlement");
+            statement.execute("DROP TABLE derived_execution_ancestry");
             statement.execute("DROP INDEX managed_recovery_attempt_candidate");
             statement.execute("DROP INDEX managed_recovery_timer_candidate");
             statement.execute("DROP INDEX managed_recovery_handler_candidate");

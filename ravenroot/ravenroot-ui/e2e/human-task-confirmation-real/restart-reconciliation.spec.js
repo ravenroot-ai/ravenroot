@@ -335,9 +335,37 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
       const csp = navigation?.headers()['content-security-policy'];
       expect(csp).toBeTruthy();
       const frameSources = csp.match(/(?:^|; )frame-src ([^;]+)/)?.[1];
-      expect(frameSources).toBe(CONTROL_ORIGIN);
-      expect(frameSources).not.toContain("'self'");
+      expect(frameSources.trim().split(/\s+/)).toEqual([CONTROL_ORIGIN, "'self'"]);
       expect(frameSources).not.toContain('*');
+
+      const sandboxResponsePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/frontend-plugin-sandbox.html');
+      const sandboxResult = await page.evaluate(async probeUrl => {
+        const source = `export default { async layout() {
+          let network = 'allowed';
+          try { await fetch(${JSON.stringify(probeUrl)}); } catch { network = 'blocked'; }
+          return { network, schema: 'ravenroot.layout-result/v1', positions: {} };
+        } };`;
+        const sandbox = window.ravenroot._createFrontendPluginSandboxForTest(source);
+        try {
+          const result = await sandbox.layout({});
+          return { result, sandbox: sandbox.element.getAttribute('sandbox'), connected: sandbox.element.isConnected };
+        } finally {
+          sandbox.destroy();
+        }
+      }, `${CONTROL_ORIGIN}/graph`);
+      const sandboxResponse = await sandboxResponsePromise;
+      const sandboxCsp = sandboxResponse.headers()['content-security-policy'];
+      expect(sandboxResponse.status()).toBe(200);
+      expect(sandboxResponse.headers()['x-frame-options']).toBeUndefined();
+      expect(sandboxCsp).toContain("frame-ancestors 'self'");
+      expect(sandboxCsp).toContain("script-src 'self' blob:");
+      expect(sandboxCsp).toContain("connect-src 'none'");
+      expect(sandboxCsp).toContain("worker-src 'none'");
+      expect(sandboxResult).toEqual({
+        result: { network: 'blocked', schema: 'ravenroot.layout-result/v1', positions: {} },
+        sandbox: 'allow-scripts', connected: true,
+      });
 
       await authenticate(page);
       await openFixtureGraph(page, request);

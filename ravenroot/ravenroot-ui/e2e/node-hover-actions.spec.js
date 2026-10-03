@@ -878,6 +878,13 @@ test('closing a document cancels overlay async work and removes global and canva
   await page.keyboard.press('ArrowRight');
   expect(await page.evaluate(() => window.__nodeActionTeardown.snapshot().documentListeners))
     .toBe(firstVisible);
+  // Let the positioning RAF created while reopening the toolbar finish before resetting the
+  // tracker. Otherwise that already-scheduled handle can still occupy `overlay.raf`: the explicit
+  // pan below then correctly coalesces into it, but the tracker has just forgotten its handle and
+  // cannot prove that close cancels newly claimed work. Starting from an idle scheduler makes the
+  // lifecycle assertion deterministic while still requiring teardown to cancel a real queued RAF.
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const teardown = await page.evaluate(documentId => {
     const tracker = window.__nodeActionTeardown;
     tracker.reset();

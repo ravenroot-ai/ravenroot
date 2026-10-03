@@ -38,6 +38,9 @@ The entry is an ES module with a default export. `layout(snapshot)` returns stab
 `path`, `line`, and `text` primitives with finite geometry, plain labels, restricted class names,
 and no markup, URL, image, style, event-handler, or link fields. See
 `ravenroot/ravenroot-ui/sdk/frontend-plugin-api.d.ts` for the complete contract.
+An interactive primitive uses `role` plus its mapped evidence `id`. When a separate visual primitive
+such as an initial arrow has its own scene `id`, set `targetId` to the mapped state or transition id;
+pointer and keyboard activation then inspect that declared target.
 
 The installable `Textbook automata` example is under
 `ravenroot/ravenroot-ui/public/examples/frontend-plugins/textbook-automata/`. It demonstrates

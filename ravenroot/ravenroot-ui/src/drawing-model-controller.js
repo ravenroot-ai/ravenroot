@@ -60,16 +60,17 @@ function sceneSvg(document_, scene, onEvidence) {
     if (item.className) element.setAttribute('class', item.className);
     if (item.type === 'text') { element.textContent = item.text || ''; element.setAttribute('text-anchor', 'middle'); }
     if (item.type === 'path' || item.type === 'line') element.setAttribute('marker-end', 'url(#drawing-model-arrow)');
-    if (item.role && item.id) {
+    const evidenceId = item.targetId || item.id;
+    if (item.role && evidenceId) {
       element.dataset.evidenceRole = item.role;
-      element.dataset.evidenceId = item.id;
+      element.dataset.evidenceId = evidenceId;
       element.setAttribute('tabindex', '0');
       element.setAttribute('role', 'button');
-      element.setAttribute('aria-label', item.label || item.id);
-      element.addEventListener('click', () => onEvidence(item.role, item.id));
+      element.setAttribute('aria-label', item.label || evidenceId);
+      element.addEventListener('click', () => onEvidence(item.role, evidenceId));
       element.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault(); event.stopPropagation(); onEvidence(item.role, item.id);
+          event.preventDefault(); event.stopPropagation(); onEvidence(item.role, evidenceId);
         }
       });
     }
@@ -100,9 +101,10 @@ export function createDrawingModelController({ document: document_, getContext, 
   function context() { return getContext?.() || null; }
   function selectedKey() { return context()?.graph?.graphProperties?.[FRONTEND_DRAWING_MODEL_PROPERTY] || INTEGRATED; }
 
-  function clearOverlay() {
-    context()?.container?.querySelector('.drawing-model-overlay')?.remove();
-    context()?.container?.classList.remove('doc-canvas--drawing-model');
+  function clearOverlays() {
+    document_.querySelectorAll('.drawing-model-overlay').forEach(element => element.remove());
+    document_.querySelectorAll('.doc-canvas--drawing-model')
+      .forEach(element => element.classList.remove('doc-canvas--drawing-model'));
   }
 
   function stop() {
@@ -112,19 +114,23 @@ export function createDrawingModelController({ document: document_, getContext, 
   }
 
   function fallback(message) {
-    stop(); clearOverlay();
+    stop(); clearOverlays();
     select.value = INTEGRATED;
     fullFlowButton.hidden = true;
     if (message) notify?.(message, 'failed');
   }
 
-  function evidence(role, id, mapping) {
+  function evidence(role, id, mapping, owner) {
+    const current = context();
+    if (!current || current.documentId !== owner.documentId) return;
     if (role === 'state') {
       const state = mapping.states.find(item => item.id === id);
-      if (state) selectEvidence?.({ role, id, nodeIds: [state.nodeId], edgeIds: [] });
+      if (state) selectEvidence?.({ role, id, nodeIds: [state.nodeId], edgeIds: [],
+        documentId: owner.documentId });
     } else {
       const transition = mapping.transitions.find(item => item.id === id);
-      if (transition) selectEvidence?.({ role, id, nodeIds: [], edgeIds: transition.edgePath });
+      if (transition) selectEvidence?.({ role, id, nodeIds: [], edgeIds: transition.edgePath,
+        documentId: owner.documentId });
     }
   }
 
@@ -133,7 +139,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     const currentGeneration = ++generation;
     const current = context();
     const key = selectedKey();
-    if (!current?.graph || key === INTEGRATED) { clearOverlay(); fullFlowButton.hidden = true; return; }
+    if (!current?.graph || key === INTEGRATED) { clearOverlays(); fullFlowButton.hidden = true; return; }
     const parts = key.split('|');
     let layoutPackage;
     let rendererPackage;
@@ -176,13 +182,15 @@ export function createDrawingModelController({ document: document_, getContext, 
       if (currentGeneration !== generation || context()?.documentId !== current.documentId) return;
       const scene = await rendererSandbox.render({ snapshot, layout }, { signal: abort.signal });
       if (currentGeneration !== generation || context()?.documentId !== current.documentId) return;
-      clearOverlay();
+      clearOverlays();
       const overlay = document_.createElement('div');
       overlay.className = 'drawing-model-overlay';
       const notice = document_.createElement('p');
       notice.className = 'drawing-model-evidence-note';
       notice.textContent = snapshot.evidence.description;
-      overlay.append(sceneSvg(document_, scene, (role, id) => evidence(role, id, mapping)), notice);
+      overlay.append(sceneSvg(document_, scene, (role, id) => {
+        if (currentGeneration === generation) evidence(role, id, mapping, current);
+      }), notice);
       current.container.append(overlay);
       current.container.classList.add('doc-canvas--drawing-model');
       fullFlowButton.hidden = false;
@@ -195,6 +203,9 @@ export function createDrawingModelController({ document: document_, getContext, 
   }
 
   async function reload() {
+    // Package lookup is asynchronous. Retire the previous document synchronously so its controls
+    // cannot remain live while the newly active document is still loading its provider catalog.
+    stop(); clearOverlays(); fullFlowButton.hidden = true;
     try { packages = await listFrontendPackages(indexedDB); }
     catch (cause) { packages = []; notify?.(cause.message, 'failed'); }
     const wanted = selectedKey();
@@ -298,12 +309,16 @@ export function createDrawingModelController({ document: document_, getContext, 
       error.textContent = ''; dialog.close(); void render();
     } catch (cause) { error.textContent = cause.message; }
   });
-  function scheduleRefresh() {
+  function scheduleRefresh(documentId = context()?.documentId) {
+    if (!documentId || context()?.documentId !== documentId) return;
     if (refreshFrame != null) return;
-    refreshFrame = requestAnimationFrame(() => { refreshFrame = null; void render(); });
+    refreshFrame = requestAnimationFrame(() => {
+      refreshFrame = null;
+      if (context()?.documentId === documentId) void render();
+    });
   }
   return Object.freeze({ reload, refresh: render, scheduleRefresh, destroy() {
     if (refreshFrame != null) cancelAnimationFrame(refreshFrame);
-    stop(); clearOverlay();
+    stop(); clearOverlays();
   } });
 }

@@ -12,6 +12,48 @@ async function openDrawingModelOptions(page) {
   await expect(actions.locator('.drawing-model-actions-menu')).toBeVisible();
 }
 
+async function configureActiveAutomata(page) {
+  await openDrawingModelOptions(page);
+  await page.locator('#drawing-model-mapping').click();
+  await page.locator('#drawing-model-mapping-json').fill(mapping);
+  await page.locator('#drawing-model-dialog button[type="submit"]').click();
+  await page.locator('#drawing-model-select')
+    .selectOption('model|ai.ravenroot.examples.textbook-automata|textbook-automata');
+  await expect(page.locator('.active-document .drawing-model-scene')).toBeVisible();
+}
+
+async function installRuntimeEvents(page) {
+  let execution = 0;
+  const releases = [];
+  await page.route('**/v1/node-types', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '[]',
+  }));
+  await page.route('**/v1/executions**', route => {
+    if (route.request().method() !== 'POST') {
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ status: 'COMPLETED' }) });
+    }
+    execution += 1;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      executionId: `drawing-exec-${execution}`, graphVersion: `drawing-version-${execution}`,
+      processInstanceId: `drawing-process-${execution}`,
+    }) });
+  });
+  await page.route('**/v1/events**', route => new Promise(resolve => {
+    releases.push(body => {
+      route.fulfill({ status: 200, contentType: 'text/event-stream', body }).then(resolve);
+    });
+  }));
+  return {
+    async release(body) {
+      await expect.poll(() => releases.length).toBeGreaterThan(0);
+      releases.shift()(body);
+    },
+  };
+}
+
+const runtimeFrame = payload => `event: execution\ndata: ${JSON.stringify(payload)}\n\n`;
+
 test('keeps drawing options inside the established desktop command-bar height', async ({ page }) => {
   for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
     await page.setViewportSize(viewport);
@@ -55,12 +97,13 @@ test('installs and authors the textbook automata drawing model while keeping rea
 
   const geometry = await scene.evaluate(svg => {
     const byEvidence = id => svg.querySelector(`[data-evidence-id="${id}"]`);
+    const stateEvidence = id => svg.querySelector(`.automata-state[data-evidence-id="${id}"]`);
     const box = id => {
       const value = byEvidence(id).getBBox();
       return { x: value.x, y: value.y, width: value.width, height: value.height };
     };
-    const state = id => ({ cx: byEvidence(id).getAttribute('cx'), cy: byEvidence(id).getAttribute('cy'),
-      r: byEvidence(id).getAttribute('r') });
+    const state = id => ({ cx: stateEvidence(id).getAttribute('cx'), cy: stateEvidence(id).getAttribute('cy'),
+      r: stateEvidence(id).getAttribute('r') });
     const accepting = svg.querySelector('.automata-accepting');
     return { qEven: state('qEven'), qOdd: state('qOdd'), accepting: {
       cx: accepting.getAttribute('cx'), cy: accepting.getAttribute('cy'), r: accepting.getAttribute('r'),
@@ -74,8 +117,24 @@ test('installs and authors the textbook automata drawing model while keeping rea
   expect(geometry.evenToOdd.height).toBeGreaterThan(40);
   expect(geometry.oddToEven.height).toBeGreaterThan(40);
 
-  await page.locator('[data-evidence-id="qEven"]').focus();
-  await page.locator('[data-evidence-id="qEven"]').press('Enter');
+  await page.locator('.automata-state[data-evidence-id="qEven"]').focus();
+  await page.locator('.automata-state[data-evidence-id="qEven"]').press('Enter');
+  expect(await page.evaluate(() => window.cy.nodes(':selected').map(node => node.id())))
+    .toEqual(['state-q-even']);
+
+  const initial = page.locator('.automata-initial[data-evidence-id="qEven"]');
+  await page.evaluate(() => { window.cy.elements().unselect(); });
+  const initialPoint = await initial.evaluate(element => {
+    const point = new DOMPoint((Number(element.getAttribute('x1')) + Number(element.getAttribute('x2'))) / 2,
+      Number(element.getAttribute('y1'))).matrixTransform(element.getScreenCTM());
+    return { x: point.x, y: point.y };
+  });
+  await page.mouse.click(initialPoint.x, initialPoint.y);
+  expect(await page.evaluate(() => window.cy.nodes(':selected').map(node => node.id())))
+    .toEqual(['state-q-even']);
+  await page.evaluate(() => { window.cy.elements().unselect(); });
+  await initial.focus();
+  await initial.press('Enter');
   expect(await page.evaluate(() => window.cy.nodes(':selected').map(node => node.id())))
     .toEqual(['state-q-even']);
 
@@ -92,6 +151,99 @@ test('installs and authors the textbook automata drawing model while keeping rea
   await page.locator('#drawing-model-full-flow').click();
   await expect(scene).toBeHidden();
   await expect(page.locator('.doc-canvas canvas').first()).toBeVisible();
+});
+
+test('retires document-owned controls before activating another visible document', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#drawing-model-package-input').setInputFiles(packageDirectory);
+  await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'first.graphml'), fixture);
+  await configureActiveAutomata(page);
+  const first = await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    window.__retiredDrawingControl = owner.container.querySelector('.automata-state[data-evidence-id="qEven"]');
+    return owner.id;
+  });
+  const second = await page.evaluate(xml => {
+    const id = window.ravenroot.openDocument({ name: 'second.graphml' });
+    window.ravenroot.replaceActiveDocumentFromText(xml, 'second.graphml');
+    window.ravenroot.setWorkspaceLayout('horizontal');
+    return id;
+  }, fixture);
+
+  await expect(page.locator('.doc-canvas')).toHaveCount(2);
+  await expect(page.locator('.drawing-model-overlay')).toHaveCount(0);
+  expect(await page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return owner.container.classList.contains('doc-canvas--drawing-model');
+  }, first)).toBe(false);
+  await page.evaluate(() => window.__retiredDrawingControl.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(await page.evaluate(id =>
+    window.ravenroot.workspace.find(id).cy.$(':selected').map(element => element.id()), second)).toEqual([]);
+
+  await page.evaluate(id => window.ravenroot.activateDocument(id), first);
+  await expect(page.locator('.active-document .drawing-model-overlay')).toBeVisible();
+  await page.locator('.active-document .automata-state[data-evidence-id="qEven"]').click();
+  expect(await page.evaluate(id =>
+    window.ravenroot.workspace.find(id).cy.nodes(':selected').map(node => node.id()), first))
+    .toEqual(['state-q-even']);
+  expect(await page.evaluate(id =>
+    window.ravenroot.workspace.find(id).cy.$(':selected').map(element => element.id()), second)).toEqual([]);
+});
+
+test('projects owned node and edge runtime evidence, resets it, and fences background events', async ({ page }) => {
+  const runtime = await installRuntimeEvents(page);
+  await page.goto('/');
+  await page.locator('#drawing-model-package-input').setInputFiles(packageDirectory);
+  await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'runtime-a.graphml'), fixture);
+  await configureActiveAutomata(page);
+  const first = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  await page.locator('#btn-play').click();
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.activeDocument().execution.executionId)).toBe('drawing-exec-1');
+
+  await runtime.release([
+    runtimeFrame({ type: 'NODE_STARTED', executionId: 'drawing-exec-1',
+      graphVersion: 'drawing-version-1', processInstanceId: 'drawing-process-1',
+      nodeId: 'state-q-even', activeInstances: 1, sequence: 1 }),
+    runtimeFrame({ type: 'EDGE_TRAVERSED', executionId: 'drawing-exec-1',
+      graphVersion: 'drawing-version-1', processInstanceId: 'drawing-process-1',
+      edgeId: 'e20', sequence: 2, occurredAt: new Date().toISOString() }),
+    runtimeFrame({ type: 'EXECUTION_COMPLETED', executionId: 'drawing-exec-1',
+      graphVersion: 'drawing-version-1', processInstanceId: 'drawing-process-1', sequence: 3 }),
+  ].join(''));
+  await expect(page.locator('.active-document .automata-state[data-evidence-id="qEven"]'))
+    .toHaveClass(/\bactive\b/);
+  await expect(page.locator('.active-document [data-evidence-id="qEven-1"]'))
+    .toHaveClass(/\bactive\b/);
+  await expect(page.locator('.active-document [data-evidence-id="qEven-1"]'))
+    .not.toHaveClass(/\bactive\b/, { timeout: 4_000 });
+
+  await expect(page.locator('#btn-play')).toBeEnabled();
+  await page.locator('#btn-play').click();
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.activeDocument().execution.executionId)).toBe('drawing-exec-2');
+  await expect(page.locator('.active-document .automata-state[data-evidence-id="qEven"]'))
+    .not.toHaveClass(/\bactive\b/);
+
+  const second = await page.evaluate(xml => {
+    const id = window.ravenroot.openDocument({ name: 'runtime-b.graphml' });
+    window.ravenroot.replaceActiveDocumentFromText(xml, 'runtime-b.graphml');
+    window.ravenroot.setWorkspaceLayout('horizontal');
+    return id;
+  }, fixture);
+  await configureActiveAutomata(page);
+  await runtime.release(runtimeFrame({ type: 'NODE_STARTED', executionId: 'drawing-exec-2',
+    graphVersion: 'drawing-version-2', processInstanceId: 'drawing-process-2',
+    nodeId: 'state-q-odd', activeInstances: 1, sequence: 1 }));
+  await page.waitForTimeout(100);
+  await expect(page.locator('.active-document .automata-state.active')).toHaveCount(0);
+  expect(await page.evaluate(id =>
+    window.ravenroot.workspace.find(id).cy.getElementById('state-q-odd').data('runtimeState'), second))
+    .not.toBe('active');
+
+  await page.evaluate(id => window.ravenroot.activateDocument(id), first);
+  await expect(page.locator('.active-document .automata-state[data-evidence-id="qOdd"]'))
+    .toHaveClass(/\bactive\b/);
 });
 
 test('manages layout-only and renderer-only composition packages independently', async ({ page }, testInfo) => {

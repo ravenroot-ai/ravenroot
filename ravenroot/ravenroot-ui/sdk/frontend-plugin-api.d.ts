@@ -51,7 +51,8 @@ export interface SceneV1 {
   width?: number;
   height?: number;
   elements: Array<{
-    type: 'circle' | 'path' | 'text' | 'line'; id?: string; role?: 'state' | 'transition';
+    type: 'circle' | 'path' | 'text' | 'line'; id?: string; targetId?: string;
+    role?: 'state' | 'transition';
     label?: string; text?: string; d?: string; className?: string;
     x?: number; y?: number; x1?: number; y1?: number; x2?: number; y2?: number; r?: number;
   }>;

@@ -26,4 +26,19 @@ describe('textbook automata example geometry', () => {
     expect(paths['a-b-1']).not.toBe(paths['b-a']);
     expect(new Set(Object.values(paths))).toHaveLength(6);
   });
+
+  it('targets the mapped state from a distinct initial-marker scene element', () => {
+    const snapshot = {
+      schema: 'ravenroot.drawing-model-snapshot/v1',
+      states: [{ id: 'qEven', label: 'qEven', nodeId: 'node-even', initial: true,
+        accepting: true, active: false }],
+      transitions: [], positions: { qEven: { x: 220, y: 250 } },
+      evidence: { activeNodeIds: [], activeEdgeIds: [], description: '' },
+    };
+    const scene = textbookAutomata.render({ snapshot, layout: {
+      schema: 'ravenroot.layout-result/v1', positions: snapshot.positions,
+    } });
+    expect(scene.elements.find(item => item.id === 'initial-qEven'))
+      .toMatchObject({ role: 'state', targetId: 'qEven' });
+  });
 });

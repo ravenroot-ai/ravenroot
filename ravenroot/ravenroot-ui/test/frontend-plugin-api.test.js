@@ -97,9 +97,15 @@ describe('declarative renderer scene', () => {
   it('preserves finite coordinates while rejecting markup, hrefs and unsupported path data', () => {
     const scene = validateScene({ schema: 'ravenroot.scene/v1', width: 800, height: 500, elements: [
       { type: 'circle', id: 'qEven', role: 'state', x: 220, y: 250, r: 46, className: 'state active' },
+      { type: 'line', id: 'initial-qEven', targetId: 'qEven', role: 'state',
+        x1: 110, y1: 250, x2: 170, y2: 250 },
       { type: 'path', d: 'M 1 2 Q 3 4 5 6', className: 'edge' },
     ] });
     expect(scene.elements[0]).toMatchObject({ x: 220, y: 250, r: 46 });
+    expect(scene.elements[1]).toMatchObject({ id: 'initial-qEven', targetId: 'qEven' });
+    expect(() => validateScene({ schema: 'ravenroot.scene/v1', elements: [
+      { type: 'line', id: 'initial', targetId: 'q Even', role: 'state' },
+    ] })).toThrow(/targetId.*unsafe/);
     expect(() => validateScene({ schema: 'ravenroot.scene/v1', elements: [
       { type: 'circle', x: 1, y: 2, r: 3, href: 'https://example.test' },
     ] })).toThrow(/unknown field 'href'/);

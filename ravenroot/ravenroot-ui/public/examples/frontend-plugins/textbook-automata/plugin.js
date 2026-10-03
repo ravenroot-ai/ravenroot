@@ -63,7 +63,7 @@ export default {
     snapshot.states.forEach(state => {
       const p = positions[state.id];
       if (state.initial) {
-        elements.push({ type: 'line', id: `initial-${state.id}`, role: 'state', label: `Initial state ${state.label}`,
+        elements.push({ type: 'line', id: `initial-${state.id}`, targetId: state.id, role: 'state', label: `Initial state ${state.label}`,
           x1: p.x - 105, y1: p.y, x2: p.x - 48, y2: p.y, className: 'automata-initial' });
       }
       elements.push({ type: 'circle', id: state.id, role: 'state', label: `${state.label}${state.initial ? ', initial' : ''}${state.accepting ? ', accepting' : ''}`,

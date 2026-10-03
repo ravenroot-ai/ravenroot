@@ -239,7 +239,8 @@ export function validateScene(input) {
     const safe = { type: element.type };
     for (const [key, value] of Object.entries(element)) {
       if (key === 'type') continue;
-      if (!['id', 'role', 'label', 'text', 'd', 'className', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r'].includes(key)) {
+      if (!['id', 'targetId', 'role', 'label', 'text', 'd', 'className',
+        'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r'].includes(key)) {
         throw new TypeError(`Renderer scene element contains unknown field '${key}'`);
       }
       if (['x', 'y', 'x1', 'y1', 'x2', 'y2', 'r'].includes(key)) {
@@ -247,7 +248,7 @@ export function validateScene(input) {
         safe[key] = value;
       } else if (typeof value !== 'string') throw new TypeError(`Renderer scene field '${key}' must be a string`);
       else {
-        if ((key === 'id' || key === 'role') && !/^[A-Za-z0-9._-]+$/.test(value)) {
+        if ((key === 'id' || key === 'targetId' || key === 'role') && !/^[A-Za-z0-9._-]+$/.test(value)) {
           throw new TypeError(`Renderer scene field '${key}' contains unsafe characters`);
         }
         if (key === 'className' && !/^[A-Za-z0-9 _-]*$/.test(value)) {

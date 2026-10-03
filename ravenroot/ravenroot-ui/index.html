@@ -254,16 +254,21 @@
     <button class="btn" id="btn-export" data-command-id="file.save" title="Save the current workflow as GraphML">⇩ Save GraphML</button>
   </div>
   <div class="drawing-model-controls" role="group" aria-label="Drawing model">
-    <label class="visually-hidden" for="drawing-model-select">Drawing model</label>
-    <select id="drawing-model-select" title="Choose the drawing model for this document">
-      <option value="integrated">Integrated Design</option>
-    </select>
-    <button class="btn" type="button" id="drawing-model-install" title="Install a frontend plugin package directory">＋ Install</button>
-    <input id="drawing-model-package-input" class="visually-hidden" type="file" multiple webkitdirectory
-           aria-label="Frontend plugin package directory">
-    <button class="btn" type="button" id="drawing-model-mapping" title="Author the explicit presentation mapping">Mapping</button>
-    <button class="btn" type="button" id="drawing-model-manage" title="Enable, disable, or remove the selected package">Manage</button>
-    <button class="btn" type="button" id="drawing-model-full-flow" title="Return to the complete operational flow" hidden>Full flow</button>
+    <details class="drawing-model-actions">
+      <summary class="btn" id="drawing-model-options" title="Install and manage frontend drawing packages">Drawing options</summary>
+      <div class="drawing-model-actions-menu" role="group" aria-label="Drawing model options">
+        <label for="drawing-model-select">Drawing model</label>
+        <select id="drawing-model-select" title="Choose the drawing model for this document">
+          <option value="integrated">Integrated Design</option>
+        </select>
+        <button class="btn" type="button" id="drawing-model-install" title="Install a frontend plugin package directory">＋ Install package</button>
+        <input id="drawing-model-package-input" class="visually-hidden" type="file" multiple webkitdirectory
+               aria-label="Frontend plugin package directory">
+        <button class="btn" type="button" id="drawing-model-mapping" title="Author the explicit presentation mapping">Edit mapping</button>
+        <button class="btn" type="button" id="drawing-model-manage" title="Enable, disable, or remove installed packages">Manage packages</button>
+        <button class="btn" type="button" id="drawing-model-full-flow" title="Return to the complete operational flow" hidden>Full operational flow</button>
+      </div>
+    </details>
   </div>
   <div class="spacer"></div>
   <!-- One ordered unit so the unique runtime controls wrap together instead of being clipped one

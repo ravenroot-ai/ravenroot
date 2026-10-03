@@ -1,7 +1,7 @@
 # Textbook automata frontend plugin
 
-This directory is an installable Ravenroot frontend package. In Workbench, choose **Install** beside
-the Drawing model selector and select this directory. Open an executable workflow, choose **Mapping**,
+This directory is an installable Ravenroot frontend package. In Workbench, open **Drawing options**,
+choose **Install package**, and select this directory. Open an executable workflow, choose **Edit mapping**,
 apply `dfa-even-ones-presentation.json`, then select **Textbook DFA/NFA**.
 
 The package changes only presentation. Its mapping explicitly connects synthetic states and

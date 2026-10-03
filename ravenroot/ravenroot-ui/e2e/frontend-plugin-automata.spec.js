@@ -6,12 +6,40 @@ const packageDirectory = fileURLToPath(new URL('../public/examples/frontend-plug
 const fixture = readFileSync(new URL('../public/examples/frontend-plugins/textbook-automata/dfa-even-ones-sanitized.graphml', import.meta.url), 'utf8');
 const mapping = readFileSync(new URL('../public/examples/frontend-plugins/textbook-automata/dfa-even-ones-presentation.json', import.meta.url), 'utf8');
 
+async function openDrawingModelOptions(page) {
+  const actions = page.locator('.drawing-model-actions');
+  await actions.evaluate(element => { element.open = true; });
+  await expect(actions.locator('.drawing-model-actions-menu')).toBeVisible();
+}
+
+test('keeps drawing options inside the established desktop command-bar height', async ({ page }) => {
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/');
+    const geometry = await page.evaluate(() => {
+      const box = selector => {
+        const value = document.querySelector(selector).getBoundingClientRect();
+        return { x: value.x, y: value.y, width: value.width, height: value.height };
+      };
+      const options = box('#drawing-model-options');
+      return { bar: box('#workflowbar'), save: box('#btn-export'), options,
+        hit: document.elementFromPoint(options.x + options.width / 2, options.y + options.height / 2)?.id };
+    });
+    expect(geometry.bar.height).toBeLessThanOrEqual(75);
+    expect(geometry.save.x + geometry.save.width).toBeLessThan(geometry.options.x);
+    expect(geometry.hit).toBe('drawing-model-options');
+    await page.locator('#drawing-model-options').click();
+    await expect(page.locator('#drawing-model-select')).toBeVisible();
+  }
+});
+
 test('installs and authors the textbook automata drawing model while keeping real evidence accessible', async ({ page }) => {
   await page.goto('/');
   await page.locator('#drawing-model-package-input').setInputFiles(packageDirectory);
   await expect(page.locator('#drawing-model-select option')).toContainText(['Integrated Design', 'Textbook DFA/NFA']);
 
   await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'dfa-even-ones.graphml'), fixture);
+  await openDrawingModelOptions(page);
   await page.locator('#drawing-model-mapping').click();
   await page.locator('#drawing-model-mapping-json').fill(mapping);
   await page.locator('#drawing-model-dialog button[type="submit"]').click();
@@ -91,6 +119,7 @@ test('manages layout-only and renderer-only composition packages independently',
   await page.goto('/');
   await page.locator('#drawing-model-package-input').setInputFiles(layoutDirectory);
   await page.locator('#drawing-model-package-input').setInputFiles(rendererDirectory);
+  await openDrawingModelOptions(page);
   await page.locator('#drawing-model-manage').click();
   for (const name of ['Layout only', 'Renderer only']) {
     await page.getByRole('button', { name: `Disable ${name}` }).click();
@@ -100,6 +129,7 @@ test('manages layout-only and renderer-only composition packages independently',
   }
   await page.locator('#drawing-model-package-dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'dfa-even-ones.graphml'), fixture);
+  await openDrawingModelOptions(page);
   await page.locator('#drawing-model-mapping').click();
   await page.locator('#drawing-model-mapping-json').fill(mapping);
   await page.locator('#drawing-model-dialog button[type="submit"]').click();
@@ -107,6 +137,7 @@ test('manages layout-only and renderer-only composition packages independently',
     .selectOption('compose|test.layout-only|layout|test.renderer-only|renderer');
   await expect(page.locator('.drawing-model-scene circle[role="button"]')).toHaveCount(2);
 
+  await openDrawingModelOptions(page);
   await page.locator('#drawing-model-manage').click();
   await page.getByRole('button', { name: 'Remove Layout only' }).click();
   await expect(page.getByText(/Layout only 1\.0\.0/)).toHaveCount(0);

@@ -48,12 +48,12 @@ labels, selection, and operational highlighting.
 
 1. Open Ravenroot Workbench in a Chromium-family browser, the tested v1 profile. Other browsers are
    unverified; package installation requires directory-upload and sandboxed blob-module support.
-2. Choose **Install** beside the Drawing model selector and select the package directory. Ravenroot
+2. Open **Drawing options**, choose **Install package**, and select the package directory. Ravenroot
    validates the manifest, API compatibility, capabilities, entries, size limits, UTF-8 source, and
    any declared SHA-256 digests before writing the package to IndexedDB.
-3. Choose the installed drawing model. Selection is recorded in the GraphML graph property
-   `ravenroot.frontendDrawingModel.v1` and in the workspace snapshot.
-4. Choose **Manage** to list every installed package and disable, enable, or remove either side of
+3. Choose the installed drawing model in **Drawing options**. Selection is recorded in the GraphML
+   graph property `ravenroot.frontendDrawingModel.v1` and in the workspace snapshot.
+4. Choose **Manage packages** to list every installed package and disable, enable, or remove either side of
    a composition independently. A missing, disabled,
    incompatible, removed, timed-out, or failed provider leaves the document untouched and restores
    integrated Design.
@@ -67,16 +67,16 @@ packages in v1.
 ## Map an executable flow to a synthetic drawing
 
 Drawing models never infer semantic states from node ids, labels, log messages, or visual shapes.
-Choose **Mapping** and author `ravenroot.presentation-mapping/v1` JSON. Every state names a real
+Open **Drawing options**, choose **Edit mapping**, and author `ravenroot.presentation-mapping/v1` JSON. Every state names a real
 workflow node. Every transition names an ordered, contiguous list of real workflow edge ids whose
 first source and last target match the mapped states. Ravenroot validates the mapping before adding
 it to the undo history and persisting it as `ravenroot.frontendPresentation.v1`.
 
 The example directory includes `dfa-even-ones-presentation.json`. To apply it to the even-ones
-workflow, open the GraphML, choose **Mapping**, paste that file, save, and select **Textbook DFA/NFA**.
+workflow, open the GraphML, choose **Edit mapping**, paste that file, save, and select **Textbook DFA/NFA**.
 The diagram shows `qEven` as initial and accepting, `qOdd`, both `0` loops, and both `1`
 transitions. Select a state or transition to select and inspect its underlying node or ordered edge
-path. Choose **Full flow** to return to every executable parsing, decision, consumption, routing,
+path. Choose **Full operational flow** to return to every executable parsing, decision, consumption, routing,
 logging, and terminal node. Position values in the mapping are editable in Ravenroot and survive
 save, reopen, and export.
 

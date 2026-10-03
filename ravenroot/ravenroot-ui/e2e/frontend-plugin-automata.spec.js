@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
@@ -25,8 +25,35 @@ test('installs and authors the textbook automata drawing model while keeping rea
   await expect(page.locator('.automata-accepting')).toHaveCount(1);
   await expect(page.locator('[data-evidence-role="transition"]')).toHaveCount(4);
 
+  const geometry = await scene.evaluate(svg => {
+    const byEvidence = id => svg.querySelector(`[data-evidence-id="${id}"]`);
+    const box = id => {
+      const value = byEvidence(id).getBBox();
+      return { x: value.x, y: value.y, width: value.width, height: value.height };
+    };
+    const state = id => ({ cx: byEvidence(id).getAttribute('cx'), cy: byEvidence(id).getAttribute('cy'),
+      r: byEvidence(id).getAttribute('r') });
+    const accepting = svg.querySelector('.automata-accepting');
+    return { qEven: state('qEven'), qOdd: state('qOdd'), accepting: {
+      cx: accepting.getAttribute('cx'), cy: accepting.getAttribute('cy'), r: accepting.getAttribute('r'),
+    }, evenToOdd: box('qEven-1'), oddToEven: box('qOdd-1') };
+  });
+  expect(geometry.qEven).toEqual({ cx: '220', cy: '250', r: '46' });
+  expect(geometry.qOdd).toEqual({ cx: '570', cy: '250', r: '46' });
+  expect(geometry.accepting).toEqual({ cx: '220', cy: '250', r: '38' });
+  expect(geometry.evenToOdd.y).toBeGreaterThanOrEqual(249);
+  expect(geometry.oddToEven.y + geometry.oddToEven.height).toBeLessThanOrEqual(251);
+  expect(geometry.evenToOdd.height).toBeGreaterThan(40);
+  expect(geometry.oddToEven.height).toBeGreaterThan(40);
+
+  await page.locator('[data-evidence-id="qEven"]').focus();
+  await page.locator('[data-evidence-id="qEven"]').press('Enter');
+  expect(await page.evaluate(() => window.cy.nodes(':selected').map(node => node.id())))
+    .toEqual(['state-q-even']);
+
   await page.locator('[data-evidence-id="qEven-1"]').focus();
   await page.locator('[data-evidence-id="qEven-1"]').press('Enter');
+  expect(await page.evaluate(() => window.cy.nodes(':selected').map(node => node.id()))).toEqual([]);
   expect(await page.evaluate(() => window.cy.edges(':selected').map(edge => edge.id())))
     .toEqual(['e10', 'e11', 'e13', 'e14', 'e15', 'e16', 'e18', 'e20', 'e22']);
 
@@ -37,4 +64,52 @@ test('installs and authors the textbook automata drawing model while keeping rea
   await page.locator('#drawing-model-full-flow').click();
   await expect(scene).toBeHidden();
   await expect(page.locator('.doc-canvas canvas').first()).toBeVisible();
+});
+
+test('manages layout-only and renderer-only composition packages independently', async ({ page }, testInfo) => {
+  const layoutDirectory = testInfo.outputPath('layout-package');
+  const rendererDirectory = testInfo.outputPath('renderer-package');
+  mkdirSync(layoutDirectory, { recursive: true }); mkdirSync(rendererDirectory, { recursive: true });
+  writeFileSync(`${layoutDirectory}/ravenroot-frontend-plugin.json`, JSON.stringify({
+    schema: 'ravenroot.frontend-plugin/v1', id: 'test.layout-only', name: 'Layout only', version: '1.0.0',
+    apiVersion: '1.0', permissions: [], layouts: [{ id: 'layout', name: 'Test layout', entry: 'plugin.js',
+      capabilities: ['directed-edges'] }], renderers: [], drawingModels: [], integrity: {},
+  }));
+  writeFileSync(`${layoutDirectory}/plugin.js`, `export default { layout(snapshot) { return {
+    schema: 'ravenroot.layout-result/v1', positions: Object.fromEntries(snapshot.states.map((state, index) =>
+      [state.id, { x: 180 + index * 300, y: 220 }])) }; } };`);
+  writeFileSync(`${rendererDirectory}/ravenroot-frontend-plugin.json`, JSON.stringify({
+    schema: 'ravenroot.frontend-plugin/v1', id: 'test.renderer-only', name: 'Renderer only', version: '1.0.0',
+    apiVersion: '1.0', permissions: [], layouts: [], renderers: [{ id: 'renderer', name: 'Test renderer',
+      entry: 'plugin.js', requires: ['directed-edges'] }], drawingModels: [], integrity: {},
+  }));
+  writeFileSync(`${rendererDirectory}/plugin.js`, `export default { render({ snapshot, layout }) { return {
+    schema: 'ravenroot.scene/v1', width: 700, height: 440, elements: snapshot.states.map(state => ({
+      type: 'circle', id: state.id, role: 'state', label: state.label, x: layout.positions[state.id].x,
+      y: layout.positions[state.id].y, r: 35, className: 'automata-state' })) }; } };`);
+
+  await page.goto('/');
+  await page.locator('#drawing-model-package-input').setInputFiles(layoutDirectory);
+  await page.locator('#drawing-model-package-input').setInputFiles(rendererDirectory);
+  await page.locator('#drawing-model-manage').click();
+  for (const name of ['Layout only', 'Renderer only']) {
+    await page.getByRole('button', { name: `Disable ${name}` }).click();
+    await expect(page.getByRole('button', { name: `Enable ${name}` })).toBeVisible();
+    await page.getByRole('button', { name: `Enable ${name}` }).click();
+    await expect(page.getByRole('button', { name: `Disable ${name}` })).toBeVisible();
+  }
+  await page.locator('#drawing-model-package-dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'dfa-even-ones.graphml'), fixture);
+  await page.locator('#drawing-model-mapping').click();
+  await page.locator('#drawing-model-mapping-json').fill(mapping);
+  await page.locator('#drawing-model-dialog button[type="submit"]').click();
+  await page.locator('#drawing-model-select')
+    .selectOption('compose|test.layout-only|layout|test.renderer-only|renderer');
+  await expect(page.locator('.drawing-model-scene circle[role="button"]')).toHaveCount(2);
+
+  await page.locator('#drawing-model-manage').click();
+  await page.getByRole('button', { name: 'Remove Layout only' }).click();
+  await expect(page.getByText(/Layout only 1\.0\.0/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Remove Renderer only' }).click();
+  await expect(page.getByText('No frontend packages are installed.')).toBeVisible();
 });

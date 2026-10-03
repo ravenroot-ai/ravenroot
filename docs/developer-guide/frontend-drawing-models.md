@@ -53,7 +53,8 @@ labels, selection, and operational highlighting.
    any declared SHA-256 digests before writing the package to IndexedDB.
 3. Choose the installed drawing model. Selection is recorded in the GraphML graph property
    `ravenroot.frontendDrawingModel.v1` and in the workspace snapshot.
-4. Choose **Manage** to disable, enable, or remove the selected package. A missing, disabled,
+4. Choose **Manage** to list every installed package and disable, enable, or remove either side of
+   a composition independently. A missing, disabled,
    incompatible, removed, timed-out, or failed provider leaves the document untouched and restores
    integrated Design.
 

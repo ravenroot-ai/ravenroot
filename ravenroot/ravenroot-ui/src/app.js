@@ -16033,6 +16033,7 @@ const drawingModelController = createDrawingModelController({
   },
   selectEvidence: ({ role, id, nodeIds, edgeIds }) => {
     if (!cy) return;
+    invalidateStableSelection();
     cy.elements().unselect();
     [...nodeIds, ...edgeIds].forEach(elementId => cy.getElementById(elementId).select());
     revealInspector();

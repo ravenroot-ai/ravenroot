@@ -52,7 +52,10 @@ function sceneSvg(document_, scene, onEvidence) {
   for (const item of scene.elements) {
     const element = document_.createElementNS(SVG, item.type);
     for (const field of ['x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'd']) {
-      if (Object.hasOwn(item, field)) element.setAttribute(field, String(item[field]));
+      if (!Object.hasOwn(item, field)) continue;
+      const attribute = item.type === 'circle' && field === 'x' ? 'cx'
+        : item.type === 'circle' && field === 'y' ? 'cy' : field;
+      element.setAttribute(attribute, String(item[field]));
     }
     if (item.className) element.setAttribute('class', item.className);
     if (item.type === 'text') { element.textContent = item.text || ''; element.setAttribute('text-anchor', 'middle'); }
@@ -65,7 +68,9 @@ function sceneSvg(document_, scene, onEvidence) {
       element.setAttribute('aria-label', item.label || item.id);
       element.addEventListener('click', () => onEvidence(item.role, item.id));
       element.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onEvidence(item.role, item.id); }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault(); event.stopPropagation(); onEvidence(item.role, item.id);
+        }
       });
     }
     svg.append(element);
@@ -82,6 +87,8 @@ export function createDrawingModelController({ document: document_, getContext, 
   const mappingButton = document_.getElementById('drawing-model-mapping');
   const fullFlowButton = document_.getElementById('drawing-model-full-flow');
   const dialog = document_.getElementById('drawing-model-dialog');
+  const packageDialog = document_.getElementById('drawing-model-package-dialog');
+  const packageList = document_.getElementById('drawing-model-package-list');
   const textarea = document_.getElementById('drawing-model-mapping-json');
   const error = document_.getElementById('drawing-model-error');
   let packages = [];
@@ -180,7 +187,10 @@ export function createDrawingModelController({ document: document_, getContext, 
       current.container.classList.add('doc-canvas--drawing-model');
       fullFlowButton.hidden = false;
     } catch (cause) {
-      if (cause.name !== 'AbortError') fallback(`Drawing model failed: ${cause.message}. Integrated Design remains active.`);
+      if (cause.name !== 'AbortError' && currentGeneration === generation
+          && context()?.documentId === current.documentId) {
+        fallback(`Drawing model failed: ${cause.message}. Integrated Design remains active.`);
+      }
     }
   }
 
@@ -233,20 +243,46 @@ export function createDrawingModelController({ document: document_, getContext, 
     } catch (cause) { notify?.(`Frontend package was not installed: ${cause.message}`, 'failed'); }
     finally { installInput.value = ''; }
   });
-  manageButton.addEventListener('click', async () => {
-    const key = select.value;
-    if (key === INTEGRATED) { notify?.('Select an installed drawing model to disable or remove its package.', 'failed'); return; }
-    const parts = key.split('|');
-    const packageId = parts[1];
-    const package_ = packages.find(item => item.id === packageId);
-    const action = globalThis.prompt(`Package ${package_.manifest.name}: type disable, enable, or remove`);
-    if (action === 'remove') await removeFrontendPackage(packageId, indexedDB);
-    else if (action === 'disable') await setFrontendPackageEnabled(packageId, false, indexedDB);
-    else if (action === 'enable') await setFrontendPackageEnabled(packageId, true, indexedDB);
-    else return;
-    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
-    await reload();
-  });
+  const selectedReferencesPackage = packageId => {
+    const parts = selectedKey().split('|');
+    return (parts[0] === 'model' && parts[1] === packageId)
+      || (parts[0] === 'compose' && (parts[1] === packageId || parts[3] === packageId));
+  };
+  const renderPackageManager = () => {
+    packageList.replaceChildren();
+    if (!packages.length) {
+      const empty = document_.createElement('p'); empty.textContent = 'No frontend packages are installed.';
+      packageList.append(empty); return;
+    }
+    for (const package_ of packages) {
+      const row = document_.createElement('div'); row.className = 'drawing-model-package-row';
+      const description = document_.createElement('span');
+      description.textContent = `${package_.manifest.name} ${package_.manifest.version} — ${package_.enabled ? 'enabled' : 'disabled'}`;
+      const toggle = document_.createElement('button'); toggle.type = 'button'; toggle.className = 'btn';
+      toggle.textContent = package_.enabled ? 'Disable' : 'Enable';
+      toggle.setAttribute('aria-label', `${toggle.textContent} ${package_.manifest.name}`);
+      toggle.addEventListener('click', async () => {
+        await setFrontendPackageEnabled(package_.id, !package_.enabled, indexedDB);
+        if (package_.enabled && selectedReferencesPackage(package_.id)) {
+          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
+        }
+        await reload(); renderPackageManager();
+      });
+      const remove = document_.createElement('button'); remove.type = 'button'; remove.className = 'btn';
+      remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove ${package_.manifest.name}`);
+      remove.addEventListener('click', async () => {
+        await removeFrontendPackage(package_.id, indexedDB);
+        if (selectedReferencesPackage(package_.id)) {
+          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
+        }
+        await reload(); renderPackageManager();
+      });
+      row.append(description, toggle, remove); packageList.append(row);
+    }
+  };
+  manageButton.addEventListener('click', () => { renderPackageManager(); packageDialog.showModal(); });
+  packageDialog.querySelector('[data-drawing-model-package-close]')
+    .addEventListener('click', () => packageDialog.close());
   mappingButton.addEventListener('click', () => {
     const mapping = context()?.graph ? readPresentationMapping(context().graph) : null;
     textarea.value = mapping ? JSON.stringify(mapping, null, 2) : '{\n  "schema": "ravenroot.presentation-mapping/v1",\n  "states": [],\n  "transitions": [],\n  "positions": {}\n}';

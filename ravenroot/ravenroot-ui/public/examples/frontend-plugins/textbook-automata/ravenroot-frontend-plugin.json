@@ -1,0 +1,34 @@
+{
+  "schema": "ravenroot.frontend-plugin/v1",
+  "id": "ai.ravenroot.examples.textbook-automata",
+  "name": "Textbook automata",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "description": "A declarative DFA/NFA drawing model with circular states, initial markers, accepting rings, loops and curved transitions.",
+  "permissions": [],
+  "layouts": [
+    {
+      "id": "textbook-layout",
+      "name": "Textbook horizontal layout",
+      "entry": "plugin.js",
+      "capabilities": ["self-loops", "parallel-edges", "opposite-edges", "initial-marker", "accepting-marker"]
+    }
+  ],
+  "renderers": [
+    {
+      "id": "textbook-renderer",
+      "name": "Textbook SVG scene",
+      "entry": "plugin.js",
+      "capabilities": ["directed-edges", "self-loops", "parallel-edges", "opposite-edges", "initial-marker", "accepting-marker", "structured-labels", "selection", "operational-overlay", "authoring"]
+    }
+  ],
+  "drawingModels": [
+    {
+      "id": "textbook-automata",
+      "name": "Textbook DFA/NFA",
+      "layout": "textbook-layout",
+      "renderer": "textbook-renderer"
+    }
+  ],
+  "integrity": {}
+}

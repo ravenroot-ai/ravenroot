@@ -348,7 +348,10 @@ import {
   createCommandHistory,
   discardChangesMessage,
   shouldWarnBeforeUnload,
+  updateGraphPropertiesCommand,
 } from './graph-commands.js';
+import { createDrawingModelController } from './drawing-model-controller.js';
+import { createFrontendPluginSandbox } from './frontend-plugin-sandbox.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
@@ -2699,6 +2702,7 @@ window.ravenroot = {
   _setWorkspaceSnapshotReaderForTest: reader => {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
+  _createFrontendPluginSandboxForTest: (source, options) => createFrontendPluginSandbox(source, options),
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -3904,6 +3908,7 @@ function syncActiveDocumentChrome() {
   syncSourceSessionChrome(workspace.active);
   syncProgramReadinessChrome(workspace.active);
   refreshCommands();
+  void drawingModelController?.reload();
 }
 
 function syncExecutionReconciliationChrome(hasDocument) {
@@ -12684,6 +12689,7 @@ function applyRuntimeVisual(node) {
     'underlay-opacity': state === 'active' ? 0.28 : 0.12,
     'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
   });
+  drawingModelController?.scheduleRefresh();
 }
 
 function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArrivals = 0, event = {}) {
@@ -16003,6 +16009,42 @@ document.getElementById('help-box').addEventListener('click', event => {
   event.stopPropagation();
 });
 
+const drawingModelController = createDrawingModelController({
+  document: window.document,
+  getContext: () => {
+    const owner = workspace.find(workspace.activeId);
+    return owner && graphData ? {
+      documentId: owner.id,
+      graph: graphData,
+      container: owner.container,
+      operational: {
+        activeNodeIds: graphData.nodes.filter(node => node.runtimeObserved && node.runtimeState !== 'idle')
+          .map(node => node.id),
+        activeEdgeIds: graphData.edges.filter(edge => edge.runtimeObserved && edge.runtimeState !== 'idle')
+          .map(edge => edge.id),
+      },
+    } : null;
+  },
+  editGraphProperties: (patch, unset, label) => {
+    if (!graphData || graphData.format !== 'graphml' || !documentIsEditable(workspace.active)) return false;
+    editHistory.execute(graphData, updateGraphPropertiesCommand(patch, label, unset));
+    updateHistoryUi();
+    return true;
+  },
+  selectEvidence: ({ role, id, nodeIds, edgeIds }) => {
+    if (!cy) return;
+    cy.elements().unselect();
+    [...nodeIds, ...edgeIds].forEach(elementId => cy.getElementById(elementId).select());
+    revealInspector();
+    if (nodeIds.length === 1) showNodeInfo(cy.getElementById(nodeIds[0]));
+    else showInspectorMessage(`${role === 'transition' ? 'Transition' : 'State'} ${id} maps to `
+      + `${nodeIds.length} workflow node(s) and ${edgeIds.length} ordered workflow edge(s).`);
+    addActivityMessage('drawing-model', `Inspected mapped ${role} ${id}`, 'completed');
+  },
+  notify: (message, state) => addActivityMessage('drawing-model', message, state),
+});
+window.ravenroot.drawingModels = drawingModelController;
+
 // ═══════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════
@@ -16052,4 +16094,5 @@ window.addEventListener('load', () => {
   const fileParam = params.get('file');
   if (fileParam) autoLoadUrl(fileParam);
   else newWorkflow();
+  void drawingModelController.reload();
 });

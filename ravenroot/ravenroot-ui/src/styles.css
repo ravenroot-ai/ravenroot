@@ -1462,6 +1462,24 @@
     /* The canvas fills what the strip leaves. It is created inside its pane and never moved: moving
        it stops Cytoscape painting, and resize/fit/forceRender do not bring it back. */
     .doc-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+    .drawing-model-controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .drawing-model-controls select { max-width: 210px; min-width: 130px; }
+    .drawing-model-dialog { width: min(760px, calc(100vw - 32px)); color: var(--tx-1); background: var(--bg-1); border: 1px solid var(--bd); border-radius: 10px; }
+    .drawing-model-dialog form { display: grid; gap: 10px; }
+    .drawing-model-dialog textarea { width: 100%; min-height: 360px; resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tx-1); background: var(--bg-0); border: 1px solid var(--bd); }
+    .drawing-model-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .drawing-model-overlay { position: absolute; inset: 0; z-index: 8; display: flex; flex-direction: column; background: var(--bg-0); }
+    .drawing-model-scene { width: 100%; height: 100%; min-height: 0; }
+    .drawing-model-scene path, .drawing-model-scene line { fill: none; stroke: var(--tx-2); stroke-width: 3; }
+    .drawing-model-scene path[role="button"], .drawing-model-scene line[role="button"] { pointer-events: stroke; }
+    .drawing-model-scene marker path { fill: var(--tx-2); stroke: none; }
+    .drawing-model-scene .automata-state { fill: var(--bg-1); stroke: var(--tx-1); stroke-width: 3; cursor: pointer; }
+    .drawing-model-scene .automata-accepting { fill: none; stroke: var(--tx-1); stroke-width: 2; pointer-events: none; }
+    .drawing-model-scene .automata-state-label { fill: var(--tx-1); font: 24px system-ui, sans-serif; pointer-events: none; }
+    .drawing-model-scene .automata-label { fill: var(--tx-1); font: 20px system-ui, sans-serif; pointer-events: none; }
+    .drawing-model-scene .active { stroke: var(--acc); stroke-width: 6; }
+    .drawing-model-scene [role="button"]:focus { outline: none; filter: drop-shadow(0 0 5px var(--acc)); }
+    .drawing-model-evidence-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--bd); color: var(--tx-3); font-size: 12px; }
     /* A document with no authored coordinates has no honest preset frame to show. Keep only that
        initial canvas visually withheld until its selected finite arrangement and routing settle;
        the pane header and live busy announcement remain available throughout. */

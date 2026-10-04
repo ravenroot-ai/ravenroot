@@ -2907,10 +2907,9 @@ public final class GraphRunner implements AutoCloseable {
             }
         };
         // Disabled capture is the compatibility path as well as the zero-copy path. Returning the
-        // engine's stage directly preserves its failure identity. The enabled path also preserves
-        // that identity after its gate: CompletionStage.thenCompose adds a CompletionException
-        // layer around an ordinary engine failure, which would replace a branch failure's direct
-        // message when a join retains that failure as a suppressed cause.
+        // engine's stage directly preserves its failure identity. The enabled gate uses a bridge
+        // because CompletionStage.thenCompose adds a CompletionException around an ordinary engine
+        // failure, replacing its direct message when a join retains it as a suppressed cause.
         attempt = activityCapture.enabled()
                 ? dispatchAfterCapture(activityCapture.input(captureContext, delivered), dispatch)
                 : dispatch.get();

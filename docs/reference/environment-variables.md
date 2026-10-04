@@ -326,6 +326,16 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | Variable or family | Applicability and default boundary |
 |---|---|
 | `RAVENROOT_AUDIT_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ACTIVITY_CAPTURE_ENABLED` | Optional durable node-content archive; `false` |
+| `RAVENROOT_ACTIVITY_CAPTURE_POLICY` | `BEST_EFFORT` by default when enabled; `STRICT` gates invocation and downstream publication |
+| `RAVENROOT_ACTIVITY_CAPTURE_NODES` | Exact comma-separated node IDs; empty selects all nodes |
+| `RAVENROOT_ACTIVITY_CAPTURE_CONTENTS` | Selected content kinds; `INPUT_PAYLOAD,OUTPUT_PAYLOAD` |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES` | Post-redaction canonical JSON ceiling; `65536` |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT` | Pending write ceiling; `64` |
+| `RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS` | Per-record persistence deadline; `2000` |
+| `RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS` | Activity content retention; `604800` |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE` | History page ceiling from 1 through 1000; `100` |
+| `RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS` | Case-insensitive object keys redacted before size checks; safe credential-key defaults |
 | `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | PostgreSQL-only positive lost-race repair bound; unset defaults to `3` |
@@ -349,6 +359,9 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS` | PostgreSQL statement bound in positive whole milliseconds; default `30000` and no shorter than lock timeout |
 | `RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS` | PostgreSQL terminal-process retention; default `604800` seconds |
 | `RAVENROOT_WORKER_ID` | See the linked contract for exact type, default, and applicability. |
+
+Activity capture's full failure, retention, and query contract is in
+[Durable activity content capture](../operator-guide/activity-capture.md).
 
 ## Package activation
 

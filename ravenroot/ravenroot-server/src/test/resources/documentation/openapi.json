@@ -24,6 +24,26 @@
         }
       }
     },
+    "/v1/activity": {
+      "get": {
+        "summary": "Optional tenant-scoped durable node activity-content archive. Reads are bounded, incremental, filterable by execution and attempt identity, and report the retained cursor floor. The tenant comes only from authentication; malformed, overflowing, unknown and over-limit query values are refused.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "503": {"description": "REQUEST_INTERRUPTED"}
+        }
+      }
+    },
     "/v1/admin/human-tasks": {
       "get": {
         "summary": "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. Filters cover task and execution identity, lifecycle, age, and actionable, terminal, orphaned, or non-resumable classification.",

@@ -35,6 +35,11 @@ public final class PayloadJson {
     private PayloadJson() {
     }
 
+    /** Bounded canonical encoding for trusted adapters that start with a Java payload value. */
+    public static byte[] writeJava(Object value, PayloadLimits limits) {
+        return write(PayloadValue.fromJava(value, limits)).getBytes(StandardCharsets.UTF_8);
+    }
+
 /**
  * Canonical encoding: sorted map keys, no insignificant whitespace.
  * @param value payload type-model value to encode

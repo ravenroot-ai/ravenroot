@@ -2245,6 +2245,27 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return executionStore != null && executionStore.supports(StoreCapability.EVENT_JOURNAL);
     }
 
+    @Override
+    public boolean activityArchiveAvailable() {
+        return behaviors.activityCapture().enabled();
+    }
+
+    @Override
+    public int activityArchiveMaxPageSize() {
+        return behaviors.activityCapture().maximumPageSize();
+    }
+
+    @Override
+    public ai.ravenroot.api.activity.ActivityPage activityAfter(
+            String tenantId, ai.ravenroot.api.activity.ActivityQuery query) {
+        if (!activityArchiveAvailable()) {
+            throw new IllegalStateException("activity content archive is unavailable");
+        }
+        return await(behaviors.activityCapture().read(
+                java.util.Objects.requireNonNull(tenantId, "tenantId"),
+                java.util.Objects.requireNonNull(query, "query")));
+    }
+
     /**
      * The durable inventory is available exactly when a store is composed and declares
      * {@link StoreCapability#PROCESS_INVENTORY} — the same "declared capability, not implicit
@@ -3231,6 +3252,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         });
         deployments.clear();
         localDeployments.clear();
+        behaviors.activityCapture().close();
         if (artifacts instanceof AutoCloseable closeable) {
             try {
                 closeable.close();

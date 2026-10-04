@@ -2891,7 +2891,7 @@ public final class GraphRunner implements AutoCloseable {
         TraversalInstanceRegistry.TraversalInstance capturedTraversalInstance = traversalInstance;
         ExecutionBudget.Actor acquiredActorLease = actorLease;
         RuntimeException capturedCreationFailure = creationFailed;
-        attempt = activityCapture.input(captureContext, delivered).thenCompose(ignored -> {
+        java.util.function.Supplier<CompletionStage<NodeResult>> dispatch = () -> {
             try {
                 if (capturedCreationFailure != null) throw capturedCreationFailure;
                 if (definition.nature() == NodeRuntimeNature.WORKER) {
@@ -2905,7 +2905,14 @@ public final class GraphRunner implements AutoCloseable {
             } catch (RuntimeException creationFailure) {
                 return CompletableFuture.failedFuture(creationFailure);
             }
-        });
+        };
+        // Disabled capture is the compatibility path as well as the zero-copy path. Returning the
+        // engine's stage directly preserves its failure identity; composing through an already
+        // completed gate adds a CompletionException layer, which would replace a branch failure's
+        // direct message when a join retains that failure as a suppressed cause.
+        attempt = activityCapture.enabled()
+                ? activityCapture.input(captureContext, delivered).thenCompose(ignored -> dispatch.get())
+                : dispatch.get();
         return attempt
                 .handle((result, error) -> {
                     // Capacity protects this node attempt, not its downstream subtree. Releasing

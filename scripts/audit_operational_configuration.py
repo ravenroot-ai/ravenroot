@@ -14194,6 +14194,31 @@ def activity_capture_authority_from_source(
     contracts: list[dict[str, object]] = []
     by_environment = {item[3]: item for item in ACTIVITY_CAPTURE_SETTINGS}
     by_helm_field = {item[1]: item for item in ACTIVITY_CAPTURE_SETTINGS}
+    values_source = sources[ACTIVITY_CAPTURE_CARRIER_PATHS[1]]
+    values_match = re.search(r"(?m)^activityCapture:\s*$", values_source)
+    schema_source = sources[ACTIVITY_CAPTURE_CARRIER_PATHS[2]]
+    schema_match = re.search(r'"activityCapture"\s*:\s*\{', schema_source)
+    if values_match is None or schema_match is None:
+        return None
+    next_values_key = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                                values_source[values_match.end():])
+    values_last_offset = (values_match.end() + next_values_key.start() - 1
+                          if next_values_key is not None else len(values_source) - 1)
+    schema_open = schema_source.find("{", schema_match.start())
+    schema_close = matching_delimiter(
+        strip_c_comments_and_literals(schema_source), schema_open, "{", "}")
+    if schema_close is None:
+        return None
+    helm_section_lines = {
+        ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix(): (
+            line_number(values_source, values_match.start()),
+            line_number(values_source, values_last_offset),
+        ),
+        ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix(): (
+            line_number(schema_source, schema_match.start()),
+            line_number(schema_source, schema_close),
+        ),
+    }
     for setting, helm_field, field, environment, property_name, default, source_default, validation in ACTIVITY_CAPTURE_SETTINGS:
         pattern = re.compile(
             rf'value\s*\(\s*properties\s*,\s*environment\s*,\s*"{re.escape(property_name)}"\s*,\s*'
@@ -14226,10 +14251,10 @@ def activity_capture_authority_from_source(
 
     for candidate in discovered.values():
         item = by_environment.get(candidate.expression) or by_environment.get(candidate.role)
-        if item is None and candidate.path in {
-                ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix(),
-                ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix()}:
-            item = by_helm_field.get(candidate.role)
+        if item is None and candidate.path in helm_section_lines:
+            first_line, last_line = helm_section_lines[candidate.path]
+            if first_line <= candidate.line <= last_line:
+                item = by_helm_field.get(candidate.role)
         if item is not None and candidate.path in {
                 path.as_posix() for path in ACTIVITY_CAPTURE_CARRIER_PATHS}:
             candidates_by_setting[item[0]].add(candidate.id)

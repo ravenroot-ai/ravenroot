@@ -6460,6 +6460,16 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
             self.assertIsNotNone(authority)
             self.assertEqual(10, len(authority["contracts"]))
             self.assertEqual(len(authority["candidateIds"]), len(set(authority["candidateIds"])))
+            values_path = audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix()
+            schema_path = audit.ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix()
+            values_candidates = [discovered[identifier] for identifier in authority["candidateIds"]
+                                 if discovered[identifier].path == values_path]
+            schema_candidates = [discovered[identifier] for identifier in authority["candidateIds"]
+                                 if discovered[identifier].path == schema_path]
+            self.assertTrue(values_candidates)
+            self.assertTrue(schema_candidates)
+            self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
+            self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
 
             mutations = (
                 (audit.ACTIVITY_CAPTURE_CONFIGURATION_PATH, '"65536"', '"65537"'),

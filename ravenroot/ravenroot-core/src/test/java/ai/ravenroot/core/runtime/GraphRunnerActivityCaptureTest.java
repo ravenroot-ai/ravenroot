@@ -157,6 +157,55 @@ class GraphRunnerActivityCaptureTest {
   }
 
   @Test
+  void enabledCapturePreservesOrdinaryBranchFailureDiagnosticsForEveryPolicy() {
+    for (ActivityFailurePolicy failurePolicy : ActivityFailurePolicy.values()) {
+      var archive = new CollectingArchive();
+      var behaviors = new BehaviorRegistry();
+      for (String node : List.of("b0", "b1", "b2")) {
+        behaviors.register(
+            node,
+            message ->
+                "b1".equals(node)
+                    ? CompletableFuture.failedFuture(
+                        new IllegalStateException("branch exploded"))
+                    : CompletableFuture.completedFuture(
+                        NodeResult.continueWith("from-" + node)));
+      }
+      behaviors.withActivityCapture(
+          new ActivityCapture(
+              new ActivityCapturePolicy(
+                  true,
+                  failurePolicy,
+                  Set.of(),
+                  Set.of(ActivityContentKind.INPUT_PAYLOAD),
+                  PayloadLimits.DEFAULTS,
+                  8,
+                  Duration.ofSeconds(2),
+                  Duration.ofDays(1),
+                  ActivityRedactor.none()),
+              archive));
+
+      try (var manager = GraphManager.from(JoinMiniGraphs.fanIn(3, JoinMiniGraphs.quorum(3)));
+          var runner = runner(manager, behaviors)) {
+        var error =
+            assertThrows(
+                ExecutionException.class,
+                () ->
+                    runner
+                        .execute(TestIdentities.TENANT_A, "input")
+                        .toCompletableFuture()
+                        .get(5, TimeUnit.SECONDS),
+                failurePolicy.name());
+        JoinFailureException join = joinFailure(error);
+        assertTrue(
+            List.of(join.getSuppressed()).stream()
+                .anyMatch(suppressed -> "branch exploded".equals(suppressed.getMessage())),
+            failurePolicy + " capture must not change the retained branch failure");
+      }
+    }
+  }
+
+  @Test
   void strictCaptureGatesToolContinuationEffectAndResultPublication() throws Exception {
     var archive = new GatedArchive();
     var effectEntries = new AtomicInteger();
@@ -294,6 +343,15 @@ class GraphRunnerActivityCaptureTest {
         ExecutionIdentitySource.randomUuids(),
         new InMemoryJoinStore(),
         Clock.systemUTC());
+  }
+
+  private static JoinFailureException joinFailure(Throwable error) {
+    Throwable current = error;
+    while (current != null) {
+      if (current instanceof JoinFailureException failure) return failure;
+      current = current.getCause();
+    }
+    throw new AssertionError("expected a JoinFailureException", error);
   }
 
   private static ActivityCapturePolicy policy(Set<ActivityContentKind> contents) {

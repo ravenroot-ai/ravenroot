@@ -2907,11 +2907,12 @@ public final class GraphRunner implements AutoCloseable {
             }
         };
         // Disabled capture is the compatibility path as well as the zero-copy path. Returning the
-        // engine's stage directly preserves its failure identity; composing through an already
-        // completed gate adds a CompletionException layer, which would replace a branch failure's
-        // direct message when a join retains that failure as a suppressed cause.
+        // engine's stage directly preserves its failure identity. The enabled path also preserves
+        // that identity after its gate: CompletionStage.thenCompose adds a CompletionException
+        // layer around an ordinary engine failure, which would replace a branch failure's direct
+        // message when a join retains that failure as a suppressed cause.
         attempt = activityCapture.enabled()
-                ? activityCapture.input(captureContext, delivered).thenCompose(ignored -> dispatch.get())
+                ? dispatchAfterCapture(activityCapture.input(captureContext, delivered), dispatch)
                 : dispatch.get();
         return attempt
                 .handle((result, error) -> {
@@ -3896,6 +3897,31 @@ public final class GraphRunner implements AutoCloseable {
 
     private static Throwable unwrap(Throwable error) {
         return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    /** Runs a dispatch after its capture gate without changing either boundary's failure identity. */
+    private static <T> CompletionStage<T> dispatchAfterCapture(
+            CompletionStage<Void> capture,
+            java.util.function.Supplier<CompletionStage<T>> dispatch) {
+        var result = new CompletableFuture<T>();
+        capture.whenComplete((ignored, captureFailure) -> {
+            if (captureFailure != null) {
+                result.completeExceptionally(captureFailure);
+                return;
+            }
+            CompletionStage<T> dispatched;
+            try {
+                dispatched = java.util.Objects.requireNonNull(dispatch.get(), "dispatch stage");
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(failure);
+                return;
+            }
+            dispatched.whenComplete((value, dispatchFailure) -> {
+                if (dispatchFailure == null) result.complete(value);
+                else result.completeExceptionally(dispatchFailure);
+            });
+        });
+        return result;
     }
 
     /** Finds a verified durable boundary through arbitrary CompletionStage wrapping. */

@@ -30,6 +30,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Durable, version-pinned implementation behind all three intergraph node types. */
 public final class DefaultFlowInvocationCapability implements FlowInvocationCapability, AutoCloseable {
+    private static final System.Logger LOGGER =
+            System.getLogger(DefaultFlowInvocationCapability.class.getName());
+    private static final int RECOVERY_PAGE_SIZE = 1_000;
+    private static final int SETTLEMENT_CAS_RETRIES = 8;
     private final ExecutionStore store;
     private final DeploymentRegistry deployments;
     private final DefaultRavenrootApplication application;
@@ -41,6 +45,8 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
     private final Set<String> recoveryTenants = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean recoveryLoopStarted = new AtomicBoolean();
     private final AtomicBoolean reconciliationRunning = new AtomicBoolean();
+    private final ConcurrentHashMap<DeadlineKey, ScheduledFuture<?>> scheduledDeadlines = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, FlowHandle> retainedCursors = new ConcurrentHashMap<>();
 
     public DefaultFlowInvocationCapability(ExecutionStore store, DeploymentRegistry deployments,
                                            DefaultRavenrootApplication application,
@@ -84,29 +90,24 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
             FlowGraphContract contract = FlowGraphContract.read(version.canonicalSnapshot());
             Object admittedInput = contract.input(input);
             byte[] encodedInput = PayloadJson.writeJava(admittedInput, PayloadLimits.DEFAULTS);
-            return store.unfinishedFlowInvocations(tenant, policy.maximumUnfinishedPerTenant())
-                    .thenCompose(unfinished -> {
-                        if (unfinished.size() >= policy.maximumUnfinishedPerTenant()) {
-                            throw new IllegalStateException("tenant flow invocation quota is exhausted");
+            Instant now = clock.instant();
+            FlowHandle handle = new FlowHandle(UUID.randomUUID());
+            UUID childProcess = UUID.randomUUID();
+            UUID childTraversal = UUID.randomUUID();
+            var intent = new FlowInvocationRecord(tenant, handle, caller.processInstanceId(),
+                    caller.traversalId(), caller.invocationId(), caller.security().subject(),
+                    caller.security().principalType(), caller.security().issuer(),
+                    target.deploymentId(), target.version(),
+                    version.canonicalDigest(), childProcess, childTraversal, FlowInvocationStatus.INTENT,
+                    encodedInput, null, "", "", null, 1, now, now, now.plus(deadline),
+                    now.plus(policy.retention()));
+            return store.admitFlowInvocation(intent, policy.maximumUnfinishedPerTenant())
+                    .thenComposeAsync(created -> {
+                        if (!created.handle().equals(handle)) {
+                            verifyRetry(created, target);
+                            return CompletableFuture.completedFuture(created.handle());
                         }
-                        Instant now = clock.instant();
-                        FlowHandle handle = new FlowHandle(UUID.randomUUID());
-                        UUID childProcess = UUID.randomUUID();
-                        UUID childTraversal = UUID.randomUUID();
-                        var intent = new FlowInvocationRecord(tenant, handle, caller.processInstanceId(),
-                                caller.traversalId(), caller.invocationId(), caller.security().subject(),
-                                caller.security().principalType(), caller.security().issuer(),
-                                target.deploymentId(), target.version(),
-                                version.canonicalDigest(), childProcess, childTraversal, FlowInvocationStatus.INTENT,
-                                encodedInput, null, "", "", null, 1, now, now, now.plus(deadline),
-                                now.plus(policy.retention()));
-                        return store.createFlowInvocation(intent).thenComposeAsync(created -> {
-                            if (!created.handle().equals(handle)) {
-                                verifyRetry(created, target);
-                                return CompletableFuture.completedFuture(created.handle());
-                            }
-                            return launch(created, version, contract, admittedInput).thenApply(ignored -> handle);
-                        });
+                        return launch(created, version, contract, admittedInput).thenApply(ignored -> handle);
                     });
         });
     }
@@ -122,7 +123,8 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
         }
         var launchedMutation = mutation(intent, FlowInvocationStatus.LAUNCHED, null, "", "", null);
         return store.mutateFlowInvocation(intent.tenantId(), launchedMutation).thenApply(launched -> {
-            started.completion().whenComplete((result, failure) -> settleCompletion(launched, contract, result, failure));
+            started.completion().whenComplete((result, failure) ->
+                    settleCompletion(launched, contract, result, failure));
             scheduleDeadline(launched);
             return launched;
         });
@@ -130,28 +132,65 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
 
     private void settleCompletion(FlowInvocationRecord launched, FlowGraphContract contract,
                                   GraphExecutionResult result, Throwable failure) {
+        Throwable cause = unwrap(failure);
+        if (cause instanceof DurableHumanTaskSuspension
+                || cause instanceof ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
+                || cause instanceof ai.ravenroot.core.runner.RunnerJobSuspension) {
+            // The child is durably parked. Its recovery continuation records the eventual terminal
+            // result under the same traversal id; the reconciliation loop observes that record and
+            // settles this relation. Treating the suspension signal as a failure would permanently
+            // discard a child that is deliberately waiting for external work.
+            return;
+        }
         if (failure != null || result == null) {
-            settleLatest(launched.tenantId(), launched.handle(), FlowInvocationStatus.FAILED, null,
-                    "CHILD_FAILED", "child execution failed");
+            reportSettlement(settleLatest(launched.tenantId(), launched.handle(), FlowInvocationStatus.FAILED, null,
+                    "CHILD_FAILED", "child execution failed"), launched);
             return;
         }
         try {
             Object output = contract.output(result.payload());
             byte[] encoded = PayloadJson.writeJava(output, PayloadLimits.DEFAULTS);
-            settleLatest(launched.tenantId(), launched.handle(), FlowInvocationStatus.COMPLETED, encoded, "", "");
+            reportSettlement(settleLatest(launched.tenantId(), launched.handle(),
+                    FlowInvocationStatus.COMPLETED, encoded, "", ""), launched);
         } catch (RuntimeException invalid) {
-            settleLatest(launched.tenantId(), launched.handle(), FlowInvocationStatus.FAILED, null,
-                    "OUTPUT_SCHEMA", "child output did not satisfy its call contract");
+            reportSettlement(settleLatest(launched.tenantId(), launched.handle(), FlowInvocationStatus.FAILED, null,
+                    "OUTPUT_SCHEMA", "child output did not satisfy its call contract"), launched);
         }
     }
 
     private void scheduleDeadline(FlowInvocationRecord record) {
+        if (record.terminal()) {
+            cancelDeadline(record.tenantId(), record.handle());
+            return;
+        }
+        DeadlineKey key = new DeadlineKey(record.tenantId(), record.handle());
         long delay = Math.max(0, Duration.between(clock.instant(), record.deadlineAt()).toMillis());
-        deadlines.schedule(() -> {
-            application.cancelTraversal(record.tenantId(), record.childTraversalId());
-            settleLatest(record.tenantId(), record.handle(), FlowInvocationStatus.DEADLINE_EXCEEDED, null,
+        scheduledDeadlines.computeIfAbsent(key, ignored -> deadlines.schedule(() -> {
+            scheduledDeadlines.remove(key);
+            expireDeadline(key);
+        }, delay, TimeUnit.MILLISECONDS));
+    }
+
+    private void expireDeadline(DeadlineKey key) {
+        store.loadFlowInvocation(key.tenantId(), key.handle()).thenCompose(optional -> {
+            FlowInvocationRecord latest = optional.orElse(null);
+            if (latest == null || latest.terminal()) return CompletableFuture.completedFuture(null);
+            if (latest.deadlineAt().isAfter(clock.instant())) {
+                scheduleDeadline(latest);
+                return CompletableFuture.completedFuture(null);
+            }
+            ExecutionLookup execution = application.executionResult(latest.tenantId(), latest.childTraversalId());
+            if (execution instanceof ExecutionLookup.Found found && found.outcome().status().terminal()) {
+                return reconcile(latest);
+            }
+            application.cancelTraversal(latest.tenantId(), latest.childTraversalId());
+            return settleLatest(latest.tenantId(), latest.handle(), FlowInvocationStatus.DEADLINE_EXCEEDED, null,
                     "DEADLINE_EXCEEDED", "child flow deadline elapsed");
-        }, delay, TimeUnit.MILLISECONDS);
+        }).whenComplete((ignored, failure) -> {
+            if (failure != null) LOGGER.log(System.Logger.Level.ERROR,
+                    "flow deadline reconciliation failed tenant={0} handle={1}: {2}",
+                    key.tenantId(), key.handle(), unwrap(failure).toString());
+        });
     }
 
     @Override
@@ -233,18 +272,33 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
     }
 
     private CompletionStage<Void> reconcileTenant(String tenantId) {
-        return store.retainedFlowInvocations(tenantId, 1_000).thenComposeAsync(records ->
-                CompletableFuture.allOf(records.stream().map(record -> record.terminal()
-                                ? CompletableFuture.runAsync(() -> settleContinuation(record))
-                                : reconcile(record).toCompletableFuture())
-                        .toArray(CompletableFuture[]::new)))
+        CompletionStage<Void> unfinished = store.unfinishedFlowInvocations(tenantId, RECOVERY_PAGE_SIZE)
+                .thenComposeAsync(records -> CompletableFuture.allOf(records.stream()
+                        .map(record -> reconcile(record).toCompletableFuture())
+                        .toArray(CompletableFuture[]::new)));
+        FlowHandle cursor = retainedCursors.get(tenantId);
+        CompletionStage<Void> continuations = store.retainedFlowInvocationsAfter(tenantId,
+                        java.util.Optional.ofNullable(cursor), RECOVERY_PAGE_SIZE)
+                .thenAcceptAsync(records -> {
+                    records.stream().filter(FlowInvocationRecord::terminal)
+                            .filter(record -> record.continuationClaim() != null)
+                            .forEach(this::settleContinuation);
+                    if (records.size() < RECOVERY_PAGE_SIZE) retainedCursors.remove(tenantId);
+                    else retainedCursors.put(tenantId, records.getLast().handle());
+                });
+        return CompletableFuture.allOf(unfinished.toCompletableFuture(), continuations.toCompletableFuture())
                 .thenCompose(ignored -> store.purgeExpiredFlowInvocations(tenantId).thenApply(count -> null));
     }
 
     private void reconcileConfiguredTenants() {
         if (!reconciliationRunning.compareAndSet(false, true)) return;
         CompletableFuture.allOf(recoveryTenants.stream()
-                        .map(tenantId -> reconcileTenant(tenantId).exceptionally(failure -> null)
+                        .map(tenantId -> reconcileTenant(tenantId).exceptionally(failure -> {
+                            LOGGER.log(System.Logger.Level.ERROR,
+                                    "flow reconciliation failed tenant={0}: {1}",
+                                    tenantId, unwrap(failure).toString());
+                            return null;
+                        })
                                 .toCompletableFuture())
                         .toArray(CompletableFuture[]::new))
                 .whenComplete((ignored, failure) -> reconciliationRunning.set(false));
@@ -314,6 +368,7 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
         return store.mutateFlowInvocation(current.tenantId(), mutation(current, status, result, code, message, claim))
                 .whenComplete((settled, failure) -> {
                     if (failure == null && settled.terminal()) {
+                        cancelDeadline(settled.tenantId(), settled.handle());
                         CompletableFuture.runAsync(() -> settleContinuation(settled));
                     }
                 });
@@ -321,11 +376,57 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
 
     private CompletionStage<Void> settleLatest(String tenant, FlowHandle handle, FlowInvocationStatus status,
                                                byte[] result, String code, String message) {
+        return settleLatest(tenant, handle, status, result, code, message, SETTLEMENT_CAS_RETRIES);
+    }
+
+    private CompletionStage<Void> settleLatest(String tenant, FlowHandle handle, FlowInvocationStatus status,
+                                               byte[] result, String code, String message, int retries) {
         return store.loadFlowInvocation(tenant, handle).thenCompose(optional -> {
             FlowInvocationRecord latest = optional.orElse(null);
-            if (latest == null || latest.terminal()) return CompletableFuture.completedFuture(latest);
-            return settle(latest, status, result, code, message, null);
-        }).handle((settled, failure) -> null);
+            if (latest == null) {
+                return CompletableFuture.failedFuture(
+                        new IllegalStateException("flow invocation disappeared before settlement"));
+            }
+            if (latest.terminal()) {
+                cancelDeadline(tenant, handle);
+                if (latest.status() == FlowInvocationStatus.COMPLETED
+                        && status == FlowInvocationStatus.COMPLETED
+                        && !java.util.Arrays.equals(latest.result(), result)) {
+                    return CompletableFuture.failedFuture(new IllegalStateException(
+                            "recovered child output disagrees with the durable invocation result"));
+                }
+                return CompletableFuture.completedFuture(latest);
+            }
+            return settle(latest, status, result, code, message, null).handle((settled, failure) -> {
+                if (failure == null) return CompletableFuture.completedFuture(settled);
+                Throwable cause = unwrap(failure);
+                if (cause instanceof FlowInvocationConflictException && retries > 0) {
+                    return settleLatest(tenant, handle, status, result, code, message, retries - 1)
+                            .thenApply(ignored -> (FlowInvocationRecord) null);
+                }
+                return CompletableFuture.<FlowInvocationRecord>failedFuture(cause);
+            }).thenCompose(stage -> stage);
+        }).thenApply(ignored -> null);
+    }
+
+    private void reportSettlement(CompletionStage<Void> settlement, FlowInvocationRecord record) {
+        settlement.whenComplete((ignored, failure) -> {
+            if (failure != null) LOGGER.log(System.Logger.Level.ERROR,
+                    "flow settlement failed tenant={0} handle={1}: {2}",
+                    record.tenantId(), record.handle(), unwrap(failure).toString());
+        });
+    }
+
+    private void cancelDeadline(String tenantId, FlowHandle handle) {
+        ScheduledFuture<?> scheduled = scheduledDeadlines.remove(new DeadlineKey(tenantId, handle));
+        if (scheduled != null) scheduled.cancel(false);
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) current = current.getCause();
+        return current;
     }
 
     private FlowInvocationMutation mutation(FlowInvocationRecord current, FlowInvocationStatus status,
@@ -418,7 +519,11 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
                 record.callerSubject(), record.callerPrincipalType(), record.callerIssuer());
     }
 
+    private record DeadlineKey(String tenantId, FlowHandle handle) { }
+
     @Override public void close() {
+        scheduledDeadlines.values().forEach(task -> task.cancel(false));
+        scheduledDeadlines.clear();
         deadlines.shutdownNow();
     }
 }

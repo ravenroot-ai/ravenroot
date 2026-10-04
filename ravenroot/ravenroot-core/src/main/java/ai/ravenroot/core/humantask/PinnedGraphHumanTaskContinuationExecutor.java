@@ -312,7 +312,8 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                         task.key().processInstanceId(), claim.traversalId(), task.request().nodeId(),
                         task.request().graphVersionPin().reference(), recorder, result(task, handler),
                         checkpoint.budget(), task.request().executionLimits().responsePayload(),
-                        checkpoint.joins(), task.request().invocationId());
+                        checkpoint.joins(), task.request().invocationId(), checkpoint.calledExecution(),
+                        checkpoint.calledEndOutputs(), task.request().traversalId());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, () -> close(binding));
                 setupFailure = cleanup(setupFailure, runner::close);

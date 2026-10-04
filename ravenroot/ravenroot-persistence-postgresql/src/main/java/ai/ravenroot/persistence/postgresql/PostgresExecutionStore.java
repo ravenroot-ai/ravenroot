@@ -1703,20 +1703,18 @@ public final class PostgresExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
             ai.ravenroot.api.flow.FlowInvocationRecord intent) {
-        return async(() -> write(null, connection -> {
-            Objects.requireNonNull(intent, "intent");
-            if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT || intent.revision() != 1)
-                throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO flow_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING")) {
-                bindFlow(statement, intent);
-                if (statement.executeUpdate() == 1) return intent;
-            }
-            var existing = readFlowByCaller(connection, intent.tenantId(), intent.callerProcessInstanceId(),
-                    intent.callerInvocationId());
-            if (existing == null) throw new IllegalStateException("flow invocation insert conflict was unreadable");
-            return existing;
-        }));
+        return async(() -> write(null, connection -> insertFlowInvocation(connection, intent, null)));
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        if (maximumUnfinishedPerTenant < 1) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("maximumUnfinishedPerTenant must be positive"));
+        }
+        return async(() -> write(null, connection ->
+                insertFlowInvocation(connection, intent, maximumUnfinishedPerTenant)));
     }
 
     @Override public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
@@ -1769,6 +1767,27 @@ public final class PostgresExecutionStore implements ExecutionStore {
         return async(() -> readFolded(null,c->{if(limit<1||limit>1000)throw new IllegalArgumentException("limit");var found=new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();try(PreparedStatement s=c.prepareStatement("SELECT * FROM flow_invocation WHERE tenant_id=? ORDER BY created_at_epoch_second,created_at_nano,handle LIMIT ?")){s.setString(1,tenantId);s.setInt(2,limit);try(ResultSet rows=s.executeQuery()){while(rows.next())found.add(readFlow(rows));}}return List.copyOf(found);}));
     }
 
+    @Override public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocationsAfter(
+            String tenantId, Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return async(() -> readFolded(null, connection -> {
+            Objects.requireNonNull(afterExclusive, "afterExclusive");
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit");
+            var found = new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();
+            String cursor = afterExclusive.isPresent() ? " AND handle>?" : "";
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM flow_invocation WHERE tenant_id=?" + cursor + " ORDER BY handle LIMIT ?")) {
+                statement.setString(1, tenantId);
+                int index = 2;
+                if (afterExclusive.isPresent()) {
+                    statement.setObject(index++, afterExclusive.orElseThrow().value());
+                }
+                statement.setInt(index, limit);
+                try (ResultSet rows = statement.executeQuery()) { while (rows.next()) found.add(readFlow(rows)); }
+            }
+            return List.copyOf(found);
+        }));
+    }
+
     @Override public CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
         return async(() -> write(null, connection -> { try(PreparedStatement s=connection.prepareStatement(
                 "DELETE FROM flow_invocation WHERE tenant_id=? AND status NOT IN ('INTENT','LAUNCHED') AND "+StoredInstant.atOrBefore("retained_until"))){
@@ -1784,6 +1803,46 @@ public final class PostgresExecutionStore implements ExecutionStore {
         s.setString(i++,r.failureCode());s.setString(i++,r.failureMessage());s.setObject(i++,r.continuationClaim());s.setLong(i++,r.revision());
         i=StoredInstant.bindValue(s,i,r.createdAt());i=StoredInstant.bindValue(s,i,r.updatedAt());
         i=StoredInstant.bindValue(s,i,r.deadlineAt());StoredInstant.bindValue(s,i,r.retainedUntil());
+    }
+
+    private static ai.ravenroot.api.flow.FlowInvocationRecord insertFlowInvocation(
+            Connection connection, ai.ravenroot.api.flow.FlowInvocationRecord intent,
+            Integer maximumUnfinishedPerTenant) throws SQLException {
+        Objects.requireNonNull(intent, "intent");
+        if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT || intent.revision() != 1) {
+            throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
+        }
+        if (maximumUnfinishedPerTenant != null) {
+            try (PreparedStatement lock = connection.prepareStatement(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+                lock.setString(1, intent.tenantId());
+                lock.executeQuery().close();
+            }
+        }
+        var existing = readFlowByCaller(connection, intent.tenantId(), intent.callerProcessInstanceId(),
+                intent.callerInvocationId());
+        if (existing != null) return existing;
+        if (maximumUnfinishedPerTenant != null) {
+            try (PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM flow_invocation WHERE tenant_id=? AND status IN ('INTENT','LAUNCHED')")) {
+                count.setString(1, intent.tenantId());
+                try (ResultSet row = count.executeQuery()) {
+                    if (!row.next()) throw new SQLException("flow invocation quota count returned no row");
+                    if (row.getLong(1) >= maximumUnfinishedPerTenant) {
+                        throw new IllegalStateException("tenant flow invocation quota is exhausted");
+                    }
+                }
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO flow_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING")) {
+            bindFlow(statement, intent);
+            if (statement.executeUpdate() == 1) return intent;
+        }
+        existing = readFlowByCaller(connection, intent.tenantId(), intent.callerProcessInstanceId(),
+                intent.callerInvocationId());
+        if (existing == null) throw new IllegalStateException("flow invocation insert conflict was unreadable");
+        return existing;
     }
     private static ai.ravenroot.api.flow.FlowInvocationRecord readFlow(Connection c,String tenant,UUID handle)throws SQLException{
         try(PreparedStatement s=c.prepareStatement("SELECT * FROM flow_invocation WHERE tenant_id=? AND handle=?")){s.setString(1,tenant);s.setObject(2,handle);try(ResultSet r=s.executeQuery()){return r.next()?readFlow(r):null;}}

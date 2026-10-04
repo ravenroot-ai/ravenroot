@@ -53,6 +53,7 @@ import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.core.approval.ToolApprovalService;
 import ai.ravenroot.core.approval.ToolApprovalSettings;
 import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry;
@@ -155,6 +156,35 @@ class HumanTaskRestartIntegrationTest {
                   <data key="edge-outcome">resolved</data>
                 </edge>
                 <edge id="capture-end" source="capture" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] CALLED_PARALLEL_END_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <key id="responseSchema" for="node" attr.name="responseSchema" attr.type="string"/>
+              <key id="responseSchemaVersion" for="node" attr.name="responseSchemaVersion" attr.type="string"/>
+              <key id="authorizedRoles" for="node" attr.name="authorizedRoles" attr.type="string"/>
+              <key id="joinPolicy" for="node" attr.name="joinPolicy" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="called-parallel-end-restart" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="first"><data key="kind">BEHAVIOR</data><data key="behavior">first-end</data></node>
+                <node id="review"><data key="kind">BEHAVIOR</data><data key="behavior">delayed-human-task</data>
+                  <data key="title">Resume called child</data>
+                  <data key="responseSchema">release.decision</data>
+                  <data key="responseSchemaVersion">1</data>
+                  <data key="authorizedRoles">APPROVER</data></node>
+                <node id="second"><data key="kind">BEHAVIOR</data><data key="behavior">second-end</data></node>
+                <node id="end"><data key="kind">END</data><data key="joinPolicy">each</data></node>
+                <edge id="start-first" source="start" target="first"/>
+                <edge id="first-end" source="first" target="end"/>
+                <edge id="start-review" source="start" target="review"/>
+                <edge id="review-second" source="review" target="second"><data key="edge-outcome">resolved</data></edge>
+                <edge id="second-end" source="second" target="end"/>
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
@@ -890,6 +920,112 @@ class HumanTaskRestartIntegrationTest {
         }
     }
 
+    @Test
+    void calledExecutionRestoresPriorEndOutputAcrossHumanTaskRestart(@TempDir Path directory)
+            throws Exception {
+        Path database = directory.resolve("called-parallel-end-restart.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        String pin;
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(CALLED_PARALLEL_END_GRAPH);
+            var stored = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            pin = stored.key().contentId().value();
+            long revision = createRunning(store, key, traversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            var firstReturned = new CompletableFuture<Void>();
+            BehaviorRegistry behaviors = standard(tasks)
+                    .register("first-end", message -> {
+                        firstReturned.complete(null);
+                        return CompletableFuture.completedFuture(NodeResult.continueWith("earlier-end"));
+                    })
+                    .register("second-end", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith("later-end")));
+            var initialEvents = new java.util.concurrent.CopyOnWriteArrayList<ExecutionEvent>();
+            var initialMonitor = new ExecutionMonitor();
+            initialMonitor.subscribe(event -> {
+                initialEvents.add(event);
+            });
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(CALLED_PARALLEL_END_GRAPH))) {
+                GraphNode review = manager.definition().node("review");
+                var humanTask = behaviors.create(new GraphNode(review.id(), review.kind(), "human-task",
+                        review.properties())).orElseThrow();
+                behaviors.register("delayed-human-task", message -> firstReturned.thenCompose(ignored ->
+                        CompletableFuture.runAsync(() -> { },
+                                CompletableFuture.delayedExecutor(100, TimeUnit.MILLISECONDS)))
+                        .thenCompose(ignored -> humanTask.handle(message)));
+                try (var runner = new GraphRunner(manager, snapshot(stored.identity(), manager), engine,
+                             behaviors, initialMonitor, ExecutionIdentitySource.randomUuids(),
+                             GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                     var recorder = ExecutionRecorder.open(store, key, "called-live", TTL, revision);
+                     var binding = tasks.bindLive(key, recorder, runner)) {
+                    ExecutionException suspended = assertThrows(ExecutionException.class,
+                            () -> runner.executeCalled(requesterIdentity(), key.processInstanceId(), traversal,
+                                    "earlier-end", pin, null, null, recorder)
+                                    .toCompletableFuture().get(10, TimeUnit.SECONDS));
+                    assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+                }
+            }
+            DurableHumanTask task = onlyTask(tasks);
+            var checkpoint = GraphExecutionContinuationCheckpoint.read(
+                    task.request().continuationVersion(), task.request().continuation());
+            assertTrue(checkpoint.calledExecution());
+            assertEquals(List.of("earlier-end"),
+                    checkpoint.calledEndOutputs().stream().map(PayloadValue::toJava).toList(),
+                    initialEvents.toString());
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK)) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            DurableHumanTask task = onlyTask(tasks);
+            tasks.resolve(approver(), task.request().taskId(), task.generation(), response());
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks)
+                    .register("delayed-human-task", message -> CompletableFuture.failedFuture(
+                            new AssertionError("the task node must not run again during re-entry")))
+                    .register("second-end", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith("later-end")));
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "called-recovery", TTL);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "called-recovery",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+            var outcomes = recovery.sweepOnce();
+            assertEquals(1, dispatched(outcomes), outcomes.toString());
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status(), outcomes.toString());
+
+            waitUntil(() -> store.loadExecutionResult(TENANT, traversal).toCompletableFuture().join()
+                    .isPresent());
+            var durable = store.loadExecutionResult(TENANT, traversal).toCompletableFuture().join()
+                    .orElseThrow();
+            var found = assertInstanceOf(ai.ravenroot.api.application.ExecutionLookup.Found.class,
+                    ExecutionResultRegistry.project(durable));
+            assertEquals(List.of("earlier-end", "later-end"), found.outcome().payload());
+            String fingerprint = durable.fingerprint();
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+            assertTrue(recovery.sweepOnce().isEmpty(), "acknowledged continuation must not replay");
+            assertEquals(fingerprint,
+                    store.loadExecutionResult(TENANT, traversal).toCompletableFuture().join()
+                            .orElseThrow().fingerprint(),
+                    "a recovery retry must not replace the original terminal result");
+        }
+    }
+
     /**
      * Production reproduction: a sibling already parked at an all-branches join must not turn the
      * durable Human Task boundary into JOIN_FAILED/QUORUM_UNREACHABLE, and its payload must survive
@@ -1564,6 +1700,16 @@ class HumanTaskRestartIntegrationTest {
 
     private static long dispatched(List<RecoveryOutcome> outcomes) {
         return outcomes.stream().filter(RecoveryOutcome.HandlerDispatched.class::isInstance).count();
+    }
+
+    private static void waitUntil(java.util.function.BooleanSupplier condition) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("condition did not become true");
+            }
+            Thread.sleep(10);
+        }
     }
 
     private static BehaviorRegistry standard(HumanTaskService tasks) {

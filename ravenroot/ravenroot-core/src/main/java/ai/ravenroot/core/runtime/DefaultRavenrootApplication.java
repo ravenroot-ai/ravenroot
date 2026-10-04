@@ -1516,7 +1516,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             ExecutionRecorder recorder = openRecorder(security, processInstanceId, revision);
             approvalBinding = toolApprovals == null || recorder == null ? null
                     : toolApprovals.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
+                            security.tenantId(), processInstanceId), recorder, runner);
             budgetBinding = agentBudgets == null || recorder == null ? null
                     : agentBudgets.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);

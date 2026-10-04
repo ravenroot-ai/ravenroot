@@ -116,6 +116,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -6424,6 +6425,57 @@ public abstract class ExecutionStoreContract {
         clock().set(completed.retainedUntil());
         assertEquals(1L, await(store().purgeExpiredFlowInvocations(DEFAULT_TENANT)));
         assertTrue(await(store().loadFlowInvocation(DEFAULT_TENANT, completed.handle())).isEmpty());
+    }
+
+    @Test
+    final void concurrentFlowAdmissionCannotExceedTheTenantQuota() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        var gate = new CountDownLatch(1);
+        var attempts = java.util.stream.IntStream.range(0, 16)
+                .mapToObj(index -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        assertTrue(gate.await(10, TimeUnit.SECONDS));
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(interrupted);
+                    }
+                    return await(store().admitFlowInvocation(flowIntent(DEFAULT_TENANT,
+                            UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()), 1));
+                })).toList();
+        gate.countDown();
+        var admitted = new java.util.ArrayList<FlowInvocationRecord>();
+        var refused = new java.util.ArrayList<Throwable>();
+        for (var attempt : attempts) {
+            try {
+                admitted.add(attempt.join());
+            } catch (CompletionException failure) {
+                Throwable cause = failure;
+                while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+                refused.add(cause);
+            }
+        }
+        assertEquals(1, admitted.size());
+        assertEquals(15, refused.size());
+        assertTrue(refused.stream().allMatch(IllegalStateException.class::isInstance));
+        assertEquals(1, await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).size());
+    }
+
+    @Test
+    final void retainedFlowPagesAdvanceByAStableExclusiveHandleCursor() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        var created = java.util.stream.IntStream.range(0, 5)
+                .mapToObj(index -> await(store().createFlowInvocation(flowIntent(DEFAULT_TENANT,
+                        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))))
+                .sorted(java.util.Comparator.comparing(record -> record.handle().toString()))
+                .toList();
+        var first = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT, Optional.empty(), 2));
+        var second = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT,
+                Optional.of(first.getLast().handle()), 2));
+        var third = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT,
+                Optional.of(second.getLast().handle()), 2));
+        var paged = java.util.stream.Stream.of(first, second, third).flatMap(List::stream).toList();
+        assertEquals(created.stream().map(FlowInvocationRecord::handle).toList(),
+                paged.stream().map(FlowInvocationRecord::handle).toList());
     }
 
     @Test

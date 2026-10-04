@@ -1438,6 +1438,24 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
+     * Atomically records one invocation intent only while the tenant remains below its unfinished
+     * relation quota. A retry by the same caller invocation returns its existing relation without
+     * consuming another quota slot.
+     *
+     * <p>The count and insert are one persistence transaction. Implementations must not emulate this
+     * method with a separate {@link #unfinishedFlowInvocations(String, int)} read followed by
+     * {@link #createFlowInvocation(ai.ravenroot.api.flow.FlowInvocationRecord)}.</p>
+     *
+     * @param intent complete durable invocation intent
+     * @param maximumUnfinishedPerTenant positive tenant quota
+     * @return the created relation, or the caller invocation's existing relation on retry
+     */
+    default CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
      * Reads one invocation by tenant-scoped opaque handle.
      * @param tenantId tenant boundary for the lookup
      * @param handle opaque relation reference
@@ -1491,6 +1509,21 @@ public interface ExecutionStore extends AutoCloseable {
      */
     default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
             retainedFlowInvocations(String tenantId, int limit) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Reads a stable handle-ordered page of retained relations for bounded fair reconciliation.
+     * Passing an empty cursor starts at the beginning; an empty page signals the caller to wrap.
+     *
+     * @param tenantId tenant boundary for the scan
+     * @param afterExclusive opaque handle after which the page starts, or empty to start
+     * @param limit positive maximum row count
+     * @return at most {@code limit} retained relations in ascending handle order
+     */
+    default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
+            retainedFlowInvocationsAfter(String tenantId,
+                    Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
         return flowInvocationsUnsupported();
     }
 

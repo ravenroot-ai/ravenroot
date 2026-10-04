@@ -6,6 +6,8 @@ import ai.ravenroot.api.deployment.registry.*;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.flow.*;
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.persistence.*;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
@@ -51,9 +53,15 @@ class DefaultFlowInvocationCapabilityTest {
 
     @Test
     void registeredChildrenArePinnedAuthorizedIdempotentAndSettleAllTerminalOutcomes() throws Exception {
-        try (var store = new SqliteExecutionStore(directory.resolve("flows.db"), CLOCK);
+        var currentTime = new java.util.concurrent.atomic.AtomicReference<>(NOW);
+        Clock clock = new Clock() {
+            @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public Instant instant() { return currentTime.get(); }
+        };
+        try (var store = new SqliteExecutionStore(directory.resolve("flows.db"), clock);
              var engine = new SameThreadExecutionEngine()) {
-            var tasks = new HumanTaskService(store, CLOCK);
+            var tasks = new HumanTaskService(store, clock);
             var behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
                     .register("fail-child", message -> CompletableFuture.failedFuture(
                             new IllegalStateException("child failed")))
@@ -61,7 +69,7 @@ class DefaultFlowInvocationCapabilityTest {
             var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), store);
-            var registry = new InMemoryDeploymentRegistry(CLOCK);
+            var registry = new InMemoryDeploymentRegistry(clock);
             GraphVersion successV1 = create(registry, "success", graph(null, "v1"), CALLER.qualifiedIdentity());
             GraphVersion failure = create(registry, "failure", graph("fail-child", "failure"),
                     CALLER.qualifiedIdentity());
@@ -71,7 +79,7 @@ class DefaultFlowInvocationCapabilityTest {
 
             try (var flows = new DefaultFlowInvocationCapability(store, registry, application, tasks,
                     FlowTargetAuthorizer.creatorOwnedTargets(),
-                    new FlowInvocationPolicy(100, Duration.ofHours(1), Duration.ofDays(1)), CLOCK)) {
+                    new FlowInvocationPolicy(100, Duration.ofHours(1), Duration.ofDays(1)), clock)) {
                 behaviors.withFlowInvocations(flows);
 
                 FlowTarget pinnedV1 = new FlowTarget(successV1.deploymentId(), 1);
@@ -183,6 +191,7 @@ class DefaultFlowInvocationCapabilityTest {
                 FlowHandle deadlineHandle = flows.start(deadlineCaller.message(),
                         new FlowTarget(blocked.deploymentId(), 1), null, Duration.ofMillis(20))
                         .toCompletableFuture().join();
+                currentTime.set(NOW.plusSeconds(1));
                 assertEquals(FlowInvocationStatus.DEADLINE_EXCEEDED, terminal(store, deadlineHandle).status());
             } finally {
                 application.close();
@@ -259,6 +268,132 @@ class DefaultFlowInvocationCapabilityTest {
         }
     }
 
+    @Test
+    void reconciliationKeepsOneDeadlineTimerPerInvocationAndCompletedChildWinsItsDeadline()
+            throws Exception {
+        Clock realtime = Clock.systemUTC();
+        try (var store = new SqliteExecutionStore(directory.resolve("timer-reconciliation.db"), realtime);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, realtime);
+            var behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
+                    .register("block-child", message -> new CompletableFuture<>());
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            var registry = new InMemoryDeploymentRegistry(realtime);
+            GraphVersion blocked = create(registry, "timer-blocked", graph("block-child", "blocked"),
+                    CALLER.qualifiedIdentity());
+            GraphVersion success = create(registry, "timer-success", graph(null, "success"),
+                    CALLER.qualifiedIdentity());
+            try (var flows = new DefaultFlowInvocationCapability(store, registry, application, tasks,
+                    FlowTargetAuthorizer.creatorOwnedTargets(),
+                    new FlowInvocationPolicy(100, Duration.ofHours(1), Duration.ofDays(1)), realtime)) {
+                CallerFixture waiting = caller(store, CALLER);
+                FlowHandle waitingHandle = flows.start(waiting.message(),
+                                new FlowTarget(blocked.deploymentId(), blocked.version()), null,
+                                Duration.ofSeconds(30))
+                        .toCompletableFuture().join();
+                for (int index = 0; index < 20; index++) {
+                    flows.recoverTenant(TENANT).toCompletableFuture().join();
+                }
+                assertEquals(1, scheduledDeadlineCount(flows),
+                        "reconciliation must reuse the invocation's one scheduled deadline");
+                flows.cancel(waiting.message(), waitingHandle, "cleanup").toCompletableFuture().join();
+                waitUntil(() -> scheduledDeadlineCount(flows) == 0);
+
+                CallerFixture fast = caller(store, CALLER);
+                FlowHandle fastHandle = flows.start(fast.message(),
+                                new FlowTarget(success.deploymentId(), success.version()), "done",
+                                Duration.ofMillis(30))
+                        .toCompletableFuture().join();
+                assertEquals(FlowInvocationStatus.COMPLETED, terminal(store, fastHandle).status());
+                Thread.sleep(80);
+                assertEquals(FlowInvocationStatus.COMPLETED, store.loadFlowInvocation(TENANT, fastHandle)
+                        .toCompletableFuture().join().orElseThrow().status(),
+                        "an expired timer cannot replace an already durable completion");
+                assertEquals(0, scheduledDeadlineCount(flows));
+            } finally {
+                application.close();
+            }
+        }
+    }
+
+    @Test
+    void aFullRetainedTerminalPageCannotStarveAnUnfinishedIntent() throws Exception {
+        try (var store = new SqliteExecutionStore(directory.resolve("fair-recovery.db"), CLOCK);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            var behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            var registry = new InMemoryDeploymentRegistry(CLOCK);
+            GraphVersion success = create(registry, "fair-recovery", graph(null, "success"),
+                    CALLER.qualifiedIdentity());
+            for (int index = 0; index < 1_000; index++) {
+                FlowInvocationRecord intent = flowRecord(success, FlowInvocationStatus.INTENT,
+                        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+                store.createFlowInvocation(intent).toCompletableFuture().join();
+                store.mutateFlowInvocation(TENANT, new FlowInvocationMutation(intent.handle(), 1,
+                        FlowInvocationStatus.COMPLETED, intent.childProcessInstanceId(),
+                        intent.childTraversalId(), PayloadJson.writeJava(Map.of("terminal", index),
+                        PayloadLimits.DEFAULTS), "", "", null, NOW)).toCompletableFuture().join();
+            }
+            FlowInvocationRecord active = flowRecord(success, FlowInvocationStatus.INTENT,
+                    UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+            store.createFlowInvocation(active).toCompletableFuture().join();
+            try (var flows = new DefaultFlowInvocationCapability(store, registry, application, tasks,
+                    FlowTargetAuthorizer.creatorOwnedTargets(),
+                    new FlowInvocationPolicy(1_000, Duration.ofHours(1), Duration.ofDays(1)), CLOCK)) {
+                flows.recoverTenant(TENANT).toCompletableFuture().join();
+                assertEquals(FlowInvocationStatus.COMPLETED, terminal(store, active.handle()).status(),
+                        "unfinished recovery must be independent of retained terminal pagination");
+            } finally {
+                application.close();
+            }
+        }
+    }
+
+    @Test
+    void permanentSettlementStoreFailureIsReturnedToTheCaller() throws Exception {
+        try (var delegate = new SqliteExecutionStore(directory.resolve("settlement-failure.db"), CLOCK);
+             var engine = new SameThreadExecutionEngine()) {
+            CallerFixture fixture = caller(delegate, CALLER);
+            var registry = new InMemoryDeploymentRegistry(CLOCK);
+            GraphVersion target = create(registry, "settlement-failure", graph(null, "success"),
+                    CALLER.qualifiedIdentity());
+            FlowInvocationRecord intent = flowRecord(target, FlowInvocationStatus.INTENT,
+                    fixture.key().processInstanceId(), fixture.message().invocationId(), UUID.randomUUID());
+            delegate.createFlowInvocation(intent).toCompletableFuture().join();
+            ExecutionStore failing = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                    ExecutionStore.class.getClassLoader(), new Class<?>[] { ExecutionStore.class },
+                    (proxy, method, arguments) -> {
+                        if (method.getName().equals("mutateFlowInvocation")) {
+                            return CompletableFuture.failedFuture(
+                                    new IllegalStateException("permanent settlement failure"));
+                        }
+                        try {
+                            return method.invoke(delegate, arguments);
+                        } catch (java.lang.reflect.InvocationTargetException wrapped) {
+                            throw wrapped.getCause();
+                        }
+                    });
+            var tasks = new HumanTaskService(delegate, CLOCK);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), delegate);
+            try (var flows = new DefaultFlowInvocationCapability(failing, registry, application, tasks,
+                    FlowTargetAuthorizer.creatorOwnedTargets(), FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                Throwable failure = failure(() -> flows.cancel(fixture.message(), intent.handle(), "test")
+                        .toCompletableFuture().join());
+                assertEquals("permanent settlement failure", failure.getMessage());
+            } finally {
+                application.close();
+            }
+        }
+    }
+
     private static GraphVersion create(InMemoryDeploymentRegistry registry, String key, byte[] bytes,
                                        String creator) {
         var record = registry.create(new GraphVersion.Content(1, bytes, creator, NOW),
@@ -304,6 +439,28 @@ class DefaultFlowInvocationCapabilityTest {
             return result[0] != null && result[0].terminal();
         });
         return result[0];
+    }
+
+    private static FlowInvocationRecord flowRecord(GraphVersion target, FlowInvocationStatus status,
+                                                   UUID callerProcess, UUID callerInvocation,
+                                                   UUID childTraversal) {
+        return new FlowInvocationRecord(TENANT, new FlowHandle(UUID.randomUUID()), callerProcess,
+                UUID.randomUUID(), callerInvocation, CALLER.subject(), CALLER.principalType(), CALLER.issuer(),
+                target.deploymentId(), target.version(), target.canonicalDigest(), UUID.randomUUID(),
+                childTraversal, status, PayloadJson.writeJava(Map.of("input", "recovery"),
+                PayloadLimits.DEFAULTS), null, "", "", null, 1, NOW, NOW, NOW.plusSeconds(60),
+                NOW.plusSeconds(120));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int scheduledDeadlineCount(DefaultFlowInvocationCapability flows) {
+        try {
+            var field = DefaultFlowInvocationCapability.class.getDeclaredField("scheduledDeadlines");
+            field.setAccessible(true);
+            return ((Map<Object, Object>) field.get(flows)).size();
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError(failure);
+        }
     }
 
     private static void waitUntil(java.util.function.BooleanSupplier condition) throws Exception {

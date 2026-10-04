@@ -9,7 +9,7 @@ public record FlowInvocationPolicy(int maximumUnfinishedPerTenant, Duration maxi
             new FlowInvocationPolicy(1_000, Duration.ofHours(24), Duration.ofDays(7));
 
     public FlowInvocationPolicy {
-        if (maximumUnfinishedPerTenant < 1 || maximumUnfinishedPerTenant > 100_000
+        if (maximumUnfinishedPerTenant < 1 || maximumUnfinishedPerTenant > 1_000
                 || maximumDeadline == null || maximumDeadline.isZero() || maximumDeadline.isNegative()
                 || maximumDeadline.compareTo(Duration.ofDays(7)) > 0
                 || retention == null || retention.isZero() || retention.isNegative()

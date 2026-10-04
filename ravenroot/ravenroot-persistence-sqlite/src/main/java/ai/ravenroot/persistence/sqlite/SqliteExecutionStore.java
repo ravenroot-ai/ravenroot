@@ -1841,38 +1841,18 @@ public final class SqliteExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
             ai.ravenroot.api.flow.FlowInvocationRecord intent) {
-        return async(() -> inWriteTransaction(null, () -> {
-            Objects.requireNonNull(intent, "intent");
-            if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT || intent.revision() != 1) {
-                throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
-            }
-            var existing = readFlowByCaller(intent.tenantId(), intent.callerProcessInstanceId(),
-                    intent.callerInvocationId());
-            if (existing != null) return existing;
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO flow_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
-                int i = 1;
-                statement.setString(i++, intent.tenantId()); statement.setString(i++, intent.handle().toString());
-                statement.setString(i++, intent.callerProcessInstanceId().toString());
-                statement.setString(i++, intent.callerTraversalId().toString());
-                statement.setString(i++, intent.callerInvocationId().toString());
-                statement.setString(i++, intent.callerSubject());
-                statement.setString(i++, intent.callerPrincipalType().name()); statement.setString(i++, intent.callerIssuer());
-                statement.setString(i++, intent.targetDeploymentId().value()); statement.setLong(i++, intent.targetVersion());
-                statement.setString(i++, intent.targetDigest()); statement.setString(i++, intent.childProcessInstanceId().toString());
-                statement.setString(i++, intent.childTraversalId().toString()); statement.setString(i++, intent.status().name());
-                statement.setBytes(i++, intent.input()); statement.setBytes(i++, intent.result());
-                statement.setString(i++, intent.failureCode()); statement.setString(i++, intent.failureMessage());
-                statement.setString(i++, intent.continuationClaim() == null ? null : intent.continuationClaim().toString());
-                statement.setLong(i++, intent.revision());
-                i = StoredInstant.bindValue(statement, i, intent.createdAt());
-                i = StoredInstant.bindValue(statement, i, intent.updatedAt());
-                i = StoredInstant.bindValue(statement, i, intent.deadlineAt());
-                StoredInstant.bindValue(statement, i, intent.retainedUntil());
-                statement.executeUpdate();
-            }
-            return intent;
-        }));
+        return async(() -> inWriteTransaction(null, () -> insertFlowInvocation(intent, null)));
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        if (maximumUnfinishedPerTenant < 1) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("maximumUnfinishedPerTenant must be positive"));
+        }
+        return async(() -> inWriteTransaction(null,
+                () -> insertFlowInvocation(intent, maximumUnfinishedPerTenant)));
     }
 
     @Override
@@ -1965,6 +1945,23 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }));
     }
 
+    @Override public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocationsAfter(
+            String tenantId, Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return async(() -> inReadTransaction(null, () -> {
+            requireTenantId(tenantId); Objects.requireNonNull(afterExclusive, "afterExclusive");
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit");
+            var records = new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM flow_invocation WHERE tenant_id=? AND handle>? ORDER BY handle LIMIT ?")) {
+                statement.setString(1, tenantId);
+                statement.setString(2, afterExclusive.map(Object::toString).orElse(""));
+                statement.setInt(3, limit);
+                try (ResultSet rows = statement.executeQuery()) { while (rows.next()) records.add(readFlow(rows)); }
+            }
+            return List.copyOf(records);
+        }));
+    }
+
     @Override
     public CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
         return async(() -> inWriteTransaction(null, () -> {
@@ -1984,6 +1981,53 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(1, tenantId); statement.setString(2, handle);
             try (ResultSet rows = statement.executeQuery()) { return rows.next() ? readFlow(rows) : null; }
         }
+    }
+
+    private ai.ravenroot.api.flow.FlowInvocationRecord insertFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, Integer maximumUnfinishedPerTenant)
+            throws SQLException {
+        Objects.requireNonNull(intent, "intent");
+        if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT || intent.revision() != 1) {
+            throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
+        }
+        var existing = readFlowByCaller(intent.tenantId(), intent.callerProcessInstanceId(),
+                intent.callerInvocationId());
+        if (existing != null) return existing;
+        if (maximumUnfinishedPerTenant != null) {
+            try (PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM flow_invocation WHERE tenant_id=? AND status IN ('INTENT','LAUNCHED')")) {
+                count.setString(1, intent.tenantId());
+                try (ResultSet row = count.executeQuery()) {
+                    if (!row.next()) throw new SQLException("flow invocation quota count returned no row");
+                    if (row.getLong(1) >= maximumUnfinishedPerTenant) {
+                        throw new IllegalStateException("tenant flow invocation quota is exhausted");
+                    }
+                }
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO flow_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+            int i = 1;
+            statement.setString(i++, intent.tenantId()); statement.setString(i++, intent.handle().toString());
+            statement.setString(i++, intent.callerProcessInstanceId().toString());
+            statement.setString(i++, intent.callerTraversalId().toString());
+            statement.setString(i++, intent.callerInvocationId().toString());
+            statement.setString(i++, intent.callerSubject());
+            statement.setString(i++, intent.callerPrincipalType().name()); statement.setString(i++, intent.callerIssuer());
+            statement.setString(i++, intent.targetDeploymentId().value()); statement.setLong(i++, intent.targetVersion());
+            statement.setString(i++, intent.targetDigest()); statement.setString(i++, intent.childProcessInstanceId().toString());
+            statement.setString(i++, intent.childTraversalId().toString()); statement.setString(i++, intent.status().name());
+            statement.setBytes(i++, intent.input()); statement.setBytes(i++, intent.result());
+            statement.setString(i++, intent.failureCode()); statement.setString(i++, intent.failureMessage());
+            statement.setString(i++, intent.continuationClaim() == null ? null : intent.continuationClaim().toString());
+            statement.setLong(i++, intent.revision());
+            i = StoredInstant.bindValue(statement, i, intent.createdAt());
+            i = StoredInstant.bindValue(statement, i, intent.updatedAt());
+            i = StoredInstant.bindValue(statement, i, intent.deadlineAt());
+            StoredInstant.bindValue(statement, i, intent.retainedUntil());
+            statement.executeUpdate();
+        }
+        return intent;
     }
 
     private ai.ravenroot.api.flow.FlowInvocationRecord readFlowByCaller(String tenantId, UUID processId,

@@ -20,9 +20,9 @@ import java.util.UUID;
 
 /** Core-owned envelope shared by durable graph continuations and their trusted budget snapshot. */
 public final class GraphExecutionContinuationCheckpoint {
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
     private static final int MAGIC = 0x52524232; // RRB2
-    private static final int FORMAT = 2;
+    private static final int FORMAT = 3;
     private static final PayloadLimits CHECKPOINT_PAYLOAD_LIMITS = new PayloadLimits(
             PayloadLimits.HARD_MAX_ENCODED_BYTES, PayloadLimits.HARD_MAX_DEPTH,
             PayloadLimits.HARD_MAX_COLLECTION_SIZE, PayloadLimits.HARD_MAX_VALUE_COUNT,
@@ -32,12 +32,19 @@ public final class GraphExecutionContinuationCheckpoint {
 
     /** Encodes a package checkpoint and the exact graph budget active at suspension. */
     public static byte[] write(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget) {
-        return write(innerVersion, inner, budget, List.of());
+        return write(innerVersion, inner, budget, List.of(), false, List.of());
     }
 
     /** Encodes a continuation plus the arrived join branches whose payload must survive suspension. */
     static byte[] write(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget,
                         List<JoinState> joins) {
+        return write(innerVersion, inner, budget, joins, false, List.of());
+    }
+
+    /** Encodes called-execution mode and every END output already observed before suspension. */
+    static byte[] write(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget,
+                        List<JoinState> joins, boolean calledExecution,
+                        List<PayloadValue> calledEndOutputs) {
         if (innerVersion < 1) throw new IllegalArgumentException("inner continuation version must be positive");
         java.util.Objects.requireNonNull(inner, "inner");
         java.util.Objects.requireNonNull(budget, "budget");
@@ -72,6 +79,11 @@ public final class GraphExecutionContinuationCheckpoint {
                         output.writeInt(entry.getValue());
                     }
                 }
+                output.writeBoolean(calledExecution);
+                List<PayloadValue> outputs = List.copyOf(calledEndOutputs == null ? List.of() : calledEndOutputs);
+                if (!calledExecution && !outputs.isEmpty()) throw malformed();
+                output.writeInt(outputs.size());
+                for (PayloadValue value : outputs) writePayload(output, value);
             }
             byte[] encoded = bytes.toByteArray();
             if (encoded.length > ToolApprovalRegistration.MAX_CONTINUATION_BYTES) throw malformed();
@@ -87,7 +99,7 @@ public final class GraphExecutionContinuationCheckpoint {
             throw new GraphExecutionContinuationCheckpointException(
                     GraphExecutionContinuationCheckpointException.Reason.LEGACY_BUDGET_UNAVAILABLE);
         }
-        if (version != 2 && version != VERSION) {
+        if (version != 2 && version != 3 && version != VERSION) {
             throw new GraphExecutionContinuationCheckpointException(
                     GraphExecutionContinuationCheckpointException.Reason.UNKNOWN_VERSION);
         }
@@ -97,8 +109,9 @@ public final class GraphExecutionContinuationCheckpoint {
         try (var input = new DataInputStream(new ByteArrayInputStream(encoded))) {
             if (input.readInt() != MAGIC) throw malformed();
             int format = input.readInt();
-            if (format != 1 && format != FORMAT) throw malformed();
-            if ((version == 2) != (format == 1)) throw malformed();
+            if (format < 1 || format > FORMAT) throw malformed();
+            if (!((version == 2 && format == 1) || (version == 3 && format == 2)
+                    || (version == VERSION && format == FORMAT))) throw malformed();
             int innerVersion = input.readInt();
             if (innerVersion < 1) throw malformed();
             var budget = new GraphExecutionBudgetSnapshot(input.readLong(), input.readLong(), input.readLong(),
@@ -113,7 +126,7 @@ public final class GraphExecutionContinuationCheckpoint {
             byte[] inner = input.readNBytes(length);
             if (inner.length != length) throw malformed();
             var joins = new ArrayList<JoinState>();
-            if (format == FORMAT) {
+            if (format >= 2) {
                 int count = input.readInt();
                 if (count < 0 || count > 10_000) throw malformed();
                 var identities = new java.util.HashSet<String>();
@@ -146,10 +159,24 @@ public final class GraphExecutionContinuationCheckpoint {
                             GraphExecutionContinuationCheckpointException.Reason.UNSAFE_REENTRY_STATE);
                 }
             }
+            boolean calledExecution = false;
+            var calledEndOutputs = new ArrayList<PayloadValue>();
+            if (format >= 3) {
+                calledExecution = input.readBoolean();
+                int outputCount = input.readInt();
+                if (outputCount < 0 || outputCount > CHECKPOINT_PAYLOAD_LIMITS.maxCollectionSize()) {
+                    throw malformed();
+                }
+                for (int index = 0; index < outputCount; index++) {
+                    calledEndOutputs.add(readPayload(input));
+                }
+                if (!calledExecution && !calledEndOutputs.isEmpty()) throw malformed();
+            }
             if (input.read() != -1) throw malformed();
             return new Decoded(innerVersion, inner,
                     new GraphExecutionBudgetSnapshot(budget.traversalSteps(), budget.amplifiedDeliveries(),
-                            budget.payloadBytes(), 1, budget.liveActors()), joins);
+                            budget.payloadBytes(), 1, budget.liveActors()), joins,
+                    calledExecution, calledEndOutputs);
         } catch (EOFException truncated) {
             throw malformed();
         } catch (IOException | IllegalArgumentException invalid) {
@@ -179,14 +206,22 @@ public final class GraphExecutionContinuationCheckpoint {
 
     /** Decoded immutable package checkpoint and graph budget. */
     public record Decoded(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget,
-                          List<JoinState> joins) {
+                          List<JoinState> joins, boolean calledExecution,
+                          List<PayloadValue> calledEndOutputs) {
         public Decoded {
             inner = inner.clone();
             joins = List.copyOf(joins == null ? List.of() : joins);
+            calledEndOutputs = List.copyOf(calledEndOutputs == null ? List.of() : calledEndOutputs);
+            if (!calledExecution && !calledEndOutputs.isEmpty()) throw malformed();
         }
 
         public Decoded(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget) {
-            this(innerVersion, inner, budget, List.of());
+            this(innerVersion, inner, budget, List.of(), false, List.of());
+        }
+
+        public Decoded(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget,
+                       List<JoinState> joins) {
+            this(innerVersion, inner, budget, joins, false, List.of());
         }
 
         @Override public byte[] inner() { return inner.clone(); }

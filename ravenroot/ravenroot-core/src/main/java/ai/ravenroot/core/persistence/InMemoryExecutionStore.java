@@ -1387,9 +1387,18 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
             ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return admitFlowInvocation(intent, Integer.MAX_VALUE);
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
         return complete(() -> {
             requireCapability(StoreCapability.FLOW_INVOCATIONS);
             Objects.requireNonNull(intent, "intent");
+            if (maximumUnfinishedPerTenant < 1) {
+                throw new IllegalArgumentException("maximumUnfinishedPerTenant must be positive");
+            }
             if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT
                     || intent.revision() != 1) {
                 throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
@@ -1400,6 +1409,18 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 if (existing != null) {
                     if (sameFlowIntent(existing, intent)) return existing;
                     throw new IllegalStateException("flow handle is already bound to another intent");
+                }
+                ai.ravenroot.api.flow.FlowInvocationRecord callerExisting = flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(intent.tenantId())
+                                && record.callerProcessInstanceId().equals(intent.callerProcessInstanceId())
+                                && record.callerInvocationId().equals(intent.callerInvocationId()))
+                        .findFirst().orElse(null);
+                if (callerExisting != null) return callerExisting;
+                long unfinished = flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(intent.tenantId()) && !record.terminal())
+                        .count();
+                if (unfinished >= maximumUnfinishedPerTenant) {
+                    throw new IllegalStateException("tenant flow invocation quota is exhausted");
                 }
                 flowInvocations.put(key, intent);
                 return intent;
@@ -1500,6 +1521,25 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return flowInvocations.values().stream().filter(record -> record.tenantId().equals(tenantId))
                         .sorted(java.util.Comparator.comparing(ai.ravenroot.api.flow.FlowInvocationRecord::createdAt)
                                 .thenComparing(record -> record.handle().toString())).limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocationsAfter(
+            String tenantId, Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(afterExclusive, "afterExclusive");
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            String cursor = afterExclusive.map(Object::toString).orElse("");
+            synchronized (monitor) {
+                return flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(tenantId)
+                                && record.handle().toString().compareTo(cursor) > 0)
+                        .sorted(java.util.Comparator.comparing(record -> record.handle().toString()))
+                        .limit(limit).toList();
             }
         });
     }

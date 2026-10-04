@@ -7,12 +7,14 @@
   <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
   <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
   <key id="property-brokerProfile" for="node" attr.name="brokerProfile" attr.type="string"/>
+  <key id="property-resourceMode" for="node" attr.name="resourceMode" attr.type="string"/>
   <graph id="example-amqp.consume" edgedefault="directed">
     <node id="start"><data key="kind">START</data></node>
     <node id="action">
       <data key="kind">BEHAVIOR</data>
       <data key="behavior">amqp.consume</data>
       <data key="property-brokerProfile">replace-with-operator-profile</data>
+      <data key="property-resourceMode">shared</data>
     </node>
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>

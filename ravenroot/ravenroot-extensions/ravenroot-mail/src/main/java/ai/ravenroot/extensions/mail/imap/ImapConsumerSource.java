@@ -30,7 +30,7 @@ import java.util.function.IntConsumer;
 final class ImapConsumerSource implements InboundSource {
     enum State { STOPPED, STARTING, READY, BACKING_OFF, RECONNECTING, STOPPING, FAILED }
     private static final int MAX_RESOLVER_TASKS = 32;
-    private static final ConcurrentHashMap<String, Object> LEASES = new ConcurrentHashMap<>();
+    private static final ImapConsumerLeaseRegistry RESOURCE_LEASES = new ImapConsumerLeaseRegistry();
     private static final java.util.concurrent.Semaphore RESOLVER_SLOTS =
             new java.util.concurrent.Semaphore(MAX_RESOLVER_TASKS, true);
     private static final ConcurrentHashMap<String, Object> RESOLVER_LEASES = new ConcurrentHashMap<>();
@@ -142,7 +142,7 @@ final class ImapConsumerSource implements InboundSource {
 
     State state() { return state; }
     long generation() { synchronized (lifecycle) { return generation; } }
-    static int activeLeases() { return LEASES.size(); }
+    static int activeLeases() { return RESOURCE_LEASES.activeLeases(); }
     static int activeResolverTasks() { return MAX_RESOLVER_TASKS - RESOLVER_SLOTS.availablePermits(); }
     static int activeResolverProfiles() { return RESOLVER_LEASES.size(); }
 
@@ -152,8 +152,7 @@ final class ImapConsumerSource implements InboundSource {
 
     private void run(InboundSourceContext context, CompletableFuture<Void> ready,
                      CompletableFuture<Void> stopped) {
-        Object lease = null;
-        String leaseKey = null;
+        ImapConsumerLeaseRegistry.Lease resourceLease = null;
         Settings settings = null;
         FailureStreak reconnectFailures = new FailureStreak();
         ProjectionFailureTracker projectionFailures = new ProjectionFailureTracker();
@@ -169,9 +168,9 @@ final class ImapConsumerSource implements InboundSource {
                 throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_OWNERSHIP_UNAVAILABLE, unavailable);
             }
             probeDurability(context, context.nodeId() + "/imap/durable-probe", settings.timeoutMs);
-            leaseKey = leaseKey(policy.tenant(), profileName, settings.folder);
-            lease = new Object();
-            if (LEASES.putIfAbsent(leaseKey, lease) != null)
+            String leaseKey = leaseKey(policy.tenant(), profileName, settings.folder);
+            resourceLease = RESOURCE_LEASES.tryAcquire(leaseKey, settings.resourceMode);
+            if (resourceLease == null)
                 throw sourceFailure(ImapSourceStartFailure.IMAP_CONSUMER_ALREADY_ACTIVE);
 
             while (!stopRequested) {
@@ -238,7 +237,7 @@ final class ImapConsumerSource implements InboundSource {
             if (activeIngress instanceof ai.ravenroot.api.deployment.DurableConsumerIngress consumer)
                 try { consumer.close(); } catch (RuntimeException ignored) { }
             activeIngress = null;
-            if (leaseKey != null && lease != null) LEASES.remove(leaseKey, lease);
+            if (resourceLease != null) resourceLease.close();
             synchronized (lifecycle) {
                 if (!ready.isDone()) ready.completeExceptionally(
                         new IllegalStateException("IMAP source stopped before readiness"));
@@ -576,7 +575,8 @@ final class ImapConsumerSource implements InboundSource {
 
     private record Settings(String folder, String consumerId, String initialPosition, int pollIntervalMs, int batchSize, int scanWindow,
                             int retryBackoffMs, int maxRetryBackoffMs, int poisonAttempts,
-                            int timeoutMs, ImapMessageEvent.Limits limits) {
+                            int timeoutMs, ImapMessageEvent.Limits limits,
+                            ImapConsumerLeaseRegistry.Mode resourceMode) {
         static Settings resolve(NodeConfiguration c, ImapProfile profile, ImapConsumerPolicy policy) {
             if (!MailImapConsumeNodeBehavior.knownConfiguration().containsAll(c.properties().keySet()))
                 throw sourceFailure(ImapSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
@@ -622,10 +622,15 @@ final class ImapConsumerSource implements InboundSource {
             }
             if (!"require-durable".equals(c.property("checkpointPolicy", "require-durable")))
                 throw sourceFailure(ImapSourceStartFailure.INVALID_CHECKPOINT_POLICY);
+            ImapConsumerLeaseRegistry.Mode resourceMode = switch (c.property("resourceMode", "shared")) {
+                case "shared" -> ImapConsumerLeaseRegistry.Mode.SHARED;
+                case "exclusive" -> ImapConsumerLeaseRegistry.Mode.EXCLUSIVE;
+                default -> throw sourceFailure(ImapSourceStartFailure.INVALID_RESOURCE_MODE);
+            };
             return new Settings(policy.folder(), consumerId, initialPosition, poll, batch, policy.scanWindow(), retry, maxRetry,
                     poison, Math.min(30_000, profile.readTimeoutMs()),
                     new ImapMessageEvent.Limits(policy.maxMessageBytes(), contentMode, preview,
-                            allowedHeaders(c, policy)));
+                            allowedHeaders(c, policy)), resourceMode);
         }
 
         private static Set<String> allowedHeaders(NodeConfiguration configuration,

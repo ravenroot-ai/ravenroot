@@ -10,6 +10,7 @@
   <key id="property-profile" for="node" attr.name="profile" attr.type="string"/>
   <key id="property-consumerId" for="node" attr.name="consumerId" attr.type="string"/>
   <key id="property-initialPosition" for="node" attr.name="initialPosition" attr.type="string"/>
+  <key id="property-resourceMode" for="node" attr.name="resourceMode" attr.type="string"/>
   <graph id="example-mail.imap.consume" edgedefault="directed">
     <node id="start"><data key="kind">START</data></node>
     <node id="action">
@@ -18,6 +19,7 @@
       <data key="property-profile">replace-with-operator-profile</data>
       <data key="property-consumerId">incoming-mail</data>
       <data key="property-initialPosition">earliest</data>
+      <data key="property-resourceMode">shared</data>
     </node>
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>

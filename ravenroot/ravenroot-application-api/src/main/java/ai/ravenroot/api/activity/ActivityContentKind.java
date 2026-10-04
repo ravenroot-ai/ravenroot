@@ -12,6 +12,8 @@ public enum ActivityContentKind {
   OUTPUT_ATTRIBUTES;
 
   /**
+   * Reports whether this slot is captured at the pre-invocation boundary.
+   *
    * @return whether this content is observed before the node is invoked.
    */
   public boolean input() {

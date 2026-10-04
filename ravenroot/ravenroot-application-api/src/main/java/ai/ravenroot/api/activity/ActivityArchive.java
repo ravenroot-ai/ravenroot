@@ -4,7 +4,11 @@ import java.util.concurrent.CompletionStage;
 
 /** Consumer-supplied durable node-content archive, independent of the execution journal. */
 public interface ActivityArchive extends AutoCloseable {
-  /** @return maximum page size accepted by {@link #read} */
+  /**
+   * Reports the archive's bounded read capacity.
+   *
+   * @return maximum page size accepted by {@link #read}
+   */
   int maximumPageSize();
 
   /**

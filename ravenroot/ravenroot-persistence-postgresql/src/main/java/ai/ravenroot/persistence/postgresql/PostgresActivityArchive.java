@@ -8,6 +8,7 @@ import ai.ravenroot.api.activity.ActivityContentKind;
 import ai.ravenroot.api.activity.ActivityEvent;
 import ai.ravenroot.api.activity.ActivityPage;
 import ai.ravenroot.api.activity.ActivityQuery;
+import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -327,11 +328,11 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       statement.setString(i++, event.graphId());
       statement.setString(i++, event.graphVersion());
       statement.setString(i++, event.graphHash());
-      statement.setObject(i++, event.processInstanceId());
-      statement.setObject(i++, event.traversalId());
+      StoredUuid.bind(statement, i++, event.processInstanceId());
+      StoredUuid.bind(statement, i++, event.traversalId());
       statement.setString(i++, event.nodeId());
-      statement.setObject(i++, event.invocationId());
-      statement.setObject(i++, event.attemptId());
+      StoredUuid.bind(statement, i++, event.invocationId());
+      StoredUuid.bind(statement, i++, event.attemptId());
       statement.setInt(i++, event.attemptOrdinal());
       statement.setString(i++, event.contentKind().name());
       statement.setString(i++, event.command());
@@ -341,7 +342,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       statement.setLong(i++, event.expiresAt().getEpochSecond());
       statement.setInt(i++, event.expiresAt().getNano());
       statement.setString(i++, parents(event.parentInvocationIds()));
-      statement.setObject(i++, event.journalCausationId());
+      StoredUuid.bind(statement, i++, event.journalCausationId());
       statement.setString(i++, event.causationActivityId());
       statement.setString(i++, event.content().contentType());
       statement.setBytes(i, event.content().bytes());
@@ -350,26 +351,30 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   }
 
   private ActivityArchiveRecord readRecord(ResultSet row) throws SQLException {
+    String tenantId = row.getString("tenant_id");
+    UUID processInstanceId =
+        StoredUuid.required(row, "activity_event", "process_instance_id", tenantId);
+    var key = new ExecutionKey(tenantId, processInstanceId);
     var event =
         new ActivityEvent(
             row.getString("event_id"),
-            row.getString("tenant_id"),
+            tenantId,
             row.getString("graph_id"),
             row.getString("graph_version"),
             row.getString("graph_hash"),
-            row.getObject("process_instance_id", UUID.class),
-            row.getObject("traversal_id", UUID.class),
+            processInstanceId,
+            StoredUuid.required(row, "activity_event", "traversal_id", key),
             row.getString("node_id"),
-            row.getObject("invocation_id", UUID.class),
-            row.getObject("attempt_id", UUID.class),
+            StoredUuid.required(row, "activity_event", "invocation_id", key),
+            StoredUuid.required(row, "activity_event", "attempt_id", key),
             row.getInt("attempt_ordinal"),
             ActivityContentKind.valueOf(row.getString("content_kind")),
             row.getString("command"),
             row.getString("outcome"),
             instant(row, "occurred_at"),
             instant(row, "expires_at"),
-            parseParents(row.getString("parent_invocation_ids")),
-            row.getObject("journal_causation_id", UUID.class),
+            parseParents(row.getString("parent_invocation_ids"), key),
+            StoredUuid.optional(row, "activity_event", "journal_causation_id"),
             row.getString("causation_activity_id"),
             OpaquePayload.of(row.getBytes("content"), row.getString("content_type")));
     return new ActivityArchiveRecord(row.getLong("cursor"), event);
@@ -493,7 +498,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       Object value = values.get(i);
       if (value instanceof Integer n) s.setInt(i + 1, n);
       else if (value instanceof Long n) s.setLong(i + 1, n);
-      else if (value instanceof UUID id) s.setObject(i + 1, id);
+      else if (value instanceof UUID id) StoredUuid.bind(s, i + 1, id);
       else s.setString(i + 1, value.toString());
     }
   }
@@ -505,10 +510,12 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         .collect(java.util.stream.Collectors.joining(","));
   }
 
-  private static Set<UUID> parseParents(String value) {
+  private static Set<UUID> parseParents(String value, ExecutionKey key) {
     if (value == null || value.isEmpty()) return Set.of();
     var result = new LinkedHashSet<UUID>();
-    Arrays.stream(value.split(",")).map(UUID::fromString).forEach(result::add);
+    Arrays.stream(value.split(","))
+        .map(stored -> StoredUuid.required(stored, "activity_event", "parent_invocation_ids", key))
+        .forEach(result::add);
     return Set.copyOf(result);
   }
 

@@ -11,6 +11,13 @@ import java.util.Objects;
  */
 public record ActivityPage(
     List<ActivityArchiveRecord> records, long nextCursor, long retainedFromCursor) {
+  /**
+   * Validates and snapshots a retained activity page.
+   *
+   * @param records ascending retained records
+   * @param nextCursor cursor to pass as the next exclusive starting point
+   * @param retainedFromCursor earliest cursor that can still be read without a gap
+   */
   public ActivityPage {
     records = List.copyOf(Objects.requireNonNull(records, "records"));
     if (nextCursor < 0) throw new IllegalArgumentException("nextCursor cannot be negative");

@@ -1025,12 +1025,20 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit);
 
-    /** @return whether the separately configured durable activity-content archive is available */
+    /**
+     * Reports whether this application has a durable activity-content archive.
+     *
+     * @return whether the separately configured durable activity-content archive is available
+     */
     default boolean activityArchiveAvailable() {
         return false;
     }
 
-    /** @return maximum page accepted by {@link #activityAfter}; zero when unavailable */
+    /**
+     * Reports the read limit advertised by the configured activity archive.
+     *
+     * @return maximum page accepted by {@link #activityAfter}; zero when unavailable
+     */
     default int activityArchiveMaxPageSize() {
         return 0;
     }

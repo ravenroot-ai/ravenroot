@@ -6495,6 +6495,25 @@ class ProgramGithubPolicyAuditTest(unittest.TestCase):
         self.assertEqual([], audit.program_github_policy_authority_errors(self.root,
             {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority}, self.entries, self.discovered))
 
+    def test_program_github_schema_boundary_leaves_object_type_atoms_to_helm(self) -> None:
+        schema_path = audit.PROGRAM_GITHUB_PATHS["helmSchema"]
+        schema_source = (self.root / schema_path).read_text(encoding="utf-8")
+        span = audit.json_value_spans(schema_source)[("properties", "programAuthoring")]
+        first_line = audit.line_number(schema_source, span[0])
+        last_line = audit.line_number(schema_source, span[1] - 1)
+        candidates = [candidate for candidate in self.candidates
+                      if candidate.path == schema_path
+                      and first_line <= candidate.line <= last_line]
+        structural_types = [candidate for candidate in candidates if candidate.role == "type"]
+        required = [candidate for candidate in candidates if candidate.role == "required"]
+
+        self.assertTrue(structural_types)
+        self.assertTrue(required)
+        self.assertFalse(any(audit.program_github_deployment_candidate(self.root, candidate)
+                             for candidate in structural_types))
+        self.assertTrue(all(audit.program_github_deployment_candidate(self.root, candidate)
+                            for candidate in required))
+
     def test_program_github_missing_markers_whole_family_or_scanner_blind_contract_cannot_opt_out(self) -> None:
         for authorities in (None, {}, {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: {}}):
             with self.subTest(authorities=authorities):

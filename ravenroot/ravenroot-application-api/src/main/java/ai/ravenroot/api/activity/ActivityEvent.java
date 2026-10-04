@@ -52,6 +52,30 @@ public record ActivityEvent(
     UUID journalCausationId,
     String causationActivityId,
     OpaquePayload content) {
+  /**
+   * Validates and normalizes a durable activity observation.
+   *
+   * @param eventId stable content-slot identity
+   * @param tenantId owning tenant
+   * @param graphId graph identity
+   * @param graphVersion pinned graph version
+   * @param graphHash pinned canonical graph hash
+   * @param processInstanceId process identity
+   * @param traversalId traversal identity
+   * @param nodeId node identity
+   * @param invocationId node invocation identity
+   * @param attemptId node attempt identity
+   * @param attemptOrdinal one-based attempt ordinal
+   * @param contentKind captured slot
+   * @param command delivered node command
+   * @param outcome result outcome for output slots, otherwise {@code null}
+   * @param occurredAt first observation time
+   * @param expiresAt logical expiry time
+   * @param parentInvocationIds causal parent invocations
+   * @param journalCausationId corresponding execution-journal event
+   * @param causationActivityId selected input activity event for an output
+   * @param content redacted bounded canonical content
+   */
   public ActivityEvent {
     eventId = requireText(eventId, "eventId");
     if (!eventId.matches("[0-9a-f]{64}"))
@@ -125,7 +149,11 @@ public record ActivityEvent(
         parts.stream().map(value -> value.getBytes(StandardCharsets.UTF_8)).toList());
   }
 
-  /** @return digest distinguishing an idempotent replay from conflicting immutable content */
+  /**
+   * Computes the immutable-content digest used for duplicate and conflict decisions.
+   *
+   * @return digest distinguishing an idempotent replay from conflicting immutable content
+   */
   public String digest() {
     var parts = new java.util.ArrayList<byte[]>();
     for (String value :

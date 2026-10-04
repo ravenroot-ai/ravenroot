@@ -114,7 +114,7 @@ class PostgresActivityArchiveTest {
         null,
         occurred,
         expires,
-        Set.of(),
+        Set.of(UUID.fromString("20000000-0000-0000-0000-000000000001")),
         null,
         null,
         OpaquePayload.of(content.getBytes(StandardCharsets.UTF_8), "application/json"));

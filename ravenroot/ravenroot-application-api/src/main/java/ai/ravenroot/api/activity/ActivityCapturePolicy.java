@@ -47,6 +47,19 @@ public record ActivityCapturePolicy(
           Duration.ofDays(1),
           ActivityRedactor.none());
 
+  /**
+   * Validates and normalizes a capture policy before the runtime observes it.
+   *
+   * @param enabled whether capture is active
+   * @param failurePolicy processing behavior on capture loss
+   * @param nodeIds exact selected nodes; empty selects all
+   * @param contents selected content slots
+   * @param payloadLimits post-redaction encoding limits
+   * @param maxInFlightWrites process-local pending-write bound
+   * @param writeTimeout per-record persistence deadline
+   * @param retention logical content retention
+   * @param redactor trusted pre-persistence redactor
+   */
   public ActivityCapturePolicy {
     Objects.requireNonNull(failurePolicy, "failurePolicy");
     nodeIds = Set.copyOf(Objects.requireNonNull(nodeIds, "nodeIds"));

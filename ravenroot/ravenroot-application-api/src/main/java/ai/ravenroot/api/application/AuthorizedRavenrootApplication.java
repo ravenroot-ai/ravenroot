@@ -1382,12 +1382,20 @@ public final class AuthorizedRavenrootApplication {
         return delegate.durableEventsAfter(context.tenantId(), afterOffset, limit);
     }
 
-    /** @return whether the optional durable activity-content archive is composed */
+    /**
+     * Reports whether the delegate exposes the optional durable activity-content archive.
+     *
+     * @return whether the optional durable activity-content archive is composed
+     */
     public boolean activityArchiveAvailable() {
         return delegate.activityArchiveAvailable();
     }
 
-    /** @return maximum supported activity history page size */
+    /**
+     * Reports the activity history page limit accepted by the delegate.
+     *
+     * @return maximum supported activity history page size
+     */
     public int activityArchiveMaxPageSize() {
         return delegate.activityArchiveMaxPageSize();
     }

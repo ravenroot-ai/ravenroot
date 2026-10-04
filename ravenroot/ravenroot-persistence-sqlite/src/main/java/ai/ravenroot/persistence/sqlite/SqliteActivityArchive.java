@@ -8,6 +8,7 @@ import ai.ravenroot.api.activity.ActivityContentKind;
 import ai.ravenroot.api.activity.ActivityEvent;
 import ai.ravenroot.api.activity.ActivityPage;
 import ai.ravenroot.api.activity.ActivityQuery;
+import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -343,26 +344,30 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   }
 
   private ActivityArchiveRecord readRecord(ResultSet row) throws SQLException {
+    String tenantId = row.getString("tenant_id");
+    UUID processInstanceId =
+        StoredUuid.required(row, "activity_event", "process_instance_id", tenantId);
+    var key = new ExecutionKey(tenantId, processInstanceId);
     var event =
         new ActivityEvent(
             row.getString("event_id"),
-            row.getString("tenant_id"),
+            tenantId,
             row.getString("graph_id"),
             row.getString("graph_version"),
             row.getString("graph_hash"),
-            UUID.fromString(row.getString("process_instance_id")),
-            UUID.fromString(row.getString("traversal_id")),
+            processInstanceId,
+            StoredUuid.required(row, "activity_event", "traversal_id", key),
             row.getString("node_id"),
-            UUID.fromString(row.getString("invocation_id")),
-            UUID.fromString(row.getString("attempt_id")),
+            StoredUuid.required(row, "activity_event", "invocation_id", key),
+            StoredUuid.required(row, "activity_event", "attempt_id", key),
             row.getInt("attempt_ordinal"),
             ActivityContentKind.valueOf(row.getString("content_kind")),
             row.getString("command"),
             row.getString("outcome"),
             instant(row, "occurred_at"),
             instant(row, "expires_at"),
-            parseParents(row.getString("parent_invocation_ids")),
-            uuid(row.getString("journal_causation_id")),
+            parseParents(row.getString("parent_invocation_ids"), key),
+            StoredUuid.optional(row, "activity_event", "journal_causation_id", key),
             row.getString("causation_activity_id"),
             OpaquePayload.of(row.getBytes("content"), row.getString("content_type")));
     return new ActivityArchiveRecord(row.getLong("cursor"), event);
@@ -518,19 +523,17 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         .collect(java.util.stream.Collectors.joining(","));
   }
 
-  private static Set<UUID> parseParents(String value) {
+  private static Set<UUID> parseParents(String value, ExecutionKey key) {
     if (value == null || value.isEmpty()) return Set.of();
     var result = new LinkedHashSet<UUID>();
-    Arrays.stream(value.split(",")).map(UUID::fromString).forEach(result::add);
+    Arrays.stream(value.split(","))
+        .map(stored -> StoredUuid.required(stored, "activity_event", "parent_invocation_ids", key))
+        .forEach(result::add);
     return Set.copyOf(result);
   }
 
   private static String text(UUID value) {
     return value == null ? null : value.toString();
-  }
-
-  private static UUID uuid(String value) {
-    return value == null ? null : UUID.fromString(value);
   }
 
   private static Instant instant(ResultSet row, String prefix) throws SQLException {

@@ -24,6 +24,18 @@ public record ActivityQuery(
     UUID invocationId,
     UUID attemptId,
     Set<ActivityContentKind> contentKinds) {
+  /**
+   * Validates and snapshots one tenant-scoped archive query.
+   *
+   * @param afterCursor exclusive tenant-local cursor
+   * @param limit maximum records to return
+   * @param processInstanceId optional process filter
+   * @param traversalId optional traversal filter
+   * @param nodeId optional node filter
+   * @param invocationId optional invocation filter
+   * @param attemptId optional attempt filter
+   * @param contentKinds optional content-kind filters
+   */
   public ActivityQuery {
     if (afterCursor < 0) throw new IllegalArgumentException("afterCursor cannot be negative");
     if (limit < 1) throw new IllegalArgumentException("limit must be positive");

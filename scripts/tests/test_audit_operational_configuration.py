@@ -6470,6 +6470,9 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
             self.assertTrue(schema_candidates)
             self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
             self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
+            self.assertTrue(all(candidate.role.startswith("activityCapture.")
+                                for candidate in values_candidates + schema_candidates
+                                if candidate.kind == "configuration-scalar"))
 
             mutations = (
                 (audit.ACTIVITY_CAPTURE_CONFIGURATION_PATH, '"65536"', '"65537"'),

@@ -1094,6 +1094,23 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
     rows: list[tuple[int, str, str, str, str, str]] = []
     suffix = relative.suffix
     markers = symbol_markers(text, suffix)
+    activity_capture_lines: tuple[int, int] | None = None
+    relative_path = relative.as_posix()
+    if relative_path == "deploy/helm/ravenroot/values.yaml":
+        section = re.search(r"(?m)^activityCapture:\s*$", text)
+        if section is not None:
+            following = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                                  text[section.end():])
+            last_offset = (section.end() + following.start() - 1
+                           if following is not None else len(text) - 1)
+            activity_capture_lines = (line_number(text, section.start()),
+                                      line_number(text, last_offset))
+    elif relative_path == "deploy/helm/ravenroot/values.schema.json":
+        spans = json_value_spans(text)
+        span = None if spans is None else spans.get(("properties", "activityCapture"))
+        if span is not None:
+            activity_capture_lines = (line_number(text, span[0]),
+                                      line_number(text, span[1] - 1))
     offset = 0
     for index, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -1138,6 +1155,12 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
             offset += len(raw) + 1
             continue
         if kind and label:
+            if activity_capture_lines is not None \
+                    and activity_capture_lines[0] <= index <= activity_capture_lines[1]:
+                # Repeated Helm leaf names are common. Preserve the closed parent setting in the
+                # normalized identity so inserting activity capture cannot renumber or resurrect
+                # an unrelated reviewed candidate with the same scalar spelling.
+                label = f"activityCapture.{label}"
             for atom in FIXED_ATOM.finditer(raw):
                 candidate_offset = offset + atom.start()
                 rows.append((candidate_offset, containing_symbol(markers, candidate_offset), kind,
@@ -9489,7 +9512,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                                          'oc-c8ad782792d62e076403',
                                                                          'oc-32f6fc40a5ad8cda0865',
                                                                          'oc-8d3ae97717c09bd94bdf',
-                                                                         'oc-9bd6a78abf03d5ff22ce',
+                                                                         'oc-f40aa7e38502f19a48f6',
                                                                          'oc-8e4ba14419b5241c9fa3',
                                                                          'oc-9bfdc2a14c32a1174adc',
                                                                          'oc-5ef226f1f314a1077bbb',
@@ -14254,7 +14277,7 @@ def activity_capture_authority_from_source(
         if item is None and candidate.path in helm_section_lines:
             first_line, last_line = helm_section_lines[candidate.path]
             if first_line <= candidate.line <= last_line:
-                item = by_helm_field.get(candidate.role)
+                item = by_helm_field.get(candidate.role.removeprefix("activityCapture."))
         if item is not None and candidate.path in {
                 path.as_posix() for path in ACTIVITY_CAPTURE_CARRIER_PATHS}:
             candidates_by_setting[item[0]].add(candidate.id)

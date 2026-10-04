@@ -63,7 +63,7 @@ All transport failures are converted to safe typed errors with no protocol/serve
 |---|---|---|
 | `mail.send` | `mailProfile` | legacy exact-match strings `host`, `securityMode`, `authUsername`, `defaultFrom`; integer `port`; Boolean `tlsVerify=true`; secret reference `credentialRef`; tightening integers `connectTimeoutMs`, `readTimeoutMs`, `writeTimeoutMs`, `retries`, `maxRecipients`, `maxHeaders`, `maxHeaderChars`, `maxBodyChars`, `maxAttachments`, `maxAttachmentBytes`, `maxTotalAttachmentBytes`, `maxEncodedAttachmentBytes`, `maxConcurrency` |
 | `mail.imap.query` | `profile` | string `folder=INBOX`; integer `limit=50`; `contentMode=preview` (`preview`, `full`); integer `maxConcurrency`; `recovery.repeatable` has no default |
-| `mail.imap.consume` | `profile` | strings `folder`, `consumerId`; `initialPosition=earliest` (`earliest`, `latest`); integers `pollIntervalMs`, `batchSize`, `retryBackoffMs`, `maxRetryBackoffMs`, `poisonAttempts`; `maxInFlight=1`; `contentMode=metadata` (`metadata`, `preview`); conditional integer `previewChars`; comma-separated string `allowedHeaders`; `checkpointPolicy=require-durable` |
+| `mail.imap.consume` | `profile` | strings `folder`, `consumerId`; `initialPosition=earliest` (`earliest`, `latest`); integers `pollIntervalMs`, `batchSize`, `retryBackoffMs`, `maxRetryBackoffMs`, `poisonAttempts`; `maxInFlight=1`; `contentMode=metadata` (`metadata`, `preview`); conditional integer `previewChars`; comma-separated string `allowedHeaders`; `checkpointPolicy=require-durable`; `resourceMode=shared` (`shared`, `exclusive`) |
 | `mail.imap.move` | `profile`, `destinationFolder` | string `sourceFolder=INBOX`; integer `maxConcurrency`; `recovery.repeatable` has no default |
 | `mail.imap.delete` | `profile` | string `sourceFolder=INBOX`; `deleteMode=TRASH` (`TRASH`, `HARD_DELETE`); conditional `hardDeleteAcknowledgement`; integer `maxConcurrency`; `recovery.repeatable` has no default |
 
@@ -182,6 +182,9 @@ hyphens, starting with a letter or digit. Whitespace is invalid. Keep the same v
 behavior, profile and canonical folder to resume after UI Stop/Run, document reload, server/container
 restart, or a new source-session ID. State is isolated by tenant and that consumer/source identity;
 a different `consumerId` starts independently and never inherits another consumer's cursor.
+`resourceMode` does not change this identity. Shared sources with different consumer IDs retain
+separate checkpoints, while two sources claiming the same stable consumer identity still contend
+for the same durable checkpoint ownership and the second fails closed.
 
 `initialPosition` accepts exactly `earliest` or `latest`, with `earliest` as the compatibility default.
 It is consulted only when this identity has no checkpoint:
@@ -270,7 +273,14 @@ parsing an unknown multipart could materialize unbounded provider data.
 
 Stop revokes the graph generation before closing every tracked opening/session socket and waking the
 poller. Cleanup lives in `stop()` because the host does not promise a distinct final shutdown hook.
-One process-local lease permits only one active tenant/profile/folder consumer; credential resolver
+`resourceMode=shared` is the default and allows independent deployed sources in this process to poll
+the same authorized tenant/profile/folder. Each source keeps its own session, durable ingress identity,
+checkpoint and cursor. `resourceMode=exclusive` reserves that tuple for one source in the process; an
+exclusive holder conflicts with shared and exclusive acquisition in either startup order. Resource
+mode does not weaken stable `consumerId` ownership. It is also not cross-process coordination; use a
+supported checkpoint store and deployment topology for stable ownership. See the
+[first-party source multiplicity inventory](../source-multiplicity.md) for why
+managed HTTP routes retain different ownership rules. Credential resolver
 tasks are additionally capped at 32 globally and one per tenant/profile, and a resolver that ignores
 interruption retains that bounded slot until it exits. Late returned secrets are erased. Connect,
 read, write, checkpoint, and credential waits are capped at 30 seconds and stop observes them at a
@@ -287,7 +297,7 @@ Stable author-visible health reasons are fixed tokens such as `imap-consumer-rec
 policy, or poison-halt classifications. Raw server messages and credential material are never used as
 health text. Stable-consumer storage ownership is retained until pending durable operations settle,
 including during stop; cancelling a wait does not release ownership early. The server remains
-single-replica, and the process-local mailbox lease alone is not cross-process coordination.
+single-replica.
 
 The dedicated lifecycle proof is `./scripts/verify-mail-imap-consumer-container.sh`. It builds and
 installs the mail bundle, then runs GreenMail IMAPS, SQLite durability, `DefaultGraphDeployment`, and

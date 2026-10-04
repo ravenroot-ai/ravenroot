@@ -25,7 +25,7 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
     public static final String BEHAVIOR = "amqp.consume";
     private static final Set<String> CONFIGURATION = Set.of("brokerProfile", "queue", "prefetch", "maxInFlight",
             "retryBackoffMs", "maxRetryBackoffMs", "drainTimeoutMs", "poisonAttempts", "poisonPolicy",
-            "deadLetterMode", "checkpointPolicy");
+            "deadLetterMode", "checkpointPolicy", "resourceMode");
     private final CredentialResolver credentials;
     private final AmqpProfileResolver profiles;
     private final AmqpConsumerPolicyResolver policies;
@@ -72,6 +72,9 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
                 false, dlx, dlx));
         properties.add(allowed("checkpointPolicy", "Checkpoint policy", List.of("require-durable"),
                 "require-durable"));
+        properties.add(allowed("resourceMode", "Resource mode", List.of("shared", "exclusive"), "shared",
+                "Shared allows independent sources to consume the authorized queue. Exclusive permits only one "
+                        + "process-local source for the tenant, profile and queue."));
         // PERS-04 (ADR 0022). An inbound source declares no recovery repeatability, and the
         // reason is that it has no attempt of its own for the contract to describe. The node is armed
         // once (InboundSourceCapable) and thereafter the broker drives it; the unit that can be lost
@@ -92,7 +95,13 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
 
     private static NodePropertyDescriptor allowed(String name, String label, List<String> allowed,
                                                    String defaultValue) {
-        return new NodePropertyDescriptor(name, label, NodePropertyType.STRING, false, "", defaultValue, allowed);
+        return allowed(name, label, allowed, defaultValue, "");
+    }
+
+    private static NodePropertyDescriptor allowed(String name, String label, List<String> allowed,
+                                                   String defaultValue, String description) {
+        return new NodePropertyDescriptor(name, label, NodePropertyType.STRING, false, description,
+                defaultValue, allowed);
     }
 
     @Override public NodeAction create(NodeConfiguration configuration) {

@@ -17,6 +17,7 @@ import ai.ravenroot.api.execution.NodeLifecycleState;
 import ai.ravenroot.api.execution.RavenNode;
 import ai.ravenroot.api.execution.Scheduler;
 import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.node.NodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.payload.PayloadEnvelope;
@@ -107,10 +108,13 @@ class AmqpHumanTaskWorkflowIntegrationTest {
              var engine = new DirectEngine()) {
             channel.queueDeclare(inputQueue, true, false, false, Map.of());
             channel.queueDeclare(outputQueue, true, false, false, Map.of());
+            String sharedQueue = "shared-" + UUID.randomUUID();
+            channel.queueDeclare(sharedQueue, true, false, false, Map.of());
 
             AmqpProfile profile = profile(rabbit.port(), outputQueue);
             var credentials = (ai.ravenroot.api.security.CredentialResolver) ignored ->
                     Optional.of(new SecretValue(PASSWORD.toCharArray()));
+            assertSharedConsumers(profile, credentials, sharedQueue, channel);
             NodeBehavior consume = new AmqpConsumeNodeBehavior(credentials,
                     (tenant, name) -> Optional.of(profile),
                     (tenant, name) -> Optional.of(policy(inputQueue)), new RabbitMqAmqpConsumerProtocol(),
@@ -165,6 +169,37 @@ class AmqpHumanTaskWorkflowIntegrationTest {
             } finally {
                 deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
             }
+        }
+    }
+
+    private static void assertSharedConsumers(AmqpProfile profile,
+                                              ai.ravenroot.api.security.CredentialResolver credentials,
+                                              String queue, Channel publisher) throws Exception {
+        var configuration = new NodeConfiguration("consume", AmqpConsumeNodeBehavior.BEHAVIOR,
+                Map.of("brokerProfile", PROFILE, "queue", queue));
+        var ingress = new AmqpConsumerTestSupport.Ingress();
+        var first = new AmqpConsumerSource(configuration, credentials,
+                (tenant, name) -> Optional.of(profile), (tenant, name) -> Optional.of(policy(queue)),
+                new RabbitMqAmqpConsumerProtocol(),
+                task -> Thread.ofVirtual().name("amqp-shared-first").start(task), Clock.systemUTC());
+        var second = new AmqpConsumerSource(configuration, credentials,
+                (tenant, name) -> Optional.of(profile), (tenant, name) -> Optional.of(policy(queue)),
+                new RabbitMqAmqpConsumerProtocol(),
+                task -> Thread.ofVirtual().name("amqp-shared-second").start(task), Clock.systemUTC());
+        try {
+            first.start(new AmqpConsumerTestSupport.Context(new AmqpConsumerTestSupport.Ingress()))
+                    .toCompletableFuture().get(10, TimeUnit.SECONDS);
+            second.start(new AmqpConsumerTestSupport.Context(ingress))
+                    .toCompletableFuture().get(10, TimeUnit.SECONDS);
+            first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            publisher.basicPublish("", queue, new AMQP.BasicProperties.Builder()
+                            .contentType("text/plain").messageId("shared-live-1").build(),
+                    "shared-live".getBytes(StandardCharsets.UTF_8));
+            AmqpConsumerTestSupport.await(ingress.offered);
+            assertEquals("shared-live-1", ingress.payloads.getFirst().get("messageId"));
+        } finally {
+            first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            second.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 

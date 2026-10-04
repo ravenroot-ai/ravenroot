@@ -1428,6 +1428,89 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
+     * Records one invocation intent before a child execution may be launched.
+     * @param intent complete durable invocation intent
+     * @return the created relation
+     */
+    default CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Reads one invocation by tenant-scoped opaque handle.
+     * @param tenantId tenant boundary for the lookup
+     * @param handle opaque relation reference
+     * @return the tenant's relation when present
+     */
+    default CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Finds the relation created by one caller-node invocation, making node retry idempotent.
+     * @param tenantId tenant boundary for the lookup
+     * @param callerProcessInstanceId caller process identity
+     * @param callerInvocationId caller node invocation identity
+     * @return the caller's relation when present
+     */
+    default CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> findFlowInvocationByCaller(
+            String tenantId, UUID callerProcessInstanceId, UUID callerInvocationId) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Applies one compare-and-set lifecycle transition. Implementations must reject a stale revision,
+     * a status regression, changed child identity, or a second distinct continuation claimant.
+     * @param tenantId tenant that owns the relation
+     * @param mutation validated compare-and-set mutation
+     * @return the updated relation
+     */
+    default CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Lists unfinished invocation relations for bounded startup recovery.
+     * @param tenantId tenant boundary for the scan
+     * @param limit positive maximum row count
+     * @return at most {@code limit} unfinished relations
+     */
+    default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
+            unfinishedFlowInvocations(String tenantId, int limit) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Lists retained relations, including terminal records awaiting caller re-entry.
+     * @param tenantId tenant boundary for the scan
+     * @param limit positive maximum row count
+     * @return at most {@code limit} retained relations
+     */
+    default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
+            retainedFlowInvocations(String tenantId, int limit) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Explicitly purges terminal relations whose retention deadline elapsed.
+     * @param tenantId tenant boundary for the purge
+     * @return number of expired relations removed
+     */
+    default CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
+        return flowInvocationsUnsupported();
+    }
+
+    private static <T> CompletionStage<T> flowInvocationsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.FLOW_INVOCATIONS)));
+        return refused;
+    }
+
+    /**
      * Releases what the <em>process</em> owns and <strong>no lease</strong>.
      *
      * <p>The governing invariant (ADR 0010 section 13.1) is that a clean shutdown and a

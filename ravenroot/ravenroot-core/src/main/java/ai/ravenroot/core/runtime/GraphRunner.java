@@ -1103,6 +1103,34 @@ public final class GraphRunner implements AutoCloseable {
                                                          ai.ravenroot.api.persistence.ResolvedOperationalPolicy
                                                                  executionOperationalPolicy,
                                                          GraphExecutionLimits executionGraphLimits) {
+        return executeInternal(security, processInstanceId, traversalId, payload, graphVersion, deploymentId,
+                workloadId, recorder, executionOperationalPolicy, executionGraphLimits, false);
+    }
+
+    /**
+     * Executes an intergraph child. START receives the supplied payload exactly once and END output
+     * is reduced only after every branch settles; repeated END arrivals become a canonical ordered
+     * list rather than a scheduler-dependent last writer.
+     */
+    public CompletionStage<GraphExecutionResult> executeCalled(SecurityContext security,
+                                                                UUID processInstanceId,
+                                                                UUID traversalId, Object payload,
+                                                                String graphVersion,
+                                                                String deploymentId, String workloadId,
+                                                                ExecutionRecorder recorder) {
+        return executeInternal(security, processInstanceId, traversalId, payload, graphVersion, deploymentId,
+                workloadId, recorder, operationalPolicy, executionLimits, true);
+    }
+
+    private CompletionStage<GraphExecutionResult> executeInternal(SecurityContext security,
+                                                         UUID processInstanceId,
+                                                         UUID traversalId, Object payload, String graphVersion,
+                                                         String deploymentId, String workloadId,
+                                                         ExecutionRecorder recorder,
+                                                         ai.ravenroot.api.persistence.ResolvedOperationalPolicy
+                                                                 executionOperationalPolicy,
+                                                         GraphExecutionLimits executionGraphLimits,
+                                                         boolean calledExecution) {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(executionGraphLimits, "executionGraphLimits");
         if (processInstanceId == null) throw new IllegalArgumentException("processInstanceId cannot be null");
@@ -1115,7 +1143,7 @@ public final class GraphRunner implements AutoCloseable {
         ExecutionBudget.Hop rootHop = budget.reserveRoot(
                 measureDelivery(payload, Map.of(), executionGraphLimits));
         var state = new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
-                recorder, identity, identitySource, clock, executionGraphLimits, budget);
+                recorder, identity, identitySource, clock, executionGraphLimits, budget, calledExecution);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock,
                 timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
@@ -3142,7 +3170,7 @@ public final class GraphRunner implements AutoCloseable {
                     // ExecutionState.resultPayload(). Deliberately NOT one shared field written by
                     // both: see that method for the race that cost, measured.
                     if (node.kind() == NodeKind.END) {
-                        state.endTerminalPayload = new Object[] {result.payload()};
+                        state.recordEndTerminal(result.payload());
                     } else if (node.kind() == NodeKind.ERROR) {
                         state.errorTerminalPayload = new Object[] {result.payload()};
                     }
@@ -5322,8 +5350,38 @@ public final class GraphRunner implements AutoCloseable {
          */
         private volatile Object[] endTerminalPayload;
 
+        /** Called executions retain every END arrival and canonicalize their order at settlement. */
+        private final java.util.List<CalledEndOutput> calledEndOutputs = new java.util.ArrayList<>();
+
+        private final boolean calledExecution;
+
         /** @see #endTerminalPayload */
         private volatile Object[] errorTerminalPayload;
+
+        private synchronized void recordEndTerminal(Object payload) {
+            if (!calledExecution) {
+                // Compatibility for ordinary execution: preserve the historical last-arrival rule.
+                endTerminalPayload = new Object[] {payload};
+                return;
+            }
+            if (calledEndOutputs.size() >= limits.payload().maxCollectionSize()) {
+                throw new IllegalStateException("called execution produced more than "
+                        + limits.payload().maxCollectionSize() + " END outputs");
+            }
+            byte[] canonical = ai.ravenroot.api.payload.PayloadJson.writeJava(payload, limits.payload());
+            calledEndOutputs.add(new CalledEndOutput(canonical, payload));
+        }
+
+        private synchronized Object[] calledEndTerminal() {
+            if (calledEndOutputs.isEmpty()) return null;
+            var ordered = new java.util.ArrayList<>(calledEndOutputs);
+            ordered.sort((left, right) -> java.util.Arrays.compareUnsigned(left.canonical(), right.canonical()));
+            if (ordered.size() == 1) return new Object[] {ordered.getFirst().payload()};
+            java.util.List<Object> outputs = ordered.stream().map(CalledEndOutput::payload).toList();
+            // The collection itself may exceed the same payload bound even when every member fit.
+            limits.payload().enforceAndMeasure(outputs);
+            return new Object[] {outputs};
+        }
 
         /**
          * What a branch that ran out of edges on an ordinary node produced, or {@code null}
@@ -5433,9 +5491,18 @@ public final class GraphRunner implements AutoCloseable {
          * though it also completed — would be a different semantic contract and is not applied here.</p>
          */
         Object resultPayload() {
-            Object[] arrival = endTerminalPayload != null ? endTerminalPayload
+            Object[] calledEnd = calledExecution ? calledEndTerminal() : null;
+            Object[] arrival = calledEnd != null ? calledEnd
+                    : endTerminalPayload != null ? endTerminalPayload
                     : errorTerminalPayload != null ? errorTerminalPayload : danglingTerminal();
             return arrival == null ? null : arrival[0];
+        }
+
+        private record CalledEndOutput(byte[] canonical, Object payload) {
+            private CalledEndOutput {
+                canonical = canonical.clone();
+            }
+            @Override public byte[] canonical() { return canonical.clone(); }
         }
 
         private ExecutionState(UUID processInstanceId, UUID traversalId, String ingressNodeId,
@@ -5443,6 +5510,16 @@ public final class GraphRunner implements AutoCloseable {
                                ExecutionMonitor.ExecutionIdentity identity,
                                ExecutionIdentitySource identitySource, Clock clock,
                                GraphExecutionLimits limits, ExecutionBudget budget) {
+            this(processInstanceId, traversalId, ingressNodeId, liveness, recorder, identity,
+                    identitySource, clock, limits, budget, false);
+        }
+
+        private ExecutionState(UUID processInstanceId, UUID traversalId, String ingressNodeId,
+                               BranchLiveness liveness, ExecutionRecorder recorder,
+                               ExecutionMonitor.ExecutionIdentity identity,
+                               ExecutionIdentitySource identitySource, Clock clock,
+                               GraphExecutionLimits limits, ExecutionBudget budget,
+                               boolean calledExecution) {
             this.traversalId = traversalId;
             this.recorder = recorder;
             this.liveness = liveness;
@@ -5451,6 +5528,7 @@ public final class GraphRunner implements AutoCloseable {
             this.clock = clock;
             this.limits = java.util.Objects.requireNonNull(limits, "limits");
             this.budget = java.util.Objects.requireNonNull(budget, "budget");
+            this.calledExecution = calledExecution;
             this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
             lifecycle = new ProcessInstance(processInstanceId, ProcessInstanceStatus.ACCEPTED, Map.of())
                     .addTraversal(new Traversal(traversalId, ingressNodeId, TraversalStatus.ACCEPTED, Map.of()))
@@ -5472,6 +5550,7 @@ public final class GraphRunner implements AutoCloseable {
             this.clock = clock;
             this.limits = java.util.Objects.requireNonNull(limits, "limits");
             this.budget = java.util.Objects.requireNonNull(budget, "budget");
+            this.calledExecution = false;
             this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
             this.lifecycle = java.util.Objects.requireNonNull(storedLifecycle, "storedLifecycle");
             if (!lifecycle.processInstanceId().equals(processInstanceId)

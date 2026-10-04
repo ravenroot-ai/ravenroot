@@ -205,7 +205,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // instance. Recording refuses a conflicting outcome rather than overwriting
             // one, and the refusal is decided from the stored fingerprint alone, so it
             // is the same answer on every retry and across a reopen.
-            StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
+            StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
+            StoreCapability.FLOW_INVOCATIONS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -1835,6 +1836,186 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 }
             });
         });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return async(() -> inWriteTransaction(null, () -> {
+            Objects.requireNonNull(intent, "intent");
+            if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT || intent.revision() != 1) {
+                throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
+            }
+            var existing = readFlowByCaller(intent.tenantId(), intent.callerProcessInstanceId(),
+                    intent.callerInvocationId());
+            if (existing != null) return existing;
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO flow_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                int i = 1;
+                statement.setString(i++, intent.tenantId()); statement.setString(i++, intent.handle().toString());
+                statement.setString(i++, intent.callerProcessInstanceId().toString());
+                statement.setString(i++, intent.callerTraversalId().toString());
+                statement.setString(i++, intent.callerInvocationId().toString());
+                statement.setString(i++, intent.callerSubject());
+                statement.setString(i++, intent.callerPrincipalType().name()); statement.setString(i++, intent.callerIssuer());
+                statement.setString(i++, intent.targetDeploymentId().value()); statement.setLong(i++, intent.targetVersion());
+                statement.setString(i++, intent.targetDigest()); statement.setString(i++, intent.childProcessInstanceId().toString());
+                statement.setString(i++, intent.childTraversalId().toString()); statement.setString(i++, intent.status().name());
+                statement.setBytes(i++, intent.input()); statement.setBytes(i++, intent.result());
+                statement.setString(i++, intent.failureCode()); statement.setString(i++, intent.failureMessage());
+                statement.setString(i++, intent.continuationClaim() == null ? null : intent.continuationClaim().toString());
+                statement.setLong(i++, intent.revision());
+                i = StoredInstant.bindValue(statement, i, intent.createdAt());
+                i = StoredInstant.bindValue(statement, i, intent.updatedAt());
+                i = StoredInstant.bindValue(statement, i, intent.deadlineAt());
+                StoredInstant.bindValue(statement, i, intent.retainedUntil());
+                statement.executeUpdate();
+            }
+            return intent;
+        }));
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+        return async(() -> {
+            requireTenantId(tenantId); Objects.requireNonNull(handle, "handle");
+            return inReadTransaction(null, () -> Optional.ofNullable(readFlow(tenantId, handle.toString())));
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> findFlowInvocationByCaller(
+            String tenantId, UUID processId, UUID invocationId) {
+        return async(() -> {
+            requireTenantId(tenantId); Objects.requireNonNull(processId); Objects.requireNonNull(invocationId);
+            return inReadTransaction(null, () -> Optional.ofNullable(readFlowByCaller(tenantId, processId, invocationId)));
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        return async(() -> inWriteTransaction(null, () -> {
+            requireTenantId(tenantId); Objects.requireNonNull(mutation, "mutation");
+            var current = readFlow(tenantId, mutation.handle().toString());
+            if (current == null) throw new IllegalArgumentException("unknown flow handle");
+            if (current.revision() != mutation.expectedRevision()) {
+                throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
+                        mutation.expectedRevision(), current.revision());
+            }
+            var next = new ai.ravenroot.api.flow.FlowInvocationRecord(current.tenantId(), current.handle(),
+                    current.callerProcessInstanceId(), current.callerTraversalId(), current.callerInvocationId(),
+                    current.callerSubject(), current.callerPrincipalType(), current.callerIssuer(),
+                    current.targetDeploymentId(), current.targetVersion(), current.targetDigest(),
+                    mutation.childProcessInstanceId(), mutation.childTraversalId(), mutation.status(), current.input(),
+                    mutation.result(), mutation.failureCode(), mutation.failureMessage(), mutation.continuationClaim(),
+                    current.revision() + 1, current.createdAt(), mutation.updatedAt(), current.deadlineAt(),
+                    current.retainedUntil());
+            if (current.terminal() && next.status() != current.status()) {
+                throw new IllegalStateException("a terminal flow invocation cannot change outcome");
+            }
+            if (current.continuationClaim() != null
+                    && !Objects.equals(current.continuationClaim(), next.continuationClaim())) {
+                throw new IllegalStateException("flow continuation was already claimed");
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE flow_invocation SET status=?, result=?, failure_code=?, failure_message=?, "
+                            + "continuation_claim=?, revision=?, updated_at_epoch_second=?, updated_at_nano=? "
+                            + "WHERE tenant_id=? AND handle=? AND revision=?")) {
+                int i = 1; statement.setString(i++, next.status().name()); statement.setBytes(i++, next.result());
+                statement.setString(i++, next.failureCode()); statement.setString(i++, next.failureMessage());
+                statement.setString(i++, next.continuationClaim() == null ? null : next.continuationClaim().toString());
+                statement.setLong(i++, next.revision()); i = StoredInstant.bindValue(statement, i, next.updatedAt());
+                statement.setString(i++, tenantId); statement.setString(i++, next.handle().toString());
+                statement.setLong(i, current.revision());
+                if (statement.executeUpdate() != 1) throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
+                        current.revision(), readFlow(tenantId, next.handle().toString()).revision());
+            }
+            return next;
+        }));
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> unfinishedFlowInvocations(
+            String tenantId, int limit) {
+        return async(() -> inReadTransaction(null, () -> {
+            requireTenantId(tenantId); if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit");
+            var records = new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM flow_invocation WHERE tenant_id=? AND status IN ('INTENT','LAUNCHED') "
+                            + "ORDER BY created_at_epoch_second, created_at_nano, handle LIMIT ?")) {
+                statement.setString(1, tenantId); statement.setInt(2, limit);
+                try (ResultSet rows = statement.executeQuery()) { while (rows.next()) records.add(readFlow(rows)); }
+            }
+            return List.copyOf(records);
+        }));
+    }
+
+    @Override public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocations(
+            String tenantId, int limit) {
+        return async(() -> inReadTransaction(null, () -> {
+            requireTenantId(tenantId); if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit");
+            var records = new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM flow_invocation WHERE tenant_id=? ORDER BY created_at_epoch_second, created_at_nano, handle LIMIT ?")) {
+                statement.setString(1, tenantId); statement.setInt(2, limit);
+                try (ResultSet rows = statement.executeQuery()) { while (rows.next()) records.add(readFlow(rows)); }
+            } return List.copyOf(records);
+        }));
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
+        return async(() -> inWriteTransaction(null, () -> {
+            requireTenantId(tenantId);
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "DELETE FROM flow_invocation WHERE tenant_id=? AND status NOT IN ('INTENT','LAUNCHED') AND "
+                            + StoredInstant.atOrBefore("retained_until"))) {
+                statement.setString(1, tenantId); StoredInstant.bindComparison(statement, 2, clock.instant());
+                return (long) statement.executeUpdate();
+            }
+        }));
+    }
+
+    private ai.ravenroot.api.flow.FlowInvocationRecord readFlow(String tenantId, String handle) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM flow_invocation WHERE tenant_id=? AND handle=?")) {
+            statement.setString(1, tenantId); statement.setString(2, handle);
+            try (ResultSet rows = statement.executeQuery()) { return rows.next() ? readFlow(rows) : null; }
+        }
+    }
+
+    private ai.ravenroot.api.flow.FlowInvocationRecord readFlowByCaller(String tenantId, UUID processId,
+                                                                         UUID invocationId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM flow_invocation WHERE tenant_id=? AND caller_process_instance_id=? AND caller_invocation_id=?")) {
+            statement.setString(1, tenantId); statement.setString(2, processId.toString());
+            statement.setString(3, invocationId.toString());
+            try (ResultSet rows = statement.executeQuery()) { return rows.next() ? readFlow(rows) : null; }
+        }
+    }
+
+    private ai.ravenroot.api.flow.FlowInvocationRecord readFlow(ResultSet rows) throws SQLException {
+        String tenant = rows.getString("tenant_id");
+        return new ai.ravenroot.api.flow.FlowInvocationRecord(tenant,
+                new ai.ravenroot.api.flow.FlowHandle(UUID.fromString(rows.getString("handle"))),
+                UUID.fromString(rows.getString("caller_process_instance_id")),
+                UUID.fromString(rows.getString("caller_traversal_id")),
+                UUID.fromString(rows.getString("caller_invocation_id")), rows.getString("caller_subject"),
+                ai.ravenroot.api.security.PrincipalType.valueOf(rows.getString("caller_principal_type")),
+                rows.getString("caller_issuer"),
+                ai.ravenroot.api.deployment.DeploymentId.of(rows.getString("target_deployment_id")),
+                rows.getLong("target_version"), rows.getString("target_digest"),
+                UUID.fromString(rows.getString("child_process_instance_id")),
+                UUID.fromString(rows.getString("child_traversal_id")),
+                ai.ravenroot.api.flow.FlowInvocationStatus.valueOf(rows.getString("status")),
+                rows.getBytes("input"), rows.getBytes("result"), rows.getString("failure_code"),
+                rows.getString("failure_message"),
+                rows.getString("continuation_claim") == null ? null : UUID.fromString(rows.getString("continuation_claim")),
+                rows.getLong("revision"), StoredInstant.read(rows, "created_at"),
+                StoredInstant.read(rows, "updated_at"), StoredInstant.read(rows, "deadline_at"),
+                StoredInstant.read(rows, "retained_until"));
     }
 
     // ---------------------------------------------------------------- execution result helpers

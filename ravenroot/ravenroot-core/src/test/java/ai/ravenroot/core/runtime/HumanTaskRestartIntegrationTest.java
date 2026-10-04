@@ -9,6 +9,11 @@ import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.flow.FlowHandle;
+import ai.ravenroot.api.flow.FlowInvocationMutation;
+import ai.ravenroot.api.flow.FlowInvocationRecord;
+import ai.ravenroot.api.flow.FlowInvocationStatus;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -50,6 +55,9 @@ import ai.ravenroot.core.approval.ToolApprovalSettings;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
+import ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry;
+import ai.ravenroot.core.flow.DefaultFlowInvocationCapability;
+import ai.ravenroot.core.flow.FlowInvocationPolicy;
 import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
 import ai.ravenroot.core.humantask.HumanTaskDefinition;
 import ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher;
@@ -99,6 +107,26 @@ class HumanTaskRestartIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
     private static final Duration TTL = Duration.ofSeconds(30);
+    private static final byte[] FLOW_WAIT_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="flow-wait-restart" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="wait"><data key="kind">BEHAVIOR</data><data key="behavior">await-flow</data></node>
+                <node id="capture"><data key="kind">BEHAVIOR</data><data key="behavior">capture</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="a" source="start" target="wait"/>
+                <edge id="b" source="wait" target="capture"><data key="edge-outcome">completed</data></edge>
+                <edge id="bf" source="wait" target="capture"><data key="edge-outcome">failed</data></edge>
+                <edge id="bd" source="wait" target="capture"><data key="edge-outcome">deadline_exceeded</data></edge>
+                <edge id="bc" source="wait" target="capture"><data key="edge-outcome">cancelled</data></edge>
+                <edge id="c" source="capture" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
     private static final byte[] GRAPH = """
             <?xml version="1.0" encoding="UTF-8"?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
@@ -510,6 +538,241 @@ class HumanTaskRestartIntegrationTest {
             assertEquals(1, raceExecutions.get());
             assertEquals(1, captures.get());
             assertEquals(2, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size());
+        }
+    }
+
+    @Test
+    void internalFlowWaitResumesOriginalCallerOnceAfterCompleteServiceRecreation(@TempDir Path directory)
+            throws Exception {
+        Path database = directory.resolve("flow-wait-restart.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        FlowHandle handle = new FlowHandle(UUID.randomUUID());
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK, GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(FLOW_WAIT_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            String pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks).register("capture", message ->
+                    CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));
+            var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                    new ExecutionMonitor(), behaviors,
+                    new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            var flows = new DefaultFlowInvocationCapability(store, new InMemoryDeploymentRegistry(CLOCK),
+                    application, tasks, (caller, target) -> true, FlowInvocationPolicy.DEFAULTS, CLOCK);
+            behaviors.withFlowInvocations(flows);
+            FlowInvocationRecord intent = store.createFlowInvocation(flowRecord(key, originalTraversal, handle))
+                    .toCompletableFuture().join();
+            store.mutateFlowInvocation(TENANT, new FlowInvocationMutation(handle, intent.revision(),
+                    FlowInvocationStatus.LAUNCHED, intent.childProcessInstanceId(), intent.childTraversalId(),
+                    null, "", "", null, CLOCK.instant())).toCompletableFuture().join();
+
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(FLOW_WAIT_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "flow-live", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder, runner)) {
+                ExecutionException suspended = assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                        Map.of("flowHandle", handle.toString()), pin, null, null, recorder)
+                                .toCompletableFuture().get(10, TimeUnit.SECONDS));
+                assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+            } finally {
+                flows.close();
+                application.close();
+            }
+            assertTrue(tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().isEmpty(),
+                    "runtime flow waits must never enter the user inbox");
+            assertEquals(TraversalStatus.WAITING, store.load(key).toCompletableFuture().join().state()
+                    .traversals().get(originalTraversal).status());
+        }
+
+        // A child may finish while no caller runtime exists. Recreate only the service/capability;
+        // its retained-relation reconciliation must settle the hidden continuation.
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var engine = new SameThreadExecutionEngine()) {
+            FlowInvocationRecord launched = store.loadFlowInvocation(TENANT, handle).toCompletableFuture().join()
+                    .orElseThrow();
+            byte[] output = ai.ravenroot.api.payload.PayloadJson.writeJava(
+                    Map.of("child", "done"), PayloadLimits.DEFAULTS);
+            store.mutateFlowInvocation(TENANT, new FlowInvocationMutation(handle, launched.revision(),
+                    FlowInvocationStatus.COMPLETED, launched.childProcessInstanceId(),
+                    launched.childTraversalId(), output, "", "", launched.continuationClaim(), CLOCK.instant()))
+                    .toCompletableFuture().join();
+            var tasks = new HumanTaskService(store, CLOCK);
+            var behaviors = standard(tasks);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                    new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            try (var flows = new DefaultFlowInvocationCapability(store, new InMemoryDeploymentRegistry(CLOCK),
+                    application, tasks, (caller, target) -> true, FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                flows.recoverTenant(TENANT).toCompletableFuture().join();
+            } finally {
+                application.close();
+            }
+            assertEquals(HumanTaskStatus.RESOLVED, store.loadHumanTask(TENANT, handle.value())
+                    .toCompletableFuture().join().orElseThrow().status());
+        }
+
+        var captures = new AtomicInteger();
+        var observed = new AtomicReference<Object>();
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK, GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks).register("capture", message -> {
+                captures.incrementAndGet();
+                observed.set(message.payload());
+                return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            });
+            var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                    new ExecutionMonitor(), behaviors,
+                    new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            try (var flows = new DefaultFlowInvocationCapability(store, new InMemoryDeploymentRegistry(CLOCK),
+                    application, tasks, (caller, target) -> true, FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                behaviors.withFlowInvocations(flows);
+                var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                        engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                        "flow-recovery", TTL);
+                var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "flow-recovery", 10, TTL,
+                        RepeatabilityDeclarations.NONE_DECLARED,
+                        new HumanTaskHandlerDispatcher(store, tasks, continuation));
+                assertEquals(1, dispatched(recovery.sweepOnce()));
+                assertEquals(1, captures.get());
+                assertEquals(Map.of("child", "done"), observed.get());
+                assertEquals(ProcessInstanceStatus.COMPLETED,
+                        store.load(key).toCompletableFuture().join().state().status());
+                assertTrue(recovery.sweepOnce().isEmpty());
+                assertEquals(1, captures.get(), "acknowledged flow continuation must not replay");
+            } finally {
+                application.close();
+            }
+        }
+    }
+
+    @Test
+    void failedDeadlineAndCancelledFlowWaitsResumeTheirOriginalOutcomeAfterRestart(@TempDir Path directory)
+            throws Exception {
+        Path database = directory.resolve("flow-terminal-outcomes.db");
+        List<FlowCase> cases = List.of(
+                new FlowCase(FlowInvocationStatus.FAILED, "CHILD_FAILED"),
+                new FlowCase(FlowInvocationStatus.DEADLINE_EXCEEDED, "DEADLINE_EXCEEDED"),
+                new FlowCase(FlowInvocationStatus.CANCELLED, "CANCELLED"));
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK, GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(FLOW_WAIT_GRAPH);
+            var stored = definitions.put(TENANT, GraphDefinitionIdentity.forSubmission(canonical.contentId()),
+                    canonical).toCompletableFuture().join();
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks).register("capture", message ->
+                    CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));
+            var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                    new ExecutionMonitor(), behaviors, new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            try (var flows = new DefaultFlowInvocationCapability(store, new InMemoryDeploymentRegistry(CLOCK),
+                    application, tasks, (caller, target) -> true, FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                behaviors.withFlowInvocations(flows);
+                for (FlowCase flowCase : cases) {
+                    var key = new ExecutionKey(TENANT, UUID.randomUUID());
+                    UUID traversal = UUID.randomUUID();
+                    flowCase.key = key;
+                    flowCase.handle = new FlowHandle(UUID.randomUUID());
+                    long revision = createRunning(store, key, traversal, stored.key().contentId().value());
+                    FlowInvocationRecord intent = store.createFlowInvocation(flowRecord(key, traversal,
+                            flowCase.handle)).toCompletableFuture().join();
+                    store.mutateFlowInvocation(TENANT, new FlowInvocationMutation(flowCase.handle,
+                            intent.revision(), FlowInvocationStatus.LAUNCHED, intent.childProcessInstanceId(),
+                            intent.childTraversalId(), null, "", "", null, CLOCK.instant()))
+                            .toCompletableFuture().join();
+                    try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(FLOW_WAIT_GRAPH));
+                         var runner = new GraphRunner(manager, snapshot(stored.identity(), manager), engine,
+                                 behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                                 GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                         var recorder = ExecutionRecorder.open(store, key, "flow-" + flowCase.status, TTL, revision);
+                         var binding = tasks.bindLive(key, recorder, runner)) {
+                        ExecutionException suspended = assertThrows(ExecutionException.class,
+                                () -> runner.execute(requesterIdentity(), key.processInstanceId(), traversal,
+                                                Map.of("flowHandle", flowCase.handle.toString()),
+                                                stored.key().contentId().value(), null, null, recorder)
+                                        .toCompletableFuture().get(10, TimeUnit.SECONDS));
+                        assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+                    }
+                }
+            } finally {
+                application.close();
+            }
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var engine = new SameThreadExecutionEngine()) {
+            for (FlowCase flowCase : cases) {
+                FlowInvocationRecord current = store.loadFlowInvocation(TENANT, flowCase.handle)
+                        .toCompletableFuture().join().orElseThrow();
+                store.mutateFlowInvocation(TENANT, new FlowInvocationMutation(flowCase.handle,
+                        current.revision(), flowCase.status, current.childProcessInstanceId(),
+                        current.childTraversalId(), null, flowCase.code, "terminal test outcome",
+                        current.continuationClaim(), CLOCK.instant())).toCompletableFuture().join();
+            }
+            var tasks = new HumanTaskService(store, CLOCK);
+            var behaviors = standard(tasks);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
+                    new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            try (var flows = new DefaultFlowInvocationCapability(store, new InMemoryDeploymentRegistry(CLOCK),
+                    application, tasks, (caller, target) -> true, FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                flows.recoverTenant(TENANT).toCompletableFuture().join();
+            } finally {
+                application.close();
+            }
+        }
+
+        var observed = java.util.Collections.synchronizedList(new ArrayList<Object>());
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK, GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks).register("capture", message -> {
+                observed.add(message.payload());
+                return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            });
+            var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                    new ExecutionMonitor(), behaviors, new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            try (var flows = new DefaultFlowInvocationCapability(store, new InMemoryDeploymentRegistry(CLOCK),
+                    application, tasks, (caller, target) -> true, FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                behaviors.withFlowInvocations(flows);
+                var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                        engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                        "terminal-flow-recovery", TTL);
+                var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "terminal-flow-recovery",
+                        10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                        new HumanTaskHandlerDispatcher(store, tasks, continuation));
+                assertEquals(3, dispatched(recovery.sweepOnce()));
+                assertEquals(3, observed.size());
+                assertTrue(observed.stream().map(Map.class::cast)
+                        .map(value -> value.get("status")).collect(java.util.stream.Collectors.toSet())
+                        .containsAll(Set.of("FAILED", "DEADLINE_EXCEEDED", "CANCELLED")));
+                assertTrue(recovery.sweepOnce().isEmpty());
+            } finally {
+                application.close();
+            }
         }
     }
 
@@ -1378,6 +1641,17 @@ class HumanTaskRestartIntegrationTest {
                 .findFirst().orElseThrow();
     }
 
+    private static FlowInvocationRecord flowRecord(ExecutionKey key, UUID callerTraversal,
+                                                   FlowHandle handle) {
+        SecurityContext caller = requesterIdentity();
+        return new FlowInvocationRecord(key.tenantId(), handle, key.processInstanceId(), callerTraversal,
+                UUID.randomUUID(), caller.subject(), caller.principalType(), caller.issuer(),
+                DeploymentId.of("child"), 1, "a".repeat(64), UUID.randomUUID(), UUID.randomUUID(),
+                FlowInvocationStatus.INTENT, "null".getBytes(StandardCharsets.UTF_8), null,
+                "", "", null, 1, NOW, NOW, NOW.plus(Duration.ofHours(1)),
+                NOW.plus(Duration.ofDays(1)));
+    }
+
     private static OpaquePayload response() {
         return OpaquePayload.of(PayloadEnvelope.of("release.decision", "1",
                         PayloadValue.map(Map.of("decision", PayloadValue.of("approved"))))
@@ -1397,6 +1671,17 @@ class HumanTaskRestartIntegrationTest {
     private static RequestContext approver() {
         return new RequestContext("approver-call", "approver", PrincipalType.USER, "issuer", TENANT,
                 Set.of(Role.APPROVER), Set.of());
+    }
+
+    private static final class FlowCase {
+        private final FlowInvocationStatus status;
+        private final String code;
+        private ExecutionKey key;
+        private FlowHandle handle;
+        private FlowCase(FlowInvocationStatus status, String code) {
+            this.status = status;
+            this.code = code;
+        }
     }
 
     private static final class RetryableBlip extends RuntimeException {

@@ -369,6 +369,22 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     }
 
     private NodeResult result(DurableHumanTask task, DurableHandler handler) {
+        if (task.status() == HumanTaskStatus.RESOLVED
+                && HumanTaskService.INTERNAL_FLOW_SCHEMA.equals(task.request().responseSchema().schema())) {
+            PayloadEnvelope envelope = PayloadJson.readEnvelope(handler.outcomePayload().bytes(),
+                    task.request().executionLimits().responsePayload());
+            if (!(envelope.value().toJava() instanceof Map<?, ?> flow)
+                    || !(flow.get("status") instanceof String status)) {
+                throw new IllegalStateException("durable flow continuation payload is malformed");
+            }
+            String outcome = status.toLowerCase(java.util.Locale.ROOT);
+            Object code = flow.get("code");
+            Object message = flow.get("message");
+            Object payload = "COMPLETED".equals(status) ? flow.get("output")
+                    : Map.of("status", status, "code", code == null ? "" : String.valueOf(code),
+                            "message", message == null ? "" : String.valueOf(message));
+            return new NodeResult(outcome, payload, Map.of());
+        }
         var body = new LinkedHashMap<String, Object>();
         body.put("taskId", task.request().taskId().toString());
         body.put("generation", task.generation());

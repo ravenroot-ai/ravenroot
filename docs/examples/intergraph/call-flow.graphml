@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="deployment" for="node" attr.name="deploymentId" attr.type="string"/>
+  <key id="version" for="node" attr.name="version" attr.type="long"/>
+  <key id="deadline" for="node" attr.name="deadlineMs" attr.type="long"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="call-flow-example" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="call">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">call-flow</data>
+      <data key="deployment">replace-with-registered-deployment-id</data>
+      <data key="version">1</data>
+      <data key="deadline">30000</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="start-call" source="start" target="call"/>
+    <edge id="call-end" source="call" target="end"><data key="outcome">completed</data></edge>
+    <edge id="call-error" source="call" target="error"/>
+  </graph>
+</graphml>

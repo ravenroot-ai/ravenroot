@@ -36,7 +36,7 @@ class MailImapConsumeContractTest {
                 "invalid-batch-size", "invalid-checkpoint-policy", "invalid-consumer-id",
                 "invalid-content-mode", "invalid-initial-position", "invalid-max-in-flight",
                 "invalid-max-retry-backoff", "invalid-poison-attempts", "invalid-poll-interval",
-                "invalid-preview-chars", "invalid-retry-backoff", "startup-cancelled",
+                "invalid-preview-chars", "invalid-retry-backoff", "invalid-resource-mode", "startup-cancelled",
                 "unknown-graph-property");
         assertEquals(expected, ImapSourceStartFailure.codes());
         assertEquals(ImapSourceStartFailure.codes(), behavior(new ImapConsumerTestSupport.FakeProtocol())
@@ -56,6 +56,10 @@ class MailImapConsumeContractTest {
                 .findFirst().orElseThrow();
         assertEquals("contentMode", preview.visibleWhen().property());
         assertEquals(preview.visibleWhen(), preview.requiredWhen());
+        var resourceMode = descriptor.properties().stream().filter(p -> p.name().equals("resourceMode"))
+                .findFirst().orElseThrow();
+        assertEquals("shared", resourceMode.defaultValue());
+        assertEquals(java.util.List.of("shared", "exclusive"), resourceMode.allowedValues());
         assertTrue(descriptor.capabilities().contains("inbound-source"));
         assertFalse(descriptor.properties().stream().map(p -> p.name()).anyMatch(
                 name -> name.matches("(?i).*(host|port|password|credential|username|tls).*")));
@@ -242,6 +246,7 @@ class MailImapConsumeContractTest {
                 Map.of("consumerId", " "), Map.of("consumerId", "a/b"),
                 Map.of("consumerId", "a".repeat(129)), Map.of("consumerId", "é"),
                 Map.of("initialPosition", "LATEST"), Map.of("initialPosition", ""),
+                Map.of("resourceMode", "SHARED"),
                 Map.of("consumerId", "valid-id"))) {
             var credentials = new AtomicInteger();
             var protocol = new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner());
@@ -622,9 +627,35 @@ class MailImapConsumeContractTest {
         assertEquals(2, protocol.openCalls.get());
     }
 
-    @Test void processLocalTenantProfileFolderLeaseRefusesDuplicateOwner() {
-        var first = source(new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner()),
+    @Test void defaultSharedModeKeepsIndependentCheckpointsAndOneConsumerContinuesAfterTheOtherStops() {
+        var firstOwner = new ImapConsumerTestSupport.FakeOwner();
+        var firstIngress = new ImapConsumerTestSupport.Ingress();
+        var first = source(new ImapConsumerTestSupport.FakeProtocol(firstOwner),
                 configuration(Map.of()), ignored -> secret());
+        first.start(new ImapConsumerTestSupport.Context(firstIngress)).toCompletableFuture().join();
+        var secondOwner = new ImapConsumerTestSupport.FakeOwner();
+        var secondIngress = new ImapConsumerTestSupport.Ingress(2);
+        var second = source(new ImapConsumerTestSupport.FakeProtocol(secondOwner),
+                configuration(Map.of()), ignored -> secret());
+        second.start(new ImapConsumerTestSupport.Context(secondIngress)).toCompletableFuture().join();
+
+        firstOwner.deliver(3, ImapConsumerTestSupport.message("<first>", "first", "body"));
+        secondOwner.deliver(7, ImapConsumerTestSupport.message("<second>", "second", "body"));
+        awaitAdvances(firstIngress, 1);
+        awaitAdvances(secondIngress, 1);
+        assertEquals(java.util.List.of(3L), firstIngress.advances);
+        assertEquals(java.util.List.of(7L), secondIngress.advances);
+
+        first.stop().toCompletableFuture().join();
+        secondOwner.deliver(8, ImapConsumerTestSupport.message("<second-next>", "second-next", "body"));
+        awaitAdvances(secondIngress, 2);
+        assertEquals(java.util.List.of(7L, 8L), secondIngress.advances);
+        source = second;
+    }
+
+    @Test void exclusiveTenantProfileFolderLeaseRefusesSharedOwnerThenCleansUp() {
+        var first = source(new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner()),
+                configuration(Map.of("resourceMode", "exclusive")), ignored -> secret());
         first.start(new ImapConsumerTestSupport.Context(new ImapConsumerTestSupport.Ingress()))
                 .toCompletableFuture().join();
         AtomicInteger credential = new AtomicInteger();
@@ -638,7 +669,26 @@ class MailImapConsumeContractTest {
         assertEquals(0, secondProtocol.openCalls.get());
         assertTrue(context.degraded.contains("imap-consumer-already-active"));
         first.stop().toCompletableFuture().join();
+        second.start(context).toCompletableFuture().join();
+        assertEquals(1, credential.get());
+        assertEquals(1, secondProtocol.openCalls.get());
         source = second;
+    }
+
+    @Test void failedExclusiveStartupReleasesTheFolderForASuccessor() {
+        var failed = source(new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner()),
+                configuration(Map.of("resourceMode", "exclusive")), ignored -> Optional.empty());
+        var failedContext = new ImapConsumerTestSupport.Context(new ImapConsumerTestSupport.Ingress());
+        assertThrows(CompletionException.class, () -> failed.start(failedContext).toCompletableFuture().join());
+        assertTrue(failedContext.degraded.contains("credential-unavailable"));
+
+        var successorProtocol = new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner());
+        var successor = source(successorProtocol, configuration(Map.of("resourceMode", "exclusive")),
+                ignored -> secret());
+        successor.start(new ImapConsumerTestSupport.Context(new ImapConsumerTestSupport.Ingress()))
+                .toCompletableFuture().join();
+        assertEquals(1, successorProtocol.openCalls.get());
+        source = successor;
     }
 
     @Test void uidValidityChangeAcrossRestartRefusesBeforeReady() {

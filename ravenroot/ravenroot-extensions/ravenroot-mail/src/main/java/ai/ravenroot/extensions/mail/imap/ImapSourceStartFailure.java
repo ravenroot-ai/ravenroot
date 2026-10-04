@@ -39,6 +39,7 @@ enum ImapSourceStartFailure implements SourceStartFailureCode {
     INVALID_POLL_INTERVAL("invalid-poll-interval"),
     INVALID_PREVIEW_CHARS("invalid-preview-chars"),
     INVALID_RETRY_BACKOFF("invalid-retry-backoff"),
+    INVALID_RESOURCE_MODE("invalid-resource-mode"),
     STARTUP_CANCELLED("startup-cancelled"),
     UNKNOWN_GRAPH_PROPERTY("unknown-graph-property");
 

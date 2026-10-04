@@ -121,6 +121,7 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `poisonPolicy` | Poison policy | Not declared | `STRING` | false | profile | profile,dead-letter | false | Not declared | Not declared | Not declared |
 | `deadLetterMode` | Dead-letter mode | Confirms broker DLX rejection; topology remains operator-owned. | `STRING` | false | Not declared | broker-dlx | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
 | `checkpointPolicy` | Checkpoint policy | Not declared | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
+| `resourceMode` | Resource mode | Shared allows independent sources to consume the authorized queue. Exclusive permits only one process-local source for the tenant, profile and queue. | `STRING` | false | shared | shared,exclusive | false | Not declared | Not declared | Not declared |
 
 ## `amqp.publish` {#node-amqp-publish}
 
@@ -846,6 +847,7 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `previewChars` | Preview characters | Tightening-only text and HTML preview bound. | `INTEGER` | false | Not declared | Not declared | false | contentMode:EQUALS:preview | contentMode:EQUALS:preview | Not declared |
 | `allowedHeaders` | Allowed headers | Optional comma-separated tightening of the operator-authorized inbound header allowlist. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `checkpointPolicy` | Checkpoint policy | Only durable checkpointing is supported. | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
+| `resourceMode` | Resource mode | Shared allows independent sources to consume the authorized folder. Exclusive permits only one process-local source for the tenant, profile and folder. | `STRING` | false | shared | shared,exclusive | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.delete` {#node-mail-imap-delete}
 

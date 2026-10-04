@@ -31,6 +31,7 @@ class AmqpConsumeContractTest {
                 "invalid-checkpoint-policy", "invalid-dead-letter-mode", "invalid-drain-timeout",
                 "invalid-max-in-flight", "invalid-max-retry-backoff", "invalid-poison-attempts",
                 "invalid-poison-policy", "invalid-prefetch", "invalid-retry-backoff",
+                "invalid-resource-mode",
                 "poison-policy-forbidden", "queue-not-authorized", "startup-cancelled",
                 "unknown-graph-property");
         assertEquals(expected, AmqpSourceStartFailure.codes());
@@ -54,6 +55,9 @@ class AmqpConsumeContractTest {
         assertEquals("poisonPolicy", deadLetter.visibleWhen().property());
         assertEquals(java.util.List.of("dead-letter"), deadLetter.visibleWhen().values());
         assertEquals(deadLetter.visibleWhen(), deadLetter.requiredWhen());
+        var resourceMode = properties.stream().filter(p -> p.name().equals("resourceMode")).findFirst().orElseThrow();
+        assertEquals("shared", resourceMode.defaultValue());
+        assertEquals(java.util.List.of("shared", "exclusive"), resourceMode.allowedValues());
         assertTrue(descriptor.capabilities().containsAll(java.util.Set.of(
                 "network", "credential-reference", "inbound-source")));
         assertFalse(properties.stream().map(p -> p.name()).anyMatch(
@@ -145,10 +149,33 @@ class AmqpConsumeContractTest {
     }
 
     @Test
-    void processLocalQueueLeaseRefusesASecondActiveConsumerBeforeCredentialOrOpen() {
+    void defaultSharedModeAllowsTwoActiveConsumersAndStoppingOneLeavesTheOtherLive() {
+        var firstOwner = new AmqpConsumerTestSupport.FakeOwner();
+        var first = source(new AmqpConsumerTestSupport.FakeProtocol(firstOwner),
+                AmqpConsumerTestSupport.policy(), configuration(Map.of()), ignored -> secret());
+        first.start(new AmqpConsumerTestSupport.Context(new AmqpConsumerTestSupport.Ingress()))
+                .toCompletableFuture().join();
+        var secondOwner = new AmqpConsumerTestSupport.FakeOwner();
+        var secondIngress = new AmqpConsumerTestSupport.Ingress();
+        var second = source(new AmqpConsumerTestSupport.FakeProtocol(secondOwner),
+                AmqpConsumerTestSupport.policy(), configuration(Map.of()), ignored -> secret());
+        second.start(new AmqpConsumerTestSupport.Context(secondIngress)).toCompletableFuture().join();
+
+        first.stop().toCompletableFuture().join();
+        secondOwner.deliver(AmqpConsumerTestSupport.delivery(23, "second-still-live", false));
+        AmqpConsumerTestSupport.await(secondOwner.acked);
+
+        assertEquals(java.util.List.of(23L), secondOwner.acks);
+        assertEquals("second-still-live", secondIngress.payloads.getFirst().get("messageId"));
+        source = second;
+    }
+
+    @Test
+    void exclusiveQueueLeaseRefusesASharedConsumerBeforeCredentialOrOpenThenCleansUp() {
         var firstOwner = new AmqpConsumerTestSupport.FakeOwner();
         var firstProtocol = new AmqpConsumerTestSupport.FakeProtocol(firstOwner);
-        var first = source(firstProtocol, AmqpConsumerTestSupport.policy(), configuration(Map.of()), ignored -> secret());
+        var first = source(firstProtocol, AmqpConsumerTestSupport.policy(),
+                configuration(Map.of("resourceMode", "exclusive")), ignored -> secret());
         first.start(new AmqpConsumerTestSupport.Context(new AmqpConsumerTestSupport.Ingress()))
                 .toCompletableFuture().join();
         var secondProtocol = new AmqpConsumerTestSupport.FakeProtocol(new AmqpConsumerTestSupport.FakeOwner());
@@ -166,7 +193,28 @@ class AmqpConsumeContractTest {
         assertTrue(secondContext.degraded.contains("amqp-consumer-already-active"));
 
         first.stop().toCompletableFuture().join();
+        second.start(secondContext).toCompletableFuture().join();
+        assertEquals(1, secondCredentials.get());
+        assertEquals(1, secondProtocol.openCalls.get());
         source = second;
+    }
+
+    @Test
+    void failedExclusiveStartupReleasesTheQueueForASuccessor() {
+        var failed = source(new AmqpConsumerTestSupport.FakeProtocol(new AmqpConsumerTestSupport.FakeOwner()),
+                AmqpConsumerTestSupport.policy(), configuration(Map.of("resourceMode", "exclusive")),
+                ignored -> Optional.empty());
+        var failedContext = new AmqpConsumerTestSupport.Context(new AmqpConsumerTestSupport.Ingress());
+        assertThrows(CompletionException.class, () -> failed.start(failedContext).toCompletableFuture().join());
+        assertTrue(failedContext.degraded.contains("credential-unavailable"));
+
+        var successorProtocol = new AmqpConsumerTestSupport.FakeProtocol(new AmqpConsumerTestSupport.FakeOwner());
+        var successor = source(successorProtocol, AmqpConsumerTestSupport.policy(),
+                configuration(Map.of("resourceMode", "exclusive")), ignored -> secret());
+        successor.start(new AmqpConsumerTestSupport.Context(new AmqpConsumerTestSupport.Ingress()))
+                .toCompletableFuture().join();
+        assertEquals(1, successorProtocol.openCalls.get());
+        source = successor;
     }
 
     @Test

@@ -135,6 +135,8 @@
       url: /reference/core-nodes.html
     - title: Node descriptor contracts
       url: /reference/node-contracts.html
+    - title: First-party source multiplicity
+      url: /reference/source-multiplicity.html
     - title: Operational coverage inventory
       url: /reference/coverage-inventory.html
     - title: Durable human tasks

@@ -5,6 +5,7 @@ import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionManifestStore;
 import ai.ravenroot.api.persistence.GraphDefinitionStore;
+import ai.ravenroot.api.activity.ActivityArchive;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
 import ai.ravenroot.core.graph.GraphMlLimits;
@@ -19,6 +20,9 @@ import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
 import ai.ravenroot.persistence.sqlite.SqliteDeploymentRegistry;
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
 import ai.ravenroot.persistence.sqlite.SqliteStoreMaintenanceLock;
+import ai.ravenroot.persistence.sqlite.SqliteActivityArchive;
+import ai.ravenroot.persistence.postgresql.PostgresActivityArchive;
+import ai.ravenroot.server.activity.ActivityCaptureConfiguration;
 
 import java.time.Clock;
 import java.util.Objects;
@@ -84,18 +88,32 @@ public final class ExecutionStoreBootstrap {
     public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
                                    GraphMlLimits graphMlLimits,
                                    ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        return openOwned(configuration, clock, graphMlLimits, humanTaskPolicy,
+                new ActivityCaptureConfiguration(
+                        ai.ravenroot.api.activity.ActivityCapturePolicy.DISABLED,
+                        ActivityCaptureConfiguration.DEFAULT_MAX_PAGE_SIZE));
+    }
+
+    /** Opens the execution stores and, when selected, the separate activity archive in the same DB. */
+    public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
+                                   GraphMlLimits graphMlLimits,
+                                   ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                   ActivityCaptureConfiguration activityConfiguration) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(graphMlLimits, "graphMlLimits");
         Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        Objects.requireNonNull(activityConfiguration, "activityConfiguration");
         try {
             return switch (configuration) {
                 case ExecutionStoreConfiguration.Disabled disabled ->
-                        openSingleHost(disabled.location(), false, clock, graphMlLimits, humanTaskPolicy);
+                        openSingleHost(disabled.location(), false, clock, graphMlLimits, humanTaskPolicy,
+                                activityConfiguration);
                 case ExecutionStoreConfiguration.SingleHost singleHost ->
-                        openSingleHost(singleHost.location(), true, clock, graphMlLimits, humanTaskPolicy);
+                        openSingleHost(singleHost.location(), true, clock, graphMlLimits, humanTaskPolicy,
+                                activityConfiguration);
                 case ExecutionStoreConfiguration.Shared shared ->
-                        openShared(shared, clock, graphMlLimits, humanTaskPolicy);
+                        openShared(shared, clock, graphMlLimits, humanTaskPolicy, activityConfiguration);
             };
         } catch (RuntimeException failed) {
             throw new StartupException(classify(failed));
@@ -104,7 +122,8 @@ public final class ExecutionStoreBootstrap {
 
     private static Opened openSingleHost(SqliteStoreLocation location, boolean enabled, Clock clock,
                                          GraphMlLimits graphMlLimits,
-                                         ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+                                         ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                         ActivityCaptureConfiguration activityConfiguration) {
         // Preserve the adapter's useful location classification before the maintenance API
         // deliberately reduces its own diagnostics to path-free lock failures.
         location.prepare();
@@ -112,7 +131,10 @@ public final class ExecutionStoreBootstrap {
         try {
             SqliteStoreMaintenanceLock.requireNoPendingRecovery(location);
             if (!enabled) {
-                return new Opened(null, null, null, null, () -> { }, maintenanceLock::close);
+                ActivityArchive activity = activityConfiguration.policy().enabled()
+                        ? new SqliteActivityArchive(location, clock, activityConfiguration.maxPageSize()) : null;
+                return new Opened(null, null, null, null, activity,
+                        activity == null ? () -> { } : activity::close, maintenanceLock::close);
             }
             var store = new SqliteExecutionStore(location, clock,
                     ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), humanTaskPolicy);
@@ -164,8 +186,16 @@ public final class ExecutionStoreBootstrap {
                 }
                 throw failed;
             }
-            return new Opened(store, definitions, manifests, deployments,
-                    closeInOrder(store, definitions, manifests, deployments), maintenanceLock::close);
+            ActivityArchive activity;
+            try {
+                activity = activityConfiguration.policy().enabled()
+                        ? new SqliteActivityArchive(location, clock, activityConfiguration.maxPageSize()) : null;
+            } catch (RuntimeException failed) {
+                closeInOrder(store, definitions, manifests, deployments, null).run();
+                throw failed;
+            }
+            return new Opened(store, definitions, manifests, deployments, activity,
+                    closeInOrder(store, definitions, manifests, deployments, activity), maintenanceLock::close);
         } catch (RuntimeException failed) {
             maintenanceLock.close();
             throw failed;
@@ -191,7 +221,8 @@ public final class ExecutionStoreBootstrap {
      */
     private static Opened openShared(ExecutionStoreConfiguration.Shared configuration, Clock clock,
                                      GraphMlLimits graphMlLimits,
-                                     ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+                                     ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                     ActivityCaptureConfiguration activityConfiguration) {
         SharedStoreConnection connection = configuration.connection();
         PostgresStoreConfig storeConfig = configuration.storeConfig();
         var pool = SharedExecutionStoreDataSource.open(connection);
@@ -236,13 +267,22 @@ public final class ExecutionStoreBootstrap {
                 }
                 throw failed;
             }
+            ActivityArchive activity;
+            try {
+                activity = activityConfiguration.policy().enabled()
+                        ? new PostgresActivityArchive(pool.dataSource(), clock,
+                                activityConfiguration.maxPageSize()) : null;
+            } catch (RuntimeException failed) {
+                closeInOrder(store, definitions, manifests, deployments, null).run();
+                throw failed;
+            }
             // The pool takes the maintenance lease's slot in the owner, and for the same structural
             // reason that slot exists: it is the process-wide resource every store is built on, so it
             // must be released strictly after all three of them. It is not a maintenance lease and
             // excludes nobody — see this class's own explanation of why the shared store must not
             // have one.
-            return new Opened(store, definitions, manifests, deployments,
-                    closeInOrder(store, definitions, manifests, deployments), pool::close);
+            return new Opened(store, definitions, manifests, deployments, activity,
+                    closeInOrder(store, definitions, manifests, deployments, activity), pool::close);
         } catch (RuntimeException failed) {
             pool.close();
             throw failed;
@@ -252,18 +292,22 @@ public final class ExecutionStoreBootstrap {
     /** Manifests first, then definitions, then the execution store: nothing observes a released backing store. */
     private static Runnable closeInOrder(ExecutionStore store, GraphDefinitionStore definitions,
                                          ExecutionManifestStore manifests,
-                                         DeploymentRegistry deployments) {
+                                         DeploymentRegistry deployments, ActivityArchive activity) {
         return () -> {
             try {
-                deployments.close();
+                if (activity != null) activity.close();
             } finally {
                 try {
-                    manifests.close();
+                    deployments.close();
                 } finally {
                     try {
-                        definitions.close();
+                        manifests.close();
                     } finally {
-                        store.close();
+                        try {
+                            definitions.close();
+                        } finally {
+                            store.close();
+                        }
                     }
                 }
             }
@@ -305,6 +349,7 @@ public final class ExecutionStoreBootstrap {
         private final GraphDefinitionStore graphDefinitionStore;
         private final ExecutionManifestStore executionManifestStore;
         private final DeploymentRegistry deploymentRegistry;
+        private final ActivityArchive activityArchive;
         private final Runnable closeStore;
         private final Runnable releaseBackingResource;
         private final AtomicBoolean closed = new AtomicBoolean();
@@ -312,18 +357,20 @@ public final class ExecutionStoreBootstrap {
         private Opened(ExecutionStore store, GraphDefinitionStore graphDefinitionStore,
                        ExecutionManifestStore executionManifestStore,
                        DeploymentRegistry deploymentRegistry,
+                       ActivityArchive activityArchive,
                        Runnable closeStore, Runnable releaseBackingResource) {
             this.store = store;
             this.graphDefinitionStore = graphDefinitionStore;
             this.executionManifestStore = executionManifestStore;
             this.deploymentRegistry = deploymentRegistry;
+            this.activityArchive = activityArchive;
             this.closeStore = Objects.requireNonNull(closeStore, "closeStore");
             this.releaseBackingResource = Objects.requireNonNull(
                     releaseBackingResource, "releaseBackingResource");
         }
 
         static Opened forTest(Runnable closeStore, Runnable releaseBackingResource) {
-            return new Opened(null, null, null, null, closeStore, releaseBackingResource);
+            return new Opened(null, null, null, null, null, closeStore, releaseBackingResource);
         }
 
         public ExecutionStore store() {
@@ -355,6 +402,11 @@ public final class ExecutionStoreBootstrap {
         /** Shared durable lifecycle authority, absent only when persistence is disabled. */
         public DeploymentRegistry deploymentRegistry() {
             return deploymentRegistry;
+        }
+
+        /** Optional content archive; it is separate from the execution event journal. */
+        public ActivityArchive activityArchive() {
+            return activityArchive;
         }
 
         /**

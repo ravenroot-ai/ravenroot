@@ -23,6 +23,18 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Explicit behavior composition; no reflection and no dependency-injection container. */
 public final class BehaviorRegistry {
     private ai.ravenroot.core.runner.RunnerJobService runnerJobs;
+    private ai.ravenroot.core.activity.ActivityCapture activityCapture =
+            ai.ravenroot.core.activity.ActivityCapture.disabled();
+
+    /** Installs one process-owned activity archive boundary before any runner is built. */
+    public BehaviorRegistry withActivityCapture(ai.ravenroot.core.activity.ActivityCapture capture) {
+        if (activityCapture.enabled()) throw new IllegalStateException("activity capture already configured");
+        activityCapture = java.util.Objects.requireNonNull(capture, "capture");
+        return this;
+    }
+
+    /** Activity capture selected by the embedding composition root. */
+    public ai.ravenroot.core.activity.ActivityCapture activityCapture() { return activityCapture; }
 
     /** Explicit composition opt-in; existing bounded Agent and embedding behavior remain unchanged. */
     public BehaviorRegistry withRunnerJobs(ai.ravenroot.core.runner.RunnerJobService service) {

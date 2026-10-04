@@ -2126,12 +2126,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(97, len(details))
+            self.assertEqual(98, len(details))
             self.assertEqual(
-                {"methods": 107, "path": 97, "summary": 428, "successStatuses": 99},
+                {"methods": 108, "path": 98, "summary": 432, "successStatuses": 100},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(731, len(entries))
+            self.assertEqual(738, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4237,6 +4237,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -4480,7 +4481,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 428 |",
+                "| Retained published contract descriptions | 432 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4488,7 +4489,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 427 |",
+                "| Retained published contract descriptions | 431 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6251,6 +6252,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
@@ -6445,6 +6447,55 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
         self.assertIsNone(audit.ai_operational_authority_from_source(ROOT, changed))
 
 
+class ActivityCapturePolicyAuditTest(unittest.TestCase):
+    def test_source_derived_authority_rejects_unknown_defaults_bounds_and_wiring(self) -> None:
+        paths = tuple(audit.ACTIVITY_CAPTURE_SOURCE_PROOFS)
+        with synthetic_repository() as location:
+            root = Path(location)
+            for relative in paths:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, destination)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+            authority = audit.activity_capture_authority_from_source(root, discovered)
+            self.assertIsNotNone(authority)
+            self.assertEqual(10, len(authority["contracts"]))
+            self.assertEqual(len(authority["candidateIds"]), len(set(authority["candidateIds"])))
+            values_path = audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix()
+            schema_path = audit.ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix()
+            values_candidates = [discovered[identifier] for identifier in authority["candidateIds"]
+                                 if discovered[identifier].path == values_path]
+            schema_candidates = [discovered[identifier] for identifier in authority["candidateIds"]
+                                 if discovered[identifier].path == schema_path]
+            self.assertTrue(values_candidates)
+            self.assertTrue(schema_candidates)
+            self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
+            self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
+            self.assertTrue(all(candidate.role.startswith("activityCapture.")
+                                for candidate in values_candidates + schema_candidates
+                                if candidate.kind == "configuration-scalar"))
+
+            mutations = (
+                (audit.ACTIVITY_CAPTURE_CONFIGURATION_PATH, '"65536"', '"65537"'),
+                (audit.ACTIVITY_CAPTURE_POLICY_PATH, "10_000", "10_001"),
+                (audit.ACTIVITY_CAPTURE_CARRIER_PATHS[3],
+                 "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS",
+                 "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_TYPO"),
+                (audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1],
+                 "activityCapture:\n", "activityCapture:\n  unknownSetting: 1\n"),
+            )
+            for relative, before, after in mutations:
+                path = root / relative
+                original = path.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                with self.subTest(path=relative, mutation=after):
+                    self.assertIsNone(
+                        audit.activity_capture_authority_from_source(root, discovered))
+                path.write_text(original, encoding="utf-8")
+
+
 class ProgramGithubPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -6494,6 +6545,25 @@ class ProgramGithubPolicyAuditTest(unittest.TestCase):
         self.assertEqual(set(all_ids), audit.program_github_policy_cohort_candidate_ids(self.root, self.discovered))
         self.assertEqual([], audit.program_github_policy_authority_errors(self.root,
             {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority}, self.entries, self.discovered))
+
+    def test_program_github_schema_boundary_leaves_object_type_atoms_to_helm(self) -> None:
+        schema_path = audit.PROGRAM_GITHUB_PATHS["helmSchema"]
+        schema_source = (self.root / schema_path).read_text(encoding="utf-8")
+        span = audit.json_value_spans(schema_source)[("properties", "programAuthoring")]
+        first_line = audit.line_number(schema_source, span[0])
+        last_line = audit.line_number(schema_source, span[1] - 1)
+        candidates = [candidate for candidate in self.candidates
+                      if candidate.path == schema_path
+                      and first_line <= candidate.line <= last_line]
+        structural_types = [candidate for candidate in candidates if candidate.role == "type"]
+        required = [candidate for candidate in candidates if candidate.role == "required"]
+
+        self.assertTrue(structural_types)
+        self.assertTrue(required)
+        self.assertFalse(any(audit.program_github_deployment_candidate(self.root, candidate)
+                             for candidate in structural_types))
+        self.assertTrue(all(audit.program_github_deployment_candidate(self.root, candidate)
+                            for candidate in required))
 
     def test_program_github_missing_markers_whole_family_or_scanner_blind_contract_cannot_opt_out(self) -> None:
         for authorities in (None, {}, {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: {}}):

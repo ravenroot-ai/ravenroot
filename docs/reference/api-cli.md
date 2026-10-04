@@ -13,6 +13,7 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/node-types` | Effective node catalog |
 | `POST /v1/graphs/inspect?purpose=EXECUTION\|LOCAL_DEPLOYMENT\|SOURCE_SESSION` | Validate the exact GraphML bytes without executing them. A parsed but inadmissible graph remains HTTP 200 with `valid:false` and one `ravenroot.graph-admission/1` finding; malformed GraphML remains an error response carrying the same safe finding shape. |
 | `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget and the authenticated principal's exact opaque `workspace.tenantId` |
+| `GET /v1/activity` | Read the optional tenant-scoped durable node-content archive after an incremental cursor; requires `EXECUTION_READ` and reports retention gaps explicitly |
 | `POST /v1/drain` | Stop admission and drain accepted work |
 
 ## Deployment lifecycle

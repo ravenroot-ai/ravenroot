@@ -567,7 +567,7 @@
                             <groups>
                                 <group>
                                     <title>Application and execution</title>
-                                    <packages>ai.ravenroot.api.application*:ai.ravenroot.api.execution*:ai.ravenroot.api.catalog*:ai.ravenroot.api.payload*:ai.ravenroot.api.error*</packages>
+                                    <packages>ai.ravenroot.api.activity*:ai.ravenroot.api.application*:ai.ravenroot.api.execution*:ai.ravenroot.api.catalog*:ai.ravenroot.api.payload*:ai.ravenroot.api.error*</packages>
                                 </group>
                                 <group>
                                     <title>Node SDK and integrations</title>

@@ -799,6 +799,7 @@ public final class RavenrootServer implements AutoCloseable {
         // every other suffix. This is the opposite choice from /v1/executions/{id}, which must be
         // dispatched inside its parent because {id} is a variable segment that cannot be a context.
         apiContext("/v1/events/recent", this::recentExecutionEvents);
+        apiContext("/v1/activity", this::activity);
         // ADR 0025. Two contexts, not one with internal dispatch: the JDK HttpServer matches by
         // longest prefix, so "/v1/assistant/messages" reaches its own handler while "/v1/assistant"
         // keeps the shorter path -- and both are then table-driven and CORS-preflighted individually,
@@ -5589,6 +5590,108 @@ public final class RavenrootServer implements AutoCloseable {
                     + "\",\"retryability\":\"" + escape(String.valueOf(storeFailure.retryability())) + "\"}");
             fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
         }
+    }
+
+    /** Bounded incremental reads from the optional content archive, always scoped by authentication. */
+    private void activity(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) return;
+        if (!authorizedApplication.activityArchiveAvailable()) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        Map<String, String> parameters = query(exchange);
+        Set<String> allowed = Set.of("after", "limit", "processInstanceId", "traversalId", "nodeId",
+                "invocationId", "attemptId", "content");
+        if (!allowed.containsAll(parameters.keySet())) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            long after = parameters.containsKey("after")
+                    ? Long.parseLong(parameters.get("after")) : 0L;
+            int limit = parameters.containsKey("limit")
+                    ? Integer.parseInt(parameters.get("limit"))
+                    : Math.min(100, authorizedApplication.activityArchiveMaxPageSize());
+            if (after < 0 || limit < 1 || limit > authorizedApplication.activityArchiveMaxPageSize()) {
+                throw new IllegalArgumentException();
+            }
+            var kinds = java.util.EnumSet.noneOf(ai.ravenroot.api.activity.ActivityContentKind.class);
+            String selected = parameters.get("content");
+            if (selected != null && !selected.isBlank()) {
+                for (String value : selected.split(",")) {
+                    kinds.add(ai.ravenroot.api.activity.ActivityContentKind.valueOf(
+                            value.trim().toUpperCase(java.util.Locale.ROOT)));
+                }
+            }
+            var activityQuery = new ai.ravenroot.api.activity.ActivityQuery(after, limit,
+                    uuidParameter(parameters, "processInstanceId"), uuidParameter(parameters, "traversalId"),
+                    parameters.get("nodeId"), uuidParameter(parameters, "invocationId"),
+                    uuidParameter(parameters, "attemptId"), kinds);
+            var page = authorizedApplication.activityAfter(httpContext.applicationContext(), activityQuery);
+            json(exchange, 200, activityJson(page));
+        } catch (ai.ravenroot.api.activity.ActivityArchiveException failure) {
+            switch (failure.reason()) {
+                case CURSOR_EXPIRED -> json(exchange, 200, "{\"gap\":true,\"nextCursor\":"
+                        + (failure.retainedFromCursor() - 1) + ",\"retainedFromCursor\":"
+                        + failure.retainedFromCursor() + ",\"records\":[]}");
+                case INVALID_REQUEST -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                case UNAVAILABLE -> fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
+                case CONFLICT -> fail(exchange, httpContext, ErrorCode.CONFLICT);
+            }
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    private static java.util.UUID uuidParameter(Map<String, String> parameters, String name) {
+        String value = parameters.get(name);
+        return value == null ? null : java.util.UUID.fromString(value);
+    }
+
+    private static String activityJson(ai.ravenroot.api.activity.ActivityPage page) {
+        var json = new StringBuilder(512).append("{\"gap\":false,\"nextCursor\":").append(page.nextCursor())
+                .append(",\"retainedFromCursor\":").append(page.retainedFromCursor())
+                .append(",\"records\":[");
+        for (int index = 0; index < page.records().size(); index++) {
+            if (index > 0) json.append(',');
+            var record = page.records().get(index);
+            var event = record.event();
+            json.append("{\"cursor\":").append(record.cursor())
+                    .append(",\"eventId\":\"").append(escape(event.eventId()))
+                    .append("\",\"graphId\":\"").append(escape(event.graphId()))
+                    .append("\",\"graphVersion\":\"").append(escape(event.graphVersion()))
+                    .append("\",\"graphHash\":\"").append(escape(event.graphHash()))
+                    .append("\",\"processInstanceId\":\"").append(event.processInstanceId())
+                    .append("\",\"traversalId\":\"").append(event.traversalId())
+                    .append("\",\"nodeId\":\"").append(escape(event.nodeId()))
+                    .append("\",\"invocationId\":\"").append(event.invocationId())
+                    .append("\",\"attemptId\":\"").append(event.attemptId())
+                    .append("\",\"attemptOrdinal\":").append(event.attemptOrdinal())
+                    .append(",\"contentKind\":\"").append(event.contentKind())
+                    .append("\",\"command\":\"").append(escape(event.command()))
+                    .append("\",\"outcome\":")
+                    .append(event.outcome() == null ? "null" : "\"" + escape(event.outcome()) + "\"")
+                    .append(",\"occurredAt\":\"").append(event.occurredAt())
+                    .append("\",\"expiresAt\":\"").append(event.expiresAt())
+                    .append("\",\"journalCausationId\":")
+                    .append(event.journalCausationId() == null ? "null"
+                            : "\"" + event.journalCausationId() + "\"")
+                    .append(",\"causationActivityId\":")
+                    .append(event.causationActivityId() == null ? "null"
+                            : "\"" + event.causationActivityId() + "\"")
+                    .append(",\"parentInvocationIds\":[");
+            var parents = event.parentInvocationIds().stream()
+                    .sorted(java.util.Comparator.comparing(java.util.UUID::toString)).toList();
+            for (int parent = 0; parent < parents.size(); parent++) {
+                if (parent > 0) json.append(',');
+                json.append('"').append(parents.get(parent)).append('"');
+            }
+            json.append("],\"contentType\":\"").append(escape(event.content().contentType()))
+                    .append("\",\"content\":")
+                    .append(new String(event.content().bytes(), java.nio.charset.StandardCharsets.UTF_8))
+                    .append('}');
+        }
+        return json.append("]}").toString();
     }
 
     /**

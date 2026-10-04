@@ -106,6 +106,8 @@ public final class RavenrootServerMain {
         // second process is the guarantee it exists to remove. See ExecutionStoreBootstrap.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
                 .fromSystem(System.getProperties(), System.getenv());
+        var activityCaptureConfiguration = ai.ravenroot.server.activity.ActivityCaptureConfiguration
+                .fromSystem(System.getProperties(), System.getenv());
         // Every combination of replica count, store selection and still-per-replica authority that
         // this build cannot honour, refused before anything durable is opened. Evaluated here rather
         // than beside the embed check at the top of run because it needs the parsed store selection,
@@ -117,7 +119,7 @@ public final class RavenrootServerMain {
                 .ExecutionOwnershipConfiguration.fromSystem(System.getProperties(), System.getenv());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
-                humanTaskPolicy);
+                humanTaskPolicy, activityCaptureConfiguration);
         try (var startupGuard = executionStoreOwner.startupGuard()) {
         ai.ravenroot.api.persistence.ExecutionStore managedExecutionStore = executionStoreOwner.store() == null
                 ? null : ai.ravenroot.server.persistence.ManagedExecutionStore.protect(
@@ -229,6 +231,10 @@ public final class RavenrootServerMain {
                 toolApprovals, toolApprovalSettings, agentBudgets, humanTasks, humanTaskPolicy);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
+        if (activityCaptureConfiguration.policy().enabled()) {
+            behaviors.withActivityCapture(new ai.ravenroot.core.activity.ActivityCapture(
+                    activityCaptureConfiguration.policy(), executionStoreOwner.activityArchive()));
+        }
         // Validate all enabled package declarations before either application deployment state or the
         // HTTP listener exists. This process has no distributed lease coordinator, so replicas >1
         // are refused by configuration instead of pretending process memory coordinates pods.

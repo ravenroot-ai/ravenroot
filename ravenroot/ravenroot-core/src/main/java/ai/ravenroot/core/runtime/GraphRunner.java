@@ -132,6 +132,7 @@ public final class GraphRunner implements AutoCloseable {
      */
     private final java.util.function.BiFunction<String, RavenNode, NodeRef> spawner;
     private final BehaviorRegistry behaviors;
+    private final ai.ravenroot.core.activity.ActivityCapture activityCapture;
     private final ExecutionMonitor monitor;
     private final ExecutionIdentitySource identitySource;
     private final Duration shutdownBound;
@@ -876,6 +877,7 @@ public final class GraphRunner implements AutoCloseable {
                 : requireDescribes(snapshot, submitted);
         this.graph = pinned.definition();
         this.behaviors = java.util.Objects.requireNonNull(behaviors, "behaviors");
+        this.activityCapture = behaviors.activityCapture();
         this.executionScopedExternalIo = executionScopedExternalIo;
         this.completedHumanTaskNode = validateCompletedHumanTaskNode(this.graph, completedHumanTaskNode);
         validateGraphAdmission(this.graph, this.behaviors, executionPolicy, this.executionLimits,
@@ -1285,10 +1287,12 @@ public final class GraphRunner implements AutoCloseable {
                 NodeCommand.PROCESS, state.traversalAcceptedEventId());
         NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
                 invocationId, attemptId, Set.of(), node.id(), null, Map.of(), NodeCommand.PROCESS);
+        var captureContext = activityContext(identity, delivered, FIRST_ATTEMPT_ORDINAL, startedEventId);
         CompletionStage<ToolCallContinuationResult> resumed;
         try {
-            resumed = java.util.Objects.requireNonNull(action.resume(inputFactory.apply(delivered)),
-                    "continuation result stage");
+            resumed = activityCapture.input(captureContext, delivered).thenCompose(ignored ->
+                    java.util.Objects.requireNonNull(action.resume(inputFactory.apply(delivered)),
+                            "continuation result stage"));
         } catch (RuntimeException failure) {
             resumed = CompletableFuture.failedFuture(failure);
         }
@@ -1314,9 +1318,17 @@ public final class GraphRunner implements AutoCloseable {
                         state.nodeFailed(invocationId, attemptId, startedEventId);
                         throw new CompletionException(cause);
                     }
+                    NodeResult result = markSyntheticProvenance(node, delivered, rawResult);
+                    try {
+                        activityCapture.output(captureContext, result).toCompletableFuture().join();
+                    } catch (RuntimeException captureFailure) {
+                        Throwable explicit = unwrap(captureFailure);
+                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        monitor.nodeFailed(identity, node.id(), invocationId, attemptId, explicit, 0);
+                        throw new CompletionException(explicit);
+                    }
                     UUID completedEventId = state.nodeCompleted(
                             invocationId, attemptId, startedEventId, false, false);
-                    NodeResult result = markSyntheticProvenance(node, delivered, rawResult);
                     resumedHop.close();
                     List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
                     if (next.isEmpty() && !"continue".equals(result.outcome())) {
@@ -1505,14 +1517,35 @@ public final class GraphRunner implements AutoCloseable {
         if (existingAttemptId == null) monitor.nodeStarted(identity, node.id(), invocationId, attemptId, 0);
         UUID runnerCompletedEventId = existingAttemptId == null ? null : UUID.nameUUIDFromBytes(
                 ("runner-node-completed:" + existingAttemptId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        UUID completedEventId = runnerAlreadyCompleted ? runnerCompletedEventId
-                : state.nodeCompleted(invocationId, attemptId, startedEventId, false, false, runnerCompletedEventId);
-        monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false,
-                result.outcome(), 0, null);
         NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
                 invocationId, attemptId, Set.copyOf(reentryParents), node.id(), result.payload(), result.attributes(),
                 existingAttemptId == null ? NodeCommand.PROCESS
                         : storedLifecycle.traversals().get(traversalId).invocations().get(invocationId).command());
+        int captureAttemptOrdinal = existingAttemptId == null ? FIRST_ATTEMPT_ORDINAL
+                : attemptOrdinal(storedLifecycle.traversals().get(traversalId)
+                        .invocations().get(invocationId), existingAttemptId);
+        var captureContext = activityContext(identity, delivered, captureAttemptOrdinal, startedEventId);
+        try {
+            activityCapture.output(captureContext, result).toCompletableFuture().join();
+        } catch (RuntimeException captureFailure) {
+            Throwable explicit = unwrap(captureFailure);
+            if (existingAttemptId == null) {
+                state.nodeFailed(invocationId, attemptId, startedEventId);
+                monitor.nodeFailed(identity, node.id(), invocationId, attemptId, explicit, 0);
+            }
+            state.beginClosing();
+            beginClosing(traversalId);
+            cancelBackoffs(traversalId);
+            state.executionFailed(ExecutionTermination.reasonOf(explicit));
+            publishTermination(identity, explicit);
+            resumedHop.close();
+            release(traversalId, coordinator).toCompletableFuture().join();
+            return CompletableFuture.failedFuture(explicit);
+        }
+        UUID completedEventId = runnerAlreadyCompleted ? runnerCompletedEventId
+                : state.nodeCompleted(invocationId, attemptId, startedEventId, false, false, runnerCompletedEventId);
+        monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false,
+                result.outcome(), 0, null);
         List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
         if (next.isEmpty() && !"continue".equals(result.outcome())) {
             next = graph.nextEdges(node.id(), "continue");
@@ -2804,6 +2837,7 @@ public final class GraphRunner implements AutoCloseable {
         NodeMessage delivered = new NodeMessage(identity.security(), identity.processInstanceId(),
                 identity.traversalId(), invocationId, attemptId, parentInvocationIds, node.id(), payload, attributes,
                 command);
+        var captureContext = activityContext(identity, delivered, attemptOrdinal, startedEventId);
         if (("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null) {
             behaviors.runnerJobs().bindLive(attemptId, state.recorder, this, startedEventId);
         }
@@ -2853,25 +2887,32 @@ public final class GraphRunner implements AutoCloseable {
         // OTHER instances of this node are alive, not this one.
         monitor.nodeStarted(identity, node.id(), invocationId, attemptId,
                 liveInstances(node.id(), definition.nature()), attemptOrdinal);
-        try {
-            if (creationFailed != null) {
-                throw creationFailed;
-            }
-            if (definition.nature() == NodeRuntimeNature.WORKER) {
-                attempt = engine.send(acquired.ref(), delivered);
-            } else if (definition.nature() == NodeRuntimeNature.TRAVERSAL) {
-                attempt = engine.send(traversalInstance.ref(), delivered);
-            } else {
-                // A nature that is resident by contract keeps one actor, addressed by node id and
-                // shared by every arrival. Making those lifecycles demand-driven here would silently
-                // change their residency contract.
-                attempt = engine.send(residentRefs.get(node.id()), delivered);
-            }
-        } catch (RuntimeException creationFailure) {
-            attempt = CompletableFuture.failedFuture(creationFailure);
-        }
         WorkerInstanceRegistry.WorkerInstance instance = acquired;
+        TraversalInstanceRegistry.TraversalInstance capturedTraversalInstance = traversalInstance;
         ExecutionBudget.Actor acquiredActorLease = actorLease;
+        RuntimeException capturedCreationFailure = creationFailed;
+        java.util.function.Supplier<CompletionStage<NodeResult>> dispatch = () -> {
+            try {
+                if (capturedCreationFailure != null) throw capturedCreationFailure;
+                if (definition.nature() == NodeRuntimeNature.WORKER) {
+                    return engine.send(instance.ref(), delivered);
+                }
+                if (definition.nature() == NodeRuntimeNature.TRAVERSAL) {
+                    return engine.send(capturedTraversalInstance.ref(), delivered);
+                }
+                // A resident nature keeps one actor shared by every arrival.
+                return engine.send(residentRefs.get(node.id()), delivered);
+            } catch (RuntimeException creationFailure) {
+                return CompletableFuture.failedFuture(creationFailure);
+            }
+        };
+        // Disabled capture is the compatibility path as well as the zero-copy path. Returning the
+        // engine's stage directly preserves its failure identity. The enabled gate uses a bridge
+        // because CompletionStage.thenCompose adds a CompletionException around an ordinary engine
+        // failure, replacing its direct message when a join retains it as a suppressed cause.
+        attempt = activityCapture.enabled()
+                ? dispatchAfterCapture(activityCapture.input(captureContext, delivered), dispatch)
+                : dispatch.get();
         return attempt
                 .handle((result, error) -> {
                     // Capacity protects this node attempt, not its downstream subtree. Releasing
@@ -2889,6 +2930,13 @@ public final class GraphRunner implements AutoCloseable {
                         acquiredActorLease.close();
                     }
                     if (error != null) {
+                        Throwable captureFailure = unwrap(error);
+                        if (captureFailure instanceof ai.ravenroot.core.activity.ActivityCaptureException) {
+                            state.nodeFailed(invocationId, attemptId, startedEventId);
+                            monitor.nodeFailed(identity, node.id(), invocationId, attemptId, captureFailure,
+                                    liveInstances(node.id(), definition.nature()));
+                            throw new CompletionException(captureFailure);
+                        }
                         // A durable tool approval suspension is NOT a failure, and it is answered
                         // before anything else looks at this throwable. It means "this node is
                         // waiting for a human to approve a tool call", and the recorder has just
@@ -3026,6 +3074,9 @@ public final class GraphRunner implements AutoCloseable {
                     try {
                         routed = markSyntheticProvenance(node, delivered, result);
                         routedBytes = measure(routed, state.limits);
+                        // STRICT output persistence is the boundary between a node effect and the
+                        // runtime claiming completion or making that content visible downstream.
+                        activityCapture.output(captureContext, routed).toCompletableFuture().join();
                     } catch (RuntimeException rejectedOutput) {
                         state.nodeFailed(invocationId, attemptId, startedEventId);
                         monitor.nodeFailed(identity, node.id(), invocationId, attemptId, rejectedOutput,
@@ -3462,6 +3513,25 @@ public final class GraphRunner implements AutoCloseable {
             ExecutionMonitor.ExecutionIdentity identity, String nodeId) {
         return new TraversalInstanceIdentity(identity.security().tenantId(), identity.deploymentId(),
                 identity.graphVersion(), identity.processInstanceId(), identity.traversalId(), nodeId);
+    }
+
+    private ai.ravenroot.core.activity.ActivityCapture.Context activityContext(
+            ExecutionMonitor.ExecutionIdentity identity, NodeMessage message, int attemptOrdinal,
+            UUID startedEventId) {
+        var metadata = pin.metadata();
+        return new ai.ravenroot.core.activity.ActivityCapture.Context(identity.security(),
+                metadata.key().graphId(), metadata.key().versionId(), metadata.canonicalHash(),
+                identity.processInstanceId(), identity.traversalId(), message.nodeId(),
+                message.invocationId(), message.attemptId(), attemptOrdinal, message.command().name(),
+                message.parentInvocationIds(), startedEventId);
+    }
+
+    private static int attemptOrdinal(ai.ravenroot.api.application.NodeInvocation invocation,
+                                      UUID attemptId) {
+        for (int index = 0; index < invocation.attempts().size(); index++) {
+            if (invocation.attempts().get(index).attemptId().equals(attemptId)) return index + 1;
+        }
+        throw new IllegalArgumentException("attempt is not part of the resumed invocation");
     }
 
     /**
@@ -6185,5 +6255,30 @@ public final class GraphRunner implements AutoCloseable {
             }
             return folded;
         }
+    }
+
+    /** Runs a dispatch after its capture gate without changing either boundary's failure identity. */
+    private static <T> CompletionStage<T> dispatchAfterCapture(
+            CompletionStage<Void> capture,
+            java.util.function.Supplier<CompletionStage<T>> dispatch) {
+        var result = new CompletableFuture<T>();
+        capture.whenComplete((ignored, captureFailure) -> {
+            if (captureFailure != null) {
+                result.completeExceptionally(captureFailure);
+                return;
+            }
+            CompletionStage<T> dispatched;
+            try {
+                dispatched = java.util.Objects.requireNonNull(dispatch.get(), "dispatch stage");
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(failure);
+                return;
+            }
+            dispatched.whenComplete((value, dispatchFailure) -> {
+                if (dispatchFailure == null) result.complete(value);
+                else result.completeExceptionally(dispatchFailure);
+            });
+        });
+        return result;
     }
 }

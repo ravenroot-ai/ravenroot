@@ -1026,6 +1026,36 @@ public interface RavenrootApplication extends AutoCloseable {
     List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit);
 
     /**
+     * Reports whether this application has a durable activity-content archive.
+     *
+     * @return whether the separately configured durable activity-content archive is available
+     */
+    default boolean activityArchiveAvailable() {
+        return false;
+    }
+
+    /**
+     * Reports the read limit advertised by the configured activity archive.
+     *
+     * @return maximum page accepted by {@link #activityAfter}; zero when unavailable
+     */
+    default int activityArchiveMaxPageSize() {
+        return 0;
+    }
+
+    /**
+     * Reads a bounded tenant-local activity page. Authorization belongs at the adapter boundary;
+     * external adapters must source {@code tenantId} from authenticated request context.
+     * @param tenantId trusted tenant identity
+     * @param query bounded incremental query
+     * @return retained activity page
+     */
+    default ai.ravenroot.api.activity.ActivityPage activityAfter(
+            String tenantId, ai.ravenroot.api.activity.ActivityQuery query) {
+        throw new IllegalStateException("activity content archive is unavailable");
+    }
+
+    /**
  * Whether this implementation retains execution results at all.
  *
  * <p>Declared for the same reason {@link #durableEventJournalAvailable()} is declared: an

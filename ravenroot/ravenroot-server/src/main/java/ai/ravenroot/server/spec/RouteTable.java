@@ -897,7 +897,7 @@ public final class RouteTable {
                             + "never truncated. Durable rows carry handlerId, so a handler-lifecycle event "
                             + "names the handler it is about; it is null on every other type. "
                             + "'include=diagnostics' selects in-process "
-                            + "instrumentation (activeInstances, inFlightArrivals, fallback, "
+                    + "instrumentation (activeInstances, inFlightArrivals, fallback, "
                             + "processingDuration), bounded author-safe failure messages and built-in "
                             + "log output by "
                             + "content rather than by source; when those have aged out the caller is told "
@@ -919,6 +919,14 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.EVENT_LIMIT_ABOVE_MAXIMUM.code(),
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/activity",
+                    "Optional tenant-scoped durable node activity-content archive. Reads are bounded, "
+                            + "incremental, filterable by execution and attempt identity, and report the "
+                            + "retained cursor floor. The tenant comes only from authentication; malformed, "
+                            + "overflowing, unknown and over-limit query values are refused.",
+                    true, true, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.REQUEST_INTERRUPTED.code()), READ, true),
             // ADR 0025. The two paths ravenroot-ui's assistant-client.js calls, and the
             // complete set it is permitted to call -- `ASSISTANT_PATHS` there is frozen to exactly these.
             //

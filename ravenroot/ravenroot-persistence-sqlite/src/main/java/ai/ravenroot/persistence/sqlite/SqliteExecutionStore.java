@@ -2042,21 +2042,25 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private ai.ravenroot.api.flow.FlowInvocationRecord readFlow(ResultSet rows) throws SQLException {
         String tenant = rows.getString("tenant_id");
+        UUID callerProcess = StoredUuid.required(rows, "flow_invocation",
+                "caller_process_instance_id", tenant);
+        var key = new ExecutionKey(tenant, callerProcess);
         return new ai.ravenroot.api.flow.FlowInvocationRecord(tenant,
-                new ai.ravenroot.api.flow.FlowHandle(UUID.fromString(rows.getString("handle"))),
-                UUID.fromString(rows.getString("caller_process_instance_id")),
-                UUID.fromString(rows.getString("caller_traversal_id")),
-                UUID.fromString(rows.getString("caller_invocation_id")), rows.getString("caller_subject"),
+                new ai.ravenroot.api.flow.FlowHandle(StoredUuid.required(rows, "flow_invocation", "handle", key)),
+                callerProcess,
+                StoredUuid.required(rows, "flow_invocation", "caller_traversal_id", key),
+                StoredUuid.required(rows, "flow_invocation", "caller_invocation_id", key),
+                rows.getString("caller_subject"),
                 ai.ravenroot.api.security.PrincipalType.valueOf(rows.getString("caller_principal_type")),
                 rows.getString("caller_issuer"),
                 ai.ravenroot.api.deployment.DeploymentId.of(rows.getString("target_deployment_id")),
                 rows.getLong("target_version"), rows.getString("target_digest"),
-                UUID.fromString(rows.getString("child_process_instance_id")),
-                UUID.fromString(rows.getString("child_traversal_id")),
+                StoredUuid.required(rows, "flow_invocation", "child_process_instance_id", key),
+                StoredUuid.required(rows, "flow_invocation", "child_traversal_id", key),
                 ai.ravenroot.api.flow.FlowInvocationStatus.valueOf(rows.getString("status")),
                 rows.getBytes("input"), rows.getBytes("result"), rows.getString("failure_code"),
                 rows.getString("failure_message"),
-                rows.getString("continuation_claim") == null ? null : UUID.fromString(rows.getString("continuation_claim")),
+                StoredUuid.optional(rows, "flow_invocation", "continuation_claim", key),
                 rows.getLong("revision"), StoredInstant.read(rows, "created_at"),
                 StoredInstant.read(rows, "updated_at"), StoredInstant.read(rows, "deadline_at"),
                 StoredInstant.read(rows, "retained_until"));

@@ -1167,7 +1167,7 @@ final class SqliteSchema {
                                 + "WHERE status IN ('RESOLVED', 'DENIED', 'EXPIRED')")),
                 new SchemaMigration(36, "durable intergraph invocation relations", List.of(
                         """
-                        CREATE TABLE flow_invocation (
+                        CREATE TABLE IF NOT EXISTS flow_invocation (
                             tenant_id TEXT NOT NULL, handle TEXT NOT NULL,
                             caller_process_instance_id TEXT NOT NULL, caller_traversal_id TEXT NOT NULL,
                             caller_invocation_id TEXT NOT NULL, caller_subject TEXT NOT NULL,
@@ -1185,8 +1185,8 @@ final class SqliteSchema {
                             UNIQUE (tenant_id, caller_process_instance_id, caller_invocation_id)
                         )
                         """,
-                        "CREATE INDEX flow_invocation_recovery ON flow_invocation (tenant_id, status, created_at_epoch_second, created_at_nano)",
-                        "CREATE INDEX flow_invocation_retention ON flow_invocation (tenant_id, retained_until_epoch_second, retained_until_nano)")));
+                        "CREATE INDEX IF NOT EXISTS flow_invocation_recovery ON flow_invocation (tenant_id, status, created_at_epoch_second, created_at_nano)",
+                        "CREATE INDEX IF NOT EXISTS flow_invocation_retention ON flow_invocation (tenant_id, retained_until_epoch_second, retained_until_nano)")));
     }
 
     static int currentVersion() {

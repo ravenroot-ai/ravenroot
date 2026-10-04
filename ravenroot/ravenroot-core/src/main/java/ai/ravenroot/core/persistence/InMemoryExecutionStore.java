@@ -1462,33 +1462,37 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
             String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
-        return complete(() -> {
-            requireCapability(StoreCapability.FLOW_INVOCATIONS);
-            requireTenantId(tenantId);
-            Objects.requireNonNull(mutation, "mutation");
-            synchronized (monitor) {
-                var key = new FlowKey(tenantId, mutation.handle());
-                var current = flowInvocations.get(key);
-                if (current == null) return missingFlow(mutation.handle());
-                if (current.revision() != mutation.expectedRevision()) {
-                    if (sameFlowMutation(current, mutation)) return current;
-                    throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
-                            mutation.expectedRevision(), current.revision());
+        try {
+            return complete(() -> {
+                requireCapability(StoreCapability.FLOW_INVOCATIONS);
+                requireTenantId(tenantId);
+                Objects.requireNonNull(mutation, "mutation");
+                synchronized (monitor) {
+                    var key = new FlowKey(tenantId, mutation.handle());
+                    var current = flowInvocations.get(key);
+                    if (current == null) return missingFlow(mutation.handle());
+                    if (current.revision() != mutation.expectedRevision()) {
+                        if (sameFlowMutation(current, mutation)) return current;
+                        throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
+                                mutation.expectedRevision(), current.revision());
+                    }
+                    requireFlowTransition(current, mutation);
+                    var next = new ai.ravenroot.api.flow.FlowInvocationRecord(
+                            current.tenantId(), current.handle(), current.callerProcessInstanceId(),
+                            current.callerTraversalId(), current.callerInvocationId(),
+                            current.callerSubject(), current.callerPrincipalType(), current.callerIssuer(),
+                            current.targetDeploymentId(), current.targetVersion(), current.targetDigest(),
+                            mutation.childProcessInstanceId(), mutation.childTraversalId(), mutation.status(),
+                            current.input(), mutation.result(), mutation.failureCode(), mutation.failureMessage(),
+                            mutation.continuationClaim(), current.revision() + 1, current.createdAt(),
+                            mutation.updatedAt(), current.deadlineAt(), current.retainedUntil());
+                    flowInvocations.put(key, next);
+                    return next;
                 }
-                requireFlowTransition(current, mutation);
-                var next = new ai.ravenroot.api.flow.FlowInvocationRecord(
-                        current.tenantId(), current.handle(), current.callerProcessInstanceId(),
-                        current.callerTraversalId(), current.callerInvocationId(),
-                        current.callerSubject(), current.callerPrincipalType(), current.callerIssuer(),
-                        current.targetDeploymentId(), current.targetVersion(), current.targetDigest(),
-                        mutation.childProcessInstanceId(), mutation.childTraversalId(), mutation.status(),
-                        current.input(), mutation.result(), mutation.failureCode(), mutation.failureMessage(),
-                        mutation.continuationClaim(), current.revision() + 1, current.createdAt(),
-                        mutation.updatedAt(), current.deadlineAt(), current.retainedUntil());
-                flowInvocations.put(key, next);
-                return next;
-            }
-        });
+            });
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(refused);
+        }
     }
 
     @Override

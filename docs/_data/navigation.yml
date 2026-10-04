@@ -31,6 +31,8 @@
       url: /examples/governed-runner/disposable-repository/
     - title: Register Machine example library
       url: /examples/register-machine/
+    - title: Intergraph call examples
+      url: /examples/intergraph/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -141,6 +143,8 @@
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
+    - title: Intergraph calls
+      url: /reference/intergraph-calls.html
     - title: Session memory
       url: /reference/session-memory.html
     - title: Executions, outcomes, and events

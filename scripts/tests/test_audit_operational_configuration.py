@@ -6445,6 +6445,42 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
         self.assertIsNone(audit.ai_operational_authority_from_source(ROOT, changed))
 
 
+class ActivityCapturePolicyAuditTest(unittest.TestCase):
+    def test_source_derived_authority_rejects_unknown_defaults_bounds_and_wiring(self) -> None:
+        paths = tuple(audit.ACTIVITY_CAPTURE_SOURCE_PROOFS)
+        with synthetic_repository() as location:
+            root = Path(location)
+            for relative in paths:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, destination)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+            authority = audit.activity_capture_authority_from_source(root, discovered)
+            self.assertIsNotNone(authority)
+            self.assertEqual(10, len(authority["contracts"]))
+            self.assertEqual(len(authority["candidateIds"]), len(set(authority["candidateIds"])))
+
+            mutations = (
+                (audit.ACTIVITY_CAPTURE_CONFIGURATION_PATH, '"65536"', '"65537"'),
+                (audit.ACTIVITY_CAPTURE_POLICY_PATH, "10_000", "10_001"),
+                (audit.ACTIVITY_CAPTURE_CARRIER_PATHS[3],
+                 "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS",
+                 "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_TYPO"),
+                (audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1],
+                 "activityCapture:\n", "activityCapture:\n  unknownSetting: 1\n"),
+            )
+            for relative, before, after in mutations:
+                path = root / relative
+                original = path.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                with self.subTest(path=relative, mutation=after):
+                    self.assertIsNone(
+                        audit.activity_capture_authority_from_source(root, discovered))
+                path.write_text(original, encoding="utf-8")
+
+
 class ProgramGithubPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

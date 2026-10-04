@@ -45,6 +45,23 @@ Detailed contract: [Agent authority](configuration.md#agent-authority-and-budget
 | `RAVENROOT_AGENT_RUNTIME_INSTANCE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_RUNNER_CONFIG` | unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart |
 
+## Activity content archive
+
+Detailed contract: [Activity content archive](../operator-guide/activity-capture.md#service-configuration).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_ACTIVITY_CAPTURE_CONTENTS` | comma-separated content kinds; default `INPUT_PAYLOAD,OUTPUT_PAYLOAD` |
+| `RAVENROOT_ACTIVITY_CAPTURE_ENABLED` | optional durable node-content archive; unset defaults to `false` and performs no archive schema or content I/O |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT` | process-wide pending-write ceiling; default `64`, from `1` through `10000` |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE` | history page ceiling; default `100`, from `1` through `1000` records |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES` | post-redaction canonical JSON ceiling; default `65536`, from `1` through `67108864` bytes |
+| `RAVENROOT_ACTIVITY_CAPTURE_NODES` | exact comma-separated node IDs; blank selects every node |
+| `RAVENROOT_ACTIVITY_CAPTURE_POLICY` | `BEST_EFFORT` by default when enabled; `STRICT` gates invocation and downstream publication |
+| `RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS` | case-insensitive structured keys redacted before size checks; defaults to the documented credential-key list |
+| `RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS` | content retention; default `604800`, from `1` through `315360000` seconds |
+| `RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS` | per-content persistence deadline; default `2000`, from `1` through `300000` milliseconds |
+
 ## Authoring assistant
 
 Detailed contract: [Authoring assistant](../operator-guide/authoring-assistant.md#setting-reference).
@@ -326,16 +343,6 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | Variable or family | Applicability and default boundary |
 |---|---|
 | `RAVENROOT_AUDIT_DIR` | See the linked contract for exact type, default, and applicability. |
-| `RAVENROOT_ACTIVITY_CAPTURE_ENABLED` | Optional durable node-content archive; `false` |
-| `RAVENROOT_ACTIVITY_CAPTURE_POLICY` | `BEST_EFFORT` by default when enabled; `STRICT` gates invocation and downstream publication |
-| `RAVENROOT_ACTIVITY_CAPTURE_NODES` | Exact comma-separated node IDs; empty selects all nodes |
-| `RAVENROOT_ACTIVITY_CAPTURE_CONTENTS` | Selected content kinds; `INPUT_PAYLOAD,OUTPUT_PAYLOAD` |
-| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES` | Post-redaction canonical JSON ceiling; `65536` |
-| `RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT` | Pending write ceiling; `64` |
-| `RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS` | Per-record persistence deadline; `2000` |
-| `RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS` | Activity content retention; `604800` |
-| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE` | History page ceiling from 1 through 1000; `100` |
-| `RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS` | Case-insensitive object keys redacted before size checks; safe credential-key defaults |
 | `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | PostgreSQL-only positive lost-race repair bound; unset defaults to `3` |
@@ -359,9 +366,6 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS` | PostgreSQL statement bound in positive whole milliseconds; default `30000` and no shorter than lock timeout |
 | `RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS` | PostgreSQL terminal-process retention; default `604800` seconds |
 | `RAVENROOT_WORKER_ID` | See the linked contract for exact type, default, and applicability. |
-
-Activity capture's full failure, retention, and query contract is in
-[Durable activity content capture](../operator-guide/activity-capture.md).
 
 ## Package activation
 

@@ -3899,31 +3899,6 @@ public final class GraphRunner implements AutoCloseable {
         return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
     }
 
-    /** Runs a dispatch after its capture gate without changing either boundary's failure identity. */
-    private static <T> CompletionStage<T> dispatchAfterCapture(
-            CompletionStage<Void> capture,
-            java.util.function.Supplier<CompletionStage<T>> dispatch) {
-        var result = new CompletableFuture<T>();
-        capture.whenComplete((ignored, captureFailure) -> {
-            if (captureFailure != null) {
-                result.completeExceptionally(captureFailure);
-                return;
-            }
-            CompletionStage<T> dispatched;
-            try {
-                dispatched = java.util.Objects.requireNonNull(dispatch.get(), "dispatch stage");
-            } catch (RuntimeException failure) {
-                result.completeExceptionally(failure);
-                return;
-            }
-            dispatched.whenComplete((value, dispatchFailure) -> {
-                if (dispatchFailure == null) result.complete(value);
-                else result.completeExceptionally(dispatchFailure);
-            });
-        });
-        return result;
-    }
-
     /** Finds a verified durable boundary through arbitrary CompletionStage wrapping. */
     private static Throwable suspensionIn(Throwable error) {
         Throwable current = error;
@@ -6281,5 +6256,30 @@ public final class GraphRunner implements AutoCloseable {
             }
             return folded;
         }
+    }
+
+    /** Runs a dispatch after its capture gate without changing either boundary's failure identity. */
+    private static <T> CompletionStage<T> dispatchAfterCapture(
+            CompletionStage<Void> capture,
+            java.util.function.Supplier<CompletionStage<T>> dispatch) {
+        var result = new CompletableFuture<T>();
+        capture.whenComplete((ignored, captureFailure) -> {
+            if (captureFailure != null) {
+                result.completeExceptionally(captureFailure);
+                return;
+            }
+            CompletionStage<T> dispatched;
+            try {
+                dispatched = java.util.Objects.requireNonNull(dispatch.get(), "dispatch stage");
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(failure);
+                return;
+            }
+            dispatched.whenComplete((value, dispatchFailure) -> {
+                if (dispatchFailure == null) result.complete(value);
+                else result.completeExceptionally(dispatchFailure);
+            });
+        });
+        return result;
     }
 }

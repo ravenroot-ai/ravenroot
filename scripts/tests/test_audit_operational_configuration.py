@@ -2122,16 +2122,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_731_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_738_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(97, len(details))
+            self.assertEqual(98, len(details))
             self.assertEqual(
-                {"methods": 107, "path": 97, "summary": 428, "successStatuses": 99},
+                {"methods": 108, "path": 98, "summary": 432, "successStatuses": 100},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(731, len(entries))
+            self.assertEqual(738, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4237,6 +4237,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -4480,7 +4481,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 428 |",
+                "| Retained published contract descriptions | 432 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4488,7 +4489,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 427 |",
+                "| Retained published contract descriptions | 431 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6251,6 +6252,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 

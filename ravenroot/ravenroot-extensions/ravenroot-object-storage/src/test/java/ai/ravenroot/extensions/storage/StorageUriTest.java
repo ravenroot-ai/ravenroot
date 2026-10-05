@@ -26,6 +26,14 @@ class StorageUriTest {
                 Set.of(), false, false, 100, 1000, 1, 1));
     }
 
+    @Test void pathStylePreservesAdministratorAuthorizedHttpOrigin() {
+        StorageProfile profile = new StorageProfile("assets", URI.create("http://10.42.1.9:9000"),
+                "us-east-1", "bucket-a", "", StorageProfile.AddressingStyle.PATH, "sign",
+                Set.of(StorageProfile.Operation.GET), Set.of(), false, false, 100, 1000, 1, 1);
+        assertEquals("http://10.42.1.9:9000/bucket-a/object",
+                StorageUri.destination(profile, "object").toASCIIString());
+    }
+
     @Test void traversalAndEncodedSeparatorFamiliesAreRejectedBeforeTransport() {
         StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 2, 10);
         for (String key : Set.of("/absolute", "trailing/", "a//b", ".", "..", "a/../b", "a\\b",

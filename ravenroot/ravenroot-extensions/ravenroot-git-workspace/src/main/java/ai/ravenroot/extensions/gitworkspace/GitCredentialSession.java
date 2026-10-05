@@ -231,7 +231,7 @@ final class GitCredentialSession implements AutoCloseable {
         URI remote = URI.create(profile.remote());
         String path = remote.getRawPath();
         while (path.startsWith("/")) path = path.substring(1);
-        String fields = "protocol=https\nhost=" + remote.getRawAuthority() + "\npath=" + path
+        String fields = "protocol=" + remote.getScheme() + "\nhost=" + remote.getRawAuthority() + "\npath=" + path
                 + "\nusername=" + profile.credentialUsername() + (password ? "\npassword=" : "");
         byte[] prefix = fields.getBytes(StandardCharsets.UTF_8);
         byte[] encoded = encode(secret);

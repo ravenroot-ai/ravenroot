@@ -138,7 +138,9 @@ final class AwsSigV4Signer {
             host = '[' + host + ']';
         }
         int port = uri.getPort();
-        boolean defaultPort = port == -1 || (port == 443 && "https".equalsIgnoreCase(uri.getScheme()));
+        boolean defaultPort = port == -1
+                || port == 443 && "https".equalsIgnoreCase(uri.getScheme())
+                || port == 80 && "http".equalsIgnoreCase(uri.getScheme());
         return defaultPort ? host : host + ':' + port;
     }
 

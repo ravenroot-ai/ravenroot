@@ -31,6 +31,109 @@ Unset or blank configuration preserves the shipped localhost-only exception
 benchmark harness may export a broader named exception set when its variable is absent. That
 harness-only value is separate from the production default and is never inferred by the server.
 
+## Trusted networks and plaintext transports
+
+`RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY` is an administrator-only, canonical padded Base64 encoding
+of strict JSON. It lets a deployment admit known internal ranges and, separately, allow an
+unencrypted hop when encryption terminates in an authenticated service mesh, tunnel, or local proxy.
+A graph may select an existing profile, but no graph, workflow, payload, redirect, or remote response
+can create or widen a rule or service grant.
+
+The decoded document has exactly this schema. Unknown or missing members, duplicate values, wildcard
+hosts/profiles, non-network CIDRs, noncanonical Base64, and unknown protocols fail closed:
+
+```json
+{
+  "version": 1,
+  "rules": [{
+    "name": "orders-mesh",
+    "protocols": ["amqp091"],
+    "ports": [5672],
+    "hosts": ["rabbitmq.orders.svc.cluster.local"],
+    "addresses": ["10.96.0.0/12"],
+    "profiles": ["acme/orders"],
+    "allowPlaintext": true
+  }]
+}
+```
+
+Supported protocol names are `http`, `websocket`, `amqp091`, `kafka`, `smtp`, `imap`, `otlp`, `git`,
+`assistant`, `jwks`, and `runner`. Every rule names at least
+one protocol, at least one finite port, and at least one host or address range. Profiles are exact
+connector-specific names: AMQP, Kafka, and SMTP use `tenant/profile`; managed HTTP and WebSocket use
+the node-package id. An empty `profiles` list applies to every profile within the other finite scope.
+There is no wildcard and no global off switch.
+
+Admission, transport encryption, and certificate verification are separate decisions:
+
+- `addresses` grants reserved-address admission. A hostname alone never trusts an arbitrary reserved
+  answer. When a rule has both `hosts` and `addresses`, both must match, and the same rule must admit
+  every DNS answer. A CIDR-only rule is useful for numeric Kubernetes service addresses and remains
+  bounded by protocol and port.
+- `allowPlaintext` permits a cleartext transport only within that same complete rule. It does not add
+  an endpoint to a connector profile, add an origin to a service grant, or grant a credential.
+  Credential-bearing plaintext therefore needs the ordinary exact profile/grant and a matching rule.
+- TLS continues to verify the certificate chain and hostname. This policy has no certificate-bypass,
+  trust-all, or hostname-verification-disable capability.
+
+DNS is checked twice. The connector validates the complete answer set under its protocol/profile
+rule before opening a client. The JVM resolver repeats the address check when the connection resolves
+the name and refuses a mixed answer rather than dropping only unsafe members. Because that resolver
+has no protocol/profile parameter, overlapping explicit-host rules use their address-range
+intersection at connection time. Disjoint ranges for one hostname fail closed; consolidate them into
+one shared envelope or use different hostnames. CIDR-only rules cannot safely authorize an arbitrary
+DNS name at that context-free boundary, so use them with numeric endpoints or add an exact hostname.
+HTTP clients do not follow redirects, so a redirect cannot move credentials to another origin.
+
+For a Kubernetes broker named `rabbitmq.orders.svc.cluster.local` with ClusterIP `10.101.4.12`, name
+the DNS identity and cluster range, exact AMQP port, and exact `tenant/profile`. Set
+`allowPlaintext:true` only when the pod-to-sidecar hop is the intended cleartext segment and the mesh
+authenticates and encrypts the next hop. A managed HTTP rule uses protocol `http` and the node-package
+id in `profiles`; its service grant must still list the exact HTTP origin and credential binding.
+
+### Private PKI
+
+Mount the internal CA as a PKCS12 or JKS trust store and configure the JVM with
+`-Djavax.net.ssl.trustStore=/run/ravenroot/internal-ca.p12` and the corresponding protected
+`javax.net.ssl.trustStorePassword`. Ravenroot's JSSE-backed clients keep chain and hostname
+verification and use the default JVM trust-manager configuration. Rotate the mounted store and
+restart the process. A private CA is not a reason to set `allowPlaintext`; TLS termination is.
+
+### Migration and precedence
+
+`RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` remains admission-only compatibility input. It never permits
+plaintext or changes certificate verification. A new rule may admit the same destination without a
+duplicate legacy entry. When an explicit hostname appears in multiple new rules, connection-time DNS
+uses the conservative intersection described above; legacy entries do not widen plaintext, protocol,
+port, or profile scope. Migrate one connector at a time, verify it, then remove a redundant legacy
+entry.
+
+### Connector coverage and protocol limits
+
+- Managed HTTP/WebSocket profiles (AI/LLM, MCP, GitHub, Matrix, Mattermost, OpenAPI, Teams, and generic
+  WebSocket) support scoped plaintext while retaining exact service grants. Slack, Discord, and
+  Telegram production origins remain fixed HTTPS endpoints and are not converted into proxy settings.
+- AMQP 0-9-1, Kafka producer/consumer, and SMTP support authenticated non-loopback plaintext only
+  through an exact rule. IMAP continues to expose only IMAPS and required STARTTLS.
+- S3-compatible object storage may use signed HTTP only when both its exact SigV4 service grant and
+  a matching trusted-network plaintext rule admit the origin; HTTPS remains the default.
+- Assistant, JWKS, runner control/model, and OTLP administrator endpoints apply scoped admission and
+  plaintext rules. Redirects remain disabled.
+- The native `kubectl` runner manager retains a CA-verified HTTPS kubeconfig. Its subprocess
+  transport does not expose a Ravenroot-controlled DNS pin equivalent to managed HTTP or Git/libcurl;
+  use the private-PKI trust path above rather than a plaintext Kubernetes API server.
+- JDBC URLs are driver-defined and may be opaque. Ravenroot does not invent generic TLS or port
+  semantics for unknown vendors; configure the driver's TLS properties and JVM trust store.
+  PostgreSQL execution-store TLS remains deployment-infrastructure configuration.
+- Git workspace HTTPS remains the default. Administrator-authorized HTTP, including credentialed
+  HTTP, uses an exact `git` rule. Immediately before each remote fetch Ravenroot validates every DNS
+  answer, pins that set into Git/libcurl with `http.curloptResolve`, and keeps redirects disabled.
+  Local `file:` remotes remain credential-free.
+
+Policy failures use stable, secret-free causes such as `OUTBOUND_DESTINATION_POLICY_REFUSED`,
+`OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED`, and `OUTBOUND_DESTINATION_UNRESOLVED`. They omit raw policy,
+URL, hostname, username, credential reference, and secret values.
+
 ## Authority
 
 The operator grants deployment-level availability. Callers may use only resources they own, and GraphML may carry references but never secret values or new network rights.

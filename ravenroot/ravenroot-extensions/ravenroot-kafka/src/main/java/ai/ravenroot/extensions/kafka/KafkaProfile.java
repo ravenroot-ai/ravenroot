@@ -34,8 +34,7 @@ public record KafkaProfile(
                 || maxInFlight < 1 || maxInFlight > 5 || maxConcurrency < 1 || maxConcurrency > 16
                 || maxPerSecond < 1 || maxPerSecond > 1_000 || timeoutMs < 100 || timeoutMs > 30_000
                 || maxRecordBytes < 1 || maxRecordBytes > 1_048_576
-                || bufferMemoryBytes < maxRecordBytes || bufferMemoryBytes > 16_777_216L
-                || !tls && bootstrapServers.stream().anyMatch(server -> !loopback(server))) {
+                || bufferMemoryBytes < maxRecordBytes || bufferMemoryBytes > 16_777_216L) {
             throw new IllegalArgumentException("invalid Kafka operator profile");
         }
     }
@@ -63,7 +62,7 @@ public record KafkaProfile(
         catch (NumberFormatException invalid) { return false; }
     }
 
-    private static boolean loopback(String value) {
+    static boolean loopback(String value) {
         return value.matches("(?i)localhost:[0-9]+|127\\.0\\.0\\.1:[0-9]+|\\[::1]:[0-9]+");
     }
 }

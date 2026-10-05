@@ -2,8 +2,10 @@ package ai.ravenroot.api.security.egress;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -24,9 +26,12 @@ public final class ReservedNetworkPolicy {
     public static final String DEFAULT_EXCEPTIONS = "localhost:LOOPBACK";
 
     private final Map<String, Set<ReservedNetwork>> exceptions;
+    private final TrustedNetworkPolicy trustedNetworks;
 
-    private ReservedNetworkPolicy(Map<String, Set<ReservedNetwork>> exceptions) {
+    private ReservedNetworkPolicy(Map<String, Set<ReservedNetwork>> exceptions,
+                                  TrustedNetworkPolicy trustedNetworks) {
         this.exceptions = Map.copyOf(exceptions);
+        this.trustedNetworks = trustedNetworks;
     }
 
     /**
@@ -35,7 +40,7 @@ public final class ReservedNetworkPolicy {
      * @return deny-all-reserved policy
      */
     public static ReservedNetworkPolicy denyAllReserved() {
-        return new ReservedNetworkPolicy(Map.of());
+        return new ReservedNetworkPolicy(Map.of(), TrustedNetworkPolicy.empty());
     }
 
     /**
@@ -55,8 +60,9 @@ public final class ReservedNetworkPolicy {
      * @return immutable policy
      */
     public static ReservedNetworkPolicy fromEnvironment(Map<String, String> environment) {
-        return fromCommaSeparatedExceptions(environment == null
+        ReservedNetworkPolicy legacy = fromCommaSeparatedExceptions(environment == null
                 ? null : environment.get(EXCEPTIONS_ENVIRONMENT_VARIABLE));
+        return new ReservedNetworkPolicy(legacy.exceptions, TrustedNetworkPolicy.fromEnvironment(environment));
     }
 
     /**
@@ -81,7 +87,7 @@ public final class ReservedNetworkPolicy {
                 return Set.copyOf(merged);
             });
         }
-        return new ReservedNetworkPolicy(parsed);
+        return new ReservedNetworkPolicy(parsed, TrustedNetworkPolicy.empty());
     }
 
     /**
@@ -93,10 +99,43 @@ public final class ReservedNetworkPolicy {
      * @return whether the address is permitted
      */
     public boolean permits(String name, InetAddress address) {
+        if (trustedNetworks.constrainsHost(name))
+            return trustedNetworks.permitsReservedAddress(name, address);
         ReservedNetwork network = ReservedNetwork.of(address);
         if (!network.isReserved()) return true;
-        Set<ReservedNetwork> allowed = exceptions.get(normalizeDestination(name));
-        return allowed != null && allowed.contains(network);
+        return legacyPermits(name, address)
+                || trustedNetworks.permitsReservedAddress(name, address);
+    }
+
+    /**
+     * Resolves and validates a complete connector destination under one protocol/profile scope.
+     * When any answer is reserved, one scoped rule must admit every answer; separate partial rules
+     * cannot be combined. The legacy exception remains an admission-only compatibility path.
+     */
+    public void requireAllowedDestination(String protocol, String profile, String host, int port) {
+        if (!trustedNetworks.hasScope(protocol, profile, host, port)) {
+            if (trustedNetworks.constrainsHost(host))
+                throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+            if (!legacyPermitsLiteral(host))
+                throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+            return;
+        }
+        resolveAllowedDestination(protocol, profile, host, port);
+    }
+
+    /**
+     * Resolves and returns one admitted address set for a native transport that cannot use the JVM
+     * resolver guard. Callers must pin the returned set into that transport before connecting.
+     */
+    public List<InetAddress> resolveAllowedDestination(String protocol, String profile, String host, int port) {
+        List<InetAddress> addresses = resolve(host);
+        boolean scoped = trustedNetworks.hasScope(protocol, profile, host, port);
+        boolean admitted = scoped
+                ? trustedNetworks.permitsAll(protocol, profile, host, port, addresses)
+                : !trustedNetworks.constrainsHost(host)
+                        && addresses.stream().allMatch(address -> legacyPermits(host, address));
+        if (!admitted) throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+        return List.copyOf(addresses);
     }
 
     /**
@@ -107,13 +146,10 @@ public final class ReservedNetworkPolicy {
      * @return true for a hostname, public literal, or exact operator exception
      */
     public boolean permitsLiteral(String host) {
+        if (legacyPermitsLiteral(host)) return true;
         Literal literal = Literal.parse(host);
-        if (literal.kind() == LiteralKind.HOSTNAME) return true;
-        if (literal.kind() == LiteralKind.MALFORMED) return false;
-        ReservedNetwork network = ReservedNetwork.of(literal.address());
-        if (!network.isReserved()) return true;
-        Set<ReservedNetwork> allowed = exceptions.get(literal.normalized());
-        return allowed != null && allowed.contains(network);
+        return literal.kind() == LiteralKind.LITERAL
+                && trustedNetworks.permitsReservedAddress(host, literal.address());
     }
 
     /**
@@ -127,6 +163,20 @@ public final class ReservedNetworkPolicy {
             throw new SecurityException("Connector destination is a reserved address prohibited by policy");
     }
 
+    /** Requires an explicit administrator rule for an unencrypted connector transport. */
+    public void requirePlaintext(String protocol, String profile, String host, int port) {
+        resolveAllowedPlaintextDestination(protocol, profile, host, port);
+    }
+
+    /** Resolves one address set admitted by the same scoped plaintext rule. */
+    public List<InetAddress> resolveAllowedPlaintextDestination(
+            String protocol, String profile, String host, int port) {
+        List<InetAddress> addresses = resolve(host);
+        if (!trustedNetworks.permitsAllPlaintext(protocol, profile, host, port, addresses))
+            throw new SecurityException("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED");
+        return List.copyOf(addresses);
+    }
+
     /**
      * Returns normalized exception destination keys for diagnostics, never for authorization.
      *
@@ -134,6 +184,32 @@ public final class ReservedNetworkPolicy {
      */
     public Set<String> exemptNames() {
         return exceptions.keySet();
+    }
+
+    private boolean legacyPermits(String name, InetAddress address) {
+        ReservedNetwork network = ReservedNetwork.of(address);
+        if (!network.isReserved()) return true;
+        Set<ReservedNetwork> allowed = exceptions.get(normalizeDestination(name));
+        return allowed != null && allowed.contains(network);
+    }
+
+    private boolean legacyPermitsLiteral(String host) {
+        Literal literal = Literal.parse(host);
+        if (literal.kind() == LiteralKind.HOSTNAME) return true;
+        if (literal.kind() == LiteralKind.MALFORMED) return false;
+        return legacyPermits(literal.normalized(), literal.address());
+    }
+
+    private static List<InetAddress> resolve(String host) {
+        try {
+            String lookup = host != null && host.startsWith("[") && host.endsWith("]")
+                    ? host.substring(1, host.length() - 1) : host;
+            List<InetAddress> addresses = Arrays.asList(InetAddress.getAllByName(lookup));
+            if (addresses.isEmpty()) throw new UnknownHostException();
+            return addresses;
+        } catch (UnknownHostException unavailable) {
+            throw new SecurityException("OUTBOUND_DESTINATION_UNRESOLVED");
+        }
     }
 
     private static ParsedException parseException(String entry) {

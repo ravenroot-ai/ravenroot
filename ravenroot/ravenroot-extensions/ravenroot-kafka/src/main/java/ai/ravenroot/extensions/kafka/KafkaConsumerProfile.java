@@ -68,8 +68,7 @@ public record KafkaConsumerProfile(
                 || poisonAttempts < 1 || poisonAttempts > 1_000
                 || !POISON.contains(poisonPolicy)
                 || "dead-letter".equals(poisonPolicy) && (deadLetterTopic == null || !topic(deadLetterTopic))
-                || deadLetterTopic != null && topics.contains(deadLetterTopic)
-                || !tls && bootstrapServers.stream().anyMatch(server -> !loopback(server))) {
+                || deadLetterTopic != null && topics.contains(deadLetterTopic)) {
             throw new IllegalArgumentException("invalid Kafka consumer operator profile");
         }
     }
@@ -116,8 +115,5 @@ public record KafkaConsumerProfile(
                 || value.matches("\\[[0-9A-Fa-f:]+]:[1-9][0-9]{0,4}"))) return false;
         try { return Integer.parseInt(value.substring(value.lastIndexOf(':') + 1)) <= 65_535; }
         catch (NumberFormatException invalid) { return false; }
-    }
-    private static boolean loopback(String value) {
-        return value.matches("(?i)localhost:[0-9]+|127\\.0\\.0\\.1:[0-9]+|\\[::1]:[0-9]+");
     }
 }

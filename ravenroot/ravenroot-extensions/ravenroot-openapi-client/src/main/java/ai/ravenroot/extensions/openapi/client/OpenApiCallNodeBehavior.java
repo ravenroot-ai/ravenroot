@@ -463,7 +463,7 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
         }
 
         private static boolean sameAuthority(URI expected, URI actual) {
-            return "https".equals(actual.getScheme()) && expected.getHost().equalsIgnoreCase(actual.getHost())
+            return expected.getScheme().equals(actual.getScheme()) && expected.getHost().equalsIgnoreCase(actual.getHost())
                     && effectivePort(expected) == effectivePort(actual) && actual.getUserInfo() == null;
         }
         private static int effectivePort(URI value) { return value.getPort() == -1 ? 443 : value.getPort(); }

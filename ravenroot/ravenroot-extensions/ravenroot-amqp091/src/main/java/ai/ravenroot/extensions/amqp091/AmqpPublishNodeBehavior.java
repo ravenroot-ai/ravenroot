@@ -568,14 +568,17 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             try {
                 Optional<AmqpProfile> resolved = resolver.resolve(tenant, profileName);
                 profile = resolved == null ? null : resolved.orElse(null);
+            } catch (SecurityException refused) {
+                throw Refusal.permanent(policyReason(refused));
             } catch (RuntimeException unavailable) {
                 throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE");
             }
             if (profile == null) throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE");
             if (!tenant.equals(profile.tenant()) || !profileName.equals(profile.name()))
                 throw Refusal.rejected("BROKER_PROFILE_FORBIDDEN");
-            try { destinationPolicy.requireAllowedLiteral(profile.host()); }
-            catch (SecurityException refused) { throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE"); }
+            try { destinationPolicy.requireAllowedDestination(
+                    "amqp091", tenant + "/" + profileName, profile.host(), profile.port()); }
+            catch (SecurityException refused) { throw Refusal.permanent("OUTBOUND_DESTINATION_POLICY_REFUSED"); }
             if (!strictBoolean(configuration, "mandatory", true))
                 throw Refusal.rejected("MANDATORY_REQUIRED");
             String exchange = configured(configuration, "exchange", profile.defaultExchange(), 255, true);
@@ -598,6 +601,11 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                     tighten(configuration, "confirmTimeoutMs", profile.timeoutMs(), 100),
                     tighten(configuration, "maxConcurrency", profile.maxConcurrency(), 1),
                     tighten(configuration, "retries", profile.retries(), 0));
+        }
+        private static String policyReason(SecurityException refused) {
+            return "OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED".equals(refused.getMessage())
+                    ? "OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED"
+                    : "OUTBOUND_DESTINATION_POLICY_REFUSED";
         }
 
         private static int tighten(NodeConfiguration configuration, String name, int ceiling, int minimum) {

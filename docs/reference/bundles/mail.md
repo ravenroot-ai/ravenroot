@@ -28,9 +28,10 @@ format, a conformant example, and the rejection contract -- kept there as the si
 this README cannot repeat it out of step with the parser. Each
 `*_HEX` token is the uppercase two-digit hexadecimal encoding of every UTF-8 byte, preserving case and
 separating values injectively: tenant `tenant-a` and profile `Primary` use
-`RAVENROOT_MAIL_PROFILE_74656E616E742D61_5072696D617279`. `allowPlaintext` is an operator-only boolean:
-SMTP is accepted only when it is true, authentication is absent, and the authoritative host is exactly
-`localhost`, `127.0.0.1`, or `::1`. The credential resolver maps the exact UTF-8 bytes of the
+`RAVENROOT_MAIL_PROFILE_74656E616E742D61_5072696D617279`. `allowPlaintext` is an operator-only boolean.
+Unauthenticated exact-loopback SMTP retains its compatibility path; every other SMTP profile,
+including authenticated plaintext, also needs an exact administrator trusted-network rule for the
+port, tenant/profile, host, and complete resolved address set. The credential resolver maps the exact UTF-8 bytes of the
 case-sensitive reference to uppercase hexadecimal: `credentialRef=primary` resolves from
 `RAVENROOT_MAIL_CREDENTIAL_7072696D617279`. Malformed UTF-16 references, including isolated surrogate
 code units, are rejected instead of being replaced and aliased. Legacy normalized names such as
@@ -47,8 +48,9 @@ are rejected. Results are `mail.send.v1` objects with `SENT`, `PARTIAL`, `REJECT
 status and safe recipient data. `AMBIGUOUS` means delivery state is unknown after SMTP DATA may have been
 accepted: it deliberately has no accepted/rejected recipient assertion and must not be retried automatically.
 
-`securityMode` is operator-controlled: STARTTLS is required rather than opportunistic, TLS verification is
-always enabled, and authentication is rejected for plain SMTP. Limits cover recipients, combined body/header
+`securityMode` is operator-controlled: STARTTLS is required rather than opportunistic and TLS verification is
+always enabled. Plain SMTP authentication is admitted only by the shared administrator rule above.
+Limits cover recipients, combined body/header
 size, attachment count, per-attachment bytes, aggregate decoded bytes, and aggregate Base64 bytes. Empty
 sender, recipient, reply-to, or header policies deny all values; `*` is the explicit wildcard that allows any
 value. Connection retries occur only before `sendMessage`; a DATA operation is never retried because a server

@@ -40,7 +40,7 @@ record TeamsProfile(String tenantId, String name, URI workflowEndpoint, String m
     }
 
     private static URI endpoint(URI value) {
-        if (value == null || !"https".equals(value.getScheme()) || value.getHost() == null
+        if (value == null || !Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null
                 || value.getUserInfo() != null || value.getFragment() != null || value.getPort() != -1
                 || value.getRawQuery() != null || value.getRawPath() == null || value.getRawPath().isBlank()
                 || value.getRawPath().contains("..")) throw configuration();

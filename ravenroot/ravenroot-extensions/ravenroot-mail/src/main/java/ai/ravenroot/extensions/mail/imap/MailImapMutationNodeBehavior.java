@@ -237,7 +237,8 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
         ImapProfile profile = resolved.orElseThrow(MailImapMutationNodeBehavior::profileUnavailable);
         if (!tenant.equals(profile.tenant()) || !profileId.equals(profile.id()))
             throw profileUnavailable();
-        try { destinationPolicy.requireAllowedLiteral(profile.host()); }
+        try { destinationPolicy.requireAllowedDestination(
+                "imap", tenant + "/" + profileId, profile.host(), profile.port()); }
         catch (SecurityException refused) { throw profileUnavailable(); }
         return profile;
     }

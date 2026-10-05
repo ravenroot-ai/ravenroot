@@ -50,14 +50,8 @@ public record LlmProfile(String name, URI endpoint, String model,
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw new IllegalArgumentException("endpoint");
         }
-        // A credential may only be placed on an encrypted origin. The managed channel already refuses
-        // to place one on a plaintext origin -- EnvironmentNodePackageServiceGrants requires an
-        // https/wss origin for every credential binding it accepts -- and repeating the rule here
-        // turns the refusal from "your call failed" into "your profile is wrong", at the point where
-        // the operator can still see which profile they wrote.
-        if (credentialBinding.isPresent() && !scheme.equals("https")) {
-            throw new IllegalArgumentException("credentialBinding");
-        }
+        // Credential transport is decided by the administrator-owned service grant plus the shared
+        // trusted-network policy. Keeping it out of graph-owned profile selection prevents widening.
         if (model.isBlank() || model.length() > 256) {
             throw new IllegalArgumentException("model");
         }

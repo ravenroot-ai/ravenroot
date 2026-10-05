@@ -1,5 +1,7 @@
 package ai.ravenroot.extensions.gitworkspace;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
+
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -12,7 +14,19 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
                                   Path processShellExecutable,
                                   String objectFormat, String credentialRef, String credentialUsername,
                                   Duration deadline, int maxConcurrency, int maxOutputBytes,
-                                  int historyScanLimit) {
+                                  int historyScanLimit, ReservedNetworkPolicy egressPolicy) {
+    /** Compatibility constructor; direct API callers retain the process administrator policy. */
+    public GitWorkspaceProfile(String tenant, String name, Path root, String remote,
+                               String baseRef, String issueRefPrefix, Path gitExecutable,
+                               Path processShellExecutable, String objectFormat, String credentialRef,
+                               String credentialUsername, Duration deadline, int maxConcurrency,
+                               int maxOutputBytes, int historyScanLimit) {
+        this(tenant, name, root, remote, baseRef, issueRefPrefix, gitExecutable,
+                processShellExecutable, objectFormat, credentialRef, credentialUsername, deadline,
+                maxConcurrency, maxOutputBytes, historyScanLimit,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+
     public GitWorkspaceProfile {
         if (!identifier(tenant) || !identifier(name) || root == null || !root.isAbsolute()
                 || Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)
@@ -28,7 +42,7 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
                 || deadline.compareTo(Duration.ofMinutes(5)) > 0 || maxConcurrency < 1 || maxConcurrency > 64
                 || maxOutputBytes < 1024 || maxOutputBytes > 1_048_576
                 || historyScanLimit < 1 || historyScanLimit > 10_000
-                || !credentialShape(credentialRef, credentialUsername)) {
+                || !credentialShape(credentialRef, credentialUsername) || egressPolicy == null) {
             throw new IllegalArgumentException("invalid Git workspace profile");
         }
         try {
@@ -59,7 +73,8 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
             if (uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
                 throw new IllegalArgumentException("invalid Git workspace profile");
             }
-            if ("https".equals(uri.getScheme()) && uri.getHost() != null && !uri.getHost().isBlank()) {
+            if (("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+                    && uri.getHost() != null && !uri.getHost().isBlank()) {
                 return uri.normalize().toASCIIString();
             }
             if (!credentialled && "file".equals(uri.getScheme())) {

@@ -26,7 +26,7 @@ public record OpenApiClientProfile(
 
     public OpenApiClientProfile {
         name = token(name, "name", 64);
-        origin = exactHttpsOrigin(origin);
+        origin = exactOrigin(origin);
         specification = Objects.requireNonNull(specification, "specification").clone();
         if (specification.length == 0 || specification.length > HARD_MAX_SPEC_BYTES) {
             throw new IllegalArgumentException("specification size is invalid");
@@ -61,15 +61,16 @@ public record OpenApiClientProfile(
                 : Optional.of(new OutboundCredentialBinding(credentialBindingId, credentialReference));
     }
 
-    private static URI exactHttpsOrigin(URI value) {
+    private static URI exactOrigin(URI value) {
         Objects.requireNonNull(value, "origin");
-        if (!"https".equals(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
+        if (!Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
                 || value.getFragment() != null || value.getQuery() != null
                 || value.getHost().contains(":") || !(value.getPath().isEmpty() || "/".equals(value.getPath()))) {
-            throw new IllegalArgumentException("origin must be an exact HTTPS authority");
+            throw new IllegalArgumentException("origin must be an exact HTTP authority");
         }
-        return URI.create("https://" + value.getHost().toLowerCase(Locale.ROOT)
-                + (value.getPort() == -1 || value.getPort() == 443 ? "" : ":" + value.getPort()));
+        int defaultPort = "https".equals(value.getScheme()) ? 443 : 80;
+        return URI.create(value.getScheme() + "://" + value.getHost().toLowerCase(Locale.ROOT)
+                + (value.getPort() == -1 || value.getPort() == defaultPort ? "" : ":" + value.getPort()));
     }
 
     private static Map<String, List<String>> immutableHeaders(Map<String, List<String>> values) {

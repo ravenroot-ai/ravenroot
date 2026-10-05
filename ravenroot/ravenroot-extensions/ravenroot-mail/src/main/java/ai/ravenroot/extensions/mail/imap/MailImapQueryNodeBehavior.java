@@ -200,7 +200,8 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         ImapProfile profile = resolved.orElseThrow(() -> new ImapQueryException(ImapQueryException.Code.PROFILE_UNAVAILABLE, "IMAP profile unavailable"));
         if (!tenant.equals(profile.tenant()) || !profileId.equals(profile.id()))
             throw new ImapQueryException(ImapQueryException.Code.PROFILE_UNAVAILABLE, "IMAP profile unavailable");
-        try { destinationPolicy.requireAllowedLiteral(profile.host()); }
+        try { destinationPolicy.requireAllowedDestination(
+                "imap", tenant + "/" + profileId, profile.host(), profile.port()); }
         catch (SecurityException refused) { throw new ImapQueryException(ImapQueryException.Code.PROFILE_UNAVAILABLE, "IMAP profile unavailable"); }
         return profile;
     }

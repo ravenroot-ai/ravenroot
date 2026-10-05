@@ -38,7 +38,8 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
                                      AssistantCredential credential, OutboundHttpPolicy egressPolicy,
                                      Duration timeout, int maxOutputTokens, int maxToolIterations,
                                      AssistantCredentialSource credentialSource,
-                                     boolean allowLocalHttp) {
+                                     boolean allowLocalHttp,
+                                     boolean allowTrustedHttp) {
 
     /** Present and set to anything other than {@code false} means the deployment offers the service. */
     public static final String ENABLED_VARIABLE = "RAVENROOT_ASSISTANT_ENABLED";
@@ -119,7 +120,7 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
                                   AssistantCredential credential, OutboundHttpPolicy egressPolicy,
                                   Duration timeout, int maxOutputTokens, int maxToolIterations) {
         this(enabled, providerId, endpoint, model, credential, egressPolicy, timeout, maxOutputTokens,
-                maxToolIterations, AssistantCredentialSource.API_KEY, false);
+                maxToolIterations, AssistantCredentialSource.API_KEY, false, false);
     }
 
     /** The canonical compatibility shape for callers that do not opt into local HTTP. */
@@ -128,7 +129,16 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
                                   Duration timeout, int maxOutputTokens, int maxToolIterations,
                                   AssistantCredentialSource credentialSource) {
         this(enabled, providerId, endpoint, model, credential, egressPolicy, timeout, maxOutputTokens,
-                maxToolIterations, credentialSource, false);
+                maxToolIterations, credentialSource, false, false);
+    }
+
+    /** Compatibility shape for the former canonical constructor. */
+    public AssistantConfiguration(boolean enabled, String providerId, URI endpoint, String model,
+                                  AssistantCredential credential, OutboundHttpPolicy egressPolicy,
+                                  Duration timeout, int maxOutputTokens, int maxToolIterations,
+                                  AssistantCredentialSource credentialSource, boolean allowLocalHttp) {
+        this(enabled, providerId, endpoint, model, credential, egressPolicy, timeout, maxOutputTokens,
+                maxToolIterations, credentialSource, allowLocalHttp, false);
     }
 
     public AssistantConfiguration {
@@ -144,7 +154,7 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
     public static AssistantConfiguration disabled() {
         return new AssistantConfiguration(true, null, null, null, null,
                 OutboundHttpPolicy.disabled(), DEFAULT_TIMEOUT, DEFAULT_MAX_OUTPUT_TOKENS,
-                DEFAULT_MAX_TOOL_ITERATIONS, AssistantCredentialSource.API_KEY, false);
+                DEFAULT_MAX_TOOL_ITERATIONS, AssistantCredentialSource.API_KEY, false, false);
     }
 
     public static AssistantConfiguration fromEnvironment(Map<String, String> environment) {
@@ -179,6 +189,24 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
         URI endpoint = endpointFor(providerId, trimmed(env.get(ENDPOINT_VARIABLE)));
         boolean allowLocalHttp = strictBoolean(env.get(ALLOW_LOCAL_HTTP_VARIABLE),
                 ALLOW_LOCAL_HTTP_VARIABLE, false);
+        boolean allowTrustedHttp = false;
+        if (endpoint != null && !"scripted".equals(endpoint.getScheme())) {
+            var destinationPolicy = ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(env);
+            int port = endpoint.getPort() == -1
+                    ? ("https".equalsIgnoreCase(endpoint.getScheme()) ? 443 : 80)
+                    : endpoint.getPort();
+            destinationPolicy.requireAllowedDestination(
+                    "assistant", providerId == null ? "assistant" : providerId,
+                    endpoint.getHost(), port);
+            if ("http".equalsIgnoreCase(endpoint.getScheme())) try {
+                destinationPolicy.requirePlaintext(
+                        "assistant", providerId == null ? "assistant" : providerId,
+                        endpoint.getHost(), port);
+                allowTrustedHttp = true;
+            } catch (SecurityException encryptionRequired) {
+                // The legacy local exception is evaluated separately and remains credential-free.
+            }
+        }
         if (ANTHROPIC_PROVIDER.equals(providerId) && model == null) {
             model = ANTHROPIC_DEFAULT_MODEL;
         }
@@ -193,7 +221,7 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
                         MAX_OUTPUT_TOKENS_VARIABLE, DEFAULT_MAX_OUTPUT_TOKENS),
                 boundedPositiveInteger(env.get(MAX_TOOL_ITERATIONS_VARIABLE),
                         MAX_TOOL_ITERATIONS_VARIABLE, DEFAULT_MAX_TOOL_ITERATIONS),
-                source, allowLocalHttp);
+                source, allowLocalHttp, allowTrustedHttp);
     }
 
     /**
@@ -327,8 +355,8 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
         if (endpoint == null || !"http".equalsIgnoreCase(endpoint.getScheme())) {
             return false;
         }
-        return !allowLocalHttp || !isLocalHttpHost(endpoint.getHost())
-                || resolved != null || credentialSource == AssistantCredentialSource.OAUTH;
+        return !allowTrustedHttp && (!allowLocalHttp || !isLocalHttpHost(endpoint.getHost())
+                || resolved != null || credentialSource == AssistantCredentialSource.OAUTH);
     }
 
     private static boolean isLocalHttpHost(String host) {

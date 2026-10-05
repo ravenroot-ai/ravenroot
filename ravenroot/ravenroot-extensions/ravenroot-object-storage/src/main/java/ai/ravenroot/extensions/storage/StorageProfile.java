@@ -20,7 +20,7 @@ public record StorageProfile(
 
     public StorageProfile {
         name = token(name, "name", 64);
-        origin = exactHttpsOrigin(origin);
+        origin = exactOrigin(origin);
         region = awsComponent(region, "region");
         bucket = bucket(bucket);
         keyPrefix = StorageUri.validatePrefix(keyPrefix == null ? "" : keyPrefix);
@@ -49,15 +49,16 @@ public record StorageProfile(
         }
     }
 
-    private static URI exactHttpsOrigin(URI value) {
+    private static URI exactOrigin(URI value) {
         Objects.requireNonNull(value, "origin");
-        if (!"https".equals(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
+        if (!Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
                 || value.getQuery() != null || value.getFragment() != null
                 || !(value.getPath().isEmpty() || "/".equals(value.getPath()))) {
-            throw new IllegalArgumentException("origin must be an exact HTTPS authority");
+            throw new IllegalArgumentException("origin must be an exact HTTP authority");
         }
-        return URI.create("https://" + value.getHost().toLowerCase(Locale.ROOT)
-                + (value.getPort() == -1 || value.getPort() == 443 ? "" : ":" + value.getPort()));
+        int defaultPort = "https".equals(value.getScheme()) ? 443 : 80;
+        return URI.create(value.getScheme() + "://" + value.getHost().toLowerCase(Locale.ROOT)
+                + (value.getPort() == -1 || value.getPort() == defaultPort ? "" : ":" + value.getPort()));
     }
 
     private static String bucket(String value) {

@@ -323,7 +323,8 @@ public final class AssistantService {
                         new ai.ravenroot.server.assistant.provider.OpenAiCompatibleAssistantProvider(
                                 ai.ravenroot.core.security.egress.EgressHttpClients.create(),
                                 configuration.endpoint(), configuration.model(), credential,
-                                configuration.timeout(), configuration.allowLocalHttp());
+                                configuration.timeout(), configuration.allowLocalHttp(),
+                                configuration.allowTrustedHttp());
                 case SCRIPTED -> new ai.ravenroot.server.assistant.provider.ScriptedAssistantProvider();
             };
         }

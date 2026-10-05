@@ -85,13 +85,8 @@ public record McpProfile(String name, URI endpoint,
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw new IllegalArgumentException("endpoint");
         }
-        // Identical to LlmProfile's rule and stated again rather than referenced: the managed channel
-        // already refuses to place a credential on a plaintext origin, and repeating it here turns
-        // "your call failed" into "your profile is wrong", while the operator can still see which
-        // profile they wrote.
-        if (credentialBinding.isPresent() && !scheme.equals("https")) {
-            throw new IllegalArgumentException("credentialBinding");
-        }
+        // Credential transport is decided by the administrator-owned service grant plus the shared
+        // trusted-network policy. The profile still cannot create either authority.
         if (timeoutMs < 1) {
             throw new IllegalArgumentException("timeoutMs");
         }

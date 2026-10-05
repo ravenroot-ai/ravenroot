@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -164,8 +165,8 @@ class ManagedNodePackageSigningTest {
     }
 
     @Test
-    void operatorSigningGrantIsHttpsOnlyBoundedUniqueAndFailClosed() {
-        assertThrows(IllegalArgumentException.class, () -> NodePackageEgressPolicy.builder()
+    void operatorSigningGrantSupportsHttpButRemainsBoundedUniqueAndFailClosed() {
+        assertDoesNotThrow(() -> NodePackageEgressPolicy.builder()
                 .bindAwsSigV4("sign", new NodePackageEgressPolicy.Origin("http", "example.test", 80),
                         "credential", "us-east-1", "s3"));
         assertThrows(IllegalArgumentException.class, () -> NodePackageEgressPolicy.builder()

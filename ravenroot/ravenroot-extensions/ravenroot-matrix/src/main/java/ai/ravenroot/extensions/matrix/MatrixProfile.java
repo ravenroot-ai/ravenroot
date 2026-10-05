@@ -57,11 +57,12 @@ record MatrixProfile(String tenantId, String name, URI homeserverOrigin, String 
     }
 
     private static URI origin(URI value) {
-        if (value == null || !"https".equals(value.getScheme()) || value.getHost() == null
+        if (value == null || !Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null
                 || value.getUserInfo() != null || value.getPort() != -1 || value.getRawQuery() != null
                 || value.getFragment() != null || !(value.getRawPath().isEmpty() || "/".equals(value.getRawPath())))
             throw configuration();
-        return URI.create("https://" + value.getHost().toLowerCase(java.util.Locale.ROOT) + "/");
+        return URI.create(value.getScheme() + "://"
+                + value.getHost().toLowerCase(java.util.Locale.ROOT) + "/");
     }
 
     private static String token(String value, int maximum) {

@@ -21,9 +21,9 @@ public record GithubProfile(
     public GithubProfile {
         name = token(name, 64); tenantId = token(tenantId, 160);
         apiOrigin = java.util.Objects.requireNonNull(apiOrigin);
-        if (!"https".equalsIgnoreCase(apiOrigin.getScheme()) || apiOrigin.getHost() == null
+        if (!Set.of("http", "https").contains(apiOrigin.getScheme().toLowerCase(java.util.Locale.ROOT)) || apiOrigin.getHost() == null
                 || apiOrigin.getUserInfo() != null || apiOrigin.getQuery() != null || apiOrigin.getFragment() != null
-                || apiOrigin.getPort() != -1 && apiOrigin.getPort() != 443
+                || apiOrigin.getPort() != -1 && apiOrigin.getPort() != 443 && apiOrigin.getPort() != 80
                 || apiOrigin.getPath() != null && !apiOrigin.getPath().isEmpty()) throw invalid();
         owner = repositoryToken(owner); repository = repositoryToken(repository);
         if (repositoryId < 1 || installationId < 1) throw invalid();

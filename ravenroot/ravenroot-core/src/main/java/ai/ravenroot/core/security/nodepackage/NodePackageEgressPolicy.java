@@ -182,9 +182,8 @@ public final class NodePackageEgressPolicy {
         public AwsSigV4SigningGrant {
             bindingId = safeToken(bindingId, "bindingId", 256);
             Objects.requireNonNull(origin, "origin");
-            if (!"https".equals(origin.scheme())) {
-                throw new IllegalArgumentException("SigV4 signing requires HTTPS");
-            }
+            if (!Set.of("http", "https").contains(origin.scheme()))
+                throw new IllegalArgumentException("SigV4 signing requires HTTP");
             credentialReference = safeToken(credentialReference, "credentialReference", 256);
             region = safeAwsComponent(region, "region");
             service = safeAwsComponent(service, "service");

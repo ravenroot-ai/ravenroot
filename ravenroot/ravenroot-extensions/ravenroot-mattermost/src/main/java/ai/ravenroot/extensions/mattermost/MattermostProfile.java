@@ -15,7 +15,7 @@ record MattermostProfile(String tenantId, String name, URI origin, String teamId
 
     MattermostProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
-        if (origin == null || !"https".equals(origin.getScheme()) || origin.getHost() == null
+        if (origin == null || !Set.of("http", "https").contains(origin.getScheme()) || origin.getHost() == null
                 || origin.getUserInfo() != null || origin.getQuery() != null || origin.getFragment() != null
                 || !(origin.getPath().isEmpty() || "/".equals(origin.getPath()))) throw configuration();
         teamId = id(teamId); publicChannelIds = ids(publicChannelIds);

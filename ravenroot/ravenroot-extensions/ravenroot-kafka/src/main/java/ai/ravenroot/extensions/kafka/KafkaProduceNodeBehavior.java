@@ -267,12 +267,21 @@ public final class KafkaProduceNodeBehavior implements NodeBehavior {
             for (String key : c.properties().keySet()) if (!CONFIG.contains(key)) throw new Refusal("REJECTED", "UNKNOWN_GRAPH_PROPERTY");
             String name = c.property("clusterProfile").orElseThrow(() -> new Refusal("REJECTED", "CLUSTER_PROFILE_REQUIRED"));
             KafkaProfile p;
-            try { p = resolver.resolve(tenant, name).orElse(null); } catch (RuntimeException failure) { p = null; }
+            try { p = resolver.resolve(tenant, name).orElse(null); }
+            catch (SecurityException refused) {
+                throw new Refusal("PERMANENT_FAILURE",
+                        "OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED".equals(refused.getMessage())
+                                ? "OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED"
+                                : "OUTBOUND_DESTINATION_POLICY_REFUSED");
+            }
+            catch (RuntimeException failure) { p = null; }
             if (p == null) throw new Refusal("PERMANENT_FAILURE", "CLUSTER_PROFILE_UNAVAILABLE");
             if (!tenant.equals(p.tenant()) || !name.equals(p.name())) throw new Refusal("REJECTED", "CLUSTER_PROFILE_FORBIDDEN");
             try { EnvironmentKafkaProfileResolver.requireDestinations(
-                    String.join(",", p.bootstrapServers()), destinationPolicy); }
-            catch (SecurityException refused) { throw new Refusal("PERMANENT_FAILURE", "CLUSTER_PROFILE_UNAVAILABLE"); }
+                    String.join(",", p.bootstrapServers()), destinationPolicy,
+                    p.tenant() + "/" + p.name(), p.tls()); }
+            catch (SecurityException refused) { throw new Refusal(
+                    "PERMANENT_FAILURE", "OUTBOUND_DESTINATION_POLICY_REFUSED"); }
             String topic = c.property("topic", p.defaultTopic()); if (!p.allowsTopic(topic)) throw new Refusal("REJECTED", "TOPIC_FORBIDDEN");
             return new Settings(p, topic, tighten(c,"timeoutMs",p.timeoutMs(),100), tighten(c,"maxConcurrency",p.maxConcurrency(),1),
                     tighten(c,"maxRecordBytes",p.maxRecordBytes(),1), optional(c,"correlationId",128));

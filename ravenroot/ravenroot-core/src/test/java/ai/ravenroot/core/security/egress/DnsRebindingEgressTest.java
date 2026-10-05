@@ -82,7 +82,7 @@ class DnsRebindingEgressTest {
 
         UnknownHostException refused = assertThrows(UnknownHostException.class,
                 () -> InetAddress.getAllByName(host));
-        assertTrue(refused.getMessage().contains("reserved address space"), refused.getMessage());
+        assertTrue(refused.getMessage().contains("OUTBOUND_DESTINATION_POLICY_REFUSED"), refused.getMessage());
     }
 
     @Test
@@ -125,17 +125,14 @@ class DnsRebindingEgressTest {
     }
 
     @Test
-    @DisplayName("a dual-stack answer keeps its public address and drops the reserved one")
-    void reservedAddressesAreDroppedIndividually() throws Exception {
+    @DisplayName("a mixed public and reserved answer is refused as one DNS decision")
+    void mixedAnswersAreRefusedTogether() throws Exception {
         String host = freshName();
         EgressAddressGuard.replaceUpstream((name, policy) -> List.of(
                 InetAddress.getByName("169.254.169.254"),
                 InetAddress.getByName("93.184.216.34")));
 
-        InetAddress[] resolved = InetAddress.getAllByName(host);
-
-        assertEquals(1, resolved.length, "the reserved address must not survive resolution");
-        assertEquals("93.184.216.34", resolved[0].getHostAddress());
+        assertThrows(UnknownHostException.class, () -> InetAddress.getAllByName(host));
     }
 
     @Test

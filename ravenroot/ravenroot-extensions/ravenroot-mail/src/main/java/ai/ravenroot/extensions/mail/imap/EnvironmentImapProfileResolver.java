@@ -170,12 +170,13 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
         if (p.length != FIELDS) return rejected(tenant, profile, Rejection.FIELD_COUNT);
 
         if (p[0].isBlank()) return rejected(tenant, profile, Rejection.HOST_BLANK);
-        try { destinationPolicy.requireAllowedLiteral(p[0]); }
-        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         int port;
         try { port = Integer.parseInt(p[1]); }
         catch (NumberFormatException notNumeric) { return rejected(tenant, profile, Rejection.PORT_FORMAT); }
         if (port < 1 || port > 65535) return rejected(tenant, profile, Rejection.PORT_RANGE);
+        try { destinationPolicy.requireAllowedDestination(
+                "imap", tenant + "/" + profile, p[0], port); }
+        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         // Deliberately not upper-cased: ImapProfile compares the raw string. See this enum's comment.
         if (!SECURITY_MODES.contains(p[2])) return rejected(tenant, profile, Rejection.UNKNOWN_SECURITY_MODE);
         if (p[3].isBlank()) return rejected(tenant, profile, Rejection.USERNAME_BLANK);

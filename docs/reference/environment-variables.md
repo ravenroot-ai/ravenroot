@@ -161,6 +161,7 @@ Detailed contract: [Credentials and egress](configuration.md#secret-handling).
 |---|---|
 | `RAVENROOT_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY` | See the linked contract for exact schema, precedence, and applicability. |
 | `RAVENROOT_HTTP_ALLOWED_HOSTS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HTTP_ALLOWED_PORTS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |

@@ -11,14 +11,21 @@ import java.util.concurrent.*;
 /** Model-only egress on the trusted worker. No endpoint, credential or headers come from a graph. */
 public final class RunnerModelGateway implements RunnerAgentRuntime.ModelGateway {
     public record Profile(URI endpoint, String model, String credentialReference,
-                          int maxConcurrency, int maxRequestBytes, int maxResponseBytes) {
+                          int maxConcurrency, int maxRequestBytes, int maxResponseBytes,
+                          boolean administratorScopedPlaintext) {
+        public Profile(URI endpoint, String model, String credentialReference,
+                       int maxConcurrency, int maxRequestBytes, int maxResponseBytes) {
+            this(endpoint, model, credentialReference, maxConcurrency, maxRequestBytes,
+                    maxResponseBytes, false);
+        }
         public Profile {
             Objects.requireNonNull(endpoint); Objects.requireNonNull(model);
-            if ((!"https".equals(endpoint.getScheme()) && !("http".equals(endpoint.getScheme())
-                    && Set.of("127.0.0.1", "localhost", "[::1]").contains(endpoint.getHost())))
+            if ((!"https".equals(endpoint.getScheme()) && !"http".equals(endpoint.getScheme()))
                     || endpoint.getUserInfo() != null || endpoint.getFragment() != null || endpoint.getQuery() != null
                     || model.isBlank() || maxConcurrency < 1 || maxRequestBytes < 1 || maxResponseBytes < 1
-                    || (credentialReference != null && !"https".equals(endpoint.getScheme()))) {
+                    || "http".equals(endpoint.getScheme()) && !administratorScopedPlaintext
+                    && (!Set.of("127.0.0.1", "localhost", "[::1]", "::1").contains(endpoint.getHost())
+                    || credentialReference != null)) {
                 throw new IllegalArgumentException("invalid operator model profile");
             }
         }
@@ -35,6 +42,18 @@ public final class RunnerModelGateway implements RunnerAgentRuntime.ModelGateway
     private final Map<UUID, Pending> pending = new HashMap<>();
     public RunnerModelGateway(Map<String, Profile> profiles, SecretProvider secrets, Duration connectTimeout) {
         this.profiles = Map.copyOf(profiles); this.secrets = Objects.requireNonNull(secrets);
+        var destinationPolicy = ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(System.getenv());
+        profiles.forEach((name, profile) -> {
+            int port = profile.endpoint().getPort() == -1
+                    ? ("https".equals(profile.endpoint().getScheme()) ? 443 : 80)
+                    : profile.endpoint().getPort();
+            boolean legacyLocal = profile.credentialReference() == null
+                    && Set.of("127.0.0.1", "localhost", "[::1]", "::1").contains(profile.endpoint().getHost());
+            if (!legacyLocal) destinationPolicy.requireAllowedDestination(
+                    "runner", name, profile.endpoint().getHost(), port);
+            if ("http".equals(profile.endpoint().getScheme()) && !legacyLocal)
+                destinationPolicy.requirePlaintext("runner", name, profile.endpoint().getHost(), port);
+        });
         var values = new LinkedHashMap<String, Semaphore>();
         profiles.forEach((name, profile) -> values.put(name, new Semaphore(profile.maxConcurrency())));
         permits = Map.copyOf(values);

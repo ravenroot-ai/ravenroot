@@ -25,8 +25,10 @@ GraphML carries only `clusterProfile` plus exact topic selection and tighter dea
 record-size, and correlation defaults. The tenant-scoped operator profile owns bootstrap servers,
 DNS lookup, TLS/SASL, client id, credential reference, exact topic/header authority, partition and
 timestamp permissions, compression, auto-creation, quotas and all producer durability settings.
-Production endpoints require authenticated `SASL_SSL`, JVM trust validation and hostname checking;
-plaintext is accepted only for an exact loopback bootstrap address. Ravenroot generates the JAAS
+Production endpoints default to authenticated `SASL_SSL`, JVM trust validation and hostname checking.
+Authenticated plaintext requires an exact administrator trusted-network rule for every bootstrap
+protocol, port, tenant/profile, host, and complete resolved address set; the legacy exact-loopback
+case remains available. Ravenroot generates the JAAS
 entry for PLAIN or SCRAM and accepts no raw JAAS, security protocol, serializer, interceptor, class
 name, admin operation or arbitrary Kafka property from a graph. Environment resolver keys encode
 tenant/profile/reference identifiers as injective UTF-8 hex values.
@@ -69,8 +71,9 @@ deadline expires, the result remains bounded but capacity stays unavailable; clo
 asynchronously only after that handoff. Admission is bounded globally, per tenant, profile and action
 before credentials/client creation. Every invocation owns one producer; there is no static cache or
 pool. The deterministic tests exercise the injectable client seam; they do not claim a live Kafka or
-Testcontainers run. A local broker example may use loopback SASL plaintext only; production must use
-authenticated TLS.
+Testcontainers run. A local broker example may use loopback SASL plaintext. A mesh-terminated
+deployment may use authenticated plaintext only under the shared trusted-network rule; other
+production deployments use authenticated TLS.
 
 Primary references: [producer configuration](https://kafka.apache.org/41/configuration/producer-configs/)
 and [KafkaProducer API](https://kafka.apache.org/41/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html).

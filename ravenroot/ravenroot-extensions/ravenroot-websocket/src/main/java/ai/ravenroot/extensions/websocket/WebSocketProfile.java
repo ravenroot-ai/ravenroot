@@ -16,7 +16,7 @@ public record WebSocketProfile(String name, URI destination, Map<String, List<St
 
     public WebSocketProfile {
         if (name == null || !name.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) throw new IllegalArgumentException("name");
-        if (destination == null || !"wss".equals(destination.getScheme()) || destination.getHost() == null || destination.getUserInfo() != null || destination.getFragment() != null || destination.getQuery() != null || destination.toASCIIString().length() > 2048) throw new IllegalArgumentException("destination");
+        if (destination == null || !("wss".equals(destination.getScheme()) || "ws".equals(destination.getScheme())) || destination.getHost() == null || destination.getUserInfo() != null || destination.getFragment() != null || destination.getQuery() != null || destination.toASCIIString().length() > 2048) throw new IllegalArgumentException("destination");
         Map<String, List<String>> copiedHeaders = new java.util.LinkedHashMap<>();
         if (headers != null) headers.forEach((key, values) -> {
             if (key == null || values == null || values.stream().anyMatch(java.util.Objects::isNull)) {

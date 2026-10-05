@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,7 +41,7 @@ class AmqpNodePackageTest {
         AmqpProfile valid = AmqpTestSupport.profile();
         assertTrue(valid.allowsExchange("orders"));
         assertFalse(valid.allowsExchange("attacker"));
-        assertThrows(IllegalArgumentException.class, () -> new AmqpProfile(valid.tenant(), valid.name(),
+        assertDoesNotThrow(() -> new AmqpProfile(valid.tenant(), valid.name(),
                 "remote.example", 5672, false, valid.vhost(), valid.username(), valid.credentialRef(),
                 valid.defaultExchange(), valid.exchanges(), valid.defaultRoutingKey(), valid.routingKeys(),
                 valid.headers(), valid.replyTo(), valid.allowPersistent(), valid.maxPriority(), valid.maxExpirationMs(),

@@ -45,7 +45,7 @@ public record AmqpProfile(
                 || timeoutMs < 100 || timeoutMs > 30_000 || maxBodyBytes < 1 || maxBodyBytes > 1_048_576
                 || retries < 0 || retries > 3 || !validNames(exchanges, 255, true)
                 || !validNames(routingKeys, 255, false) || !validHeaders(headers)
-                || !validNames(replyTo, 255, false) || !tls && !loopback(host)) {
+                || !validNames(replyTo, 255, false)) {
             throw new IllegalArgumentException("invalid AMQP operator profile");
         }
     }
@@ -91,7 +91,7 @@ public record AmqpProfile(
                 && value.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}") && AmqpWireLimits.isShortstr(value));
     }
 
-    private static boolean loopback(String host) {
+    static boolean loopback(String host) {
         return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
                 || "::1".equals(host) || "[::1]".equals(host);
     }

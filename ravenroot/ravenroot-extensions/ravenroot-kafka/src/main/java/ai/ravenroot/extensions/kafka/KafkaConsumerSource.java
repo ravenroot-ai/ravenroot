@@ -436,6 +436,11 @@ final class KafkaConsumerSource implements InboundSource {
             String name = c.property("clusterProfile").orElseThrow(() -> sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_REQUIRED));
             KafkaConsumerProfile profile;
             try { profile = profiles.resolve(context.identity().tenantId(), name).orElse(null); }
+            catch (SecurityException refused) {
+                throw sourceFailure("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED".equals(refused.getMessage())
+                        ? KafkaSourceStartFailure.OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED
+                        : KafkaSourceStartFailure.OUTBOUND_DESTINATION_POLICY_REFUSED, refused);
+            }
             catch (RuntimeException invalid) {
                 throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE, invalid);
             }
@@ -444,7 +449,7 @@ final class KafkaConsumerSource implements InboundSource {
             }
             try { destinationAdmission.requireAllowed(profile); }
             catch (SecurityException refused) {
-                throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE, refused);
+                throw sourceFailure(KafkaSourceStartFailure.OUTBOUND_DESTINATION_POLICY_REFUSED, refused);
             }
             String group = c.property("group", profile.groupLogicalName());
             if (!group.equals(profile.groupLogicalName())) throw sourceFailure(KafkaSourceStartFailure.GROUP_FORBIDDEN);
@@ -543,7 +548,8 @@ final class KafkaConsumerSource implements InboundSource {
     static DestinationAdmission defaultDestinationAdmission() {
         ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(System.getenv());
         return profile -> EnvironmentKafkaProfileResolver.requireDestinations(
-                String.join(",", profile.bootstrapServers()), policy);
+                String.join(",", profile.bootstrapServers()), policy,
+                profile.tenant() + "/" + profile.name(), profile.tls());
     }
 
     @FunctionalInterface

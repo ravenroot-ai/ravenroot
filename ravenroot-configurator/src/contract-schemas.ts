@@ -1016,7 +1016,9 @@ export const EXPLICIT_CONTRACT_SCHEMAS = {
             "specBase64": {
               "kind": "string",
               "format": "base64",
-              "minimumLength": 4
+              "minimumLength": 4,
+              "maximumLength": 2796204,
+              "maximumDecodedBytes": 2097152
             },
             "specSha256": {
               "kind": "string",

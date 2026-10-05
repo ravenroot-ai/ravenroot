@@ -258,6 +258,20 @@ for (const [id, runtime] of Object.entries(RUNTIMES)) {
         }
       }
     }
+    if (id === "openapi-server.config") {
+      const original = selection.values.document as Record<string, unknown>;
+      const profileName = Object.keys(original.profiles as Record<string, unknown>)[0]!;
+      const originalProfile = (original.profiles as Record<string, Record<string, unknown>>)[profileName]!;
+      const baseSpec = Buffer.from(String(originalProfile.specBase64), "base64");
+      const sizedConfiguration = (size: number): Record<string, unknown> => {
+        const spec = Buffer.concat([baseSpec, Buffer.alloc(size - baseSpec.length, 0x20)]);
+        const profile = { ...originalProfile, specBase64: spec.toString("base64"), specSha256: createHash("sha256").update(spec).digest("hex") };
+        return { ...original, profiles: { ...(original.profiles as Record<string, unknown>), [profileName]: profile } };
+      };
+      const exactLimit = sizedConfiguration(2_097_152);
+      positives.push({ value: Object.values(serializeSelection({ ...selection, values: { document: exactLimit } }))[0]!, args: "", label: "canonical-spec-at-2097152-decoded-bytes", assertion: "openapi-server-spec-2mib" });
+      mutations.push({ value: sizedConfiguration(2_097_153), label: "profiles.specBase64:2097153-decoded-bytes" });
+    }
     for (const mutation of mutations) {
       const invalidSelection = structuredClone(selection) as { values: { document: unknown } }; invalidSelection.values.document = mutation.value;
       try { serializeSelection(invalidSelection); throw new Error(`${id} schema accepted generated negative ${mutation.label}`); } catch (error) {

@@ -30,7 +30,7 @@ export const NODE_COVERAGE: readonly NodeCoverage[] = [
   covered("amqp.publish", "AMQP 0-9-1", ["amqp.profile"]),
   authorOnly("bigint-op"),
   covered("boundary-guard", "core", ["core.publication-policies"]),
-  authorOnly("cel-decision"), authorOnly("cel-transform"), authorOnly("delay"),
+  authorOnly("cel-decision"), authorOnly("cel-transform"), authorOnly("crontab"), authorOnly("delay"),
   covered("discord.interactions", "Discord", ["discord.config"]),
   covered("discord.send", "Discord", ["discord.config"]),
   covered("filesystem.read", "Filesystem", ["filesystem.profile"]),
@@ -79,7 +79,7 @@ export const NODE_COVERAGE: readonly NodeCoverage[] = [
   covered("telegram.delete.message", "Telegram", ["telegram.profile"]),
   covered("telegram.edit.message", "Telegram", ["telegram.profile"]),
   covered("telegram.send", "Telegram", ["telegram.profile"]),
-  authorOnly("template"),
+  authorOnly("template"), authorOnly("timer"),
   covered("websocket.receive", "WebSocket", ["websocket.profile"]),
   covered("websocket.send", "WebSocket", ["websocket.profile"])
 ] as const;

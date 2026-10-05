@@ -160,19 +160,23 @@ describe("runtime contract fidelity", () => {
     expect(() => serializeSelection(duplicate)).toThrow("case-insensitive duplicate");
   });
 
-  test("matches the OpenAPI decoded specification size boundary", () => {
-    const selection = templateSelection("openapi-client.profile") as { values: { document: Record<string, unknown> } };
-    const source = Buffer.from(String(selection.values.document.specBase64), "base64");
-    const withSize = (size: number): void => {
-      const specification = Buffer.concat([source, Buffer.alloc(size - source.length, 0x20)]);
-      selection.values.document.specBase64 = specification.toString("base64");
-      selection.values.document.specSha256 = createHash("sha256").update(specification).digest("hex");
-      expect(String(selection.values.document.specBase64)).toHaveLength(2_796_204);
-    };
-    withSize(2_097_152);
-    expect(() => serializeSelection(selection)).not.toThrow();
-    withSize(2_097_153);
-    expect(() => serializeSelection(selection)).toThrow("must decode to at most 2097152 bytes");
+  test("matches the OpenAPI decoded specification size boundary for client and server profiles", () => {
+    for (const contractId of ["openapi-client.profile", "openapi-server.config"] as const) {
+      const selection = templateSelection(contractId) as { values: { document: Record<string, unknown> } };
+      const profile = contractId === "openapi-client.profile" ? selection.values.document
+        : Object.values(selection.values.document.profiles as Record<string, Record<string, unknown>>)[0]!;
+      const source = Buffer.from(String(profile.specBase64), "base64");
+      const withSize = (size: number): void => {
+        const specification = Buffer.concat([source, Buffer.alloc(size - source.length, 0x20)]);
+        profile.specBase64 = specification.toString("base64");
+        profile.specSha256 = createHash("sha256").update(specification).digest("hex");
+        expect(String(profile.specBase64)).toHaveLength(2_796_204);
+      };
+      withSize(2_097_152);
+      expect(() => serializeSelection(selection), contractId).not.toThrow();
+      withSize(2_097_153);
+      expect(() => serializeSelection(selection), contractId).toThrow("must decode to at most 2097152 bytes");
+    }
   });
 
   test("counts governed runner instructions in UTF-8 bytes", () => {

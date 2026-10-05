@@ -65,6 +65,7 @@ describe("guided registry", () => {
     expect(document.querySelector("#configurations")?.textContent).toContain("Connector constraints");
     expect(document.querySelector("#configurations")?.textContent).toContain("Required runtime capability: outbound-http");
     expect(document.querySelector("#configurations")?.textContent).toContain("External requirement: A configured sandbox supervisor");
+    expect(document.querySelector("#configurations")?.textContent).toContain("at most 2097152 decoded bytes");
     kind.value = "prestart"; kind.dispatchEvent(new Event("change"));
     expect(document.querySelector('[data-target-option="restartCommandJson"]')).not.toBeNull();
     expect(document.querySelector('[data-target-option="verifyCommandJson"]')).not.toBeNull();

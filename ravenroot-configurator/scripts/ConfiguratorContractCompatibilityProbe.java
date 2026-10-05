@@ -91,6 +91,14 @@ public final class ConfiguratorContractCompatibilityProbe {
                     id + " did not preserve the exact 2 MiB decoded specification");
             return;
         }
+        if ("openapi-server-spec-2mib".equals(assertion)) {
+            Method profiles = accepted.getClass().getMethod("profiles");
+            Object profile = ((Map<?, ?>) profiles.invoke(accepted)).values().iterator().next();
+            Method specification = profile.getClass().getMethod("specification");
+            require(((byte[]) specification.invoke(profile)).length == 2_097_152,
+                    id + " did not preserve the exact 2 MiB decoded specification");
+            return;
+        }
         if (!"openapi-normalized".equals(assertion)) throw new AssertionError(id + " has unknown assertion " + assertion);
         Method origin = accepted.getClass().getMethod("origin");
         Method fixedHeaders = accepted.getClass().getMethod("fixedHeaders");

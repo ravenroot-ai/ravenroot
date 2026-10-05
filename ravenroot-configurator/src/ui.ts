@@ -104,6 +104,7 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
   if (schema.kind === "string") {
     if (schema.minimumLength !== undefined || schema.maximumLength !== undefined) constraints.push(`length ${schema.minimumLength ?? 0}–${schema.maximumLength ?? "unbounded"}`);
     if (schema.maximumUtf8Bytes !== undefined) constraints.push(`at most ${schema.maximumUtf8Bytes} UTF-8 bytes`);
+    if (schema.maximumDecodedBytes !== undefined) constraints.push(`at most ${schema.maximumDecodedBytes} decoded bytes`);
     if (schema.schemes) constraints.push(`scheme ${schema.schemes.join("/")}`);
     if (schema.exactScheme) constraints.push("scheme is case-sensitive");
     if (schema.javaCompatibleHost) constraints.push("Java-compatible host name");

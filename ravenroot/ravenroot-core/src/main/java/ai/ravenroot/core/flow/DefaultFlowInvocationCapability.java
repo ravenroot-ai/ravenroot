@@ -172,7 +172,7 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
     }
 
     private void expireDeadline(DeadlineKey key) {
-        store.loadFlowInvocation(key.tenantId(), key.handle()).thenCompose(optional -> {
+        store.loadFlowInvocation(key.tenantId(), key.handle()).thenComposeAsync(optional -> {
             FlowInvocationRecord latest = optional.orElse(null);
             if (latest == null || latest.terminal()) return CompletableFuture.completedFuture(null);
             if (latest.deadlineAt().isAfter(clock.instant())) {

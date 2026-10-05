@@ -34,8 +34,21 @@ class PostgresProcessControlMigrationTest {
             store.createFlowInvocation(intent).toCompletableFuture().join();
         }
         try (var connection = source.getConnection(); var statement = connection.createStatement()) {
-            statement.execute("DELETE FROM store_schema_history WHERE version = 16");
-            statement.execute("UPDATE store_schema_version SET version = 15");
+            // Restore the exact version-15 shape while deliberately retaining flow_invocation.
+            // Migrations 16-19 created saga, palette, and selective-replay structures; leaving any
+            // of them behind would synthesize a database no released build could have produced and
+            // would make the migration-20 IF NOT EXISTS compatibility check fail for the wrong reason.
+            statement.execute("DROP TABLE saga_command_outbox");
+            statement.execute("DROP TABLE saga_instance");
+            statement.execute("DROP TABLE node_template");
+            statement.execute("DROP TABLE node_palette");
+            statement.execute("DROP TABLE derived_execution_ancestry");
+            statement.execute("DROP TABLE replay_source_settlement");
+            statement.execute("DROP TABLE replay_invocation_evidence");
+            assertEquals(5, statement.executeUpdate(
+                    "DELETE FROM store_schema_history WHERE version >= 16"));
+            assertEquals(1, statement.executeUpdate(
+                    "UPDATE store_schema_version SET version = 15"));
         }
 
         try (var store = new PostgresExecutionStore(source, CLOCK)) {

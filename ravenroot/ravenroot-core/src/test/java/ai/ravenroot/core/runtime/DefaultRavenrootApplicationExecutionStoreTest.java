@@ -34,8 +34,10 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -197,7 +199,8 @@ class DefaultRavenrootApplicationExecutionStoreTest {
 
     @Test
     void durableSagaCompensationOverridesAnEarlierCompletedResultAfterRestart() {
-        var store = new InMemoryExecutionStore();
+        Instant now = Instant.parse("2026-09-27T12:00:00Z");
+        var store = new InMemoryExecutionStore(Clock.fixed(now, ZoneOffset.UTC));
         java.util.UUID traversalId = java.util.UUID.randomUUID();
         var key = new ExecutionKey(TestIdentities.TENANT_A.tenantId(), java.util.UUID.randomUUID());
         var created = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
@@ -217,7 +220,6 @@ class DefaultRavenrootApplicationExecutionStoreTest {
                         traversalId, TraversalStatus.FAILED))
                 .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
                         ProcessInstanceStatus.FAILED)).build()).toCompletableFuture().join();
-        Instant now = Instant.parse("2026-09-27T12:00:00Z");
         store.recordExecutionResult(DurableExecutionResult.of(key, traversalId,
                 new GraphVersionPin("graph-v1"), ProcessInstanceStatus.COMPLETED, null,
                 now, now.plusSeconds(1), Map.of("graph", "finished"),

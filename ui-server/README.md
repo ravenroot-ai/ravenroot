@@ -8,6 +8,11 @@ RAVENROOT_UI_ROOT="$PWD/ui" RAVENROOT_UI_BACKEND_URL=http://127.0.0.1:8080 \
   RAVENROOT_UI_PORT=8081 node server.mjs
 ```
 
+Without `RAVENROOT_UI_BACKEND_URL`, the server runs in static-only mode: UI/local probes work,
+while `/v1` and backend probes return `503` with `UI_BACKEND_NOT_CONFIGURED`. Explicit localhost or
+loopback URLs using the UI listening port are rejected; do not use this UI's Service/DNS name as its
+own upstream. Configure an existing backend to enable connected features.
+
 Open http://localhost:8081/. Supply a backend-issued access token in the UI connection panel.
 The backend URL is server configuration; it is never emitted into assets. The browser uses the
 same-origin proxy. Never put credentials in the backend URL or image configuration.

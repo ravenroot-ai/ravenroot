@@ -19,7 +19,7 @@ VARIABLE = re.compile(r'"(RAVENROOT_[A-Z0-9_]+)"')
 UI_SERVER_SOURCE = ROOT / "ui-server" / "server.mjs"
 UI_SETTINGS = {
     "RAVENROOT_UI_BACKEND_URL": (
-        "Server-side HTTP(S) upstream, default `http://127.0.0.1:8080`; optional backend path prefix, "
+        "Server-side HTTP(S) upstream; unset selects static-only mode with backend routes returning `503`; optional backend path prefix, "
         "no credentials/query/fragment"
     ),
     "RAVENROOT_UI_PREFIX": "Empty (root) or public slash-prefixed path without trailing slash",

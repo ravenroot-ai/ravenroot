@@ -89,11 +89,17 @@ backend secrets, service-account token or writable root filesystem.
 
 | Runtime variable | Default/contract |
 |---|---|
-| `RAVENROOT_UI_BACKEND_URL` | `http://127.0.0.1:8080`; operator-owned HTTP(S) URL with optional backend prefix; no credentials/query/fragment |
+| `RAVENROOT_UI_BACKEND_URL` | Unset selects static-only mode (API/backend probes return `503`); operator-owned HTTP(S) URL with optional backend prefix; no credentials/query/fragment |
 | `RAVENROOT_UI_PREFIX` | Empty for root; otherwise slash-prefixed segments of letters/digits/underscore/hyphen, no trailing slash |
 | `RAVENROOT_UI_PORT` | `8080`, integer TCP port |
 | `RAVENROOT_UI_ROOT` | `/opt/ravenroot/ui`; absolute/relative operator-owned asset directory |
 | `NODE_EXTRA_CA_CERTS` | Optional operator-mounted additional HTTPS CA bundle |
+
+If no backend URL is set, the UI serves its assets and local health/readiness without an upstream.
+API and backend-probe requests return `503` with `UI_BACKEND_NOT_CONFIGURED`, so offline authoring
+can remain available. Explicit loopback/localhost upstreams targeting the UI listening port refuse
+startup. Other DNS aliases can still identify the same pod: verify your configured backend endpoint
+belongs to the existing backend, not this UI Service. Never configure the UI Service as its upstream.
 
 No backend URL or bearer token is written into frontend assets. The index response pre-fills only
 the public same-origin Service URL prefix. Configure the backend URL on the **server**, not in the

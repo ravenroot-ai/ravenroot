@@ -129,3 +129,30 @@ test('bounded header wait and disconnect release upstream sockets without closin
     await Promise.race([disconnected, new Promise((_, reject) => setTimeout(() => reject(new Error('Upstream socket leaked')), 2000).unref())]);
   } finally { await stop(server); await stop(backend); }
 });
+
+
+test('unset upstream serves static UI safely and returns explicit 503 for every backend route', async () => {
+  assert.equal(configuration({}).upstream, null);
+  assert.equal(configuration({ RAVENROOT_UI_BACKEND_URL: '   ' }).upstream, null);
+  const root = mkdtempSync(join(tmpdir(), 'ravenroot-ui-static-'));
+  writeFileSync(join(root, 'index.html'), '<input id="service-url" value="">');
+  const server = createServer(configuration({ RAVENROOT_UI_ROOT: root }));
+  const ui = await listen(server);
+  try {
+    assert.equal((await fetch(ui + '/')).status, 200);
+    for (const path of ['/health', '/ready']) assert.equal((await fetch(ui + path)).status, 200);
+    for (const path of ['/v1', '/v1/runtime', '/v1/events', '/backend-health', '/backend-ready']) {
+      const response = await fetch(ui + path);
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).error, 'UI_BACKEND_NOT_CONFIGURED');
+    }
+  } finally { await stop(server); rmSync(root, { recursive: true }); }
+});
+
+test('explicit loopback targets cannot point at the configured UI port', () => {
+  for (const host of ['localhost', 'localhost.', '127.0.0.1', '127.1', '127.0.0.2', '[::1]', '0.0.0.0', '[::]']) {
+    assert.throws(() => configuration({ RAVENROOT_UI_BACKEND_URL: `http://${host}:8080` }), /UI listening port/);
+  }
+  assert.throws(() => configuration({ RAVENROOT_UI_PORT: '80', RAVENROOT_UI_BACKEND_URL: 'http://localhost' }), /UI listening port/);
+  assert.ok(configuration({ RAVENROOT_UI_PORT: '8081', RAVENROOT_UI_BACKEND_URL: 'http://localhost:8080' }).upstream);
+});

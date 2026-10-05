@@ -9,15 +9,25 @@ export function configuration(env = process.env) {
   if (prefix && !/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(prefix)) {
     throw new Error('RAVENROOT_UI_PREFIX must be empty or a slash-prefixed path without trailing slash');
   }
-  const upstream = new URL(env.RAVENROOT_UI_BACKEND_URL || 'http://127.0.0.1:8080');
-  if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password
-      || upstream.search || upstream.hash || /%|\/\//.test(upstream.pathname)) {
-    throw new Error('Backend URL must be HTTP(S), without credentials, query, fragment or encoded path');
-  }
-  if (env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw new Error('TLS verification cannot be disabled');
-  const backendPrefix = upstream.pathname.replace(/\/$/, '');
   const port = Number(env.RAVENROOT_UI_PORT || 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid UI port');
+  if (env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw new Error('TLS verification cannot be disabled');
+  // Unconfigured standalone UI is a static authoring surface, never a proxy to itself.
+  const configured = env.RAVENROOT_UI_BACKEND_URL?.trim();
+  const upstream = configured ? new URL(configured) : null;
+  if (upstream && (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password
+      || upstream.search || upstream.hash || /%|\/\//.test(upstream.pathname))) {
+    throw new Error('Backend URL must be HTTP(S), without credentials, query, fragment or encoded path');
+  }
+  if (upstream) {
+    const hostname = upstream.hostname.toLowerCase().replace(/\.$/, '');
+    const upstreamPort = Number(upstream.port || (upstream.protocol === 'https:' ? 443 : 80));
+    if (upstreamPort === port && (/^127\./.test(hostname)
+        || ['localhost', '[::1]', '0.0.0.0', '[::]'].includes(hostname))) {
+      throw new Error('Backend loopback URL must not target the UI listening port');
+    }
+  }
+  const backendPrefix = upstream?.pathname.replace(/\/$/, '') || '';
   return { prefix, upstream, backendPrefix, port, headerTimeoutMs: 15000, root: resolve(env.RAVENROOT_UI_ROOT || '/opt/ravenroot/ui') };
 }
 
@@ -52,6 +62,11 @@ export function createServer(config) {
     if (!url.pathname.startsWith(`${config.prefix}/`)) { res.writeHead(404).end(); return; }
     const local = url.pathname.slice(config.prefix.length);
     if (local === '/v1' || local.startsWith('/v1/') || local === '/backend-health' || local === '/backend-ready') {
+      if (!config.upstream) {
+        res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end('{"error":"UI_BACKEND_NOT_CONFIGURED","message":"Set RAVENROOT_UI_BACKEND_URL to an existing backend"}');
+        return;
+      }
       const path = local === '/backend-health' ? '/health' : local === '/backend-ready' ? '/ready' : local;
       const target = new URL(config.upstream);
       target.pathname = config.backendPrefix + path;

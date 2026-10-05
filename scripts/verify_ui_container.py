@@ -6,6 +6,7 @@ import re
 import subprocess
 import time
 import urllib.request
+import urllib.error
 
 def docker(*args):
     return subprocess.check_output(['docker', *args], text=True).strip()
@@ -34,6 +35,12 @@ if __name__ == '__main__':
             html = response.read().decode()
             assert 'id="service-url" value="/workspace"' in html
             assert './assets/' in html
+            try:
+                urllib.request.urlopen(base + '/workspace/v1/runtime', timeout=2)
+                raise AssertionError('Unconfigured UI unexpectedly proxied an API request')
+            except urllib.error.HTTPError as error:
+                assert error.code == 503
+                assert json.load(error)['error'] == 'UI_BACKEND_NOT_CONFIGURED'
             assets = re.findall(r'(?:src|href)="(\./assets/[^"]+)"', html)
             assert assets
             for asset in assets:

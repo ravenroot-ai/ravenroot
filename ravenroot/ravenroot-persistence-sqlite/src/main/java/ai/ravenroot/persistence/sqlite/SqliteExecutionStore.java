@@ -68,6 +68,9 @@ import ai.ravenroot.api.persistence.ProcessInventoryPage;
 import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.SagaSnapshot;
+import ai.ravenroot.api.persistence.SagaOutboxRecord;
+import ai.ravenroot.api.persistence.SagaOutboxSettlement;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
@@ -205,7 +208,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // instance. Recording refuses a conflicting outcome rather than overwriting
             // one, and the refusal is decided from the stored fingerprint alone, so it
             // is the same answer on every retry and across a reopen.
-            StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
+            StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
+            StoreCapability.DURABLE_SAGAS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -284,6 +288,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
     private final Clock clock;
     private final SqliteStoreConfig config;
     private final ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy;
+    private final ai.ravenroot.api.persistence.SagaOutboxCapacity sagaOutboxCapacity;
     private final CommitBoundary commitBoundary;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -338,6 +343,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
         this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        this.sagaOutboxCapacity = ai.ravenroot.api.persistence.SagaOutboxCapacity.configured();
         this.commitBoundary = Objects.requireNonNull(commitBoundary, "commitBoundary");
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-" + this.databaseFile.getFileName());
@@ -535,6 +541,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         writeRunnerWorkspace(key, batch, folded, now);
         writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
+        SqliteSagaStorage.write(connection, key, batch, now, sagaOutboxCapacity);
         // Inside the same transaction as the transition above, which is the entirety of the shared
         // transactional boundary the event journal promises. There is no publish step to crash
         // between, because there is no publish step: delivery reads the committed journal afterwards.
@@ -1506,7 +1513,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
         var terminal = java.util.Arrays.stream(ProcessInstanceStatus.values())
                 .filter(ProcessInstanceStatus::terminal).map(name -> "'" + name.name() + "'").toList();
         return "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? AND status IN ("
-                + String.join(", ", terminal) + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) AND ("
+                + String.join(", ", terminal) + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM saga_instance s WHERE s.tenant_id = process_instance.tenant_id AND s.process_instance_id = process_instance.process_instance_id "
+                + "AND (s.graph_completed=0 OR s.disposition NOT IN ('SUCCEEDED', 'COMPENSATED'))) AND ("
                 + "(retained_until_epoch_second IS NOT NULL AND "
                 + StoredInstant.atOrBefore("retained_until") + ") OR "
                 + "(retained_until_epoch_second IS NULL AND "
@@ -5631,6 +5640,56 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + batch.key().processInstanceId()));
             }
         }
+    }
+
+    @Override
+    public CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        Objects.requireNonNull(key, "key"); Objects.requireNonNull(sagaId, "sagaId");
+        return async(() -> inReadTransaction(key, () -> SqliteSagaStorage.load(connection, key, sagaId)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        Objects.requireNonNull(key, "key");
+        return async(() -> inReadTransaction(key, () -> SqliteSagaStorage.list(connection, key)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        Objects.requireNonNull(key, "key");
+        return async(() -> inReadTransaction(key, () -> SqliteSagaStorage.listCommands(connection, key)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaCompletionCandidates(String tenantId, int limit) {
+        requireTenantId(tenantId); requireLimit(limit);
+        return async(() -> inReadTransaction(null,
+                () -> SqliteSagaStorage.completionCandidates(connection, tenantId, limit, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaRecoveryCandidates(String tenantId, int limit) {
+        requireTenantId(tenantId); requireLimit(limit);
+        return async(() -> inReadTransaction(null,
+                () -> SqliteSagaStorage.recoveryCandidates(connection, tenantId, limit, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        requireTenantId(tenantId); requireWorkerId(workerId); requireLimit(limit); requireLeaseTtl(ttl);
+        return async(() -> inWriteTransaction(null,
+                () -> SqliteSagaStorage.claim(connection, tenantId, workerId, limit, ttl, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        requireTenantId(tenantId); requireWorkerId(workerId); Objects.requireNonNull(messageId, "messageId");
+        Objects.requireNonNull(settlement, "settlement");
+        return async(() -> inWriteTransaction(null, () -> SqliteSagaStorage.settle(connection, tenantId,
+                messageId, workerId, fencingToken, settlement, clock.instant())));
     }
 
     // ---------------------------------------------------------------- plumbing

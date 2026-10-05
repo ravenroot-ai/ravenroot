@@ -485,7 +485,7 @@ public final class ExecutionResultRegistry {
         Objects.requireNonNull(result, "result");
         return switch (result.payload().state()) {
             case NONE, RETAINED -> found(result);
-            case WITHHELD, UNCONVERTIBLE -> new ExecutionLookup.Redacted(result.traversalId(),
+            case WITHHELD, UNCONVERTIBLE, UNAVAILABLE -> new ExecutionLookup.Redacted(result.traversalId(),
                     result.status(), result.terminationReason(), result.payload().state());
             case EXPIRED -> new ExecutionLookup.Expired(result.traversalId(), result.status(),
                     result.terminationReason());

@@ -924,6 +924,59 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Whether this application can expose durable saga diagnostics.
+     * @return true only when a durable saga-capable execution store is composed
+     */
+    default boolean sagaStatusAvailable() {
+        return false;
+    }
+
+    /**
+     * Lists bounded durable saga state for one tenant-scoped process instance.
+     *
+     * @param tenantId tenant that owns the process instance
+     * @param processInstanceId process instance whose saga state is requested
+     * @return immutable saga snapshots; sensitive participant payloads remain opaque
+     * @throws IllegalStateException when {@link #sagaStatusAvailable()} is false
+     */
+    default List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable saga status unavailable");
+    }
+
+    /**
+     * Lists payload-free command-outbox diagnostics for the same process scope.
+     * @param tenantId tenant that owns the process instance
+     * @param processInstanceId process instance whose commands are requested
+     * @return immutable durable records; callers must not expose {@code intent.payload}
+     */
+    default List<ai.ravenroot.api.persistence.SagaOutboxRecord> processInstanceSagaCommands(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable saga status unavailable");
+    }
+
+    /**
+     * Applies a fenced recovery request without allowing the caller to assert participant success.
+     *
+     * @param tenantId tenant that owns the process and saga
+     * @param processInstanceId process containing the saga
+     * @param sagaId saga selected for recovery
+     * @param expectedSagaRevision exact revision observed by the operator
+     * @param action recovery transition to request
+     * @param mutationId stable audit/idempotency identity of this request
+     * @return the persisted saga snapshot after the conditional transition
+     */
+    default ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+            String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+            ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+        throw new UnsupportedOperationException("governed saga recovery is unavailable");
+    }
+
+    /**
      * The per-tenant inventory retention floor, delegating to
      * {@link ai.ravenroot.api.persistence.ExecutionStore#inventoryRetainedFrom}. {@link java.time.Instant#MIN}
      * for an implementation with no durable inventory at all, which is the honest answer: nothing has

@@ -67,6 +67,16 @@ import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
+import ai.ravenroot.api.persistence.SagaCommandIntent;
+import ai.ravenroot.api.persistence.SagaCommandCodec;
+import ai.ravenroot.api.persistence.SagaOutboxCapacity;
+import ai.ravenroot.api.persistence.SagaCommandCompletion;
+import ai.ravenroot.api.persistence.SagaDisposition;
+import ai.ravenroot.api.persistence.SagaOutboxRecord;
+import ai.ravenroot.api.persistence.SagaOutboxSettlement;
+import ai.ravenroot.api.persistence.SagaOutboxStatus;
+import ai.ravenroot.api.persistence.SagaSnapshot;
+import ai.ravenroot.api.persistence.SagaWrite;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -156,8 +166,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Duration terminalRetention;
     private final Duration executionResultRetention;
     private final HumanTaskPolicy humanTaskPolicy;
+    private final SagaOutboxCapacity sagaOutboxCapacity;
     private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
     private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
+    private final Map<SagaKey, SagaSnapshot> sagas = new LinkedHashMap<>();
+    private final Map<OutboxKey, OutboxEntry> sagaOutbox = new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
         this(Clock.systemUTC(), InMemoryExecutionStorePolicy.DEFAULTS);
@@ -247,6 +260,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         this.terminalRetention = policy.terminalRetention();
         this.executionResultRetention = policy.executionResultRetention();
         this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        this.sagaOutboxCapacity = SagaOutboxCapacity.configured();
     }
 
     @Override
@@ -293,7 +307,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // medium, and this adapter honours every one of them exactly. What it
                 // cannot honour is survival of process death, which is what DURABLE
                 // says and what this adapter still does not say.
-                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
+                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
+                StoreCapability.DURABLE_SAGAS);
     }
 
     @Override
@@ -507,6 +522,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         createdAt, generation, origin, retainedUntil);
                 dropAcknowledgementsForRescheduledWork(next);
 
+                var sagaReplacements = validateSagaWrites(key, batch, now);
+                var outboxInserts = validateSagaCommands(key, batch, now);
+                var outboxRearms = validateSagaCommandRearms(key, batch);
+
                 batch.idempotency().ifPresent(write -> idempotency.put(new IdempotencyKey(key.tenantId(), write.key()),
                         new IdempotencyRecord(write.key(), write.requestFingerprint(), write.outcomeRef(),
                                 revision, now.plus(write.retentionWindow()))));
@@ -516,10 +535,267 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // what makes the shared transactional boundary real rather than described: there is
                 // no instant at which the transition is visible and its events are not.
                 instances.put(key, next);
+                sagaReplacements.forEach(sagas::put);
+                outboxInserts.forEach(sagaOutbox::put);
+                outboxRearms.forEach(entry -> rearm(entry, now));
                 appendToJournal(key, batch, revision, now);
                 return next.toStored();
             }
         });
+    }
+
+    private Map<SagaKey, SagaSnapshot> validateSagaWrites(ExecutionKey key, ExecutionBatch batch, Instant now) {
+        var replacements = new LinkedHashMap<SagaKey, SagaSnapshot>();
+        var mutations = new HashSet<UUID>();
+        for (SagaWrite write : batch.sagaWrites()) {
+            SagaSnapshot snapshot = write.snapshot();
+            if (!snapshot.key().equals(key) || !mutations.add(write.mutationId())) {
+                throw failure(ExecutionStoreFailure.invalid("invalid or duplicate saga write"));
+            }
+            SagaKey sagaKey = new SagaKey(key, snapshot.sagaId());
+            SagaSnapshot current = replacements.getOrDefault(sagaKey, sagas.get(sagaKey));
+            long actual = current == null ? 0L : current.revision();
+            if (actual != write.expectedRevision()) {
+                throw failure(ExecutionStoreFailure.invalid("saga revision conflict"));
+            }
+            if (current != null && !current.definition().equals(snapshot.definition())) {
+                throw failure(ExecutionStoreFailure.invalid("saga definition is immutable"));
+            }
+            if (current != null && !current.traversalId().equals(snapshot.traversalId())) {
+                throw failure(ExecutionStoreFailure.invalid("saga traversal is immutable"));
+            }
+            replacements.put(sagaKey, snapshot);
+        }
+        return replacements;
+    }
+
+    private Map<OutboxKey, OutboxEntry> validateSagaCommands(ExecutionKey key, ExecutionBatch batch, Instant now) {
+        var inserts = new LinkedHashMap<OutboxKey, OutboxEntry>();
+        long outstandingCommands = sagaOutbox.values().stream()
+                .filter(entry -> entry.key.tenantId().equals(key.tenantId()))
+                .filter(entry -> entry.status != SagaOutboxStatus.BUSINESS_COMPLETED
+                        && entry.status != SagaOutboxStatus.EXHAUSTED).count();
+        long outstandingBytes = sagaOutbox.values().stream()
+                .filter(entry -> entry.key.tenantId().equals(key.tenantId()))
+                .filter(entry -> entry.status != SagaOutboxStatus.BUSINESS_COMPLETED
+                        && entry.status != SagaOutboxStatus.EXHAUSTED)
+                .mapToLong(entry -> SagaCommandCodec.encode(entry.intent).length).sum();
+        for (SagaCommandIntent intent : batch.sagaCommands()) {
+            SagaKey sagaKey = new SagaKey(key, intent.sagaId());
+            if (!sagas.containsKey(sagaKey) && batch.sagaWrites().stream()
+                    .noneMatch(write -> write.snapshot().sagaId().equals(intent.sagaId()))) {
+                throw failure(ExecutionStoreFailure.invalid("saga command references an absent saga"));
+            }
+            OutboxKey outboxKey = new OutboxKey(key.tenantId(), intent.messageId());
+            OutboxEntry existing = sagaOutbox.get(outboxKey);
+            if (existing != null) {
+                if (!existing.key.equals(key) || !existing.intent.equals(intent)) {
+                    throw failure(ExecutionStoreFailure.invalid("conflicting saga message identity reuse"));
+                }
+                continue;
+            }
+            int encodedBytes = SagaCommandCodec.encode(intent).length;
+            if (++outstandingCommands > sagaOutboxCapacity.maximumOutstandingCommands()
+                    || (outstandingBytes += encodedBytes) > sagaOutboxCapacity.maximumOutstandingBytes()) {
+                throw failure(ExecutionStoreFailure.invalid("saga outbox tenant capacity exceeded"));
+            }
+            OutboxEntry pending = new OutboxEntry(key, intent, SagaOutboxStatus.PENDING, 0,
+                    null, 0L, null, intent.notBefore(), "", now, null, null);
+            if (inserts.putIfAbsent(outboxKey, pending) != null) {
+                throw failure(ExecutionStoreFailure.invalid("duplicate saga message in one batch"));
+            }
+        }
+        return inserts;
+    }
+
+    private List<OutboxEntry> validateSagaCommandRearms(ExecutionKey key, ExecutionBatch batch) {
+        var result = new ArrayList<OutboxEntry>();
+        var seen = new HashSet<UUID>();
+        for (UUID messageId : batch.sagaCommandsToRearm()) {
+            if (!seen.add(messageId)) throw failure(ExecutionStoreFailure.invalid("duplicate saga command rearm"));
+            OutboxEntry entry = sagaOutbox.get(new OutboxKey(key.tenantId(), messageId));
+            if (entry == null || !entry.key.equals(key) || entry.status != SagaOutboxStatus.EXHAUSTED) {
+                throw failure(ExecutionStoreFailure.invalid("only an exhausted command in this execution may be rearmed"));
+            }
+            boolean owningSagaWritten = batch.sagaWrites().stream()
+                    .anyMatch(write -> write.snapshot().sagaId().equals(entry.intent.sagaId()));
+            if (!owningSagaWritten) {
+                throw failure(ExecutionStoreFailure.invalid("saga command rearm requires an atomic owning saga write"));
+            }
+            result.add(entry);
+        }
+        return List.copyOf(result);
+    }
+
+    private static void rearm(OutboxEntry entry, Instant now) {
+        entry.status = entry.brokerAcceptedAt == null ? SagaOutboxStatus.PENDING : SagaOutboxStatus.BROKER_ACCEPTED;
+        entry.attempts = 0; entry.owner = null; entry.leaseExpiresAt = null;
+        entry.fencingToken++; entry.nextAttemptAt = now;
+        entry.lastFailure = "operator rearmed bounded delivery";
+    }
+
+    @Override
+    public CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key"); Objects.requireNonNull(sagaId, "sagaId");
+            synchronized (monitor) { return Optional.ofNullable(sagas.get(new SagaKey(key, sagaId))); }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                return sagas.entrySet().stream().filter(entry -> entry.getKey().key.equals(key))
+                        .map(Map.Entry::getValue).sorted(java.util.Comparator.comparing(SagaSnapshot::createdAt))
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                return sagaOutbox.values().stream().filter(entry -> entry.key.equals(key))
+                        .map(OutboxEntry::record)
+                        .sorted(java.util.Comparator.comparing(record -> record.intent().messageId()))
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaCompletionCandidates(String tenantId, int limit) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid saga candidate limit");
+            synchronized (monitor) {
+                return sagas.values().stream()
+                        .filter(snapshot -> snapshot.key().tenantId().equals(tenantId))
+                        .filter(snapshot -> !leaseLive(instances.get(snapshot.key()), clock.instant()))
+                        .filter(snapshot -> {
+                            var entry = instances.get(snapshot.key());
+                            if (entry == null || entry.state.status().terminal()) return false;
+                            var traversal = entry.state.traversals().get(snapshot.traversalId());
+                            return traversal != null && !traversal.status().terminal();
+                        })
+                        .filter(SagaSnapshot::graphCompleted)
+                        .filter(snapshot -> snapshot.disposition() == SagaDisposition.SUCCEEDED
+                                || snapshot.disposition() == SagaDisposition.COMPENSATED)
+                        .sorted(java.util.Comparator.comparing(SagaSnapshot::updatedAt))
+                        .limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaRecoveryCandidates(String tenantId, int limit) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid saga candidate limit");
+            synchronized (monitor) {
+                return sagas.values().stream()
+                        .filter(snapshot -> snapshot.key().tenantId().equals(tenantId))
+                        .filter(snapshot -> !leaseLive(instances.get(snapshot.key()), clock.instant()))
+                        .filter(snapshot -> snapshot.disposition() != SagaDisposition.COMPENSATED
+                                && (snapshot.disposition() != SagaDisposition.SUCCEEDED
+                                || !snapshot.graphCompleted()))
+                        .sorted(java.util.Comparator.comparing(value -> value.sagaId().toString()))
+                        .limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        return complete(() -> {
+            requireTenantId(tenantId); requireWorkerId(workerId); requireLeaseTtl(ttl);
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid saga claim limit");
+            synchronized (monitor) {
+                Instant now = clock.instant(); var claimed = new ArrayList<SagaOutboxRecord>();
+                for (OutboxEntry entry : sagaOutbox.values()) {
+                    if (claimed.size() == limit) break;
+                    if (!entry.key.tenantId().equals(tenantId) || entry.status == SagaOutboxStatus.BUSINESS_COMPLETED
+                            || entry.status == SagaOutboxStatus.EXHAUSTED || now.isBefore(entry.nextAttemptAt)) continue;
+                    if (entry.status == SagaOutboxStatus.CLAIMED && entry.leaseExpiresAt != null
+                            && now.isBefore(entry.leaseExpiresAt)) continue;
+                    if (entry.attempts >= entry.intent.maxAttempts()) {
+                        exhaustSaga(entry, now, "delivery attempts exhausted after recovery");
+                        entry.status = SagaOutboxStatus.EXHAUSTED;
+                        entry.owner = null;
+                        entry.leaseExpiresAt = null;
+                        entry.lastFailure = "delivery attempts exhausted after recovery";
+                        continue;
+                    }
+                    entry.status = SagaOutboxStatus.CLAIMED; entry.owner = workerId;
+                    entry.fencingToken++; entry.leaseExpiresAt = now.plus(ttl); entry.attempts++;
+                    claimed.add(entry.record());
+                }
+                return List.copyOf(claimed);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        return complete(() -> {
+            requireTenantId(tenantId); requireWorkerId(workerId); Objects.requireNonNull(messageId);
+            Objects.requireNonNull(settlement, "settlement");
+            synchronized (monitor) {
+                OutboxEntry entry = sagaOutbox.get(new OutboxKey(tenantId, messageId));
+                if (entry == null) throw failure(ExecutionStoreFailure.invalid("saga message not found"));
+                Instant now = clock.instant();
+                if (entry.status != SagaOutboxStatus.CLAIMED || !workerId.equals(entry.owner)
+                        || entry.fencingToken != fencingToken || entry.leaseExpiresAt == null
+                        || !now.isBefore(entry.leaseExpiresAt)) {
+                    throw failure(ExecutionStoreFailure.invalid("stale saga outbox claimant"));
+                }
+                entry.owner = null; entry.leaseExpiresAt = null;
+                switch (settlement) {
+                    case SagaOutboxSettlement.BrokerAccepted ignored -> {
+                        entry.status = SagaOutboxStatus.BROKER_ACCEPTED; entry.brokerAcceptedAt = now;
+                        entry.nextAttemptAt = now.plusSeconds(1);
+                    }
+                    case SagaOutboxSettlement.BusinessCompleted ignored -> {
+                        SagaKey sagaKey = new SagaKey(entry.key, entry.intent.sagaId());
+                        SagaSnapshot current = sagas.get(sagaKey);
+                        if (current == null) throw failure(ExecutionStoreFailure.invalid("saga disappeared"));
+                        sagas.put(sagaKey, SagaCommandCompletion.fold(current, entry.intent, now));
+                        entry.status = SagaOutboxStatus.BUSINESS_COMPLETED; entry.businessCompletedAt = now;
+                    }
+                    case SagaOutboxSettlement.Retry retry -> {
+                        if (entry.attempts >= entry.intent.maxAttempts()) {
+                            exhaustSaga(entry, now, retry.safeReason());
+                            entry.status = SagaOutboxStatus.EXHAUSTED;
+                        }
+                        else {
+                            entry.status = entry.brokerAcceptedAt == null
+                                    ? SagaOutboxStatus.PENDING : SagaOutboxStatus.BROKER_ACCEPTED;
+                            entry.nextAttemptAt = now.plus(retry.delay());
+                        }
+                        entry.lastFailure = retry.safeReason();
+                    }
+                    case SagaOutboxSettlement.Exhausted exhausted -> {
+                        exhaustSaga(entry, now, exhausted.safeReason());
+                        entry.status = SagaOutboxStatus.EXHAUSTED; entry.lastFailure = exhausted.safeReason();
+                    }
+                }
+                return entry.record();
+            }
+        });
+    }
+
+    private void exhaustSaga(OutboxEntry entry, Instant now, String reason) {
+        SagaKey sagaKey = new SagaKey(entry.key, entry.intent.sagaId());
+        SagaSnapshot current = sagas.get(sagaKey);
+        if (current == null) throw failure(ExecutionStoreFailure.invalid("saga disappeared"));
+        sagas.put(sagaKey, SagaCommandCompletion.exhausted(current, entry.intent, now, reason));
     }
 
     @Override
@@ -1064,6 +1340,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     // reports would remove a row whose own deadline said it was safe.
                     Optional<Instant> deadline = retainedUntilOf(entry);
                     if (entry.runnerWorkspace != null && !entry.runnerWorkspace.retentionSafe()) continue;
+                    boolean unresolvedSaga = sagas.entrySet().stream()
+                            .filter(saga -> saga.getKey().key().equals(instance.getKey()))
+                            .map(Map.Entry::getValue)
+                            .anyMatch(saga -> !saga.graphCompleted()
+                                    || saga.disposition() != SagaDisposition.SUCCEEDED
+                                    && saga.disposition() != SagaDisposition.COMPENSATED);
+                    if (unresolvedSaga) continue;
                     if (deadline.isEmpty() || deadline.get().isAfter(now)) {
                         continue;
                     }
@@ -3075,5 +3358,40 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private record IdempotencyKey(String tenantId, String key) {
+    }
+
+    private record SagaKey(ExecutionKey key, UUID sagaId) { }
+
+    private record OutboxKey(String tenantId, UUID messageId) { }
+
+    private static final class OutboxEntry {
+        private final ExecutionKey key;
+        private final SagaCommandIntent intent;
+        private SagaOutboxStatus status;
+        private int attempts;
+        private String owner;
+        private long fencingToken;
+        private Instant leaseExpiresAt;
+        private Instant nextAttemptAt;
+        private String lastFailure;
+        private final Instant createdAt;
+        private Instant brokerAcceptedAt;
+        private Instant businessCompletedAt;
+
+        private OutboxEntry(ExecutionKey key, SagaCommandIntent intent, SagaOutboxStatus status,
+                            int attempts, String owner, long fencingToken, Instant leaseExpiresAt,
+                            Instant nextAttemptAt, String lastFailure, Instant createdAt,
+                            Instant brokerAcceptedAt, Instant businessCompletedAt) {
+            this.key = key; this.intent = intent; this.status = status; this.attempts = attempts;
+            this.owner = owner; this.fencingToken = fencingToken; this.leaseExpiresAt = leaseExpiresAt;
+            this.nextAttemptAt = nextAttemptAt; this.lastFailure = lastFailure; this.createdAt = createdAt;
+            this.brokerAcceptedAt = brokerAcceptedAt; this.businessCompletedAt = businessCompletedAt;
+        }
+
+        private SagaOutboxRecord record() {
+            return new SagaOutboxRecord(key, intent, status, attempts, owner, fencingToken,
+                    leaseExpiresAt, nextAttemptAt, lastFailure, createdAt,
+                    brokerAcceptedAt, businessCompletedAt);
+        }
     }
 }

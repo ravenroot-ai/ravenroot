@@ -1428,6 +1428,99 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
+     * Loads one tenant-scoped saga aggregate.
+     * @param key execution scope
+     * @param sagaId saga identity
+     * @return optional snapshot
+     */
+    default CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists saga aggregates owned by one execution.
+     * @param key execution scope
+     * @return immutable snapshots
+     */
+    default CompletionStage<java.util.List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists application-command outbox records owned by one execution for diagnostics.
+     * @param key execution scope
+     * @return immutable outbox records without dispatch authority
+     */
+    default CompletionStage<java.util.List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists a bounded tenant page of terminal sagas whose graph boundary was durably reached while
+     * the owning traversal still needs its terminal execution projection.
+     *
+     * <p>This recovery inventory exists so an outbox worker restarted after both the participant
+     * and Ravenroot crashed can finish the owning execution. It is diagnostic/recovery authority,
+     * not a cross-tenant enumeration. Implementations filter already-terminal processes and
+     * traversals, and executions with a live runner lease, before applying {@code limit}; historical
+     * terminal work therefore cannot starve a newer actionable completion.</p>
+     * @param tenantId tenant physical partition
+     * @param limit maximum snapshots returned
+     * @return actionable terminal graph-completion candidates
+     */
+    default CompletionStage<java.util.List<SagaSnapshot>> listSagaCompletionCandidates(
+            String tenantId, int limit) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists a bounded tenant page whose frozen participant work may require post-lease recovery.
+     * This is worker authority and managed request-scoped stores should keep it fail-closed.
+     * @param tenantId tenant physical partition
+     * @param limit maximum snapshots returned
+     * @return non-terminal saga recovery candidates
+     */
+    default CompletionStage<java.util.List<SagaSnapshot>> listSagaRecoveryCandidates(
+            String tenantId, int limit) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Claims due commands.
+     * @param tenantId tenant
+     * @param workerId claimant
+     * @param limit page bound
+     * @param ttl lease duration
+     * @return claimed commands
+     */
+    default CompletionStage<java.util.List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Settles a claim.
+     * @param tenantId tenant
+     * @param messageId message
+     * @param workerId claimant
+     * @param fencingToken claim fence
+     * @param settlement result
+     * @return durable record
+     */
+    default CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        return sagasUnsupported();
+    }
+
+    private static <T> CompletionStage<T> sagasUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.DURABLE_SAGAS)));
+        return refused;
+    }
+
+    /**
      * Releases what the <em>process</em> owns and <strong>no lease</strong>.
      *
      * <p>The governing invariant (ADR 0010 section 13.1) is that a clean shutdown and a

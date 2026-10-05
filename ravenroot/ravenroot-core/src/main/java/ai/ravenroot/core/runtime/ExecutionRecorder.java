@@ -19,6 +19,8 @@ import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.SagaCommandIntent;
+import ai.ravenroot.api.persistence.SagaWrite;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.ProcessInventoryEntry;
@@ -271,6 +273,48 @@ public final class ExecutionRecorder implements AutoCloseable {
             }
             throw failed;
         }
+    }
+
+    /**
+     * Commits saga state and application-command intents under this execution's live fence.
+     *
+     * <p>The call is synchronous for the same reason as {@link #record(List, List)}: an intent must
+     * be durable before the participant is invoked. A command placed in {@code commands} therefore
+     * shares the exact store transaction and execution revision with the state that made it
+     * eligible.</p>
+     *
+     * @param writes conditional saga aggregate replacements
+     * @param commands stable application commands created by those replacements
+     */
+    public synchronized void recordSaga(List<SagaWrite> writes, List<SagaCommandIntent> commands) {
+        requireFence();
+        if ((writes == null || writes.isEmpty()) && (commands == null || commands.isEmpty())) return;
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease);
+        if (writes != null) writes.forEach(batch::writeSaga);
+        if (commands != null) commands.forEach(batch::enqueueSagaCommand);
+        try {
+            StoredProcessInstance applied = await(store.apply(batch.build()));
+            revision = applied.revision();
+        } catch (ExecutionStoreException failed) {
+            if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                    || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                loseFence(failed.failure());
+            }
+            throw failed;
+        }
+    }
+
+    /** Returns a saga from the same tenant/process stream this recorder fences. */
+    public java.util.Optional<ai.ravenroot.api.persistence.SagaSnapshot> saga(UUID sagaId) {
+        return await(store.loadSaga(key, java.util.Objects.requireNonNull(sagaId, "sagaId")));
+    }
+
+    /** Whether the composed store promises the saga aggregate and command-outbox contract. */
+    public boolean supportsDurableSagas() {
+        return store.supports(StoreCapability.DURABLE_SAGAS)
+                && store.supports(StoreCapability.DURABLE);
     }
 
     /**

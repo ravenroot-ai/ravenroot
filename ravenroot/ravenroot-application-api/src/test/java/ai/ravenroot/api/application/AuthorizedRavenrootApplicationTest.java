@@ -955,6 +955,42 @@ class AuthorizedRavenrootApplicationTest {
                 java.util.Optional.empty(), null);
     }
 
+    @Test
+    void sagaReadsAndActionsAreTenantScopedAuthorizedAndAudited() {
+        var raw = new FakeApplication();
+        UUID processId = UUID.randomUUID();
+        UUID sagaId = UUID.randomUUID();
+        var key = new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", processId);
+        var step = new ai.ravenroot.api.persistence.SagaStepDefinition(
+                "validate", "validate", "pure", null, List.of(), false, false);
+        var definition = new ai.ravenroot.api.persistence.SagaDefinition(1, "order", "a".repeat(64),
+                "b".repeat(64), Map.of(step.stepId(), step));
+        raw.sagaSnapshot = new ai.ravenroot.api.persistence.SagaSnapshot(key, sagaId, UUID.randomUUID(), definition, 4,
+                ai.ravenroot.api.persistence.SagaDisposition.UNRESOLVED, false, Map.of(), null,
+                Instant.EPOCH, Instant.EPOCH, "operator action required", true);
+        var audit = new ArrayList<ExecutionControlAuditEvent>();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, false, AuthorizedRavenrootApplication.DEFAULT_EXECUTION_OWNERSHIP_LIMIT,
+                audit::add);
+
+        assertEquals(List.of(raw.sagaSnapshot), facade.processInstanceSagas(
+                context("tenant-a", Role.OPERATOR, "ravenroot.observe"), processId));
+        assertEquals("tenant-a", raw.sagaTenant);
+        assertThrows(AuthorizationDeniedException.class, () -> facade.requestSagaAction(
+                context("tenant-a", Role.VIEWER, "ravenroot.observe"), processId, sagaId, 4,
+                ai.ravenroot.api.persistence.SagaOperatorAction.RECONCILE));
+
+        assertEquals(raw.sagaSnapshot, facade.requestSagaAction(
+                context("tenant-a", Role.OPERATOR, "ravenroot.execution.control"), processId, sagaId, 4,
+                ai.ravenroot.api.persistence.SagaOperatorAction.RECONCILE));
+        assertEquals("tenant-a", raw.sagaTenant);
+        assertEquals(List.of(ExecutionControlAuditEvent.Disposition.ATTEMPT,
+                        ExecutionControlAuditEvent.Disposition.SUCCEEDED),
+                audit.stream().map(ExecutionControlAuditEvent::disposition).toList());
+        assertTrue(audit.stream().allMatch(event -> event.action().equals("saga.reconcile")
+                && event.resourceType().equals("saga") && event.resourceId().equals(sagaId.toString())));
+    }
+
     private static RequestContext context(String tenant, Role role, String scope) {
         return context("alice", tenant, role, scope);
     }
@@ -1020,6 +1056,26 @@ class AuthorizedRavenrootApplicationTest {
     }
 
     private static final class FakeApplication implements RavenrootApplication {
+        private ai.ravenroot.api.persistence.SagaSnapshot sagaSnapshot;
+        private String sagaTenant;
+
+        @Override
+        public boolean sagaStatusAvailable() { return true; }
+
+        @Override
+        public List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+                String tenantId, UUID processInstanceId) {
+            sagaTenant = tenantId;
+            return sagaSnapshot == null ? List.of() : List.of(sagaSnapshot);
+        }
+
+        @Override
+        public ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+                String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+                ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+            sagaTenant = tenantId;
+            return sagaSnapshot;
+        }
         private ai.ravenroot.api.programming.ProgramAuthoringLimits programLimits =
                 ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
         private final List<GeneratedArtifact> artifacts = new ArrayList<>();

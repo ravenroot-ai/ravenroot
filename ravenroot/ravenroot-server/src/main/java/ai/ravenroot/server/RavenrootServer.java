@@ -2621,6 +2621,17 @@ public final class RavenrootServer implements AutoCloseable {
                 readProcessInstanceTraversals(exchange, httpContext, segments[1]);
                 return;
             }
+            if (segments.length == 3 && !segments[1].isBlank() && "sagas".equals(segments[2])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                readProcessInstanceSagas(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 5 && !segments[1].isBlank() && "sagas".equals(segments[2])
+                    && !segments[3].isBlank() && !segments[4].isBlank()) {
+                if (!method(exchange, httpContext, "POST")) return;
+                controlSaga(exchange, httpContext, segments[1], segments[3], segments[4]);
+                return;
+            }
             if (segments.length == 5 && !segments[1].isBlank()
                     && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
                     && ("approve".equals(segments[4]) || "deny".equals(segments[4])
@@ -4597,10 +4608,10 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code Redacted} is a distinct 410, {@code EXECUTION_RESULT_REDACTED}: the execution provably
      * ran, but its payload was never retained in the first place, rather than having aged out after
      * being retained. The two are different facts calling for different operator responses — an
-     * expired result is a retention policy working as configured, a redacted one is either a size cap
-     * an operator can raise or a node returning a value no remote adapter could ever persist — so
+     * expired result is a retention policy working as configured, while a redacted result identifies
+     * a size cap, an unrepresentable node output, or output evidence lost with its original runtime — so
      * they carry different {@code code}s and {@code redactedExecutionJson}'s body adds
-     * {@code payloadState} to say which of the two. {@code Unknown} is 404 and covers a
+     * {@code payloadState} to say which condition applies. {@code Unknown} is 404 and covers a
      * nonexistent id, another tenant's id and a fully evicted one alike — see
      * {@code ExecutionLookup.Unknown} for why those three must not be distinguishable.</p>
      *
@@ -5037,6 +5048,104 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
+    private void readProcessInstanceSagas(HttpExchange exchange, HttpRequestContext httpContext,
+                                          String rawId) throws IOException {
+        if (!authorizedApplication.sagaStatusAvailable()) {
+            fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var sagas = authorizedApplication.processInstanceSagas(
+                    httpContext.applicationContext(), processInstanceId);
+            var commands = authorizedApplication.processInstanceSagaCommands(
+                    httpContext.applicationContext(), processInstanceId);
+            String sagaBody = sagas.stream().map(RavenrootServer::sagaJson)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String commandBody = commands.stream().map(RavenrootServer::sagaCommandJson)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String body = "{\"sagas\":[" + sagaBody + "],\"outbox\":[" + commandBody + "]}";
+            json(exchange, 200, body);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private void controlSaga(HttpExchange exchange, HttpRequestContext httpContext, String rawProcessId,
+                             String rawSagaId, String rawAction) throws IOException {
+        java.util.UUID processId;
+        java.util.UUID sagaId;
+        long expectedRevision;
+        ai.ravenroot.api.persistence.SagaOperatorAction action;
+        try {
+            processId = java.util.UUID.fromString(rawProcessId);
+            sagaId = java.util.UUID.fromString(rawSagaId);
+            expectedRevision = Long.parseLong(exchange.getRequestHeaders()
+                    .getFirst("X-Ravenroot-Expected-Saga-Revision"));
+            action = ai.ravenroot.api.persistence.SagaOperatorAction.valueOf(
+                    rawAction.replace('-', '_').toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var result = authorizedApplication.requestSagaAction(httpContext.applicationContext(), processId,
+                    sagaId, expectedRevision, action);
+            json(exchange, 200, sagaJson(result));
+        } catch (IllegalStateException conflict) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private static String sagaJson(ai.ravenroot.api.persistence.SagaSnapshot saga) {
+        String steps = saga.occurrences().values().stream()
+                .sorted(java.util.Comparator.comparing(ai.ravenroot.api.persistence.SagaStepSnapshot::stepId)
+                        .thenComparing(ai.ravenroot.api.persistence.SagaStepSnapshot::occurrenceId))
+                .map(step -> "{\"occurrenceId\":\"" + step.occurrenceId()
+                        + "\",\"stepId\":\"" + escape(step.stepId())
+                        + "\",\"invocationId\":\"" + step.invocationId()
+                        + "\",\"forwardOperationId\":\"" + escape(step.forwardOperationId())
+                        + "\",\"compensationOperationId\":\"" + escape(step.compensationOperationId())
+                        + "\",\"status\":\"" + step.status()
+                        + "\",\"detail\":\"" + escape(step.detail()) + "\"}")
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"sagaId\":\"" + saga.sagaId() + "\",\"scope\":\""
+                + escape(saga.definition().scopeId()) + "\",\"revision\":" + saga.revision()
+                + ",\"disposition\":\"" + saga.disposition()
+                + "\",\"cancellationRequested\":" + saga.cancellationRequested()
+                + ",\"actionableReason\":\"" + escape(saga.actionableReason())
+                + "\",\"steps\":[" + steps + "]}";
+    }
+
+    private static String sagaCommandJson(ai.ravenroot.api.persistence.SagaOutboxRecord record) {
+        var intent = record.intent();
+        return "{\"messageId\":\"" + intent.messageId()
+                + "\",\"sagaId\":\"" + intent.sagaId()
+                + "\",\"operationId\":\"" + escape(intent.operationId())
+                + "\",\"commandType\":\"" + escape(intent.commandType())
+                + "\",\"schemaVersion\":" + intent.schemaVersion()
+                + ",\"status\":\"" + record.status()
+                + "\",\"attempts\":" + record.attempts()
+                + ",\"maxAttempts\":" + intent.maxAttempts()
+                + ",\"lastFailure\":\"" + escape(record.lastFailure()) + "\"}";
+    }
+
     /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */
     private static String traversalInventoryEntryJson(ai.ravenroot.api.persistence.TraversalInventoryEntry entry) {
         return "{\"traversalId\":\"" + entry.traversalId()
@@ -5165,12 +5274,13 @@ public final class RavenrootServer implements AutoCloseable {
      * one of {@code WITHHELD} (a configured budget refused the payload: either an encoded projection
      * larger than the store's byte cap, or a value the runtime's payload limits rejected before any
      * encoding of it existed, which terminates the traversal on that rejection) or
-     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all) --
+     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all), or
+     * {@code UNAVAILABLE} (recovery proved the terminal lifecycle after the producing runtime ended
+     * before it recorded an output projection) --
      * {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}'s canonical constructor refuses
-     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only two
-     * this method ever renders. A caller reading it can tell "raise the configured cap" from "this
-     * node returns something no remote adapter could ever persist", which is exactly the distinction
-     * {@code EXECUTION_RESULT_EXPIRED} alone could not make -- see
+     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only three
+     * this method ever renders. A caller can distinguish a configured limit, an unrepresentable
+     * value, and output evidence lost with the original runtime -- see
      * {@link ErrorCode#EXECUTION_RESULT_REDACTED}'s own Javadoc.</p>
      */
     private static String redactedExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Redacted redacted,

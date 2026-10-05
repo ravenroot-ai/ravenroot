@@ -521,13 +521,14 @@ public final class RouteTable {
                             + "bare FAILED would tell a caller its cancellation was an incident, from "
                             + "the one answer it has no live record left to check it against. A distinct "
                             + "410 EXECUTION_RESULT_REDACTED: it ran, but its payload was never retained "
-                            + "in the first place -- refused for exceeding a configured payload budget, or for "
-                            + "not projecting onto the closed payload model at all -- rather than having "
+                            + "in the first place -- refused for exceeding a configured payload budget, for "
+                            + "not projecting onto the closed payload model, or unavailable because recovery "
+                            + "proved the terminal boundary after the original runtime ended -- rather than having "
                             + "aged out after being retained. The body carries the same status, "
                             + "terminationReason and cancelled as the 200 and the EXPIRED bodies, plus a "
-                            + "payloadState field naming which of the two refusals applies (WITHHELD or "
-                            + "UNCONVERTIBLE), so a caller can tell a size limit an operator may raise "
-                            + "from a node returning a value no remote adapter could ever persist. "
+                            + "payloadState field naming the absence (WITHHELD, UNCONVERTIBLE or UNAVAILABLE), "
+                            + "so a caller can distinguish a configurable limit, an unrepresentable value and "
+                            + "output evidence lost with its original runtime. "
                             + "visitedNodes, "
                             + "defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array "
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
@@ -693,6 +694,21 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
                             ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/sagas",
+                    "Lists payload-free durable saga, step, compensation, and actionable recovery status for "
+                            + "one tenant-owned process instance. Requires execution-read authority.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/executions/{id}/sagas/{sagaId}/{action}",
+                    "Requests reconcile, retry-compensation, or compensate under execution-control authority "
+                            + "and an exact X-Ravenroot-Expected-Saga-Revision fence. Actions reopen work or "
+                            + "request compensation; they cannot assert participant success.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/cancel",
                     "Cancels a traversal (#37). 200 with a CancelResult body distinguishing CANCELLED, "
                             + "ALREADY_CANCELLED and ALREADY_COMPLETED; unknown ownership fails closed as "

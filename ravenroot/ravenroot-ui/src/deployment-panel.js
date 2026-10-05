@@ -367,6 +367,46 @@ export function createDeploymentsWindow({
           actions.append(drain);
         }
         item.append(actions);
+        if (entry.sagaError) {
+          const diagnostic = doc.createElement('small');
+          diagnostic.className = 'deployment-diagnostic';
+          diagnostic.textContent = `Saga status unavailable: ${entry.sagaError}`;
+          item.append(diagnostic);
+        } else if (Array.isArray(entry.sagas)) {
+          const sagas = doc.createElement('ul');
+          sagas.className = 'lifecycle-saga-list';
+          if (entry.sagas.length === 0) {
+            const none = doc.createElement('li');
+            none.textContent = 'No saga scope has entered this process.';
+            sagas.append(none);
+          }
+          for (const saga of entry.sagas) {
+            const row = doc.createElement('li');
+            const headline = doc.createElement('b');
+            headline.textContent = `${saga.scope} · ${saga.disposition}`;
+            const detail = doc.createElement('small');
+            const steps = Array.isArray(saga.steps)
+              ? saga.steps.map(step => `${step.stepId}: ${step.status}`).join(' · ') : '';
+            detail.textContent = `revision ${saga.revision}`
+              + `${saga.actionableReason ? ` · ${saga.actionableReason}` : ''}`
+              + `${steps ? ` · ${steps}` : ''}`;
+            row.append(headline, detail);
+            sagas.append(row);
+          }
+          item.append(sagas);
+          if (Array.isArray(entry.sagaOutbox) && entry.sagaOutbox.length > 0) {
+            const outbox = doc.createElement('ul');
+            outbox.className = 'lifecycle-saga-outbox';
+            for (const command of entry.sagaOutbox) {
+              const row = doc.createElement('li');
+              row.textContent = `${command.commandType} · ${command.status}`
+                + ` · attempts ${command.attempts}/${command.maxAttempts}`
+                + `${command.lastFailure ? ` · ${command.lastFailure}` : ''}`;
+              outbox.append(row);
+            }
+            item.append(outbox);
+          }
+        }
       }
       return item;
     }));
@@ -422,7 +462,11 @@ export function createDeploymentsWindow({
         rows.push(...page.items);
         cursor = page.nextCursor;
       } while (cursor);
-      processes = rows;
+      const previous = new Map(processes.map(entry => [entry.processInstanceId, entry]));
+      processes = rows.map(entry => ({ ...entry,
+        ...(previous.get(entry.processInstanceId)?.sagas
+          ? { sagas: previous.get(entry.processInstanceId).sagas,
+            sagaOutbox: previous.get(entry.processInstanceId).sagaOutbox } : {}) }));
       if (selectedProcessId && !rows.some(item => item.processInstanceId === selectedProcessId)) {
         selectedProcessId = null;
       }
@@ -430,11 +474,27 @@ export function createDeploymentsWindow({
       processStatus.textContent = rows.length
         ? `${rows.length} authoritative process instance${rows.length === 1 ? '' : 's'} for “${selectedDeploymentId}”.`
         : `No durable process instances are recorded for “${selectedDeploymentId}”.`;
+      if (selectedProcessId) void refreshSagas(selectedProcessId);
     } catch (error) {
       processes = [];
       renderProcesses();
       processStatus.textContent = `Process inventory could not be reconciled: ${error?.message || error}`;
     }
+  }
+
+  async function refreshSagas(processInstanceId) {
+    if (!client || typeof client.processInstanceSagas !== 'function') return;
+    try {
+      const result = await client.processInstanceSagas(processInstanceId);
+      if (disposed || selectedProcessId !== processInstanceId) return;
+      processes = processes.map(entry => entry.processInstanceId === processInstanceId
+        ? { ...entry, sagas: result.sagas, sagaOutbox: result.outbox, sagaError: null } : entry);
+    } catch (error) {
+      if (disposed || selectedProcessId !== processInstanceId) return;
+      processes = processes.map(entry => entry.processInstanceId === processInstanceId
+        ? { ...entry, sagaError: error?.message || String(error) } : entry);
+    }
+    renderProcesses();
   }
 
   async function register() {
@@ -687,6 +747,7 @@ export function createDeploymentsWindow({
     if (selectProcess) {
       selectedProcessId = selectProcess.dataset.processSelect;
       renderProcesses();
+      void refreshSagas(selectedProcessId);
       return;
     }
     const processAction = event.target.closest?.('[data-process-action]');

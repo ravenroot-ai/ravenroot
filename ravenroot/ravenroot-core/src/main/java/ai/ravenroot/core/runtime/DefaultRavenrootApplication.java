@@ -1372,7 +1372,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public GraphSummary inspectGraphMl(InputStream graphMl,
             ai.ravenroot.api.application.GraphAdmissionPurpose purpose) {
         byte[] bytes = readGraphMlBytes(graphMl);
-        return new GraphAdmissionValidator(behaviors, graphExecutionLimits).inspect(bytes, purpose);
+        return new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
+                .inspect(bytes, purpose);
     }
 
     @Override
@@ -1399,7 +1400,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // The exact bytes consumed by the mutation cross the same admission boundary exposed by
         // inspection. This precedes every definition read, reservation, manifest lookup, and spawn.
         try {
-            new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+            new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
                     .require(graphBytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);
         } catch (RuntimeException | Error refusal) {
             document.close();
@@ -2318,6 +2319,125 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public boolean sagaStatusAvailable() {
+        return executionStore != null
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE_SAGAS);
+    }
+
+    @Override
+    public List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga status unavailable");
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        await(executionStore.load(key));
+        return await(executionStore.listSagas(key));
+    }
+
+    @Override
+    public List<ai.ravenroot.api.persistence.SagaOutboxRecord> processInstanceSagaCommands(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga status unavailable");
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        await(executionStore.load(key));
+        return await(executionStore.listSagaCommands(key));
+    }
+
+    @Override
+    public ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+            String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+            ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        java.util.Objects.requireNonNull(sagaId, "sagaId");
+        java.util.Objects.requireNonNull(action, "action");
+        java.util.Objects.requireNonNull(mutationId, "mutationId");
+        if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga recovery unavailable");
+        var key = new ai.ravenroot.api.persistence.ExecutionKey(tenantId, processInstanceId);
+        var stored = await(executionStore.load(key));
+        var current = await(executionStore.loadSaga(key, sagaId)).orElseThrow(() ->
+                new ai.ravenroot.api.persistence.ExecutionStoreException(
+                        new ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound(key)));
+        if (!current.key().equals(key)) throw new ai.ravenroot.api.persistence.ExecutionStoreException(
+                new ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound(key));
+        if (current.revision() != expectedSagaRevision) throw new IllegalStateException(
+                "saga revision changed; reload status before requesting recovery");
+        var commands = await(executionStore.listSagaCommands(key));
+        var unknownForward = current.occurrences().values().stream().anyMatch(step ->
+                step.status() == ai.ravenroot.api.persistence.SagaStepStatus.OUTCOME_UNKNOWN
+                        || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.DISPATCHED);
+        var unknownCompensation = current.occurrences().values().stream().anyMatch(step ->
+                step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATION_UNKNOWN
+                        || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATING);
+        var confirmed = current.occurrences().values().stream().filter(step ->
+                step.status() == ai.ravenroot.api.persistence.SagaStepStatus.CONFIRMED_SUCCESS).toList();
+        ai.ravenroot.api.persistence.SagaDisposition disposition;
+        boolean cancellation = current.cancellationRequested();
+        String reason;
+        switch (action) {
+            case RECONCILE -> {
+                if (!unknownForward) throw new IllegalStateException(
+                        "reconciliation requires an unknown forward participant outcome");
+                disposition = ai.ravenroot.api.persistence.SagaDisposition.RUNNING;
+                reason = "operator requested idempotent participant reconciliation";
+            }
+            case RETRY_COMPENSATION -> {
+                if (!unknownCompensation && current.disposition()
+                        != ai.ravenroot.api.persistence.SagaDisposition.COMPENSATION_PENDING) {
+                    throw new IllegalStateException("no durable compensation is pending or unknown");
+                }
+                disposition = ai.ravenroot.api.persistence.SagaDisposition.COMPENSATION_PENDING;
+                cancellation = true;
+                reason = "operator requested compensation retry";
+            }
+            case COMPENSATE -> {
+                if (confirmed.isEmpty()) throw new IllegalStateException("no confirmed effect can be compensated");
+                boolean irreversible = confirmed.stream().anyMatch(step ->
+                        current.definition().steps().get(step.stepId()).irreversible());
+                if (irreversible) throw new IllegalStateException("confirmed irreversible effect cannot be compensated");
+                disposition = ai.ravenroot.api.persistence.SagaDisposition.COMPENSATION_PENDING;
+                cancellation = true;
+                reason = "operator requested compensation of confirmed effects";
+            }
+            default -> throw new IllegalStateException("unsupported saga action");
+        }
+        var now = java.time.Instant.now();
+        var next = new ai.ravenroot.api.persistence.SagaSnapshot(current.key(), current.sagaId(),
+                current.traversalId(), current.definition(), current.revision() + 1, disposition, cancellation,
+                current.occurrences(), current.deadline(), current.createdAt(), now, reason,
+                current.graphCompleted());
+        var batch = ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(stored.revision()))
+                .writeSaga(new ai.ravenroot.api.persistence.SagaWrite(mutationId, current.revision(), next));
+        java.util.Set<String> operationsToRearm = switch (action) {
+            case RECONCILE -> current.occurrences().values().stream()
+                    .filter(step -> step.status() == ai.ravenroot.api.persistence.SagaStepStatus.OUTCOME_UNKNOWN
+                            || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.DISPATCHED)
+                    .map(ai.ravenroot.api.persistence.SagaStepSnapshot::forwardOperationId)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            case RETRY_COMPENSATION -> current.occurrences().values().stream()
+                    .filter(step -> step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATION_UNKNOWN
+                            || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATING
+                            || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATION_PENDING)
+                    .map(ai.ravenroot.api.persistence.SagaStepSnapshot::compensationOperationId)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            case COMPENSATE -> java.util.Set.of();
+        };
+        commands.stream()
+                .filter(command -> command.intent().sagaId().equals(sagaId))
+                .filter(command -> command.status() == ai.ravenroot.api.persistence.SagaOutboxStatus.EXHAUSTED)
+                .filter(command -> operationsToRearm.contains(command.intent().operationId()))
+                .map(command -> command.intent().messageId())
+                .forEach(batch::rearmSagaCommand);
+        await(executionStore.apply(batch.build()));
+        return next;
+    }
+
+    @Override
     public java.time.Instant processInventoryRetainedFrom(String tenantId) {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         if (executionStore == null) {
@@ -2334,7 +2454,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public ai.ravenroot.api.application.ExecutionLookup executionResult(String tenantId, UUID executionId) {
-        var lookup = executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId));
+        var lookup = reconcileDurableExecutionLifecycle(tenantId, executionId,
+                executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId)));
         // The pause is applied on the way out and never stored in the registry. The registry holds
         // an immutable record of what a traversal has done; whether it is holding right now belongs
         // to the runtime, changes without the registry being written, and would go stale the instant
@@ -2352,6 +2473,37 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             return new ai.ravenroot.api.application.ExecutionLookup.Found(found.outcome().withPaused(true));
         }
         return lookup;
+    }
+
+    private ai.ravenroot.api.application.ExecutionLookup reconcileDurableExecutionLifecycle(
+            String tenantId, UUID executionId, ai.ravenroot.api.application.ExecutionLookup lookup) {
+        if (!(lookup instanceof ai.ravenroot.api.application.ExecutionLookup.Found found)
+                || executionStore == null) return lookup;
+        var outcome = found.outcome();
+        try {
+            var stored = await(executionStore.load(new ExecutionKey(tenantId, outcome.processInstanceId())));
+            var traversal = stored.state().traversals().get(executionId);
+            if (traversal == null) return lookup;
+            var durableStatus = ProcessInstanceStatus.valueOf(traversal.status().name());
+            if (durableStatus == outcome.status()) return lookup;
+            // A graph can finish before its durable participant receipts do.  The initial result
+            // record then describes graph completion, while the aggregate remains WAITING and may
+            // later become FAILED because its business effects were compensated.  The aggregate is
+            // the lifecycle authority, including after restart; the graph result still supplies the
+            // bounded node evidence, but it must never promote that business rollback to success.
+            var reconciled = new ai.ravenroot.api.application.ExecutionOutcome(
+                    outcome.processInstanceId(), outcome.traversalId(), durableStatus,
+                    durableStatus == ProcessInstanceStatus.COMPLETED ? outcome.payload() : null,
+                    outcome.visitedNodes(), outcome.defaultedNodes(), outcome.bypassedNodes(),
+                    outcome.handledFailureNodes(), outcome.untakenEdges(), false,
+                    traversal.terminationReason());
+            return new ai.ravenroot.api.application.ExecutionLookup.Found(reconciled);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException unavailable) {
+            if (unavailable.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                return lookup;
+            }
+            throw unavailable;
+        }
     }
 
     @Override
@@ -2480,7 +2632,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             throw new IllegalStateException("Ravenroot application is closed");
         }
         byte[] graphMlBytes = readGraphMlBytes(graphMl);
-        new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+        new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
                 .require(graphMlBytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
         // start() must run INSIDE this critical section, not after it. A freshly
         // registered deployment is COLD until start() flips it, and COLD does not count as active
@@ -3087,7 +3239,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private int inspectEffectiveSources(byte[] graphBytes,
             ai.ravenroot.api.application.GraphAdmissionPurpose purpose) {
-        return new GraphAdmissionValidator(behaviors, graphExecutionLimits).require(graphBytes, purpose);
+        return new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
+                .require(graphBytes, purpose);
     }
 
     /** Keeps the source session's published refusal taxonomy over the shared registration path's own. */

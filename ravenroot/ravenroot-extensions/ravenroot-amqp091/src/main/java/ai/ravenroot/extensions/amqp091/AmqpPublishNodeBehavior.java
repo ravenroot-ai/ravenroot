@@ -130,7 +130,8 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                         + "discards a message id it has already handled."));
         return new NodeTypeDescriptor(BEHAVIOR, "Publish AMQP message", "AMQP 0-9-1",
                 "Publishes one bounded message with mandatory returns and publisher confirms.",
-                "actor", false, List.copyOf(properties), Set.of("network", "credential-reference", "side-effect"));
+                "actor", false, List.copyOf(properties), Set.of("network", "credential-reference", "side-effect",
+                        "saga-adapter:ravenroot.amqp-inbox.v1"));
     }
 
     private static NodePropertyDescriptor optional(String name, String displayName, NodePropertyType type,
@@ -556,11 +557,24 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             for (var property : configuration.properties().entrySet()) {
                 String name = property.getKey();
                 if (CONFIGURATION_FIELDS.contains(name)) continue;
+                if (name.startsWith("saga.")) continue;
                 if (RecoveryRepeatabilityProperty.NAME.equals(name)) {
                     if (RecoveryRepeatabilityProperty.ALLOWED_VALUES.contains(property.getValue())) continue;
                     throw Refusal.rejected("INVALID_GRAPH_PROPERTY");
                 }
                 throw Refusal.rejected("UNKNOWN_GRAPH_PROPERTY");
+            }
+            if ("amqp-inbox-v1".equals(configuration.property("saga.participant", ""))) {
+                if (!"ravenroot.amqp-inbox.v1".equals(configuration.property("saga.adapter", ""))) {
+                    throw Refusal.rejected("SAGA_ADAPTER_REQUIRED");
+                }
+                String binding = configuration.property("saga.inboxBinding", "");
+                if (!binding.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")) {
+                    throw Refusal.rejected("SAGA_INBOX_BINDING_REQUIRED");
+                }
+                if (!strictBoolean(configuration, "saga.businessCompletionRequired", false)) {
+                    throw Refusal.rejected("SAGA_BUSINESS_COMPLETION_REQUIRED");
+                }
             }
             String profileName = configuration.property("brokerProfile")
                     .orElseThrow(() -> Refusal.rejected("BROKER_PROFILE_REQUIRED"));
@@ -583,6 +597,9 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             if (!profile.allowsExchange(exchange) || !profile.allowsRoutingKey(routing))
                 throw Refusal.rejected("PUBLICATION_FORBIDDEN");
             boolean persistent = strictBoolean(configuration, "persistent", false);
+            if ("amqp-inbox-v1".equals(configuration.property("saga.participant", "")) && !persistent) {
+                throw Refusal.rejected("SAGA_PERSISTENCE_REQUIRED");
+            }
             if (persistent && !profile.allowPersistent()) throw Refusal.rejected("PERSISTENCE_FORBIDDEN");
             Integer priority = optionalInt(configuration, "priority", profile.maxPriority());
             Long expiration = optionalLong(configuration, "expirationMs", profile.maxExpirationMs());

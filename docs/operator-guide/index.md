@@ -13,6 +13,7 @@ Run Ravenroot as a controlled service with explicit identity, storage, deploymen
 - [Global lifecycle console](lifecycle-console.md) — Select authoritative deployment and process targets, understand command scope, and reconcile every outcome.
 - [Embedded-viewer operations](embed-operations.md) — Register a deployment, record seven attestations, issue sessions, audit access, and revoke it.
 - [Human Task operations](human-tasks.md) — Select responder enforcement, register sandbox/external providers, rotate secrets, and reconcile durable tasks.
+- [Durable sagas and application-command outbox](saga-outbox.md) — Author governed participant contracts and operate fenced saga and delivery recovery.
 
 ## Authority boundary
 

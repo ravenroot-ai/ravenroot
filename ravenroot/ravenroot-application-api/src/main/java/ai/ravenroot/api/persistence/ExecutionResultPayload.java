@@ -121,6 +121,15 @@ public record ExecutionResultPayload(ResultPayloadState state, boolean redacted,
     }
 
     /**
+     * The state of an output whose durable lifecycle was recovered after its producing runtime ended.
+     *
+     * @return a payload record reporting {@link ResultPayloadState#UNAVAILABLE}.
+     */
+    public static ExecutionResultPayload unavailable() {
+        return new ExecutionResultPayload(ResultPayloadState.UNAVAILABLE, false, false, 0, null, null);
+    }
+
+    /**
      * The state of a payload the payload boundary refused before any projection of it could exist.
      *
      * <p>Every other factory here decides after {@link DurableExecutionResult#project} has encoded a

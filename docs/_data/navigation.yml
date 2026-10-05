@@ -60,6 +60,8 @@
       url: /operator-guide/embed-operations.html
     - title: Human Task operations
       url: /operator-guide/human-tasks.html
+    - title: Durable sagas and application-command outbox
+      url: /operator-guide/saga-outbox.html
 
 - title: Integrator guide
   items:

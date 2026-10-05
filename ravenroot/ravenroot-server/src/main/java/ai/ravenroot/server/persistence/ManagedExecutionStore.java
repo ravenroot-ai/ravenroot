@@ -67,7 +67,7 @@ public final class ManagedExecutionStore implements InvocationHandler {
             "findProcessInstance", "listTraversals", "inventoryRetainedFrom",
             "purgeExpiredProcessInstances", "executionResultRetention", "maxExecutionResultPayloadBytes",
             "recordExecutionResult", "loadExecutionResult", "executionResultsRetainedFrom",
-            "purgeExpiredExecutionResults", "close");
+            "purgeExpiredExecutionResults", "loadSaga", "listSagas", "listSagaCommands", "close");
 
     private final ExecutionStore delegate;
     private final ExecutionManifestStore manifests;
@@ -118,7 +118,9 @@ public final class ManagedExecutionStore implements InvocationHandler {
         }
         if (name.equals("applyManaged") || name.equals("claimManaged")
                 || name.equals("claimPendingWorkAmong") || name.equals("claimDueTimersAmong")
-                || name.equals("managedClaimCandidates")) {
+                || name.equals("managedClaimCandidates") || name.equals("claimSagaCommands")
+                || name.equals("listSagaCompletionCandidates") || name.equals("listSagaRecoveryCandidates")
+                || name.equals("settleSagaCommand")) {
             return failed("managed persistence internals are not public entry points");
         }
         if (!SAFE_DELEGATE_METHODS.contains(name)) {

@@ -14085,22 +14085,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-056a4859c32cc562334a": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-e945fb94fdcff9a14183":
+    "oc-718c93fcd4195beee84e": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-8a475043a068f68a3359":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-b7720bdb37a21b1d1120": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-6d7a3980c3fdc11b50fc": (
+    "oc-4f76f6164bb685b59511": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-3f9a83111f48f0f5425c": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-1814c131afe14c623c8f": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-88e5f7eff7fa5a8d9d13": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-056a4859c32cc562334a": "/v1/events",
-    "oc-e945fb94fdcff9a14183": "/v1/events",
-    "oc-b7720bdb37a21b1d1120": "/v1/events",
-    "oc-6d7a3980c3fdc11b50fc": "/v1/events/recent",
-    "oc-1814c131afe14c623c8f": "/v1/events/recent",
+    "oc-718c93fcd4195beee84e": "/v1/events",
+    "oc-8a475043a068f68a3359": "/v1/events",
+    "oc-4f76f6164bb685b59511": "/v1/events",
+    "oc-3f9a83111f48f0f5425c": "/v1/events/recent",
+    "oc-88e5f7eff7fa5a8d9d13": "/v1/events/recent",
 }
 
 
@@ -14320,7 +14320,8 @@ def route_table_candidate_partitions(source: str) -> tuple[
         method_values: list[str] = []
         for argument, _start, _end in methods:
             value = java_literal_concatenation(argument)
-            if value is None or len(value[1]) != 1 or value[0] not in {"GET", "POST", "PUT", "DELETE"}:
+            if value is None or len(value[1]) != 1 \
+                    or value[0] not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
                 return None
             method_values.append(value[0])
         if not path[0].startswith("/") or not summary[0].strip():
@@ -14906,9 +14907,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 110, "path": 100, "summary": 431, "successStatuses": 103}
-    if len(details) != 100 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 100/744 positional shape")
+    expected_counts = {"methods": 121, "path": 108, "summary": 449, "successStatuses": 111}
+    if len(details) != 108 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 108/789 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

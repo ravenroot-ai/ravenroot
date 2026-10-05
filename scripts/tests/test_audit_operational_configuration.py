@@ -2122,16 +2122,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_744_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_789_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(100, len(details))
+            self.assertEqual(108, len(details))
             self.assertEqual(
-                {"methods": 110, "path": 100, "summary": 431, "successStatuses": 103},
+                {"methods": 121, "path": 108, "summary": 449, "successStatuses": 111},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(744, len(entries))
+            self.assertEqual(789, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -2143,7 +2143,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
 
-    def test_runner_routes_include_put_without_opening_the_method_vocabulary(self) -> None:
+    def test_routes_include_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
@@ -2154,11 +2154,19 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                    for identifier in item["candidateIds"]["methods"])
         }
         self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
+        patch_routes = {
+            item["path"] for item in details
+            if any(candidates[identifier].expression == '"PATCH"'
+                   for identifier in item["candidateIds"]["methods"])
+        }
+        self.assertEqual({
+            "/v1/node-palettes/{paletteId}",
+            "/v1/node-palettes/templates/{templateId}",
+        }, patch_routes)
         self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
         self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
         self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})
         self.assertIsNone(audit.route_table_candidate_partitions(source.replace('"PUT"', '"TRACE"', 1)))
-
     def test_runner_inventory_distinguishes_bounds_protocol_and_presentation(self) -> None:
         document = audit.load_inventory(audit.INVENTORY)
         rows = document["entries"]
@@ -6384,6 +6392,42 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:
             audit.main(["--accept-retired-pending"])
         self.assertEqual(2, failure.exception.code)
+
+
+class ActivityCapturePolicyAuditTest(unittest.TestCase):
+    def test_live_references_remap_exact_declared_fields_and_fail_closed_elsewhere(self) -> None:
+        old, new = "oc-live-before", "oc-live-after"
+        authority = {
+            "candidateIds": [old],
+            "contracts": [{
+                "candidateIds": [old],
+                "defaultEvidence": [old],
+                "rationale": old,
+                "unsupportedCandidateIds": [old],
+            }],
+        }
+        history = [{"candidateIds": [old], "source": old}]
+        document = {
+            "activityCaptureAuthorities": {"activity-capture-settings": authority},
+            "reconciliationHistory": copy.deepcopy(history),
+        }
+
+        audit.remap_declared_candidate_references(document, {old: new})
+
+        self.assertEqual([new], authority["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["defaultEvidence"])
+        self.assertEqual(old, authority["contracts"][0]["rationale"])
+        self.assertEqual([old], authority["contracts"][0]["unsupportedCandidateIds"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        live_locations = audit.candidate_reference_locations(document, {new})
+        self.assertTrue(live_locations)
+        self.assertTrue(all(audit.allowed_migrated_reference(path)
+                            for path in live_locations), live_locations)
+        undeclared = audit.candidate_reference_locations(document, {old})
+        self.assertTrue(any(not audit.allowed_migrated_reference(path)
+                            and not audit.immutable_historical_reference(path)
+                            for path in undeclared), undeclared)
 
 
 class AiOperationalPolicyAuditTest(unittest.TestCase):

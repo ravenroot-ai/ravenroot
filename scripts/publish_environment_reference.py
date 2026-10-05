@@ -28,16 +28,6 @@ UI_SETTINGS = {
 }
 
 
-def ui_settings() -> dict[str, str]:
-    """Maintain the non-Java web-server boundary separately, refusing unclassified runtime names."""
-    names = set(re.findall(r"\benv\.(RAVENROOT_[A-Z0-9_]+)",
-                           UI_SERVER_SOURCE.read_text(encoding="utf-8")))
-    if names != set(UI_SETTINGS):
-        raise ValueError("UI server environment mapping differs from runtime: "
-                         + ", ".join(sorted(names.symmetric_difference(UI_SETTINGS))))
-    return UI_SETTINGS
-
-
 # This reviewed literal is a startsWith namespace guard, not an environment key
 # or an open dynamic family. Pin the complete source so even a benign file change
 # requires re-review: a new use of the same literal must never be silently hidden.
@@ -327,6 +317,16 @@ def group(name: str) -> str:
                 "RAVENROOT_UNKNOWN_BEHAVIOR"}:
         return "runtime"
     raise ValueError(f"unclassified production environment variable: {name}")
+
+
+def ui_settings() -> dict[str, str]:
+    """Maintain the non-Java web-server boundary separately, refusing unclassified runtime names."""
+    names = set(re.findall(r"\benv\.(RAVENROOT_[A-Z0-9_]+)",
+                           UI_SERVER_SOURCE.read_text(encoding="utf-8")))
+    if names != set(UI_SETTINGS):
+        raise ValueError("UI server environment mapping differs from runtime: "
+                         + ", ".join(sorted(names.symmetric_difference(UI_SETTINGS))))
+    return UI_SETTINGS
 
 
 def render() -> str:

@@ -12719,8 +12719,8 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': '343c054d99c539004f7bd4c0469c849ad303ad53301bfa16d68a2796aab6ec4a',
- 'scripts/tests/test_publish_environment_reference.py': '96578f49ed01f0a61d0ffdaad6870f003167fba3d54cdbfe502137f9c5c121c0',
+ 'scripts/publish_environment_reference.py': '32eb4a51ebc94a089a90a294a4e4ff57a69fc6d7756b646f686d7e655c01f88f',
+ 'scripts/tests/test_publish_environment_reference.py': 'de2ca4be25ab8951ec9afd357a6abc5aaa8d75c1e88fa9fd1ad5871b7c82c915',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 

@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 132.
+Checked source reconciliations: 133.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 25542 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 24894 |
-| Unchanged identities | 24003 |
-| Approved identity migrations | 882 |
-| Approved retirements | 9 |
-| Semantically classified additions | 657 |
+| Source inventory candidates | 25542 |
+| Unchanged identities | 25542 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 25542 |
 
 ## Final semantic review

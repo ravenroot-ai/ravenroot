@@ -478,3 +478,19 @@ For an urgent correction:
    than recreating it independently.
 
 No hotfix bypasses review, checks, version consistency, release notes, or publication verification.
+
+## Independent frontend delivery
+
+The same protected release publishes `ravenroot-ui-<version>.zip` in GitHub Releases and
+`ghcr.io/ravenroot-ai/ravenroot-ui:<version>` alongside the complete distribution. Both use the exact
+product version; there is no moving latest tag. Frontend assets are compiled once during publication
+and those bytes populate both containers and the UI ZIP. `package_ui.py` normalizes ZIP timestamps
+to the tagged commit time. The UI ZIP is covered by SHA256SUMS and release-file build provenance;
+Maven GPG signing continues to cover Maven payloads, not this independent ZIP.
+
+Both OCI indexes contain BuildKit SBOM and SLSA provenance, have digest-bound GitHub build
+attestations and pass anonymous version-tag and digest pull verification. OCI reconciliation is
+restricted to the full image and UI image repository names and refuses immutable content mismatch.
+All new publication stays inside the same protected release environment; no additional registry
+credentials or publication authority are granted to ordinary CI. For the frontend deployment and
+verification commands see [UI-only Kubernetes installation](../operator-guide/kubernetes-ui-only.md).

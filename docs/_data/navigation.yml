@@ -42,6 +42,10 @@
       url: /operator-guide/
     - title: Deployment and startup
       url: /operator-guide/deployment-startup.html
+    - title: Complete Kubernetes installation
+      url: /operator-guide/kubernetes-installation.html
+    - title: UI-only Kubernetes installation
+      url: /operator-guide/kubernetes-ui-only.html
     - title: Identity and browser boundary
       url: /operator-guide/identity-browser.html
     - title: Persistence, lifecycle, and recovery

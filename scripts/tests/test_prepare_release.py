@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts import release_contract
-from scripts.prepare_release import prepare
+from scripts.prepare_release import prepare, bump_ui_examples, UI_RELEASE_EXAMPLES
 from scripts.release_contract import ReleaseContractError, parse_tag, release_transition
 
 
@@ -72,6 +72,23 @@ FRAGMENTS = {
 
 
 class PrepareReleaseTest(unittest.TestCase):
+    def test_ui_examples_follow_release_and_accept_initial_upcoming_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, relative in enumerate(UI_RELEASE_EXAMPLES):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                version = PREVIOUS if index % 2 else "0.2.0-alpha.1"
+                path.write_text(f"image: ravenroot-ui:{version}\narchive: ravenroot-ui-{version}.zip\n")
+            updates = bump_ui_examples(root, PREVIOUS, "0.2.0-alpha.1")
+            self.assertEqual(len(updates), 4)
+            for contents in updates.values():
+                self.assertNotIn(PREVIOUS, contents)
+                self.assertEqual(contents.count("0.2.0-alpha.1"), 2)
+            (root / UI_RELEASE_EXAMPLES[0]).write_text("version 9.9.9-alpha.1")
+            with self.assertRaises(ReleaseContractError):
+                bump_ui_examples(root, PREVIOUS, "0.2.0-alpha.1")
+
     def test_a_minor_label_moves_every_surface_to_the_authorized_version(self) -> None:
         root = fixture(FRAGMENTS)
         summary = prepare(root, "minor")

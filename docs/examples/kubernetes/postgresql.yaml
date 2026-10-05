@@ -1,0 +1,82 @@
+# Replace the image digest, storage class and credentials before applying.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: postgres-auth}
+data:
+  pg_hba.conf: |
+    local all all peer
+    hostssl all all 0.0.0.0/0 scram-sha-256
+    hostssl all all ::0/0 scram-sha-256
+    hostnossl all all 0.0.0.0/0 reject
+    hostnossl all all ::0/0 reject
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  clusterIP: None
+  selector: {app: postgres}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        fsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgres
+          image: postgres:17-bookworm@sha256:REPLACE_WITH_APPROVED_POSTGRES_DIGEST
+          args: ["-c", "ssl=on", "-c", "ssl_cert_file=/etc/postgres-tls/tls.crt", "-c", "ssl_key_file=/etc/postgres-tls/tls.key", "-c", "hba_file=/etc/postgres-auth/pg_hba.conf"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-bootstrap, key: password}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -U, postgres]}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: tmp, mountPath: /tmp}
+            - {name: tls, mountPath: /etc/postgres-tls, readOnly: true}
+            - {name: auth, mountPath: /etc/postgres-auth, readOnly: true}
+      volumes:
+        - {name: run, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+        - name: auth
+          configMap: {name: postgres-auth}
+        - name: tls
+          secret:
+            secretName: postgres-tls
+            defaultMode: 0440
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: REPLACE_WITH_STORAGE_CLASS
+        resources:
+          requests: {storage: 20Gi}

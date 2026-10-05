@@ -445,8 +445,7 @@ HELM_FIXED_LIST_CONTRACTS = {
     "persistence.accessModes.0": "ReadWriteOnce",
 }
 HELM_JAVA_CARRIER_PREFIXES = (
-    "executionRuntime.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
-    "activityCapture.",
+    "executionRuntime.", "activityCapture.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
 )
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(
@@ -1095,6 +1094,23 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
     rows: list[tuple[int, str, str, str, str, str]] = []
     suffix = relative.suffix
     markers = symbol_markers(text, suffix)
+    activity_capture_lines: tuple[int, int] | None = None
+    relative_path = relative.as_posix()
+    if relative_path == "deploy/helm/ravenroot/values.yaml":
+        section = re.search(r"(?m)^activityCapture:\s*$", text)
+        if section is not None:
+            following = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                                  text[section.end():])
+            last_offset = (section.end() + following.start() - 1
+                           if following is not None else len(text) - 1)
+            activity_capture_lines = (line_number(text, section.start()),
+                                      line_number(text, last_offset))
+    elif relative_path == "deploy/helm/ravenroot/values.schema.json":
+        spans = json_value_spans(text)
+        span = None if spans is None else spans.get(("properties", "activityCapture"))
+        if span is not None:
+            activity_capture_lines = (line_number(text, span[0]),
+                                      line_number(text, span[1] - 1))
     offset = 0
     for index, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -1139,6 +1155,12 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
             offset += len(raw) + 1
             continue
         if kind and label:
+            if activity_capture_lines is not None \
+                    and activity_capture_lines[0] <= index <= activity_capture_lines[1]:
+                # Repeated Helm leaf names are common. Preserve the closed parent setting in the
+                # normalized identity so inserting activity capture cannot renumber or resurrect
+                # an unrelated reviewed candidate with the same scalar spelling.
+                label = f"activityCapture.{label}"
             for atom in FIXED_ATOM.finditer(raw):
                 candidate_offset = offset + atom.start()
                 rows.append((candidate_offset, containing_symbol(markers, candidate_offset), kind,
@@ -3553,6 +3575,18 @@ def remap_declared_candidate_references(document: dict[str, object],
                     if isinstance(candidate_ids, dict):
                         for role in ("methods", "path", "summary", "successStatuses"):
                             remap_list(candidate_ids, role)
+            # The bound clauses use candidate identities as object keys rather than list values.
+            # They are live RouteTable authority, so an approved identity migration must move the
+            # key along with the descriptor partitions. Historical reconciliation objects remain
+            # untouched by this narrowly scoped rewrite.
+            clauses = authority.get("publishedBoundClauses")
+            if isinstance(clauses, dict):
+                remapped_clauses = {
+                    replacements.get(identifier, identifier): fields
+                    for identifier, fields in clauses.items()
+                }
+                clauses.clear()
+                clauses.update(remapped_clauses)
 
     graph_authorities = document.get("graphLimitAuthorities")
     if isinstance(graph_authorities, dict):
@@ -3692,6 +3726,17 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field == "contracts":
                             remap_list(row, "defaultCandidateIds")
+
+    activity_authorities = document.get("activityCaptureAuthorities")
+    if isinstance(activity_authorities, dict):
+        for authority in activity_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for contract in authority.get("contracts", []):
+                if isinstance(contract, dict):
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultEvidence")
 
     ai_authorities = document.get("aiOperationalAuthorities")
     if isinstance(ai_authorities, dict):
@@ -4011,6 +4056,25 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["interactionWebSocketAuthorities"] = {
             INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
+    if activity_capture_source_present(root):
+        activity_authority = activity_capture_authority_from_source(root, current)
+        if activity_authority is None:
+            return None, ["cannot derive the closed activity capture configuration authority"]
+        refreshed["activityCaptureAuthorities"] = {
+            ACTIVITY_CAPTURE_AUTHORITY_ID: activity_authority,
+        }
+        activity_by_id = {str(entry["id"]): entry for entry in merged}
+        for contract in activity_authority["contracts"]:
+            metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "activityCaptureAuthority": ACTIVITY_CAPTURE_AUTHORITY_ID,
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The typed activity capture configuration owns this optional setting and its disabled-by-default bounded runtime policy.",
+            }
+            for identifier in contract["candidateIds"]:
+                activity_by_id[identifier].update(metadata)
     if ai_operational_source_present(root):
         ai_operational_authority = ai_operational_authority_from_source(root, current)
         if ai_operational_authority is None:
@@ -8436,13 +8500,12 @@ PROGRAM_GITHUB_SHARED_METHODS = {'core': ['DefaultRavenrootApplication',
 # not the program/GitHub settings family. The reviewed run-method digest still seals their body;
 # new or changed atoms cannot inherit these exclusions. Their inventory classifications remain mandatory.
 PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
- 'oc-b3abcee105c4fc0a01bb',
- 'oc-d7a60baa1e87dd172e05',
  'oc-1450a0deaf3d5a2d2865',
  'oc-83cd267a603bc543e1de',
  'oc-7472c211aa6980103e4b',
  'oc-00dc7c6b323744d9427e',
  'oc-107e73202ff972e53169',
+ 'oc-1bed77f8f397cfa98208',
  'oc-20f796f0e15a1c389586',
  'oc-23f50ddca7ea65fc2aec',
  'oc-2d7c516244dfb35125e6',
@@ -8467,7 +8530,7 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-8561e4404c8819c4a62f',
  'oc-86ec24b91c7449c418be',
  'oc-886d1581ff889079e85d',
- 'oc-890813c7fb2d8861e36f',
+ 'oc-389255cffa9d91785bc3',
  'oc-92e7a625ae5d828264bc',
  'oc-9afebfed0a8eeafb99ce',
  'oc-a35ea52a7d68498116e3',
@@ -9484,7 +9547,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                                          'oc-c8ad782792d62e076403',
                                                                          'oc-32f6fc40a5ad8cda0865',
                                                                          'oc-8d3ae97717c09bd94bdf',
-                                                                         'oc-9bd6a78abf03d5ff22ce',
+                                                                         'oc-f40aa7e38502f19a48f6',
                                                                          'oc-8e4ba14419b5241c9fa3',
                                                                          'oc-9bfdc2a14c32a1174adc',
                                                                          'oc-5ef226f1f314a1077bbb',
@@ -10787,9 +10850,8 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                 'rationale': 'Constructor diagnostic label or one-byte '
                                                              'overflow detection sentinel; actual limit '
                                                              'comes from typed authority.',
-                                                'candidateIds': ['oc-6e44c0652ce7d3a85a35',
-                                                                 'oc-389255cffa9d91785bc3',
-                                                                 'oc-1bed77f8f397cfa98208']},
+                                                'candidateIds': ['oc-5cc859036ec85f54143e',
+                                                                 'oc-6e44c0652ce7d3a85a35']},
  'program.authoring.served-schema-version': {'classification': 'protocol-or-format-invariant',
                                              'status': 'retained',
                                              'rationale': 'Fixed peer protocol/header/schema identity, not a '
@@ -11991,7 +12053,9 @@ def program_github_deployment_candidate(root: Path, candidate: Candidate) -> boo
         if candidate.path == paths["helmSchema"]:
             spans = json_value_spans(source)
             span = None if spans is None else spans.get(("properties", "programAuthoring"))
-            return span is not None and line_number(source, span[0]) <= candidate.line <= line_number(source, span[1] - 1)
+            return (span is not None
+                    and candidate.role != "type"
+                    and line_number(source, span[0]) <= candidate.line <= line_number(source, span[1] - 1))
         if candidate.path == paths["helmValues"]:
             return "programAuthoring" in candidate.role
         lines = source.splitlines()
@@ -13652,6 +13716,162 @@ def dual_source_binding_authority_errors(root: Path, setting: str, contract: dic
     return errors
 
 
+SAGA_OUTBOX_CAPACITY_BINDING_KIND = "java-saga-outbox-system-property-v1"
+SAGA_OUTBOX_CAPACITY_PATH = (
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/"
+    "SagaOutboxCapacity.java"
+)
+SAGA_OUTBOX_CAPACITY_SETTINGS = {
+    "saga.outbox.maximum-outstanding-commands": {
+        "field": "maximumOutstandingCommands",
+        "propertyConstant": "COMMANDS_PROPERTY",
+        "property": "ravenroot.saga.outbox.maxOutstandingCommands",
+        "default": "128 commands per tenant",
+        "defaultExpressions": ("128",),
+    },
+    "saga.outbox.maximum-outstanding-bytes": {
+        "field": "maximumOutstandingBytes",
+        "propertyConstant": "BYTES_PROPERTY",
+        "property": "ravenroot.saga.outbox.maxOutstandingBytes",
+        "default": "16 MiB of encoded commands per tenant",
+        "defaultExpressions": ("16L", "1024", "1024"),
+    },
+}
+SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS = {
+    SAGA_OUTBOX_CAPACITY_PATH:
+        "159cf602178d4cd65038cdbc1949fd2f1d097826fde3a2c52a3347fb5dddaa93",
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
+    "InMemoryExecutionStore.java":
+        "b2589bb03e058418ff1e23fb0c2dfc54715e8ab05c843e5f00eb69f200119db2",
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/"
+    "SqliteExecutionStore.java":
+        "5f052e4890544bdec62ee9f235720f3b7ef006d8559750351ebda11b0e4a9cd2",
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/"
+    "postgresql/PostgresExecutionStore.java":
+        "ffb606fe6e035b393ec4b394050576fd732006d7bf8ab9343596b722cdd18fc4",
+    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
+    "ExecutionStoreContract.java":
+        "64a6ff171489849cee41d233102cf130e3acc07f238a9b4fae742df9517c6cb3",
+}
+SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST = \
+    "c17f55d2e2a2d57536718dbfa1a65122e22bce5644254b487a3156f80a4a726b"
+SAGA_OUTBOX_CAPACITY_CONSTRUCTOR_DIGEST = \
+    "380b98fe8309fd9b34a1dc5b9b88d1e21579e3f168fdb4bbd62ce202bcbed93d"
+SAGA_OUTBOX_CAPACITY_TEST_DIGEST = \
+    "668b5c668a6b79fb332dafb9e50cb05e6828f00aa0eb7bf19a7f8f9c6021981b"
+
+
+def saga_outbox_capacity_authority(
+        root: Path, setting: str,
+        discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive one property-only saga capacity setting from its closed typed source."""
+    specification = SAGA_OUTBOX_CAPACITY_SETTINGS.get(setting)
+    if specification is None:
+        return None
+    sources: dict[str, str] = {}
+    try:
+        for path, expected in SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS.items():
+            source = (root / path).read_text(encoding="utf-8")
+            if _source_digest(source) != expected:
+                return None
+            sources[path] = source
+    except (OSError, UnicodeError):
+        return None
+    source = sources[SAGA_OUTBOX_CAPACITY_PATH]
+    if java_record_components(source, "SagaOutboxCapacity") != (
+            "maximumOutstandingCommands", "maximumOutstandingBytes") \
+            or java_method_digest(source, "SagaOutboxCapacity", "configured") != \
+            SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST \
+            or java_span_digest(source, java_compact_constructor_span(
+                source, "SagaOutboxCapacity")) != SAGA_OUTBOX_CAPACITY_CONSTRUCTOR_DIGEST:
+        return None
+    test_source = sources[next(path for path in SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS
+                               if path.endswith("/ExecutionStoreContract.java"))]
+    if java_method_digest(
+            test_source, "ExecutionStoreContract",
+            "sagaOutboxCapacityRefusesTheWholeCreatingBatchWithoutPartialRows",
+    ) != SAGA_OUTBOX_CAPACITY_TEST_DIGEST:
+        return None
+    property_name = str(specification["property"])
+    property_constant = str(specification["propertyConstant"])
+    field = str(specification["field"])
+    property_ids = sorted(candidate.id for candidate in discovered.values()
+                          if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                          and candidate.kind == "property-binding"
+                          and candidate.expression == property_name)
+    declaration_ids = sorted(candidate.id for candidate in discovered.values()
+                             if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                             and candidate.kind == "fixed-declaration"
+                             and candidate.role == property_constant
+                             and candidate.expression == json.dumps(property_name))
+    lookup_ids = sorted(candidate.id for candidate in discovered.values()
+                        if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                        and candidate.kind == "property-binding"
+                        and candidate.role == "System.getProperty"
+                        and candidate.expression == property_constant)
+    expected_defaults = Counter(str(value) for value in specification["defaultExpressions"])
+    default_candidates = [candidate for candidate in discovered.values()
+                          if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                          and candidate.kind == "fixed-declaration"
+                          and candidate.role == "DEFAULTS"
+                          and candidate.expression in expected_defaults]
+    if len(property_ids) != 1 or len(declaration_ids) != 1 or len(lookup_ids) != 1 \
+            or Counter(candidate.expression for candidate in default_candidates) != expected_defaults:
+        return None
+    default_ids = sorted(candidate.id for candidate in default_candidates)
+    binding = {
+        "kind": SAGA_OUTBOX_CAPACITY_BINDING_KIND,
+        "sourceOwner": f"{SAGA_OUTBOX_CAPACITY_PATH}#SagaOutboxCapacity",
+        "method": "configured", "constructorType": "SagaOutboxCapacity",
+        "component": field, "propertyConstant": property_constant,
+        "property": property_name,
+        "declarationCandidateIds": declaration_ids,
+        "propertyCandidateIds": property_ids,
+        "lookupCandidateIds": lookup_ids,
+        "configuredMethodDigest": SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST,
+        "compactConstructorDigest": SAGA_OUTBOX_CAPACITY_CONSTRUCTOR_DIGEST,
+        "sourceProofs": dict(SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS),
+        "testMethodDigest": SAGA_OUTBOX_CAPACITY_TEST_DIGEST,
+    }
+    default = {
+        "owner": f"{SAGA_OUTBOX_CAPACITY_PATH}#SagaOutboxCapacity",
+        "instanceSymbol": "DEFAULTS", "field": field,
+        "sourceExpression": ("128" if field == "maximumOutstandingCommands"
+                             else "16L * 1024 * 1024"),
+        "candidateIds": default_ids,
+    }
+    return {"bindingAuthority": binding, "defaultAuthority": default,
+            "candidateIds": sorted(declaration_ids + property_ids + lookup_ids + default_ids)}
+
+
+def saga_outbox_capacity_authority_errors(
+        root: Path, setting: str, contract: dict[str, object],
+        setting_entries: list[dict[str, object]], entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    """Require exact property, default, consumer, and executable-test evidence."""
+    expected = saga_outbox_capacity_authority(root, setting, discovered)
+    if expected is None:
+        return [f"{setting}: unsupported or drifted saga outbox capacity authority"]
+    specification = SAGA_OUTBOX_CAPACITY_SETTINGS[setting]
+    errors: list[str] = []
+    if contract.get("owner") != f"{SAGA_OUTBOX_CAPACITY_PATH}#SagaOutboxCapacity" \
+            or contract.get("field") != specification["field"] \
+            or contract.get("bindings") != [specification["property"]] \
+            or contract.get("default") != specification["default"]:
+        errors.append(f"{setting}: typed owner, property binding, or default has drifted")
+    if contract.get("bindingAuthority") != expected["bindingAuthority"]:
+        errors.append(f"{setting}: saga outbox property binding authority has drifted")
+    if contract.get("defaultAuthority") != expected["defaultAuthority"] \
+            or contract.get("defaultEvidence") != expected["defaultAuthority"]["candidateIds"]:
+        errors.append(f"{setting}: saga outbox default authority has drifted")
+    identifiers = sorted(str(entry["id"]) for entry in setting_entries)
+    if identifiers != expected["candidateIds"] \
+            or any(entries.get(identifier, {}).get("setting") != setting
+                   for identifier in expected["candidateIds"]):
+        errors.append(f"{setting}: saga outbox capacity candidate partition has drifted")
+    return errors
+
+
 RUNNER_COORDINATOR_BINDING_KIND = "java-runner-coordinator-environment-v1"
 RUNNER_COORDINATOR_CONFIGURATION_PATH = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorConfiguration.java"
 RUNNER_COORDINATOR_BINDINGS = {
@@ -13733,6 +13953,10 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
         entry for entry in setting_entries if entry.get("kind") == "environment-binding"
     ]
     authority = contract.get("bindingAuthority")
+    if setting in SAGA_OUTBOX_CAPACITY_SETTINGS or (isinstance(authority, dict)
+            and authority.get("kind") == SAGA_OUTBOX_CAPACITY_BINDING_KIND):
+        return saga_outbox_capacity_authority_errors(
+            root, setting, contract, setting_entries, entries, discovered)
     if setting in RUNNER_COORDINATOR_BINDINGS or (isinstance(authority, dict)
             and authority.get("kind") == RUNNER_COORDINATOR_BINDING_KIND):
         return runner_coordinator_binding_errors(
@@ -13833,6 +14057,11 @@ def default_authority_errors(root: Path, setting: str, contract: dict[str, objec
     property_bound = any(entry.get("setting") == setting and entry.get("kind") == "property-binding"
                          for entry in entries.values())
     binding_authority = contract.get("bindingAuthority")
+    if isinstance(binding_authority, dict) \
+            and binding_authority.get("kind") == SAGA_OUTBOX_CAPACITY_BINDING_KIND:
+        # The specialized authority resolves two record components from one composite
+        # DEFAULTS initializer and verifies each component's exact atom multiset.
+        return []
     if isinstance(binding_authority, dict) \
             and binding_authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
         return []
@@ -14072,6 +14301,59 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
 ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
 ENVIRONMENT_REFERENCE_AUTHORITY_ID = "environment-reference-generator-v1"
 ENVIRONMENT_REFERENCE_PATH = Path("scripts/publish_environment_reference.py")
+ACTIVITY_CAPTURE_AUTHORITY_ID = "activity-capture-configuration-v1"
+ACTIVITY_CAPTURE_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/activity/"
+    "ActivityCaptureConfiguration.java")
+ACTIVITY_CAPTURE_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/activity/"
+    "ActivityCapturePolicy.java")
+ACTIVITY_CAPTURE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/activity/"
+    "ActivityCaptureConfigurationTest.java")
+ACTIVITY_CAPTURE_CARRIER_PATHS = (
+    Path("compose.yaml"),
+    Path("deploy/helm/ravenroot/values.yaml"),
+    Path("deploy/helm/ravenroot/values.schema.json"),
+    Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+)
+ACTIVITY_CAPTURE_SETTINGS = (
+    ("activity.capture.enabled", "enabled", "enabled", "RAVENROOT_ACTIVITY_CAPTURE_ENABLED",
+     "ravenroot.activity-capture.enabled", "false", "false", "Strict Boolean true or false."),
+    ("activity.capture.policy", "policy", "failurePolicy", "RAVENROOT_ACTIVITY_CAPTURE_POLICY",
+     "ravenroot.activity-capture.policy", "BEST_EFFORT", "BEST_EFFORT", "BEST_EFFORT or STRICT."),
+    ("activity.capture.nodes", "nodes", "nodeIds", "RAVENROOT_ACTIVITY_CAPTURE_NODES",
+     "ravenroot.activity-capture.nodes", "empty selects every node", "", "Comma-separated exact node IDs."),
+    ("activity.capture.contents", "contents", "contents", "RAVENROOT_ACTIVITY_CAPTURE_CONTENTS",
+     "ravenroot.activity-capture.contents", "INPUT_PAYLOAD,OUTPUT_PAYLOAD", "INPUT_PAYLOAD,OUTPUT_PAYLOAD", "Nonempty content-kind list when enabled."),
+    ("activity.capture.max-payload-bytes", "maxPayloadBytes", "payloadLimits",
+     "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES", "ravenroot.activity-capture.max-payload-bytes",
+     "65536", "65536", "Positive whole bytes capped at 67108864."),
+    ("activity.capture.max-in-flight", "maxInFlight", "maxInFlightWrites",
+     "RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT", "ravenroot.activity-capture.max-in-flight",
+     "64", "64", "Positive whole count capped at 10000."),
+    ("activity.capture.write-timeout-millis", "writeTimeoutMillis", "writeTimeout",
+     "RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS", "ravenroot.activity-capture.write-timeout-millis",
+     "2000", "2000", "Positive whole milliseconds capped at 300000."),
+    ("activity.capture.retention-seconds", "retentionSeconds", "retention",
+     "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS", "ravenroot.activity-capture.retention-seconds",
+     "604800", "604800", "Positive whole seconds capped at 315360000."),
+    ("activity.capture.max-page-size", "maxPageSize", "maxPageSize",
+     "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE", "ravenroot.activity-capture.max-page-size",
+     "100", "100", "Positive whole records capped at 1000."),
+    ("activity.capture.redact-keys", "redactKeys", "redactor",
+     "RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS", "ravenroot.activity-capture.redact-keys",
+     "password,secret,token,authorization,api_key,apikey", None, "Comma-separated structured keys."),
+)
+ACTIVITY_CAPTURE_SOURCE_PROOFS = {
+    ACTIVITY_CAPTURE_CONFIGURATION_PATH: "97449b115114f01987f0d7c9c1cc8c32e931eae8d14bcbd394bb9ce1d8953cf8",
+    ACTIVITY_CAPTURE_POLICY_PATH: "a6ac890d6852d66729e2e46ab632ee5fc663c7c0b2b247479f6351fa370177bf",
+    ACTIVITY_CAPTURE_TEST_PATH: "bc0c980884dcac6cbef97bc3867efacbb44a0428de8bcfdd6c2c7866743c6046",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "51f37f7415b1aeefd2af6e1fa1918e3dc5cf00da1544299e69905f5436618787",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "b513b197a031c3f8f7c56b77b69bf4f8f9f676deeb12ac4a0dbbfd00d99f6880",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "07be85bc73d84f7edb1eff2171a0e300debdd5d16fef5bf050667c3d15159716",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "82a8f2e4fb7c37bf599ec0c1fa9ec15e05de82fbb90bc6b1e30186c0d22c187a",
+}
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -14106,6 +14388,168 @@ ROUTE_BOUND_PATHS = {
     "oc-3f9a83111f48f0f5425c": "/v1/events/recent",
     "oc-88e5f7eff7fa5a8d9d13": "/v1/events/recent",
 }
+
+
+def activity_capture_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the ten typed activity-capture settings and all deployment carriers."""
+    paths = (ACTIVITY_CAPTURE_CONFIGURATION_PATH, ACTIVITY_CAPTURE_POLICY_PATH,
+             ACTIVITY_CAPTURE_TEST_PATH, *ACTIVITY_CAPTURE_CARRIER_PATHS)
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except (OSError, UnicodeError):
+        return None
+    if any(_source_digest(sources[path]) != digest
+           for path, digest in ACTIVITY_CAPTURE_SOURCE_PROOFS.items()):
+        return None
+    configuration = sources[ACTIVITY_CAPTURE_CONFIGURATION_PATH]
+    policy = sources[ACTIVITY_CAPTURE_POLICY_PATH]
+    if java_record_components(configuration, "ActivityCaptureConfiguration") != ("policy", "maxPageSize") \
+            or java_record_components(policy, "ActivityCapturePolicy") != (
+                "enabled", "failurePolicy", "nodeIds", "contents", "payloadLimits",
+                "maxInFlightWrites", "writeTimeout", "retention", "redactor") \
+            or java_method_span(configuration, "ActivityCaptureConfiguration", "fromSystem") is None:
+        return None
+
+    positioned = java_source_candidates(ACTIVITY_CAPTURE_CONFIGURATION_PATH, configuration)
+    candidates_by_setting: dict[str, set[str]] = defaultdict(set)
+    default_by_setting: dict[str, list[str]] = {}
+    contracts: list[dict[str, object]] = []
+    by_environment = {item[3]: item for item in ACTIVITY_CAPTURE_SETTINGS}
+    by_helm_field = {item[1]: item for item in ACTIVITY_CAPTURE_SETTINGS}
+    values_source = sources[ACTIVITY_CAPTURE_CARRIER_PATHS[1]]
+    values_match = re.search(r"(?m)^activityCapture:\s*$", values_source)
+    schema_source = sources[ACTIVITY_CAPTURE_CARRIER_PATHS[2]]
+    schema_match = re.search(r'"activityCapture"\s*:\s*\{', schema_source)
+    if values_match is None or schema_match is None:
+        return None
+    next_values_key = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                                values_source[values_match.end():])
+    values_last_offset = (values_match.end() + next_values_key.start() - 1
+                          if next_values_key is not None else len(values_source) - 1)
+    schema_open = schema_source.find("{", schema_match.start())
+    schema_close = matching_delimiter(
+        strip_c_comments_and_literals(schema_source), schema_open, "{", "}")
+    if schema_close is None:
+        return None
+    helm_section_lines = {
+        ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix(): (
+            line_number(values_source, values_match.start()),
+            line_number(values_source, values_last_offset),
+        ),
+        ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix(): (
+            line_number(schema_source, schema_match.start()),
+            line_number(schema_source, schema_close),
+        ),
+    }
+    for setting, helm_field, field, environment, property_name, default, source_default, validation in ACTIVITY_CAPTURE_SETTINGS:
+        pattern = re.compile(
+            rf'value\s*\(\s*properties\s*,\s*environment\s*,\s*"{re.escape(property_name)}"\s*,\s*'
+            rf'"{re.escape(environment)}"\s*,', re.DOTALL)
+        matched = pattern.search(configuration)
+        if matched is None:
+            return None
+        opening = configuration.find("(", matched.start())
+        closing = matching_delimiter(strip_c_comments_and_literals(configuration), opening, "(", ")")
+        if closing is None:
+            return None
+        span_ids = [candidate.id for offset, candidate in positioned
+                    if matched.start() <= offset <= closing]
+        candidates_by_setting[setting].update(span_ids)
+        defaults = [identifier for identifier in span_ids
+                    if source_default is not None and discovered.get(identifier) is not None
+                    and discovered[identifier].expression.strip('"\'') == source_default]
+        if helm_field == "redactKeys":
+            defaults.extend(candidate.id for candidate in discovered.values()
+                            if candidate.path == ACTIVITY_CAPTURE_CONFIGURATION_PATH.as_posix()
+                            and candidate.role == "DEFAULT_REDACT_KEYS")
+        elif not defaults and helm_field in {"enabled", "policy", "nodes", "contents"}:
+            # The lexical scanner does not emit string/Boolean call arguments here. The exact
+            # source proof above pins the complete value(...) call, so its property and environment
+            # atoms are the closed evidence carrier for the nonnumeric fallback.
+            defaults.extend(span_ids)
+        if not defaults:
+            return None
+        default_by_setting[setting] = sorted(set(defaults))
+
+    for candidate in discovered.values():
+        item = by_environment.get(candidate.expression) or by_environment.get(candidate.role)
+        if item is None and candidate.path in helm_section_lines:
+            first_line, last_line = helm_section_lines[candidate.path]
+            if first_line <= candidate.line <= last_line:
+                item = by_helm_field.get(candidate.role.removeprefix("activityCapture."))
+        if item is not None and candidate.path in {
+                path.as_posix() for path in ACTIVITY_CAPTURE_CARRIER_PATHS}:
+            candidates_by_setting[item[0]].add(candidate.id)
+
+    for setting, _helm_field, field, environment, property_name, default, _source_default, validation in ACTIVITY_CAPTURE_SETTINGS:
+        ids = sorted(candidates_by_setting[setting])
+        if not ids or not default_by_setting[setting]:
+            return None
+        owner = (f"{ACTIVITY_CAPTURE_CONFIGURATION_PATH.as_posix()}#ActivityCaptureConfiguration"
+                 if field == "maxPageSize"
+                 else f"{ACTIVITY_CAPTURE_POLICY_PATH.as_posix()}#ActivityCapturePolicy")
+        contracts.append({
+            "setting": setting, "owner": owner, "field": field,
+            "bindings": [property_name, environment], "default": default,
+            "defaultEvidence": default_by_setting[setting], "validation": validation,
+            "scope": "One embedded application or Service process, resolved at composition/startup.",
+            "pinning": "Resolved once before graph execution and retained in the immutable activity capture policy.",
+            "coverage": "Typed parser and bounds, disabled startup, Compose and Helm carriers, runtime gate tests, and operator reference.",
+            "candidateIds": ids,
+        })
+    all_ids = [identifier for contract in contracts for identifier in contract["candidateIds"]]
+    if len(all_ids) != len(set(all_ids)):
+        return None
+    return {
+        "kind": "java-activity-capture-configuration-v1",
+        "contracts": contracts,
+        "candidateIds": sorted(all_ids),
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "factoryBodyDigest": java_method_digest(
+            configuration, "ActivityCaptureConfiguration", "fromSystem"),
+    }
+
+
+def activity_capture_source_present(root: Path) -> bool:
+    return any((root / path).exists()
+               for path in (ACTIVITY_CAPTURE_CONFIGURATION_PATH, ACTIVITY_CAPTURE_POLICY_PATH))
+
+
+def activity_capture_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    marked = {identifier for identifier, row in entries.items()
+              if row.get("activityCaptureAuthority") is not None}
+    if not activity_capture_source_present(root):
+        return ([] if authorities in (None, {}) and not marked
+                else ["activity capture authority exists without its typed source"])
+    expected = activity_capture_authority_from_source(root, discovered)
+    if expected is None:
+        return ["activity capture configuration source or deployment carriers are incomplete"]
+    if authorities != {ACTIVITY_CAPTURE_AUTHORITY_ID: expected}:
+        return ["activity capture settings require their exact source-derived authority"]
+    errors: list[str] = []
+    expected_ids: set[str] = set()
+    for contract in expected["contracts"]:
+        expected_metadata = {
+            "status": "already-centralized", "classification": "operator-configurable",
+            "activityCaptureAuthority": ACTIVITY_CAPTURE_AUTHORITY_ID,
+            **{key: contract[key] for key in (
+                "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                "validation", "scope", "pinning", "coverage")},
+            "rationale": "The typed activity capture configuration owns this optional setting and its disabled-by-default bounded runtime policy.",
+        }
+        for identifier in contract["candidateIds"]:
+            expected_ids.add(identifier)
+            row = entries.get(identifier, {})
+            for key, value in expected_metadata.items():
+                if row.get(key) != value:
+                    errors.append(f"{identifier}: activity capture {key} authority has drifted")
+    if marked != expected_ids:
+        errors.append("activity capture authority candidate partition is incomplete or foreign")
+    return errors
 
 
 def environment_reference_description_candidate_ids(
@@ -16094,6 +16538,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
+    errors.extend(activity_capture_authority_errors(
+        root, document.get("activityCaptureAuthorities"), entries, discovered,
+    ))
     errors.extend(ai_operational_authority_errors(
         root, document.get("aiOperationalAuthorities"), entries, discovered,
     ))
@@ -16127,6 +16574,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            continue
+        if representative.get("activityCaptureAuthority") == ACTIVITY_CAPTURE_AUTHORITY_ID:
             continue
         if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
             continue

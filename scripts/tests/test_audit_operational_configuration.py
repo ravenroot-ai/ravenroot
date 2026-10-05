@@ -495,14 +495,6 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertNotIn("appVersion", authority["chartMetadata"])
         self.assertEqual(
             ["version", "appVersion"], authority["releaseVersionEvidence"]["fields"])
-        self.assertEqual({
-            "activityCapture.contents", "activityCapture.enabled",
-            "activityCapture.maxInFlight", "activityCapture.maxPageSize",
-            "activityCapture.maxPayloadBytes", "activityCapture.nodes",
-            "activityCapture.policy", "activityCapture.redactKeys",
-            "activityCapture.retentionSeconds", "activityCapture.writeTimeoutMillis",
-        }, {path for path in authority["javaCarrierPaths"]
-            if path.startswith("activityCapture.")})
         chart_candidate_ids = {
             candidate.id for candidate in candidates if candidate.path == audit.HELM_CHART_PATH}
         contract_candidate_ids = {
@@ -2151,7 +2143,31 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
 
-    def test_routes_include_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
+    def test_route_table_bound_clause_keys_follow_approved_identity_migrations(self) -> None:
+        document = {
+            "routeTableAuthorities": {audit.ROUTE_TABLE_AUTHORITY_ID: {
+                "candidateIdsByRole": {"summary": ["oc-old"]},
+                "descriptorCandidateIds": [{
+                    "candidateIds": {"summary": ["oc-old"]},
+                }],
+                "publishedBoundClauses": {
+                    "oc-old": ["StableEdgeId.MAX_UTF8_BYTES"],
+                },
+            }},
+            "reconciliationHistory": [{"candidateId": "oc-old"}],
+        }
+
+        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
+
+        authority = document["routeTableAuthorities"][audit.ROUTE_TABLE_AUTHORITY_ID]
+        self.assertEqual(["oc-new"], authority["candidateIdsByRole"]["summary"])
+        self.assertEqual(["oc-new"],
+                         authority["descriptorCandidateIds"][0]["candidateIds"]["summary"])
+        self.assertEqual({"oc-new": ["StableEdgeId.MAX_UTF8_BYTES"]},
+                         authority["publishedBoundClauses"])
+        self.assertEqual("oc-old", document["reconciliationHistory"][0]["candidateId"])
+
+    def test_route_table_accepts_reviewed_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
@@ -2162,7 +2178,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                    for identifier in item["candidateIds"]["methods"])
         }
         self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
-        patch_routes = {
+        palette_patch_routes = {
             item["path"] for item in details
             if any(candidates[identifier].expression == '"PATCH"'
                    for identifier in item["candidateIds"]["methods"])
@@ -2170,11 +2186,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual({
             "/v1/node-palettes/{paletteId}",
             "/v1/node-palettes/templates/{templateId}",
-        }, patch_routes)
+        }, palette_patch_routes)
         self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
         self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
         self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})
         self.assertIsNone(audit.route_table_candidate_partitions(source.replace('"PUT"', '"TRACE"', 1)))
+
     def test_runner_inventory_distinguishes_bounds_protocol_and_presentation(self) -> None:
         document = audit.load_inventory(audit.INVENTORY)
         rows = document["entries"]
@@ -4256,6 +4273,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -4499,7 +4517,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 431 |",
+                "| Retained published contract descriptions | 449 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4507,7 +4525,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 430 |",
+                "| Retained published contract descriptions | 448 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6270,6 +6288,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
@@ -6402,42 +6421,6 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(2, failure.exception.code)
 
 
-class ActivityCapturePolicyAuditTest(unittest.TestCase):
-    def test_live_references_remap_exact_declared_fields_and_fail_closed_elsewhere(self) -> None:
-        old, new = "oc-live-before", "oc-live-after"
-        authority = {
-            "candidateIds": [old],
-            "contracts": [{
-                "candidateIds": [old],
-                "defaultEvidence": [old],
-                "rationale": old,
-                "unsupportedCandidateIds": [old],
-            }],
-        }
-        history = [{"candidateIds": [old], "source": old}]
-        document = {
-            "activityCaptureAuthorities": {"activity-capture-settings": authority},
-            "reconciliationHistory": copy.deepcopy(history),
-        }
-
-        audit.remap_declared_candidate_references(document, {old: new})
-
-        self.assertEqual([new], authority["candidateIds"])
-        self.assertEqual([new], authority["contracts"][0]["candidateIds"])
-        self.assertEqual([new], authority["contracts"][0]["defaultEvidence"])
-        self.assertEqual(old, authority["contracts"][0]["rationale"])
-        self.assertEqual([old], authority["contracts"][0]["unsupportedCandidateIds"])
-        self.assertEqual(history, document["reconciliationHistory"])
-        live_locations = audit.candidate_reference_locations(document, {new})
-        self.assertTrue(live_locations)
-        self.assertTrue(all(audit.allowed_migrated_reference(path)
-                            for path in live_locations), live_locations)
-        undeclared = audit.candidate_reference_locations(document, {old})
-        self.assertTrue(any(not audit.allowed_migrated_reference(path)
-                            and not audit.immutable_historical_reference(path)
-                            for path in undeclared), undeclared)
-
-
 class AiOperationalPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -6500,6 +6483,89 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
         self.assertIsNone(audit.ai_operational_authority_from_source(ROOT, changed))
 
 
+class ActivityCapturePolicyAuditTest(unittest.TestCase):
+    def test_live_references_remap_exact_declared_fields_and_fail_closed_elsewhere(self) -> None:
+        old, new = "oc-live-before", "oc-live-after"
+        authority = {
+            "candidateIds": [old],
+            "contracts": [{
+                "candidateIds": [old],
+                "defaultEvidence": [old],
+                "rationale": old,
+                "unsupportedCandidateIds": [old],
+            }],
+        }
+        history = [{"candidateIds": [old], "source": old}]
+        document = {
+            "activityCaptureAuthorities": {"activity-capture-settings": authority},
+            "reconciliationHistory": copy.deepcopy(history),
+        }
+
+        audit.remap_declared_candidate_references(document, {old: new})
+
+        self.assertEqual([new], authority["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["defaultEvidence"])
+        self.assertEqual(old, authority["contracts"][0]["rationale"])
+        self.assertEqual([old], authority["contracts"][0]["unsupportedCandidateIds"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        live_locations = audit.candidate_reference_locations(document, {new})
+        self.assertTrue(live_locations)
+        self.assertTrue(all(audit.allowed_migrated_reference(path)
+                            for path in live_locations), live_locations)
+        undeclared = audit.candidate_reference_locations(document, {old})
+        self.assertTrue(any(not audit.allowed_migrated_reference(path)
+                            and not audit.immutable_historical_reference(path)
+                            for path in undeclared), undeclared)
+
+    def test_source_derived_authority_rejects_unknown_defaults_bounds_and_wiring(self) -> None:
+        paths = tuple(audit.ACTIVITY_CAPTURE_SOURCE_PROOFS)
+        with synthetic_repository() as location:
+            root = Path(location)
+            for relative in paths:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, destination)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+            authority = audit.activity_capture_authority_from_source(root, discovered)
+            self.assertIsNotNone(authority)
+            self.assertEqual(10, len(authority["contracts"]))
+            self.assertEqual(len(authority["candidateIds"]), len(set(authority["candidateIds"])))
+            values_path = audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix()
+            schema_path = audit.ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix()
+            values_candidates = [discovered[identifier] for identifier in authority["candidateIds"]
+                                 if discovered[identifier].path == values_path]
+            schema_candidates = [discovered[identifier] for identifier in authority["candidateIds"]
+                                 if discovered[identifier].path == schema_path]
+            self.assertTrue(values_candidates)
+            self.assertTrue(schema_candidates)
+            self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
+            self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
+            self.assertTrue(all(candidate.role.startswith("activityCapture.")
+                                for candidate in values_candidates + schema_candidates
+                                if candidate.kind == "configuration-scalar"))
+
+            mutations = (
+                (audit.ACTIVITY_CAPTURE_CONFIGURATION_PATH, '"65536"', '"65537"'),
+                (audit.ACTIVITY_CAPTURE_POLICY_PATH, "10_000", "10_001"),
+                (audit.ACTIVITY_CAPTURE_CARRIER_PATHS[3],
+                 "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS",
+                 "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_TYPO"),
+                (audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1],
+                 "activityCapture:\n", "activityCapture:\n  unknownSetting: 1\n"),
+            )
+            for relative, before, after in mutations:
+                path = root / relative
+                original = path.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                with self.subTest(path=relative, mutation=after):
+                    self.assertIsNone(
+                        audit.activity_capture_authority_from_source(root, discovered))
+                path.write_text(original, encoding="utf-8")
+
+
 class ProgramGithubPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -6549,6 +6615,25 @@ class ProgramGithubPolicyAuditTest(unittest.TestCase):
         self.assertEqual(set(all_ids), audit.program_github_policy_cohort_candidate_ids(self.root, self.discovered))
         self.assertEqual([], audit.program_github_policy_authority_errors(self.root,
             {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority}, self.entries, self.discovered))
+
+    def test_program_github_schema_boundary_leaves_object_type_atoms_to_helm(self) -> None:
+        schema_path = audit.PROGRAM_GITHUB_PATHS["helmSchema"]
+        schema_source = (self.root / schema_path).read_text(encoding="utf-8")
+        span = audit.json_value_spans(schema_source)[("properties", "programAuthoring")]
+        first_line = audit.line_number(schema_source, span[0])
+        last_line = audit.line_number(schema_source, span[1] - 1)
+        candidates = [candidate for candidate in self.candidates
+                      if candidate.path == schema_path
+                      and first_line <= candidate.line <= last_line]
+        structural_types = [candidate for candidate in candidates if candidate.role == "type"]
+        required = [candidate for candidate in candidates if candidate.role == "required"]
+
+        self.assertTrue(structural_types)
+        self.assertTrue(required)
+        self.assertFalse(any(audit.program_github_deployment_candidate(self.root, candidate)
+                             for candidate in structural_types))
+        self.assertTrue(all(audit.program_github_deployment_candidate(self.root, candidate)
+                            for candidate in required))
 
     def test_program_github_missing_markers_whole_family_or_scanner_blind_contract_cannot_opt_out(self) -> None:
         for authorities in (None, {}, {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: {}}):
@@ -7436,6 +7521,89 @@ class EmbedEnabledAuditTest(unittest.TestCase):
             audit.binding_authority_errors(
                 self.root, "embed.enabled", contract, setting_entries,
                 self.entries, self.discovered, {}))
+
+
+class SagaOutboxCapacityAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        for relative in audit.SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS:
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "ravenroot"], cwd=self.root, check=True)
+        self.discovered = {candidate.id: candidate for candidate in audit.discover(self.root)}
+
+    def fixture(self, setting):
+        authority = audit.saga_outbox_capacity_authority(
+            self.root, setting, self.discovered)
+        self.assertIsNotNone(authority)
+        specification = audit.SAGA_OUTBOX_CAPACITY_SETTINGS[setting]
+        contract = {
+            "bindingAuthority": authority["bindingAuthority"],
+            "defaultAuthority": authority["defaultAuthority"],
+            "field": specification["field"],
+            "owner": audit.SAGA_OUTBOX_CAPACITY_PATH + "#SagaOutboxCapacity",
+            "bindings": [specification["property"]],
+            "default": specification["default"],
+            "defaultEvidence": authority["defaultAuthority"]["candidateIds"],
+        }
+        entries = {
+            identifier: dict(self.discovered[identifier].source_fields(), setting=setting)
+            for identifier in authority["candidateIds"]
+        }
+        return contract, entries
+
+    def errors(self, setting, contract, entries):
+        return [
+            *audit.binding_authority_errors(
+                self.root, setting, contract, list(entries.values()), entries,
+                self.discovered, {}),
+            *audit.default_authority_errors(
+                self.root, setting, contract, entries, self.discovered),
+        ]
+
+    def test_property_only_capacity_settings_have_closed_typed_authority(self):
+        all_ids = set()
+        for setting in audit.SAGA_OUTBOX_CAPACITY_SETTINGS:
+            contract, entries = self.fixture(setting)
+            self.assertEqual([], self.errors(setting, contract, entries))
+            self.assertFalse(all_ids.intersection(entries))
+            all_ids.update(entries)
+        self.assertEqual(10, len(all_ids))
+
+    def test_metadata_source_consumers_and_atomic_refusal_proof_cannot_drift(self):
+        setting = "saga.outbox.maximum-outstanding-commands"
+        contract, entries = self.fixture(setting)
+        for field, value in (
+                ("owner", "foreign/Owner.java#Owner"), ("field", "maximumOutstandingBytes"),
+                ("bindings", []), ("default", "unbounded"), ("defaultEvidence", []),
+                ("bindingAuthority", None), ("defaultAuthority", None)):
+            with self.subTest(metadata=field):
+                changed = copy.deepcopy(contract); changed[field] = value
+                self.assertTrue(self.errors(setting, changed, entries))
+        mutations = (
+            (audit.SAGA_OUTBOX_CAPACITY_PATH,
+             "ravenroot.saga.outbox.maxOutstandingCommands", "ravenroot.saga.outbox.unbounded"),
+            (audit.SAGA_OUTBOX_CAPACITY_PATH, "new SagaOutboxCapacity(128,", "new SagaOutboxCapacity(129,"),
+            (audit.SAGA_OUTBOX_CAPACITY_PATH,
+             "maximumOutstandingCommands > 1_000_000", "maximumOutstandingCommands > 2_000_000"),
+            ("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
+             "InMemoryExecutionStore.java", "SagaOutboxCapacity.configured()", "SagaOutboxCapacity.DEFAULTS"),
+            ("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
+             "ExecutionStoreContract.java", "assertThrows", "removedAssertion"),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(source=relative):
+                path = self.root / relative; original = path.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    self.assertTrue(self.errors(setting, contract, entries))
+                finally:
+                    path.write_text(original, encoding="utf-8")
 
 
 class RunnerCoordinatorBindingAuditTest(unittest.TestCase):

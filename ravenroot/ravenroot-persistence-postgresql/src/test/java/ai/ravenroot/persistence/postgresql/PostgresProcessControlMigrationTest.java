@@ -42,6 +42,12 @@ class PostgresProcessControlMigrationTest {
         }
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+            // These tables arrived in migration 16. A synthetic downgrade must remove later
+            // structures as well as lowering store_schema_version; leaving them behind creates a
+            // shape no released database could have and correctly makes migration 16 fail.
+            statement.execute("DROP TABLE replay_invocation_evidence");
+            statement.execute("DROP TABLE replay_source_settlement");
+            statement.execute("DROP TABLE derived_execution_ancestry");
             statement.execute("DROP INDEX managed_recovery_attempt_candidate");
             statement.execute("DROP INDEX managed_recovery_timer_candidate");
             statement.execute("DROP INDEX managed_recovery_handler_candidate");

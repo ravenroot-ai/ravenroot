@@ -33,6 +33,64 @@ final class EmbeddedBackend implements CliBackend {
     }
 
     @Override
+    public List<DerivedBoundaryView> derivedBoundaries(String sourceProcessInstanceId) throws IOException {
+        try {
+            return application.derivedExecutionBoundaries(requestContext, UUID.fromString(sourceProcessInstanceId))
+                    .stream().map(value -> new DerivedBoundaryView(value.nodeId(),
+                            value.predecessorInvocationId().toString(), value.predecessorNodeId(),
+                            value.outcome(), value.recordedAt().toString(), value.retainedUntil().toString()))
+                    .toList();
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("invalid selective derived execution source", invalid);
+        }
+    }
+
+    @Override
+    public DerivedPreviewView previewDerived(String sourceProcessInstanceId, String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) throws IOException {
+        try {
+            var request = derivedRequest(nodeId, predecessorInvocationId, idempotencyKey, reason,
+                    repeatabilityDecision, authorizeExternalEffects);
+            var value = application.previewDerivedExecution(requestContext,
+                    UUID.fromString(sourceProcessInstanceId), request);
+            return new DerivedPreviewView(value.admissible(), value.refusalCodes(),
+                    value.inheritedEvidence().stream().map(UUID::toString).sorted().toList(),
+                    value.scopeNodeIds(), value.missingInputs(), value.externalEffectNodes(),
+                    value.sourceOutcomeAmbiguous(),
+                    value.graphContentId() == null ? null : value.graphContentId().value(),
+                    value.manifestDigest() == null ? null : value.manifestDigest().value());
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("invalid selective derived execution request", invalid);
+        }
+    }
+
+    @Override
+    public DerivedStartView startDerived(String sourceProcessInstanceId, String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) throws IOException {
+        try {
+            var request = derivedRequest(nodeId, predecessorInvocationId, idempotencyKey, reason,
+                    repeatabilityDecision, authorizeExternalEffects);
+            var value = application.startDerivedExecution(requestContext,
+                    UUID.fromString(sourceProcessInstanceId), request);
+            return new DerivedStartView(value.processInstanceId().toString(),
+                    value.traversalId().toString(), value.graphVersion());
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("invalid selective derived execution request", invalid);
+        }
+    }
+
+    private static ai.ravenroot.api.application.DerivedExecutionRequest derivedRequest(String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) {
+        return new ai.ravenroot.api.application.DerivedExecutionRequest(List.of(
+                new ai.ravenroot.api.persistence.ReplayBoundarySeed(nodeId,
+                        java.util.Set.of(UUID.fromString(predecessorInvocationId)))),
+                idempotencyKey, reason, repeatabilityDecision, authorizeExternalEffects);
+    }
+
+    @Override
     public StatusView status() {
         var status = application.status(requestContext);
         return new StatusView(status.state(), status.executionEngine(),

@@ -5,6 +5,8 @@ import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionPolicy;
 import ai.ravenroot.api.application.ExecutionSubmission;
+import ai.ravenroot.api.application.DerivedExecutionRequest;
+import ai.ravenroot.api.application.DerivedExecutionStart;
 import ai.ravenroot.api.application.GraphSummary;
 import ai.ravenroot.api.application.RavenrootApplication;
 import ai.ravenroot.api.application.RuntimeSnapshot;
@@ -15,6 +17,7 @@ import ai.ravenroot.api.security.AuthorizationAction;
 import ai.ravenroot.api.security.DefaultAuthorizationService;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.persistence.ReplayBoundarySeed;
 import ai.ravenroot.server.audit.StructuredAuthorizationLogger;
 import ai.ravenroot.server.ratelimit.ActiveExecutionRegistry;
 import ai.ravenroot.server.ratelimit.RateLimitAuditEvent;
@@ -68,6 +71,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ActiveExecutionAdmissionHttpTest {
     private final AtomicLong nanos = new AtomicLong();
+
+    @Test
+    void derivedStartsShareCapacityAndIdempotentReplaysConsumeNoAdditionalSlot() throws Exception {
+        try (var fixture = fixture(limits(builder -> builder.activeExecutions(4)))) {
+            var client = HttpClient.newHttpClient();
+            var held = new ArrayList<UUID>();
+            for (int index = 0; index < 3; index++) {
+                held.add(fixture.executionId(fixture.submit(client, "tenant-a")));
+            }
+
+            var refused = fixture.derive(client, "tenant-a", "derived-key");
+            assertEquals(429, refused.statusCode());
+            assertTrue(refused.body().contains(ActiveExecutionRegistry.TENANT_LIMIT_CODE), refused.body());
+            assertEquals(0, fixture.application().derivedStarts());
+
+            fixture.application().terminate(held.getFirst(), ExecutionEventType.EXECUTION_COMPLETED);
+            var accepted = fixture.derive(client, "tenant-a", "derived-key");
+            assertEquals(202, accepted.statusCode(), accepted.body());
+            assertEquals(1, fixture.application().derivedStarts());
+            assertEquals(3, fixture.registry().activeFor("tenant-a"));
+
+            var duplicate = fixture.derive(client, "tenant-a", "derived-key");
+            assertEquals(202, duplicate.statusCode(), duplicate.body());
+            assertEquals(accepted.body(), duplicate.body());
+            assertEquals(1, fixture.application().derivedStarts());
+            assertEquals(3, fixture.registry().activeFor("tenant-a"));
+
+            fixture.application().terminate(fixture.derivedTraversalId(accepted),
+                    ExecutionEventType.EXECUTION_COMPLETED);
+            assertEquals(2, fixture.registry().activeFor("tenant-a"));
+            assertEquals(202, fixture.derive(client, "tenant-a", "derived-key").statusCode());
+            assertEquals(2, fixture.registry().activeFor("tenant-a"),
+                    "a completed idempotent replay must not manufacture an active slot");
+        }
+    }
 
     /**
      * Cross-tenant fairness.
@@ -335,6 +373,28 @@ class ActiveExecutionAdmissionHttpTest {
             return UUID.fromString(accepted.body().substring(start, accepted.body().indexOf('"', start)));
         }
 
+        UUID derivedTraversalId(HttpResponse<String> accepted) {
+            assertEquals(202, accepted.statusCode(), accepted.body());
+            String marker = "\"traversalId\":\"";
+            int start = accepted.body().indexOf(marker) + marker.length();
+            return UUID.fromString(accepted.body().substring(start, accepted.body().indexOf('"', start)));
+        }
+
+        HttpResponse<String> derive(HttpClient client, String tenant, String key) throws Exception {
+            UUID source = UUID.fromString("10000000-0000-0000-0000-000000000001");
+            UUID predecessor = UUID.fromString("20000000-0000-0000-0000-000000000002");
+            String body = "{\"schemaVersion\":1,\"boundaries\":[{\"nodeId\":\"B\","
+                    + "\"predecessorInvocationIds\":[\"" + predecessor + "\"]}],"
+                    + "\"idempotencyKey\":\"" + key + "\",\"reason\":\"operator test\","
+                    + "\"repeatabilityDecision\":\"effects reviewed\","
+                    + "\"authorizeExternalEffects\":true}";
+            return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.port()
+                                    + "/v1/executions/" + source + "/derived"))
+                            .header("Authorization", "Bearer " + tenant + ":alice")
+                            .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+        }
+
         @Override
         public void close() {
             server.close();
@@ -358,6 +418,14 @@ class ActiveExecutionAdmissionHttpTest {
         private final AtomicLong sequence = new AtomicLong();
         private final java.util.concurrent.atomic.AtomicInteger running =
                 new java.util.concurrent.atomic.AtomicInteger();
+        private final java.util.concurrent.atomic.AtomicInteger derivedStarts =
+                new java.util.concurrent.atomic.AtomicInteger();
+        private final Map<String, DerivedExecutionStart> derived =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        int derivedStarts() {
+            return derivedStarts.get();
+        }
 
         void terminate(UUID executionId, ExecutionEventType type) {
             String tenant = tenants.remove(executionId);
@@ -387,6 +455,37 @@ class ActiveExecutionAdmissionHttpTest {
                     security.requestId(), "stub", "v1", executionId,
                     ExecutionEventType.EXECUTION_STARTED, null, 0, false, "execution accepted"));
             return new ExecutionSubmission(executionId, executionId, "v1");
+        }
+
+        @Override
+        public java.util.Optional<DerivedExecutionStart> existingDerivedExecution(
+                SecurityContext security, UUID sourceProcessInstanceId, DerivedExecutionRequest request) {
+            return java.util.Optional.ofNullable(derived.get(derivedKey(security, sourceProcessInstanceId, request)));
+        }
+
+        @Override
+        public DerivedExecutionStart startDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                           DerivedExecutionRequest request) {
+            String key = derivedKey(security, sourceProcessInstanceId, request);
+            var prior = derived.get(key);
+            if (prior != null) return prior;
+            var started = new DerivedExecutionStart(UUID.randomUUID(), UUID.randomUUID(), "v1");
+            var raced = derived.putIfAbsent(key, started);
+            if (raced != null) return raced;
+            derivedStarts.incrementAndGet();
+            tenants.put(started.traversalId(), security.tenantId());
+            running.incrementAndGet();
+            publish(new ExecutionEvent(sequence.incrementAndGet(), Instant.now(), security.tenantId(),
+                    security.requestId(), "stub", "v1", started.traversalId(),
+                    ExecutionEventType.EXECUTION_STARTED, null, 0, false, "derived execution accepted"));
+            return started;
+        }
+
+        private static String derivedKey(SecurityContext security, UUID sourceProcessInstanceId,
+                                         DerivedExecutionRequest request) {
+            ReplayBoundarySeed boundary = request.boundaries().getFirst();
+            return security.tenantId() + ":" + sourceProcessInstanceId + ":" + request.idempotencyKey()
+                    + ":" + boundary.nodeId() + ":" + boundary.predecessorInvocationIds();
         }
 
         @Override
@@ -489,6 +588,7 @@ class ActiveExecutionAdmissionHttpTest {
             listeners.clear();
             history.clear();
             tenants.clear();
+            derived.clear();
         }
     }
 

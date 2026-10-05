@@ -18,6 +18,7 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.execution.RetryClassified;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionManifestDigest;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
@@ -131,6 +132,8 @@ class OrchestrationRetryTest {
                 "a retry is a new effect identity: sharing the attempt id would make the second "
                         + "delivery deduplicate against the first under the attempt-scoped key");
         assertEquals(NodeInvocationStatus.COMPLETED, workInvocation(store, key).status());
+        assertTrue(await(store.replaySettlement(key)).orElseThrow().sourceOutcomeAmbiguous(),
+                "a later successful retry cannot erase the earlier dispatched attempt's uncertain outcome");
     }
 
     // ------------------------------------------------------------------ exhausted retries
@@ -1016,6 +1019,7 @@ class OrchestrationRetryTest {
                 } else {
                     execution.get(BOUND_MILLIS, TimeUnit.MILLISECONDS);
                 }
+                recorder.recordReplaySettlement(new ExecutionManifestDigest("00".repeat(32)));
             }
         }
         return key;

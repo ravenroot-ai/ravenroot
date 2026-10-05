@@ -912,6 +912,72 @@
         }
       }
     },
+    "/v1/executions/{id}/derived": {
+      "post": {
+        "summary": "Idempotently admits a fresh execution from a proven retained boundary. Completed predecessor effects remain historical; selected downstream effects require explicit authorization.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "202": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"}
+        }
+      }
+    },
+    "/v1/executions/{id}/derived/boundaries": {
+      "get": {
+        "summary": "Lists payload-free retained downstream boundary choices for one positively settled source execution.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"}
+        }
+      }
+    },
+    "/v1/executions/{id}/derived/preview": {
+      "post": {
+        "summary": "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure. sourceOutcomeAmbiguous separately reports begun source attempts with unresolved external outcome, including parallel siblings outside that scope.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"}
+        }
+      }
+    },
     "/v1/executions/{id}/manifest": {
       "get": {
         "summary": "Reports the identity of the dependency set one process instance was accepted against, and whether this deployment still resolves it (#153). {id} is a processInstanceId, like GET /v1/executions/{id}/traversals and unlike every other /v1/executions sub-route. The body carries manifestFormatVersion, manifestDigest, the pinned graphVersion, graphId and graphVersionId, pinnedAt, a compatible verdict, an incompatibleDimensions list of dimension names and dimensionsTruncated. It deliberately carries no value from the pinned dependency set -- no capability set, no execution limit, no node-package identity and no package count -- because those describe the deployment rather than the caller's execution; the comparison's own values stay in the server-side diagnostic a refused recovery raises. 404 when no manifest is pinned for the instance, when it belongs to another tenant, and when it was accepted before this deployment began recording them -- all three indistinguishable by design. 501 when this deployment composed no manifest store, and when a stored manifest no longer verifies.",

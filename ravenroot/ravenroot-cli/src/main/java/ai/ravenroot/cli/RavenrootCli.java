@@ -66,6 +66,9 @@ public final class RavenrootCli {
                 case "cancel" -> cancelExecution(args);
                 case "drain" -> drainServer();
                 case "process" -> processControl(args);
+                case "derive-boundaries" -> derivedBoundaries(args);
+                case "derive-preview" -> derived(args, true);
+                case "derive" -> derived(args, false);
                 case "human-tasks" -> humanTasks(args);
                 // One verb, seven subcommands, mirroring 'credentials' below: a listing, a
                 // register, and five id-scoped lifecycle actions. Every printed line carries scope=
@@ -133,6 +136,57 @@ public final class RavenrootCli {
         output.println("generation=" + result.generation());
         if (result.resumeTraversalId() != null) {
             output.println("resume-traversal-id=" + result.resumeTraversalId());
+        }
+        return 0;
+    }
+
+    private int derived(String[] args, boolean preview) throws IOException {
+        if (args.length < 5 || args.length > 8) {
+            return invalid("Usage: ravenroot " + (preview ? "derive-preview" : "derive")
+                    + " <source-process-id> <boundary-node-id> <predecessor-invocation-id> <reason>"
+                    + " [repeatability-decision] [--authorize-effects] [--key=<idempotency-key>]");
+        }
+        boolean authorize = false;
+        String decision = "";
+        String key = null;
+        for (int index = 5; index < args.length; index++) {
+            if ("--authorize-effects".equals(args[index])) authorize = true;
+            else if (args[index].startsWith("--key=")) key = args[index].substring("--key=".length());
+            else if (decision.isEmpty()) decision = args[index];
+            else return invalid("selective derived execution has an unexpected argument");
+        }
+        if (key == null || key.isBlank()) key = java.util.UUID.randomUUID().toString();
+        if (preview) {
+            var value = backend.previewDerived(args[1], args[2], args[3], key, args[4], decision, authorize);
+            output.println("idempotency-key=" + key);
+            output.println("admissible=" + value.admissible());
+            output.println("refusal-codes=" + String.join(",", value.refusalCodes()));
+            output.println("inherited-invocation-ids=" + String.join(",", value.inheritedInvocationIds()));
+            output.println("possible-scope-node-ids=" + String.join(",", value.possibleScopeNodeIds()));
+            output.println("missing-inputs=" + String.join(",", value.missingInputs()));
+            output.println("external-effect-nodes=" + String.join(",", value.externalEffectNodes()));
+            output.println("source-outcome-ambiguous=" + value.sourceOutcomeAmbiguous());
+            output.println("graph-content-id=" + value.graphContentId());
+            output.println("manifest-digest=" + value.manifestDigest());
+            return value.admissible() ? 0 : 2;
+        }
+        var value = backend.startDerived(args[1], args[2], args[3], key, args[4], decision, authorize);
+        output.println("idempotency-key=" + key);
+        output.println("process-instance-id=" + value.processInstanceId());
+        output.println("traversal-id=" + value.traversalId());
+        output.println("graph-version=" + value.graphVersion());
+        return 0;
+    }
+
+    private int derivedBoundaries(String[] args) throws IOException {
+        if (args.length != 2) return invalid("Usage: ravenroot derive-boundaries <source-process-id>");
+        for (var value : backend.derivedBoundaries(args[1])) {
+            output.println("node-id=" + value.nodeId()
+                    + " predecessor-invocation-id=" + value.predecessorInvocationId()
+                    + " predecessor-node-id=" + value.predecessorNodeId()
+                    + " outcome=" + value.outcome()
+                    + " recorded-at=" + value.recordedAt()
+                    + " retained-until=" + value.retainedUntil());
         }
         return 0;
     }
@@ -625,7 +679,8 @@ public final class RavenrootCli {
         output.println("Usage: ravenroot [--server <url> --token-file <path>] "
                 + "<status|runtime|node-types|inspect <graph.graphml>|run <graph.graphml> [payload]"
                 + "|result <execution-id>|live|inventory|traversals <process-instance-id>"
-                + "|cancel <traversal-id>|drain|process|credentials|deployments>");
+                + "|cancel <traversal-id>|drain|process|derive-boundaries|derive-preview|derive"
+                + "|credentials|deployments>");
         output.println("       ravenroot human-tasks <list|settle <task-id> <generation> "
                 + "<resolve|deny|cancel> [--response-file <path>] [--content-type <type>] "
                 + "[--comment <text>] [--override-reason <text>]>");

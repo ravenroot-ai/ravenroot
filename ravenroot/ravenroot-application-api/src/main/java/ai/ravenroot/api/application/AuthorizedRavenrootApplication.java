@@ -449,6 +449,71 @@ public final class AuthorizedRavenrootApplication {
         return startGraphMl(context, graphMl, payload, PayloadLimits.DEFAULTS);
     }
 
+    /** Lists payload-free retained boundary choices under execution-read authority.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @return bounded retained boundary choices
+     */
+    public java.util.List<DerivedBoundaryOption> derivedExecutionBoundaries(
+            RequestContext context, UUID sourceProcessInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ,
+                derivedSourceResource(context, sourceProcessInstanceId));
+        return delegate.derivedExecutionBoundaries(SecurityContext.of(context), sourceProcessInstanceId);
+    }
+
+    /** Previews a tenant-scoped selective derived execution under execution-read authority.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @param request bounded proposed derivation
+     * @return non-mutating admission plan or refusal diagnostics
+     */
+    public DerivedExecutionPreview previewDerivedExecution(RequestContext context, UUID sourceProcessInstanceId,
+                                                           DerivedExecutionRequest request) {
+        require(context, AuthorizationAction.EXECUTION_READ,
+                derivedSourceResource(context, sourceProcessInstanceId));
+        return delegate.previewDerivedExecution(SecurityContext.of(context), sourceProcessInstanceId, request);
+    }
+
+    /** Finds an idempotently admitted derivation after applying the complete start authorization.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @param request exact bounded derivation request
+     * @return existing derived identities, or empty before admission
+     */
+    public java.util.Optional<DerivedExecutionStart> existingDerivedExecution(
+            RequestContext context, UUID sourceProcessInstanceId, DerivedExecutionRequest request) {
+        require(context, AuthorizationAction.EXECUTION_READ,
+                derivedSourceResource(context, sourceProcessInstanceId));
+        require(context, AuthorizationAction.EXECUTION_START, collection("executions", context));
+        if (request.authorizeExternalEffects()) {
+            require(context, AuthorizationAction.EXECUTION_CONTROL,
+                    derivedSourceResource(context, sourceProcessInstanceId));
+        }
+        return delegate.existingDerivedExecution(SecurityContext.of(context), sourceProcessInstanceId, request);
+    }
+
+    /** Admits a selective derived execution under the same authority as a fresh execution.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @param request bounded derivation request
+     * @return fresh derived execution identities
+     */
+    public DerivedExecutionStart startDerivedExecution(RequestContext context, UUID sourceProcessInstanceId,
+                                                       DerivedExecutionRequest request) {
+        var sourceResource = derivedSourceResource(context, sourceProcessInstanceId);
+        require(context, AuthorizationAction.EXECUTION_READ, sourceResource);
+        require(context, AuthorizationAction.EXECUTION_START, collection("executions", context));
+        if (request.authorizeExternalEffects()) {
+            require(context, AuthorizationAction.EXECUTION_CONTROL, sourceResource);
+        }
+        return delegate.startDerivedExecution(SecurityContext.of(context), sourceProcessInstanceId, request);
+    }
+
+    private static ProtectedResource derivedSourceResource(RequestContext context, UUID sourceProcessInstanceId) {
+        Objects.requireNonNull(sourceProcessInstanceId, "sourceProcessInstanceId");
+        return ProtectedResource.owned("execution", sourceProcessInstanceId.toString(), context.tenantId());
+    }
+
 /**
  * Starts a GraphML traversal after execution authorization and audit.
  * @param context authenticated request context used for authorization and audit attribution.

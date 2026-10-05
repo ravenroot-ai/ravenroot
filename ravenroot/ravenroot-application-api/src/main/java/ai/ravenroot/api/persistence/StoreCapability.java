@@ -178,6 +178,13 @@ public enum StoreCapability {
      */
     EXECUTION_RESULTS,
 
+    /**
+     * Bounded invocation outputs, post-quiescence source fences and derived ancestry are retained
+     * outside the event journal for selective derived execution. Add {@link #DURABLE} when that
+     * evidence must survive process death.
+     */
+    SELECTIVE_REPLAY_EVIDENCE,
+
     /** Atomic process workspace and fenced runner jobs; add DURABLE for restart survival. */
     RUNNER_JOBS,
 

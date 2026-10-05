@@ -65,6 +65,47 @@ import java.util.concurrent.CompletionStage;
  */
 public interface ExecutionStore extends AutoCloseable {
     /**
+     * Lists at most {@code limit} retained evidence records for one exact tenant-scoped source.
+     *
+     * @param source exact source execution
+     * @param limit positive hard result bound
+     * @return retained evidence in stable capture order
+     */
+    default CompletionStage<List<ReplayInvocationEvidence>> replayEvidence(ExecutionKey source, int limit) {
+        return unsupportedReplayOperation();
+    }
+
+    /** Records positive source quiescence after every in-flight invocation has returned.
+     * @param settlement proposed source proof; store time and fence remain authoritative
+     * @param lease current source owner lease
+     * @return stored authoritative proof
+     */
+    default CompletionStage<ReplaySourceSettlement> recordReplaySettlement(
+            ReplaySourceSettlement settlement, LeaseHandle lease) {
+        return unsupportedReplayOperation();
+    }
+
+    /** Reads positive source quiescence, empty for legacy, expired or unsettled sources.
+     * @param source exact source execution
+     * @return retained positive proof, if available
+     */
+    default CompletionStage<Optional<ReplaySourceSettlement>> replaySettlement(ExecutionKey source) {
+        return unsupportedReplayOperation();
+    }
+
+    /** Reads immutable ancestry for one derived process.
+     * @param derived exact derived execution
+     * @return admitted ancestry, if this is a derived execution
+     */
+    default CompletionStage<Optional<DerivedExecutionAncestry>> derivedAncestry(ExecutionKey derived) {
+        return unsupportedReplayOperation();
+    }
+
+    private static <T> CompletionStage<T> unsupportedReplayOperation() {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)));
+    }
+    /**
      * Store-clock fenced worker incarnation renewal; must serialize with fleet admission.
      * @param proposed authenticated advertisement; client timestamps are replaced by store time
      * @param ttl positive operator-configured liveness duration

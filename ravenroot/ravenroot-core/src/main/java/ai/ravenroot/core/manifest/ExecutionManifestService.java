@@ -141,6 +141,20 @@ public final class ExecutionManifestService {
         return stored;
     }
 
+    /** Pins a fresh derived identity to the source's exact verified runtime and graph values. */
+    public StoredExecutionManifest pinDerived(ExecutionKey derived, StoredExecutionManifest source) {
+        Objects.requireNonNull(derived, "derived");
+        Objects.requireNonNull(source, "source");
+        var pinned = source.manifest();
+        if (!derived.tenantId().equals(pinned.key().tenantId())) {
+            throw new IllegalArgumentException("derived manifest cannot cross tenants");
+        }
+        var copy = new ExecutionManifest(pinned.formatVersion(), derived, pinned.graphContentId(),
+                pinned.graphIdentity(), pinned.runtime(), pinned.nodePackages(), Instant.now(clock),
+                pinned.operationalPolicy());
+        return await(store.pin(copy));
+    }
+
     /** Verifies identity compatibility and returns the immutable values runtime consumers must use. */
     public ResolvedOperationalPolicy resolvePolicy(ExecutionKey key, ExecutionPolicy policy) {
         StoredExecutionManifest stored = await(store.load(key));

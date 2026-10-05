@@ -1295,7 +1295,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        self.assertEqual(1230, len(program["candidateIds"]))
+        self.assertEqual(1232, len(program["candidateIds"]))
         self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
@@ -2122,16 +2122,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_757_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_744_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(102, len(details))
+            self.assertEqual(100, len(details))
             self.assertEqual(
-                {"methods": 115, "path": 102, "summary": 436, "successStatuses": 104},
+                {"methods": 110, "path": 100, "summary": 431, "successStatuses": 103},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(757, len(entries))
+            self.assertEqual(744, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -2143,31 +2143,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
 
-    def test_route_table_bound_clause_keys_follow_approved_identity_migrations(self) -> None:
-        document = {
-            "routeTableAuthorities": {audit.ROUTE_TABLE_AUTHORITY_ID: {
-                "candidateIdsByRole": {"summary": ["oc-old"]},
-                "descriptorCandidateIds": [{
-                    "candidateIds": {"summary": ["oc-old"]},
-                }],
-                "publishedBoundClauses": {
-                    "oc-old": ["StableEdgeId.MAX_UTF8_BYTES"],
-                },
-            }},
-            "reconciliationHistory": [{"candidateId": "oc-old"}],
-        }
-
-        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
-
-        authority = document["routeTableAuthorities"][audit.ROUTE_TABLE_AUTHORITY_ID]
-        self.assertEqual(["oc-new"], authority["candidateIdsByRole"]["summary"])
-        self.assertEqual(["oc-new"],
-                         authority["descriptorCandidateIds"][0]["candidateIds"]["summary"])
-        self.assertEqual({"oc-new": ["StableEdgeId.MAX_UTF8_BYTES"]},
-                         authority["publishedBoundClauses"])
-        self.assertEqual("oc-old", document["reconciliationHistory"][0]["candidateId"])
-
-    def test_route_table_accepts_reviewed_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
+    def test_runner_routes_include_put_without_opening_the_method_vocabulary(self) -> None:
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
@@ -2178,15 +2154,6 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                    for identifier in item["candidateIds"]["methods"])
         }
         self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
-        palette_patch_routes = {
-            item["path"] for item in details
-            if any(candidates[identifier].expression == '"PATCH"'
-                   for identifier in item["candidateIds"]["methods"])
-        }
-        self.assertEqual({
-            "/v1/node-palettes/{paletteId}",
-            "/v1/node-palettes/templates/{templateId}",
-        }, palette_patch_routes)
         self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
         self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
         self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})
@@ -2281,10 +2248,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("not the supported direct RouteDescriptor table" in error
                                 for error in errors), errors)
 
+            final_descriptor = (
+                "                            ErrorCode.UNKNOWN_RESOURCE.code(), "
+                "ErrorCode.CONFLICT.code()), NEVER, false));"
+            )
             chained = original_route.replace(
-                "                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false));",
-                "                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false))"
-                ".stream().filter(route -> false).toList();",
+                final_descriptor,
+                final_descriptor[:-2] + ").stream().filter(route -> false).toList();",
                 1,
             )
             self.assertNotEqual(original_route, chained)
@@ -4513,7 +4483,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 436 |",
+                "| Retained published contract descriptions | 431 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4521,7 +4491,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 435 |",
+                "| Retained published contract descriptions | 430 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

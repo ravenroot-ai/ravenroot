@@ -79,6 +79,70 @@ class ManagedExecutionStoreTest {
     }
 
     @Test
+    void delegatedReplaySettlementStillRequiresTheAdaptersExactLiveLease(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        var clock = new ai.ravenroot.testkit.persistence.MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        try (var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(
+                directory.resolve("replay-settlement.db"), clock)) {
+            ExecutionKey source = key(8);
+            UUID traversal = UUID.randomUUID();
+            UUID invocation = UUID.randomUUID();
+            UUID attempt = UUID.randomUUID();
+            var created = store.apply(creationBatch(source, traversal)).toCompletableFuture().join();
+            var scheduled = store.apply(ExecutionBatch.to(source)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversal,
+                            ai.ravenroot.api.application.TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversal,
+                            new ai.ravenroot.api.application.NodeInvocation(invocation, "work", java.util.Set.of(),
+                                    ai.ravenroot.api.application.NodeInvocationStatus.SCHEDULED, List.of(),
+                                    ai.ravenroot.api.execution.NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.InvocationTransitioned(traversal, invocation,
+                            ai.ravenroot.api.application.NodeInvocationStatus.RUNNING))
+                    .apply(new ExecutionTransition.AttemptAdded(traversal, invocation,
+                            new ai.ravenroot.api.application.NodeAttempt(attempt, 1,
+                                    ai.ravenroot.api.application.NodeAttemptStatus.SCHEDULED)))
+                    .build()).toCompletableFuture().join();
+            var lease = store.claim(source, "source-runner", Duration.ofSeconds(30))
+                    .toCompletableFuture().join();
+            var terminal = store.apply(ExecutionBatch.to(source)
+                    .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                    .fencedBy(lease.fencingToken())
+                    .apply(new ExecutionTransition.AttemptTransitioned(traversal, invocation, attempt,
+                            ai.ravenroot.api.application.NodeAttemptStatus.RUNNING))
+                    .apply(new ExecutionTransition.AttemptTransitioned(traversal, invocation, attempt,
+                            ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED))
+                    .apply(new ExecutionTransition.InvocationTransitioned(traversal, invocation,
+                            ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversal,
+                            ai.ravenroot.api.application.TraversalStatus.COMPLETED))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED))
+                    .build()).toCompletableFuture().join();
+            ExecutionStore managed = ManagedExecutionStore.protect(store, manifestStore(Map.of()));
+            var digest = new ai.ravenroot.api.persistence.ExecutionManifestDigest("0".repeat(64));
+            var wrongSource = new ExecutionKey(source.tenantId(), UUID.randomUUID());
+            var mismatched = new ai.ravenroot.api.persistence.ReplaySourceSettlement(wrongSource,
+                    terminal.revision(), lease.fencingToken(), digest, clock.instant(),
+                    clock.instant().plus(Duration.ofHours(1)));
+
+            assertThrows(CompletionException.class,
+                    () -> managed.recordReplaySettlement(mismatched, lease).toCompletableFuture().join());
+            assertTrue(store.replaySettlement(wrongSource).toCompletableFuture().join().isEmpty(),
+                    "a lease for another source must not create settlement state");
+
+            clock.advance(Duration.ofSeconds(31));
+            store.claim(source, "takeover", Duration.ofSeconds(30)).toCompletableFuture().join();
+            var stale = new ai.ravenroot.api.persistence.ReplaySourceSettlement(source, terminal.revision(),
+                    lease.fencingToken(), digest, clock.instant(), clock.instant().plus(Duration.ofHours(1)));
+            assertThrows(CompletionException.class,
+                    () -> managed.recordReplaySettlement(stale, lease).toCompletableFuture().join());
+            assertTrue(store.replaySettlement(source).toCompletableFuture().join().isEmpty(),
+                    "a stale lease must not create settlement state through the managed view");
+        }
+    }
+
+    @Test
     void everyExecutionStoreMethodHasAnExplicitManagedRoute() throws Exception {
         var field = ManagedExecutionStore.class.getDeclaredField("SAFE_DELEGATE_METHODS");
         field.setAccessible(true);

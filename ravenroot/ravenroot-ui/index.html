@@ -970,6 +970,21 @@
     <ul id="lifecycle-process-list" class="credential-list lifecycle-process-list"
         aria-labelledby="lifecycle-processes-title" hidden></ul>
   </section>
+  <section class="credentials-listing" aria-labelledby="derived-execution-title">
+    <h3 id="derived-execution-title">Selective derived execution</h3>
+    <p class="credential-note">Continue retained work in a fresh execution. Preview shows the possible downstream scope and exact inherited invocation evidence before submission.</p>
+    <form id="derived-execution-form" class="credential-form" novalidate autocomplete="off">
+      <div class="editor-field full"><label for="derived-source-id">Source process id *</label><input id="derived-source-id" required spellcheck="false"></div>
+      <div class="editor-field full"><label for="derived-boundary-choice">Retained downstream boundary *</label><select id="derived-boundary-choice" required><option value="">Select a source process, then discover retained boundaries</option></select><button id="derived-discover" class="btn" type="button">Discover retained boundaries</button></div>
+      <div class="editor-field"><label for="derived-idempotency-key">Generated request key *</label><input id="derived-idempotency-key" required maxlength="200" spellcheck="false"></div>
+      <div class="editor-field full"><label for="derived-reason">Reason *</label><textarea id="derived-reason" required maxlength="500"></textarea></div>
+      <div class="editor-field full"><label for="derived-repeatability">Effect reconciliation or repeatability decision</label><textarea id="derived-repeatability" maxlength="500"></textarea></div>
+      <label class="credential-note"><input id="derived-authorize-effects" type="checkbox"> I am authorized to repeat selected downstream external effects.</label>
+      <div class="credential-actions"><button id="derived-preview" class="btn" type="button">Preview</button><button id="derived-start" class="btn primary" type="submit" disabled>Start derived execution</button></div>
+      <p id="derived-execution-status" class="credential-status" role="status" aria-live="polite"></p>
+      <pre id="derived-execution-preview" class="human-task-review-text" tabindex="0" hidden></pre>
+    </form>
+  </section>
 </dialog>
 
 <!-- A Human Task decision is a central modal operation: the selected graph node remains selection

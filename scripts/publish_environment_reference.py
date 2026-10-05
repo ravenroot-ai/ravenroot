@@ -16,6 +16,28 @@ SOURCE = ROOT / "ravenroot"
 OUTPUT = ROOT / "docs" / "reference" / "environment-variables.md"
 VARIABLE = re.compile(r'"(RAVENROOT_[A-Z0-9_]+)"')
 
+UI_SERVER_SOURCE = ROOT / "ui-server" / "server.mjs"
+UI_SETTINGS = {
+    "RAVENROOT_UI_BACKEND_URL": (
+        "Server-side HTTP(S) upstream, default `http://127.0.0.1:8080`; optional backend path prefix, "
+        "no credentials/query/fragment"
+    ),
+    "RAVENROOT_UI_PREFIX": "Empty (root) or public slash-prefixed path without trailing slash",
+    "RAVENROOT_UI_PORT": "Integer TCP port, default `8080`",
+    "RAVENROOT_UI_ROOT": "Asset directory, default `/opt/ravenroot/ui`",
+}
+
+
+def ui_settings() -> dict[str, str]:
+    """Maintain the non-Java web-server boundary separately, refusing unclassified runtime names."""
+    names = set(re.findall(r"\benv\.(RAVENROOT_[A-Z0-9_]+)",
+                           UI_SERVER_SOURCE.read_text(encoding="utf-8")))
+    if names != set(UI_SETTINGS):
+        raise ValueError("UI server environment mapping differs from runtime: "
+                         + ", ".join(sorted(names.symmetric_difference(UI_SETTINGS))))
+    return UI_SETTINGS
+
+
 # This reviewed literal is a startsWith namespace guard, not an environment key
 # or an open dynamic family. Pin the complete source so even a benign file change
 # requires re-review: a new use of the same literal must never be silently hidden.
@@ -342,6 +364,12 @@ def render() -> str:
                  "from production Java, refuses any unclassified name, and compares this page byte-for-byte.",
                  "Dynamic suffixes and settings assembled outside Java literals remain covered by their",
                  "maintained parser or command-help checks rather than being invented here.", ""))
+    body.extend(("## Independent UI web server", "",
+                 "These variables configure the optional UI-only static server, not the Java backend.", "",
+                 "| Variable | Contract |", "|---|---|"))
+    body.extend(f"| `{name}` | {contract} |" for name, contract in ui_settings().items())
+    body.extend(("| `NODE_EXTRA_CA_CERTS` | Optional read-only PEM trust bundle for the HTTPS upstream; consumed by Node.js itself |", "",
+                 "See [UI-only installation](../operator-guide/kubernetes-ui-only.md) for routing, probes and TLS.", ""))
     return "\n".join(body)
 
 

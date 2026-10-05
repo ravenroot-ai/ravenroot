@@ -501,6 +501,6 @@ These variables configure the optional UI-only static server, not the Java backe
 | `RAVENROOT_UI_PREFIX` | Empty (root) or public slash-prefixed path without trailing slash |
 | `RAVENROOT_UI_PORT` | Integer TCP port, default `8080` |
 | `RAVENROOT_UI_ROOT` | Asset directory, default `/opt/ravenroot/ui` |
-| `NODE_EXTRA_CA_CERTS` | Optional read-only PEM trust bundle for the HTTPS upstream |
+| `NODE_EXTRA_CA_CERTS` | Optional read-only PEM trust bundle for the HTTPS upstream; consumed by Node.js itself |
 
 See [UI-only installation](../operator-guide/kubernetes-ui-only.md) for routing, probes and TLS.

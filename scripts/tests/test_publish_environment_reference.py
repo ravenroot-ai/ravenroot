@@ -20,6 +20,23 @@ from scripts.publish_environment_reference import (
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
+    def test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory(self):
+        names = publisher.ui_settings()
+        self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_PREFIX",
+                          "RAVENROOT_UI_PORT", "RAVENROOT_UI_ROOT"}, set(names))
+        self.assertFalse(set(names).intersection(variables()))
+        section = render().split("## Independent UI web server", 1)[1]
+        for name in names:
+            self.assertIn(f"`{name}`", section)
+        self.assertIn("not the Java backend", section)
+        self.assertIn("Node.js itself", section)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "server.mjs"
+            source.write_text(publisher.UI_SERVER_SOURCE.read_text() + "\nenv.RAVENROOT_UI_TYPO;\n")
+            with patch.object(publisher, "UI_SERVER_SOURCE", source):
+                with self.assertRaisesRegex(ValueError, "RAVENROOT_UI_TYPO"):
+                    render()
+
     def test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract(self):
         names = variables()
         activity_names = {

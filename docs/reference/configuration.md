@@ -22,6 +22,14 @@ be changed to strings before upgrading.
 
 ## Runtime and behavior resolution
 
+`RAVENROOT_PUBLICATION_POLICY_CONFIG` is an optional operator-owned JSON file for the packaged
+server's `boundary-guard` resolver. Unset retains the fail-closed empty resolver. The closed
+version-one document is at most 1 MiB and contains immutable policy IDs and versions, candidate byte
+ceilings, and ordered declarative publication rules. It is read once at startup; graph content can
+select and pin a configured revision but cannot supply this path or change a rule. See
+[Publication boundary policies](../security/publication-boundaries.md) and the
+[configuration packager](../operator-guide/configuration-packager.md).
+
 `RAVENROOT_RUNNER_CONFIG` is an opt-in operator-owned JSON file path for the
 [governed Workspace and Agent runner plane](../operator-guide/governed-runners.md). Unset leaves the existing
 bounded Agent behavior unchanged and runner routes unavailable. The file is at most 1 MiB, uses

@@ -45,12 +45,22 @@ public final class TrustedNetworkPolicy {
         this.rules = List.copyOf(rules);
     }
 
-    /** Returns a policy with no administrator exceptions. */
+    /**
+     * Returns a policy with no administrator exceptions.
+     *
+     * @return immutable policy that grants neither reserved-network admission nor plaintext
+     */
     public static TrustedNetworkPolicy empty() {
         return new TrustedNetworkPolicy(List.of());
     }
 
-    /** Captures and strictly parses the administrator policy from an environment snapshot. */
+    /**
+     * Captures and strictly parses the administrator policy from an environment snapshot.
+     *
+     * @param environment trusted process environment, or {@code null} for an empty environment
+     * @return immutable parsed policy; an absent or blank value produces an empty policy
+     * @throws IllegalArgumentException when the configured value violates the strict schema
+     */
     public static TrustedNetworkPolicy fromEnvironment(Map<String, String> environment) {
         return fromBase64(environment == null ? null : environment.get(ENVIRONMENT_VARIABLE));
     }
@@ -59,6 +69,11 @@ public final class TrustedNetworkPolicy {
      * Parses the canonical schema documented for {@link #ENVIRONMENT_VARIABLE}. Blank means no
      * rules. Standard Base64 must be canonical; unknown fields, duplicate rule names, wildcards,
      * unknown protocols, and unbounded rules are rejected.
+     *
+     * @param encoded canonical padded standard-Base64 JSON, or a blank value for no rules
+     * @return immutable parsed policy
+     * @throws IllegalArgumentException when the value is not canonical Base64 or violates the
+     *         strict versioned schema
      */
     public static TrustedNetworkPolicy fromBase64(String encoded) {
         if (encoded == null || encoded.isBlank()) return empty();
@@ -106,6 +121,13 @@ public final class TrustedNetworkPolicy {
      * True when one and the same rule admits every resolved address. This prevents two partial
      * rules from being combined into a broader authority and is the DNS-rebinding check callers
      * should use before opening a connection.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @param addresses complete, non-empty current DNS answer set
+     * @return {@code true} when one matching rule admits every supplied address
      */
     public boolean permitsAll(String protocol, String profile, String host, int port, List<InetAddress> addresses) {
         if (addresses == null || addresses.isEmpty()) return false;
@@ -113,7 +135,17 @@ public final class TrustedNetworkPolicy {
                 .anyMatch(rule -> rule.admitsAll(addresses));
     }
 
-    /** Like {@link #permitsAll}, but the same rule must also grant plaintext. */
+    /**
+     * Like {@link #permitsAll(String, String, String, int, List)}, but the same rule must also
+     * grant plaintext.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @param addresses complete, non-empty current DNS answer set
+     * @return {@code true} when one matching plaintext rule admits every supplied address
+     */
     public boolean permitsAllPlaintext(String protocol, String profile, String host, int port,
                                        List<InetAddress> addresses) {
         if (addresses == null || addresses.isEmpty()) return false;
@@ -121,7 +153,15 @@ public final class TrustedNetworkPolicy {
                 .anyMatch(rule -> rule.allowPlaintext() && rule.admitsAll(addresses));
     }
 
-    /** Whether a rule exists for this connector scope, regardless of granted capability. */
+    /**
+     * Reports whether a rule exists for this connector scope, regardless of granted capability.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return {@code true} when at least one rule matches all supplied scope components
+     */
     public boolean hasScope(String protocol, String profile, String host, int port) {
         return !matching(protocol, profile, host, port).isEmpty();
     }
@@ -139,7 +179,11 @@ public final class TrustedNetworkPolicy {
         return rules.stream().anyMatch(rule -> rule.matchesHostForGlobal(normalized));
     }
 
-    /** Number of configured rules, exposed for non-sensitive diagnostics and tests. */
+    /**
+     * Returns the number of configured rules for non-sensitive diagnostics and tests.
+     *
+     * @return configured rule count
+     */
     public int ruleCount() {
         return rules.size();
     }

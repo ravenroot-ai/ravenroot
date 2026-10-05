@@ -286,6 +286,10 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
         boolean timedOutAtFailure = false;
         watchdog.start();
         try {
+            destinationPolicy.requireAllowedDestination(
+                    "imap", profile.tenant() + "/" + profile.id(), profile.host(), profile.port());
+            if (profile.securityMode().equals("PLAIN")) destinationPolicy.requirePlaintext(
+                    "imap", profile.tenant() + "/" + profile.id(), profile.host(), profile.port());
             secret = resolveCredential(tenant, profile, actionLimit, resolverActions, watchdog);
             try { password = secret.copy(); }
             catch (RuntimeException hostile) { throw credentialUnavailable(); }
@@ -453,7 +457,7 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
                 Integer.toString(Math.min(timeoutMs, profile.connectTimeoutMs())));
         properties.setProperty(prefix + ".timeout", Integer.toString(timeoutMs));
         properties.setProperty(prefix + ".writetimeout", Integer.toString(timeoutMs));
-        if (protocol.equals("imap")) {
+        if (profile.securityMode().equals("STARTTLS")) {
             properties.setProperty("mail.imap.starttls.enable", "true");
             properties.setProperty("mail.imap.starttls.required", "true");
         }

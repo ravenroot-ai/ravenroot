@@ -55,6 +55,12 @@ final class DeterministicImapFixture implements AutoCloseable {
         }
     }
 
+    static DeterministicImapFixture startPlain() {
+        GreenMail server = new GreenMail(new ServerSetup(0, "0.0.0.0", ServerSetup.PROTOCOL_IMAP));
+        server.start();
+        return new DeterministicImapFixture(server, Map.of(), server.getImap().getPort(), null);
+    }
+
     static DeterministicImapFixture startImapsWithDefaultTrust(int port) throws Exception {
         return startFixedPortImaps(port, "0.0.0.0");
     }

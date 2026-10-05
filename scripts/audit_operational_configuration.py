@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a"
+    "90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf"
+    "5e04cc565ecc882bd9f45274336aaf65c4e88dd4be6cff477a15516595df97aa"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -151,7 +151,7 @@ JWK_CONVERSION_BEFORE_REVISION = "5f6182ec565383165b18b0e336628d2f40ac8b1c"
 JWK_CONVERSION_BEFORE_SOURCE_DIGEST = \
     "6b56d1c35c82476faa666e7a247542c894a0f000e467a617f75c10fe99eb1bdc"
 JWK_SOURCE_DIGESTS = {
-    JWK_PROVIDER_PATH: "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+    JWK_PROVIDER_PATH: "09c84d2cd7ddbdeb7f3a2503b3384c7d4de0250b600b942c9b053366faf6ce32",
     JWK_CONFIGURATION_PATH: "91435846c89b4f74aa8cc80069800469618fdb78eaf672e09f2092f71c65790c",
     JWK_TEST_PATH: "fdc935834c3c6d076c174cf94a5597288e176b463223c95ba14b82c1b9075e4e",
 }
@@ -159,6 +159,7 @@ JWK_METHOD_DIGESTS = {
     "JwkSetProvider.current": "379db51d3e3d5e399c4f0001b9906f77a0d288edd50f995ff2fd7f5db2340f2d",
     "JwkSetProvider.refresh": "cb88c5b4d5055dc96222577e5f81de21812aeb4cf1365e9cf6924f5394860503",
     "JwkSetProvider.requireRange": "018f348a8dabc162905ab9b0ecf63a1a6728e90b772f37a124e2b664a7bbf94c",
+    "JwkSetProvider.validateUri": "33be7e8bcb25f8fb7dfd37448719c658c7ebf5f3d00bdb0c7fb466e1686c145f",
     "TransportPolicy.defaults": "96ac39d6da64a365dd0af332189c9850cc3d23766c09549a3ce5064059dda271",
     "TransportPolicy.compactConstructor": "4c813ec5e71f94e3572a5986a4d2bb290aeaa5492854e7d958884daedf3c5464",
     "AuthenticationConfiguration.oidc": "00eddd691b97facd8006db1379d02cc9d3518a847605ec7619f48087a46f3dd6",
@@ -198,7 +199,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+    EMBED_MAIN_PATH: "5e04cc565ecc882bd9f45274336aaf65c4e88dd4be6cff477a15516595df97aa",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -214,7 +215,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a",
+        "90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -5547,6 +5548,8 @@ EXTERNAL_IO_LIMITS_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/ExternalIoLimits.java")
 EXTERNAL_IO_RESERVED_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java")
+EXTERNAL_IO_TRUSTED_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java")
 EXTERNAL_IO_OUTBOUND_HTTP_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java")
 EXTERNAL_IO_PACKAGE_POLICY_PATH = Path(
@@ -5601,6 +5604,7 @@ EXTERNAL_IO_CLOSED_COHORT_PATHS = frozenset({
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundHttpRequest.java",
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundWebSocketRequest.java",
     EXTERNAL_IO_RESERVED_POLICY_PATH.as_posix(),
+    EXTERNAL_IO_TRUSTED_POLICY_PATH.as_posix(),
     EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix(),
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java",
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java",
@@ -5632,7 +5636,8 @@ def external_io_policy_cohort_candidate_ids(
             result.add(candidate.id)
         elif candidate.path in reserved_carriers \
                 and candidate.expression in {
-                    "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS", "RAVENROOT_WEBSOCKET_"}:
+                    "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS", "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                    "RAVENROOT_WEBSOCKET_"}:
             result.add(candidate.id)
         elif candidate.path == EXTERNAL_IO_SERVER_MAIN_PATH.as_posix() \
                 and candidate.kind == "environment-binding" \
@@ -5767,23 +5772,23 @@ EXTERNAL_IO_RETAINED_PARTITION_IDS: dict[str, tuple[str, ...]] = {
  'oc-f204fd56af4db4ce4df2',
  'oc-face4282022761d7eb7d',
  'oc-fad38befb3e4c14b5180'),
-    'published-contract-description': ('oc-37a33ab43680907b6f2b', 'oc-8917781ba9e5e0fd3262'),
-    'security-ceiling-or-default': ('oc-03097ed713566a0f9a2d',
+    'published-contract-description': ('oc-37a33ab43680907b6f2b', 'oc-e5f210d7f3c57bf186dd'),
+    'security-ceiling-or-default': ('oc-282a35e9a58fc2e93357',
  'oc-04e68dc084451818e3e2',
  'oc-0c79686802c8f5a9f5ec',
- 'oc-0c88aaef732f7339e6dc',
+ 'oc-a4238dea0cdad7c41e65',
  'oc-0e2fb2b38a5794fbf284',
  'oc-1af3b58afc89d0250607',
  'oc-22ada0d126e70a33d227',
  'oc-2a24e11d9463ab9991c4',
- 'oc-2bfa29e2a87203574ebf',
- 'oc-327459e2c6a5446f1820',
+ 'oc-8070b009a6013dce2f84',
+ 'oc-1449dd2c7ef0acf054e5',
  'oc-3a8b07001cd918037a80',
  'oc-3dbbc46d71be59c34a4c',
  'oc-3ea50685d66f0d89553a',
  'oc-4088e843b7b7e3e0560a',
- 'oc-452952dbdf375e41fe36',
- 'oc-56d6f0690cccbb7975f8',
+ 'oc-152506aedae704f95331',
+ 'oc-adbae6e9f20f8c3a89e7',
  'oc-63f6e84f7d1bf129abca',
  'oc-6f3bf08057bc9eaaa644',
  'oc-732f25736ca294badb82',
@@ -5794,24 +5799,24 @@ EXTERNAL_IO_RETAINED_PARTITION_IDS: dict[str, tuple[str, ...]] = {
  'oc-8db9ab14683ef18bee72',
  'oc-92a7e7a387efac00528e',
  'oc-9bbe64c54001b5a2d45c',
- 'oc-9d87343583f1667cc121',
+ 'oc-c58e020c75a2e2445876',
  'oc-a1c1c4d8f26d64de5529',
  'oc-a960b7a17dbf9b412943',
  'oc-aa18ab15640b60ed85f5',
- 'oc-aa7be24706f1ea823752',
+ 'oc-3acf2a8829136f43d1d1',
  'oc-b376ce7e0f2ad8d7d954',
- 'oc-bd5fd856cf03be08b254',
+ 'oc-bfc5128862d869a7af7b',
  'oc-c8f663c9728cd2664eb0',
- 'oc-ce731262ee59dcfd729d',
+ 'oc-b94d7782662c641100be',
  'oc-e0f58e9fb2df6fd827ab',
- 'oc-e4009dbd332027b5eeac',
- 'oc-e4ec20dd7cec0fe6d5b4',
- 'oc-e6692248a8e5d394c6b9',
+ 'oc-f6f5fddb0b94d4f317df',
+ 'oc-5f7f2f68f0d68470fd3c',
+ 'oc-f21e0b1411cfc984033f',
  'oc-eca57fbb104a765fbe93',
  'oc-efcbaee5017796ec2968',
- 'oc-f318d298d21c31b58b7f',
+ 'oc-61059c2ef924f09c764d',
  'oc-f4f5f28d0a1cedc03451',
- 'oc-ffbc00e2c6f381b91688'),
+ 'oc-4c818091d348f365d43e'),
 }
 EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS: dict[str, tuple[str, ...]] = {
     "derived": ("oc-388ee6f97231765ed07c",),
@@ -5828,7 +5833,19 @@ EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS: dict[str, tuple[str, ...]] = {
         "oc-723bff59bc3dfe7d3129", "oc-26a83bfe4581de3a9dbc",
         "oc-b9fbaeda2087c25302e2", "oc-9a2df68f7eb65855f0da",
     ),
-    "protocol-or-format-invariant": ("oc-1cf23e723f844709e0ea",),
+    "protocol-or-format-invariant": (
+        "oc-1cf23e723f844709e0ea", "oc-9519ff251e2b52394fcd", "oc-f0528b190971bcae2b57",
+        "oc-c7d676ce3fb0cdbfddc7", "oc-b7a0405bd1597af99421", "oc-b4f79c2be5d54eb3080d",
+        "oc-b6285d45896cd5d30047", "oc-36c08c4a40e70b04593e", "oc-d624135aee9792acc369",
+        "oc-ce3400cd672d069e7055", "oc-9c0b9617007555de54c9", "oc-d69cad6faa7823fb7ce2",
+        "oc-d70b2fa38cb22422a9e7", "oc-cdc5aeb29f9701c268d0", "oc-4f4c5d8016e7518bc0c0",
+        "oc-90d82120a646477a74ce", "oc-f0b74a5ab45504b56ebd", "oc-c83f3db2bde0dc3ee3fc",
+        "oc-b4205675be432bd996e6", "oc-53c7448680377e4d83bd", "oc-3dad83dccc6e6cb43afd",
+        "oc-b51f2562c2100bfbe82e", "oc-024d7325434b716a598d", "oc-152f1d01ff400fd85427",
+        "oc-254c32f25a1e19cc2321", "oc-2a4f6ed2039a3b143e65", "oc-40034849492d3d5c2b6c",
+        "oc-4d1f497966dc949d8571", "oc-7e1a3469d9a397bf7aca", "oc-9d080d2b6cad5a14427b",
+        "oc-b204fc45e73c92382d1f", "oc-b2b324da0ad7ed8c1c1d", "oc-b57e0ec28d1bf40ac9e6",
+        "oc-ef40b49868837c862724", "oc-f829fd6985ae223a52b3"),
     "security-ceiling-or-default": (
         "oc-8b95f2348c416ec92e84", "oc-19d6cb049c59ad45f369",
         "oc-b8d9052b4652a6a79b2b", "oc-33335576c3b015d33f3f",
@@ -5847,6 +5864,9 @@ EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS: dict[str, tuple[str, ...]] = {
         "oc-afd5b25bd087541579a0", "oc-417ef74f91f0fb611089",
         "oc-c7ac4088cb64f659d38e", "oc-583dcbf62b31cad60e3d",
         "oc-1bd4b76dfe0ce3e1d2f7", "oc-b1caeccf5cbd3aaff355",
+        "oc-c27e5acd4b4a691f975c", "oc-a1c6917cccf35d88c435", "oc-cdc37a0c686fb7d2d1c9",
+        "oc-fb703dba6dc73337eccf", "oc-b8fe5913327999dc2a66", "oc-4d058572c7702fe3104e",
+        "oc-17d6a5cb6cf52f89cb0c", "oc-fa1f611a94ebac1422c1",
     ),
 }
 PERSISTENCE_POSTGRES_CONFIG_PATH = Path(
@@ -6255,7 +6275,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a"),
+         "90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7109,7 +7129,7 @@ def external_io_policy_authority_from_source(
         Path("docs/examples/assistant/compose.override.yaml"),
         Path("scripts/publish_environment_reference.py"),
         Path("ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java"),
-        EXTERNAL_IO_LIMITS_PATH, EXTERNAL_IO_RESERVED_POLICY_PATH,
+        EXTERNAL_IO_LIMITS_PATH, EXTERNAL_IO_RESERVED_POLICY_PATH, EXTERNAL_IO_TRUSTED_POLICY_PATH,
         EXTERNAL_IO_NODE_CAPACITY_PATH, EXTERNAL_IO_CAPACITY_CAPABLE_PATH,
         EXTERNAL_IO_OUTBOUND_HTTP_PATH, EXTERNAL_IO_PACKAGE_POLICY_PATH,
         EXTERNAL_IO_MANAGED_SERVICES_PATH, EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH,
@@ -7199,6 +7219,30 @@ def external_io_policy_authority_from_source(
         "candidateIds": reserved_ids,
         "scope": "Live deployment authorization; graphs and manifests cannot widen it.",
         "pinning": "Current authorization is checked at each connection and is not manifest-pinned.",
+    })
+
+    trusted_ids = sorted(set(
+        exact(EXTERNAL_IO_TRUSTED_POLICY_PATH,
+              expression="RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY")
+        + exact(EXTERNAL_IO_TRUSTED_POLICY_PATH, role="ENVIRONMENT_VARIABLE",
+                expression='"RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY"')
+        + [candidate.id for candidate in discovered.values()
+           if candidate.path in {"compose.yaml", "scripts/publish_environment_reference.py"}
+           and candidate.expression == "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY"]
+    ))
+    trusted_default = exact(
+        EXTERNAL_IO_TRUSTED_POLICY_PATH, role="ENVIRONMENT_VARIABLE",
+        expression='"RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY"')
+    if not trusted_ids or not trusted_default:
+        return None
+    contracts.append({
+        "setting": "egress.trusted-network-policy",
+        "owner": f"{EXTERNAL_IO_TRUSTED_POLICY_PATH.as_posix()}#TrustedNetworkPolicy",
+        "field": "rules", "bindings": ["RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY"],
+        "defaultExpression": "no trusted-network rules when absent or blank",
+        "defaultCandidateIds": trusted_default, "candidateIds": trusted_ids,
+        "scope": "Administrator-owned exact protocol, port, profile, host and address rules; workflows cannot widen it.",
+        "pinning": "Parsed once into an immutable deployment policy; destinations are revalidated at each transport connection.",
     })
 
     server_bindings = {
@@ -7445,7 +7489,7 @@ def external_io_policy_authority_from_source(
 
     approved_methods = (
         (EXTERNAL_IO_RESERVED_POLICY_PATH, "ReservedNetworkPolicy", "fromCommaSeparatedExceptions",
-         "7eb09df9e906ca3eb3fe7597ba0205a58341d2a0f5ff09b405330ccdfd9ee520"),
+         "c51cbe4425e5c934711b74f56d29d1042e176675e83694ba499212664cc769af"),
         (EXTERNAL_IO_SERVER_MAIN_PATH, "RavenrootServerMain", "byteCeiling",
          "f13441d5ade83b65753af2f6bc4f8c0387eb504abe01694360429a13501707ab"),
         (EXTERNAL_IO_GRANTS_PATH, "EnvironmentNodePackageServiceGrants", "applyLimits",
@@ -7467,12 +7511,22 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "openWebSocket",
          "31f5c92efaa99d3fd68aa6c7e1008baf5fe3d443de400183517a5b29437fb593"),
         (EXTERNAL_IO_WS_RESOLVER_PATH, "EnvironmentWebSocketProfileResolver", "resolve",
-         "de8a9ef8aac5ad1a3f74c0cb71c7baef571fef12561d2ac75caae8909c4801f3"),
+         "e8af4a34ce24e201d041dae3198c81eeca626f2032a9d5ff7714be76a51b9af0"),
         (EXTERNAL_IO_WS_SEND_PATH, "WebSocketSendNodeBehavior", "resolveExecutionIoCapacity",
          "f1b7eb0d8e7a74e3c9dd7b11994ae1313cf66324d6fbdb2f2c447443c8513690"),
+        (EXTERNAL_IO_TRUSTED_POLICY_PATH, "TrustedNetworkPolicy", "fromEnvironment",
+         "a2ab4fa588e6affefece760e2cc99befc0415e9e5c446cfab54cab90ecfad057"),
+        (EXTERNAL_IO_TRUSTED_POLICY_PATH, "Rule", "admitsAll",
+         "ccc5a623b0e94b3d6da70cd5c015d67d97617c40fa1a2bb2aecf7e9f440adf4a"),
     )
     if any(java_method_digest(sources[path], type_symbol, method) != digest
            for path, type_symbol, method, digest in approved_methods):
+        return None
+    trusted_source = sources[EXTERNAL_IO_TRUSTED_POLICY_PATH]
+    if _source_digest(trusted_source) != \
+            "bee4bff52c729a06e027c380bd3b9247f207688eccc891e086a2e3ea17a2a085" \
+            or java_record_components(trusted_source, "Rule") != (
+                "name", "protocols", "ports", "hosts", "addresses", "profiles", "allowPlaintext"):
         return None
 
     # Four execution entry points bind the exact resolved policy before dispatch.  Keeping the
@@ -7885,7 +7939,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  'b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a',
+  '90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -7947,7 +8001,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'ensureProgramGraphReady',
   'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
   1),
- ('compose.yaml', 'file', '', '', '51f37f7415b1aeefd2af6e1fa1918e3dc5cf00da1544299e69905f5436618787', 1),
+ ('compose.yaml', 'file', '', '', '3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57', 1),
  ('deploy/dev/sandbox-supervisor.sh',
   'file',
   '',
@@ -8048,7 +8102,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '7834545f4a6508ed7c18cf2cad84695ebcdd474940a71f12990eda7d4252b012',
+  'b8090cf32a378497f59d2d0c9d1c6b2bee0e9d995a6dfff149e313118d030cfd',
   1),
  ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubEventsSourceBehavior.java',
   'file',
@@ -8066,7 +8120,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'b490a4ff1b5009073d9e1b9928096ca24bcca4fcd37647df2ef90ee9b9071516',
+  '25721c7dd1c5c3924365b4ef4ac987b8ee0cd4bb81854aea355dc2dee4c56d51',
   1),
  ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProtocol.java',
   'file',
@@ -9729,8 +9783,19 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                           'status': 'retained',
                                           'rationale': 'The token names a nested section of the strict '
                                                        'configuration document.',
-                                          'candidateIds': ['oc-f2c5543bef1729332b8e',
-                                                           'oc-f0860b3dc0dd7b1e9c84']},
+                                          'candidateIds': ['oc-1075b272785cc9226a16',
+                                                           'oc-43b7beb174a573a86dc4']},
+ 'github.egress-origin-transport': {'classification': 'protocol-or-format-invariant',
+                                    'status': 'retained',
+                                    'rationale': 'These fixed URI scheme and default-port atoms bind the configured GitHub origin to scoped destination admission and explicit plaintext authorization.',
+                                    'candidateIds': ['oc-4398bd15df502e8d1460',
+                                                     'oc-530514c8aff87083030a',
+                                                     'oc-605b3a2b4bfd7f13d1a1',
+                                                     'oc-8e3e6e5fe480bc7fe5f3',
+                                                     'oc-b0f60058bca35d9b5784',
+                                                     'oc-cfcc5c6116d37eecf566',
+                                                     'oc-f1248d6731b3bde9c850',
+                                                     'oc-ffae4796443d10b27812']},
  'github.events.webhook-protocol': {'classification': 'protocol-or-format-invariant',
                                     'status': 'retained',
                                     'rationale': 'The behavior id, route prefix, method, header, '
@@ -11408,6 +11473,7 @@ def jwk_policy_authority_from_source(
         "JwkSetProvider.current": (provider, "JwkSetProvider", "current"),
         "JwkSetProvider.refresh": (provider, "JwkSetProvider", "refresh"),
         "JwkSetProvider.requireRange": (provider, "JwkSetProvider", "requireRange"),
+        "JwkSetProvider.validateUri": (provider, "JwkSetProvider", "validateUri"),
         "TransportPolicy.defaults": (provider, "TransportPolicy", "defaults"),
         "AuthenticationConfiguration.oidc":
             (configuration, "AuthenticationConfiguration", "oidc"),
@@ -11671,6 +11737,18 @@ def jwk_policy_authority_from_source(
         "classification": "derived",
         "rationale": "The one extra byte is derived from the response ceiling so the consumer can detect an oversized body without admitting it.",
         "candidateIds": sentinel_ids,
+    })
+    destination_span = java_method_span(provider, "JwkSetProvider", "validateUri")
+    destination_ids = (exact_ids(JWK_PROVIDER_PATH, provider, [destination_span])
+                       if destination_span is not None else None)
+    if destination_ids is None or not destination_ids or assigned & set(destination_ids):
+        return None
+    assigned.update(destination_ids)
+    retained_partitions.append({
+        "semanticPartition": "jwks-destination-transport-policy", "status": "retained",
+        "classification": "protocol-or-format-invariant",
+        "rationale": "The fixed HTTP defaults and URI branches bind JWKS retrieval to scoped destination admission and explicit plaintext authorization.",
+        "candidateIds": destination_ids,
     })
     family_paths = {JWK_PROVIDER_PATH.as_posix(), JWK_CONFIGURATION_PATH.as_posix()}
     expected_family = {
@@ -12360,7 +12438,7 @@ def program_github_policy_authority_from_source(root: Path, discovered: dict[str
         "profile": ("name", "tenantId", "apiOrigin", "owner", "repository", "repositoryId", "installationId",
                     "reviewerLogin", "credentialBindingId", "credentialReference", "webhookSecretReference",
                     "route", "webhookEvents", "project", "workflowIds", "release", "timeoutMs", "maxRequestBytes",
-                    "maxResponseBytes", "maxConcurrency", "maxPolls", "pollIntervalMs"),
+                    "maxResponseBytes", "maxConcurrency", "maxPolls", "pollIntervalMs", "plaintextAuthorization"),
     }
     if any(java_record_components(sources[PROGRAM_GITHUB_PATHS[key]], Path(PROGRAM_GITHUB_PATHS[key]).stem) != components
            for key, components in expected_components.items()):
@@ -12719,15 +12797,15 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': '343c054d99c539004f7bd4c0469c849ad303ad53301bfa16d68a2796aab6ec4a',
- 'scripts/tests/test_publish_environment_reference.py': '96578f49ed01f0a61d0ffdaad6870f003167fba3d54cdbfe502137f9c5c121c0',
+ 'scripts/publish_environment_reference.py': '22b7f44767f513be77cdb92d725c63948f0fc66b8d05e38f59b1c8c3681a3657',
+ 'scripts/tests/test_publish_environment_reference.py': '36695a3e7c7a53a9428a4c6a9178aa61afdb60d2bda37634c682fd2e96918148',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  'b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a'),
+  '90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -14149,7 +14227,7 @@ ACTIVITY_CAPTURE_SOURCE_PROOFS = {
     ACTIVITY_CAPTURE_CONFIGURATION_PATH: "97449b115114f01987f0d7c9c1cc8c32e931eae8d14bcbd394bb9ce1d8953cf8",
     ACTIVITY_CAPTURE_POLICY_PATH: "a6ac890d6852d66729e2e46ab632ee5fc663c7c0b2b247479f6351fa370177bf",
     ACTIVITY_CAPTURE_TEST_PATH: "bc0c980884dcac6cbef97bc3867efacbb44a0428de8bcfdd6c2c7866743c6046",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "51f37f7415b1aeefd2af6e1fa1918e3dc5cf00da1544299e69905f5436618787",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57",
     ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "b513b197a031c3f8f7c56b77b69bf4f8f9f676deeb12ac4a0dbbfd00d99f6880",
     ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "07be85bc73d84f7edb1eff2171a0e300debdd5d16fef5bf050667c3d15159716",
     ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "82a8f2e4fb7c37bf599ec0c1fa9ec15e05de82fbb90bc6b1e30186c0d22c187a",
@@ -14395,6 +14473,7 @@ ASSISTANT_LIMIT_FAMILY_ID = "assistant-operational-limits-v1"
 ASSISTANT_LIMIT_COMPONENTS = (
     "enabled", "providerId", "endpoint", "model", "credential", "egressPolicy", "timeout",
     "maxOutputTokens", "maxToolIterations", "credentialSource", "allowLocalHttp",
+    "plaintextAuthorization",
 )
 ASSISTANT_LIMIT_SETTINGS = (
     {

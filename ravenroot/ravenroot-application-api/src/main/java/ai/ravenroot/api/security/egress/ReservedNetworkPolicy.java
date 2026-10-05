@@ -111,6 +111,12 @@ public final class ReservedNetworkPolicy {
      * Resolves and validates a complete connector destination under one protocol/profile scope.
      * When any answer is reserved, one scoped rule must admit every answer; separate partial rules
      * cannot be combined. The legacy exception remains an admission-only compatibility path.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @throws SecurityException when the destination is unresolved or is not admitted
      */
     public void requireAllowedDestination(String protocol, String profile, String host, int port) {
         if (!trustedNetworks.hasScope(protocol, profile, host, port)) {
@@ -126,6 +132,13 @@ public final class ReservedNetworkPolicy {
     /**
      * Resolves and returns one admitted address set for a native transport that cannot use the JVM
      * resolver guard. Callers must pin the returned set into that transport before connecting.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return immutable, non-empty set of resolved addresses admitted by one scoped rule
+     * @throws SecurityException when the destination is unresolved or is not admitted
      */
     public List<InetAddress> resolveAllowedDestination(String protocol, String profile, String host, int port) {
         List<InetAddress> addresses = resolve(host);
@@ -163,7 +176,16 @@ public final class ReservedNetworkPolicy {
             throw new SecurityException("Connector destination is a reserved address prohibited by policy");
     }
 
-    /** Requires an explicit administrator rule for an unencrypted connector transport. */
+    /**
+     * Requires an explicit administrator rule for an unencrypted connector transport.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @throws SecurityException when no single matching rule admits every resolved address and
+     *         grants plaintext
+     */
     public void requirePlaintext(String protocol, String profile, String host, int port) {
         resolveAllowedPlaintextDestination(protocol, profile, host, port);
     }
@@ -173,13 +195,31 @@ public final class ReservedNetworkPolicy {
      * Profile constructors use this proof to keep their ordinary public construction fail-closed;
      * only trusted configuration resolvers that possess this policy can construct plaintext
      * profiles, and a proof for one protocol/profile/host/port cannot authorize another.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return opaque authorization bound to the normalized exact scope
+     * @throws SecurityException when no single matching rule admits every resolved address and
+     *         grants plaintext
      */
     public PlaintextAuthorization authorizePlaintext(String protocol, String profile, String host, int port) {
         resolveAllowedPlaintextDestination(protocol, profile, host, port);
         return new PlaintextAuthorization(protocol, profile, host, port);
     }
 
-    /** Resolves one address set admitted by the same scoped plaintext rule. */
+    /**
+     * Resolves one address set admitted by the same scoped plaintext rule.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return immutable, non-empty set of resolved addresses admitted for plaintext by one rule
+     * @throws SecurityException when the destination is unresolved or no single matching rule
+     *         admits every resolved address and grants plaintext
+     */
     public List<InetAddress> resolveAllowedPlaintextDestination(
             String protocol, String profile, String host, int port) {
         List<InetAddress> addresses = resolve(host);
@@ -211,7 +251,15 @@ public final class ReservedNetworkPolicy {
             this.port = port;
         }
 
-        /** True only for the exact scope that produced this proof. */
+        /**
+         * Tests whether this proof was issued for an exact connector scope.
+         *
+         * @param protocol finite protocol name declared by the connector
+         * @param profile exact administrator-controlled connector profile or package identifier
+         * @param host destination hostname or numeric address
+         * @param port destination TCP port
+         * @return {@code true} only when every scope component matches the issuing scope
+         */
         public boolean matches(String protocol, String profile, String host, int port) {
             return this.protocol.equals(protocol == null ? "" : protocol.trim().toLowerCase(Locale.ROOT))
                     && this.profile.equals(profile == null ? "" : profile.trim())

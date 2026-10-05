@@ -207,6 +207,10 @@ class ImapProfileRejectionDiagnosticsTest {
             causes.put("PREVIEW_CHARS_FORMAT", with(PREVIEW_CHARS, "some"));
             causes.put("PREVIEW_CHARS_RANGE", with(PREVIEW_CHARS, "65537"));
             causes.put("RESERVED_DESTINATION", with(HOST, "127.0.0.1"));
+            String[] refusedPlaintext = VALID.clone();
+            refusedPlaintext[HOST] = "localhost";
+            refusedPlaintext[MODE] = "PLAIN";
+            causes.put("PLAINTEXT_REFUSED", String.join(";", refusedPlaintext));
 
             Set<String> observed = new LinkedHashSet<>();
             int scenario = 0;

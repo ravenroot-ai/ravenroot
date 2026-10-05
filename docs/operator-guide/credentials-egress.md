@@ -60,7 +60,7 @@ hosts/profiles, non-network CIDRs, noncanonical Base64, and unknown protocols fa
 Supported protocol names are `http`, `websocket`, `amqp091`, `kafka`, `smtp`, `imap`, `otlp`, `git`,
 `assistant`, `jwks`, and `runner`. Every rule names at least
 one protocol, at least one finite port, and at least one host or address range. Profiles are exact
-connector-specific names: AMQP, Kafka, and SMTP use `tenant/profile`; managed HTTP and WebSocket use
+connector-specific names: AMQP, Kafka, SMTP, and IMAP use `tenant/profile`; managed HTTP and WebSocket use
 the node-package id. An empty `profiles` list applies to every profile within the other finite scope.
 There is no wildcard and no global off switch.
 
@@ -91,6 +91,12 @@ the DNS identity and cluster range, exact AMQP port, and exact `tenant/profile`.
 authenticates and encrypts the next hop. A managed HTTP rule uses protocol `http` and the node-package
 id in `profiles`; its service grant must still list the exact HTTP origin and credential binding.
 
+An IMAP hop through an authenticated mesh or TLS-terminating proxy uses protocol `imap`, the exact
+IMAP port and `tenant/profile`, and the same hostname/address intersection. Only after installing
+that rule may an administrator change the profile security mode to `PLAIN`. Queries, mutations, and
+long-lived consumers repeat admission and plaintext checks immediately before each connection.
+`IMAPS` and required `STARTTLS` keep their existing certificate and hostname verification.
+
 ### Private PKI
 
 Mount the internal CA as a PKCS12 or JKS trust store and configure the JVM with
@@ -108,20 +114,29 @@ uses the conservative intersection described above; legacy entries do not widen 
 port, or profile scope. Migrate one connector at a time, verify it, then remove a redundant legacy
 entry.
 
+Existing IMAP profiles remain `IMAPS` or required `STARTTLS` until an administrator edits them.
+To migrate one profile, install and verify its exact `imap` rule first, then change that profile to
+`PLAIN` and restart. A missing, nonmatching, or admission-only rule refuses the profile; an unused
+plaintext rule never downgrades an encrypted profile.
+
 ### Connector coverage and protocol limits
 
 - Managed HTTP/WebSocket profiles (AI/LLM, MCP, GitHub, Matrix, Mattermost, OpenAPI, Teams, and generic
   WebSocket) support scoped plaintext while retaining exact service grants. Slack, Discord, and
   Telegram production origins remain fixed HTTPS endpoints and are not converted into proxy settings.
-- AMQP 0-9-1, Kafka producer/consumer, and SMTP support authenticated non-loopback plaintext only
-  through an exact rule. IMAP continues to expose only IMAPS and required STARTTLS.
+- AMQP 0-9-1, Kafka producer/consumer, SMTP, and IMAP support authenticated non-loopback plaintext
+  only through an exact rule. IMAP queries, mutations, and consumers require an exact-scope proof
+  from the administrator resolver and revalidate the destination at transport time; ordinary public
+  constructors remain limited to `IMAPS` and required `STARTTLS`.
 - S3-compatible object storage may use signed HTTP only when both its exact SigV4 service grant and
   a matching trusted-network plaintext rule admit the origin; HTTPS remains the default.
 - Assistant, JWKS, runner control/model, and OTLP administrator endpoints apply scoped admission and
   plaintext rules. Redirects remain disabled.
-- The native `kubectl` runner manager retains a CA-verified HTTPS kubeconfig. Its subprocess
-  transport does not expose a Ravenroot-controlled DNS pin equivalent to managed HTTP or Git/libcurl;
-  use the private-PKI trust path above rather than a plaintext Kubernetes API server.
+- The native `kubectl` runner manager retains a CA-verified HTTPS kubeconfig. Kubernetes supports
+  HTTP, but the `kubectl` subprocess does not expose Ravenroot-controlled DNS pinning or redirect
+  boundaries. Ravenroot therefore cannot revalidate the complete answer set at the actual
+  connection or prove that a plaintext redirect stayed within the authorized scope. Use the
+  private-PKI trust path above for Kubernetes API servers.
 - JDBC URLs are driver-defined and may be opaque. Ravenroot does not invent generic TLS or port
   semantics for unknown vendors; configure the driver's TLS properties and JVM trust store.
   PostgreSQL execution-store TLS remains deployment-infrastructure configuration.

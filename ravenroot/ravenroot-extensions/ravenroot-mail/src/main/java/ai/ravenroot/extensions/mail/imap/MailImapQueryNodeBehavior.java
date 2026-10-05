@@ -215,6 +215,10 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         Store store = null; Folder folder = null;
         watchdog.start();
         try {
+            destinationPolicy.requireAllowedDestination(
+                    "imap", profile.tenant() + "/" + profile.id(), profile.host(), profile.port());
+            if (profile.securityMode().equals("PLAIN")) destinationPolicy.requirePlaintext(
+                    "imap", profile.tenant() + "/" + profile.id(), profile.host(), profile.port());
             secret = resolveCredential(tenantId, profile, actionLimit, resolverActions, watchdog);
             try { password = secret.copy(); }
             catch (RuntimeException hostile) { throw new ImapQueryException(ImapQueryException.Code.CREDENTIAL_UNAVAILABLE, "IMAP credential unavailable"); }
@@ -322,7 +326,7 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         properties.setProperty(prefix + ".writetimeout", Integer.toString(timeoutMs));
         if (protocol.equals("imap")) properties.setProperty("mail.imap.peek", "true");
         if (protocol.equals("imaps")) properties.setProperty("mail.imaps.peek", "true");
-        if (protocol.equals("imap")) {
+        if (profile.securityMode().equals("STARTTLS")) {
             properties.setProperty("mail.imap.starttls.enable", "true");
             properties.setProperty("mail.imap.starttls.required", "true");
         }

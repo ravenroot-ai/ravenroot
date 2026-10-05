@@ -128,6 +128,36 @@ public final class ExecutionRecorder implements AutoCloseable {
     private volatile ExecutionStoreFailure fenceLostBecause;
     private ScheduledFuture<?> renewalTask;
 
+    /**
+     * Records the terminal result produced by a recovered continuation.
+     *
+     * <p>The application records ordinary execution results, but its original completion stage has
+     * already ended with a durable-suspension signal by the time a recovery worker resumes this
+     * traversal. The recovery path therefore owns the eventual result write. An existing record is
+     * authoritative and makes a replay a no-op; this also keeps retry timestamps from manufacturing
+     * a conflicting fingerprint after a crash between the result write and trigger acknowledgement.</p>
+     */
+    void recordRecoveredResult(String graphVersion, UUID traversalId, GraphExecutionResult result,
+                               Throwable failure, Instant endedAt) {
+        Objects.requireNonNull(graphVersion, "graphVersion");
+        Objects.requireNonNull(traversalId, "traversalId");
+        Objects.requireNonNull(endedAt, "endedAt");
+        if (!store.supports(StoreCapability.EXECUTION_RESULTS)) return;
+        if (await(store.loadExecutionResult(key.tenantId(), traversalId)).isPresent()) return;
+        var nodes = result == null
+                ? ai.ravenroot.api.persistence.ExecutionResultNodes.empty()
+                : ai.ravenroot.api.persistence.ExecutionResultNodes.of(result.visitedNodes(),
+                        result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
+                        result.untakenEdges());
+        var status = failure == null ? ProcessInstanceStatus.COMPLETED : ProcessInstanceStatus.FAILED;
+        var reason = failure == null ? null : ExecutionTermination.reasonOf(failure);
+        Object payload = result == null ? null : result.payload();
+        var durable = ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId,
+                new GraphVersionPin(graphVersion), status, reason, endedAt, endedAt, payload, nodes,
+                failure, store.maxExecutionResultPayloadBytes());
+        await(store.recordExecutionResult(durable));
+    }
+
     private ExecutionRecorder(ExecutionStore store, ExecutionKey key, Duration leaseTtl,
                               LeaseHandle lease, long revision, ScheduledExecutorService renewals) {
         this.store = store;

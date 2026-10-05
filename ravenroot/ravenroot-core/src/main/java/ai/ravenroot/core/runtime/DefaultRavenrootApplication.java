@@ -1899,6 +1899,36 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     @Override
     public ExecutionSubmission startGraphMl(SecurityContext security, UUID executionId, InputStream graphMl,
                                             Object payload, ExecutionPolicy policy) {
+        return startGraphMlInternal(security, executionId, graphMl, payload, policy, false).submission();
+    }
+
+    /**
+     * Starts a registered intergraph child and exposes its in-process completion to the invocation
+     * capability. The ordinary public submission surface still returns only an identifier.
+     */
+    public StartedFlowExecution startCalledGraphMl(SecurityContext security, UUID executionId,
+                                                   InputStream graphMl, Object payload) {
+        return startCalledGraphMl(security, identitySource.nextProcessInstanceId(), executionId, graphMl, payload);
+    }
+
+    /** Starts a child with identities already committed in its durable invocation intent. */
+    public StartedFlowExecution startCalledGraphMl(SecurityContext security, UUID processInstanceId,
+                                                   UUID traversalId, InputStream graphMl, Object payload) {
+        StartedExecution started = startGraphMlInternal(security, traversalId, graphMl, payload,
+                ExecutionPolicy.STANDARD, true, processInstanceId);
+        return new StartedFlowExecution(started.submission(), started.completion());
+    }
+
+    private StartedExecution startGraphMlInternal(SecurityContext security, UUID executionId,
+                                                  InputStream graphMl, Object payload,
+                                                  ExecutionPolicy policy, boolean calledExecution) {
+        return startGraphMlInternal(security, executionId, graphMl, payload, policy, calledExecution, null);
+    }
+
+    private StartedExecution startGraphMlInternal(SecurityContext security, UUID executionId,
+                                                  InputStream graphMl, Object payload,
+                                                  ExecutionPolicy policy, boolean calledExecution,
+                                                  UUID reservedProcessInstanceId) {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
@@ -1952,7 +1982,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // traversal id must therefore BE the caller-supplied identifier, or events would be
         // unattributable to the reserved owner and fail closed. The process-instance id is PERS-01
         // identity and stays application-generated.
-        UUID processInstanceId = identitySource.nextProcessInstanceId();
+        UUID processInstanceId = reservedProcessInstanceId == null
+                ? identitySource.nextProcessInstanceId() : reservedProcessInstanceId;
         UUID traversalId = executionId;
         // Tenant, process-instance id, graph version and start time are captured here, at the
         // one place every path into activeExecutions already passes through, so GET
@@ -2000,15 +2031,17 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             ExecutionRecorder recorder = openRecorder(security, processInstanceId, revision);
             approvalBinding = toolApprovals == null || recorder == null ? null
                     : toolApprovals.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
+                            security.tenantId(), processInstanceId), recorder, runner);
             budgetBinding = agentBudgets == null || recorder == null ? null
                     : agentBudgets.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder, runner);
-            execution = java.util.Objects.requireNonNull(
-                    runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
+            execution = java.util.Objects.requireNonNull(calledExecution
+                    ? runner.executeCalled(security, processInstanceId, traversalId, payload, graphVersion,
+                            null, null, recorder)
+                    : runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
                             null, null, recorder),
                     "execution result");
             AutoCloseable binding = approvalBinding;
@@ -2153,7 +2186,21 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             }
             throw startupFailure;
         }
-        return new ExecutionSubmission(processInstanceId, traversalId, graphVersion);
+        return new StartedExecution(new ExecutionSubmission(processInstanceId, traversalId, graphVersion),
+                execution);
+    }
+
+    /** Child identity and completion kept on the trusted internal call path. */
+    public record StartedFlowExecution(ExecutionSubmission submission,
+                                       java.util.concurrent.CompletionStage<GraphExecutionResult> completion) {
+        public StartedFlowExecution {
+            java.util.Objects.requireNonNull(submission, "submission");
+            java.util.Objects.requireNonNull(completion, "completion");
+        }
+    }
+
+    private record StartedExecution(ExecutionSubmission submission,
+                                    java.util.concurrent.CompletionStage<GraphExecutionResult> completion) {
     }
 
     /**

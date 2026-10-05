@@ -1217,7 +1217,29 @@ final class SqliteSchema {
                         "CREATE TABLE replay_source_settlement (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, source_revision INTEGER NOT NULL, fencing_token INTEGER NOT NULL, manifest_digest TEXT NOT NULL, settled_at_epoch_second INTEGER NOT NULL, settled_at_nano INTEGER NOT NULL, retained_until_epoch_second INTEGER NOT NULL, retained_until_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
                         "CREATE TABLE derived_execution_ancestry (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, source_process_instance_id TEXT NOT NULL, boundary_seeds TEXT NOT NULL, work_traversal_id TEXT NOT NULL, work_invocation_id TEXT NOT NULL, work_attempt_id TEXT NOT NULL, work_boundary_node_id TEXT NOT NULL, work_predecessor_ids TEXT NOT NULL, work_source_node_id TEXT NOT NULL, work_command TEXT NOT NULL, work_payload_content_type TEXT NOT NULL, work_payload_bytes BLOB NOT NULL, work_attributes_content_type TEXT NOT NULL, work_attributes_bytes BLOB NOT NULL, request_id TEXT NOT NULL, request_subject TEXT NOT NULL, request_principal_type TEXT NOT NULL, request_issuer TEXT NOT NULL, request_fingerprint TEXT NOT NULL, requester TEXT NOT NULL, reason TEXT NOT NULL, repeatability_decision TEXT NOT NULL, admitted_at_epoch_second INTEGER NOT NULL, admitted_at_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)")),
                 new SchemaMigration(39, "selective replay source outcome ambiguity", List.of(
-                        "ALTER TABLE replay_source_settlement ADD COLUMN source_outcome_ambiguous INTEGER NOT NULL DEFAULT 1 CHECK (source_outcome_ambiguous IN (0, 1))")));
+                        "ALTER TABLE replay_source_settlement ADD COLUMN source_outcome_ambiguous INTEGER NOT NULL DEFAULT 1 CHECK (source_outcome_ambiguous IN (0, 1))")),
+                new SchemaMigration(40, "durable intergraph invocation relations", List.of(
+                        """
+                        CREATE TABLE IF NOT EXISTS flow_invocation (
+                            tenant_id TEXT NOT NULL, handle TEXT NOT NULL,
+                            caller_process_instance_id TEXT NOT NULL, caller_traversal_id TEXT NOT NULL,
+                            caller_invocation_id TEXT NOT NULL, caller_subject TEXT NOT NULL,
+                            caller_principal_type TEXT NOT NULL, caller_issuer TEXT NOT NULL,
+                            target_deployment_id TEXT NOT NULL, target_version INTEGER NOT NULL,
+                            target_digest TEXT NOT NULL, child_process_instance_id TEXT NOT NULL,
+                            child_traversal_id TEXT NOT NULL, status TEXT NOT NULL,
+                            input BLOB NOT NULL, result BLOB, failure_code TEXT NOT NULL,
+                            failure_message TEXT NOT NULL, continuation_claim TEXT, revision INTEGER NOT NULL,
+                            created_at_epoch_second INTEGER NOT NULL, created_at_nano INTEGER NOT NULL,
+                            updated_at_epoch_second INTEGER NOT NULL, updated_at_nano INTEGER NOT NULL,
+                            deadline_at_epoch_second INTEGER NOT NULL, deadline_at_nano INTEGER NOT NULL,
+                            retained_until_epoch_second INTEGER NOT NULL, retained_until_nano INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, handle),
+                            UNIQUE (tenant_id, caller_process_instance_id, caller_invocation_id)
+                        )
+                        """,
+                        "CREATE INDEX IF NOT EXISTS flow_invocation_recovery ON flow_invocation (tenant_id, status, created_at_epoch_second, created_at_nano)",
+                        "CREATE INDEX IF NOT EXISTS flow_invocation_retention ON flow_invocation (tenant_id, retained_until_epoch_second, retained_until_nano)")));
     }
 
     static int currentVersion() {

@@ -316,22 +316,16 @@ public final class ExecutionResultRegistry {
      * The four-way answer defined by {@link ExecutionLookup}; never null, never an empty body.
      *
      * <p>In-memory first, durable second, and the durable read happens outside this object's monitor
-     * so a slow store cannot stall every other execution in the process. <b>The only local answer
-     * returned without consulting the store is an {@link ExecutionLookup.Found} whose status is not
-     * terminal</b>, because that is the only one the store is guaranteed to have nothing to say
-     * about: {@link DurableExecutionResult} refuses a non-terminal status outright, so no record for
-     * a still-running traversal can exist. Every other answer this process can give — a terminal
-     * {@code Found}, a {@link ExecutionLookup.Redacted}, a tombstone's
-     * {@link ExecutionLookup.Expired}, and {@link ExecutionLookup.Unknown} — falls through, and the
-     * record wins wherever one is found.</p>
+     * so a slow store cannot stall every other execution in the process. Every local answer yields
+     * to a durable terminal record. This includes a local {@code RUNNING} entry: a durable Human
+     * Task, tool, runner, or flow wait ends the original in-process completion stage, and a recovery
+     * worker may later commit the terminal result while that stale local entry still exists.</p>
      *
      * <h2>The cost of that, stated rather than hidden</h2>
-     * <p>A terminal read costs one store read even when this process holds the result. It is bought
-     * deliberately, because the alternative is not "a cheaper read" but "an answer that depends on
-     * which instance was asked", which is the one property the durable record exists to establish.
-     * The traffic that made the in-memory-first ordering worth having is untouched: a caller polling
-     * a running execution is answered from memory on every poll, and reaches the store exactly once
-     * the traversal ends.</p>
+     * <p>Every read costs one store read when durable results are composed, including a caller
+     * polling an execution that is locally marked running. That cost closes the restart boundary:
+     * the recovery worker which writes the terminal record is not necessarily the application
+     * instance which still owns the stale local entry.</p>
      *
      * <h2>Neither an eviction nor a warm hit may outrank the record</h2>
      * <p>{@code Expired} used to be returned outright, on the reasoning that a tombstone this process
@@ -370,26 +364,12 @@ public final class ExecutionResultRegistry {
      */
     public ExecutionLookup lookup(Key key) {
         ExecutionLookup local = lookupLocal(key);
-        if (durable == null || answerableHereAlone(local)) {
+        if (durable == null) {
             return local;
         }
         return durable.load(key.tenantId(), key.executionId())
                 .<ExecutionLookup>map(ExecutionResultRegistry::project)
                 .orElse(local);
-    }
-
-    /**
-     * Whether {@code local} is an answer the durable record is guaranteed to have nothing to say
-     * about, which is the exact and only condition under which the store is not consulted.
-     *
-     * <p>Expressed as "not terminal" rather than as "RUNNING" because it is the terminality that
-     * carries the argument, not the particular status: {@link DurableExecutionResult} refuses to
-     * exist for a non-terminal status, so no amount of retention policy, purging or clock movement
-     * can produce a record this branch would have skipped. Every other local answer is one the
-     * record may legitimately contradict.</p>
-     */
-    private static boolean answerableHereAlone(ExecutionLookup local) {
-        return local instanceof ExecutionLookup.Found found && !found.outcome().status().terminal();
     }
 
     private synchronized ExecutionLookup lookupLocal(Key key) {

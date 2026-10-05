@@ -178,6 +178,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
     private final Map<SagaKey, SagaSnapshot> sagas = new LinkedHashMap<>();
     private final Map<OutboxKey, OutboxEntry> sagaOutbox = new LinkedHashMap<>();
+    private final Map<FlowKey, ai.ravenroot.api.flow.FlowInvocationRecord> flowInvocations =
+            new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
         this(Clock.systemUTC(), InMemoryExecutionStorePolicy.DEFAULTS);
@@ -315,7 +317,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // cannot honour is survival of process death, which is what DURABLE
                 // says and what this adapter still does not say.
                 StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
-                StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+                StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
+                StoreCapability.FLOW_INVOCATIONS);
     }
 
     @Override
@@ -1843,6 +1846,246 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         };
     }
 
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return admitFlowInvocation(intent, Integer.MAX_VALUE);
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            Objects.requireNonNull(intent, "intent");
+            if (maximumUnfinishedPerTenant < 1) {
+                throw new IllegalArgumentException("maximumUnfinishedPerTenant must be positive");
+            }
+            if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT
+                    || intent.revision() != 1) {
+                throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
+            }
+            synchronized (monitor) {
+                var key = new FlowKey(intent.tenantId(), intent.handle());
+                ai.ravenroot.api.flow.FlowInvocationRecord existing = flowInvocations.get(key);
+                if (existing != null) {
+                    if (sameFlowIntent(existing, intent)) return existing;
+                    throw new IllegalStateException("flow handle is already bound to another intent");
+                }
+                ai.ravenroot.api.flow.FlowInvocationRecord callerExisting = flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(intent.tenantId())
+                                && record.callerProcessInstanceId().equals(intent.callerProcessInstanceId())
+                                && record.callerInvocationId().equals(intent.callerInvocationId()))
+                        .findFirst().orElse(null);
+                if (callerExisting != null) return callerExisting;
+                long unfinished = flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(intent.tenantId()) && !record.terminal())
+                        .count();
+                if (unfinished >= maximumUnfinishedPerTenant) {
+                    throw new IllegalStateException("tenant flow invocation quota is exhausted");
+                }
+                flowInvocations.put(key, intent);
+                return intent;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(handle, "handle");
+            synchronized (monitor) {
+                return Optional.ofNullable(flowInvocations.get(new FlowKey(tenantId, handle)));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> findFlowInvocationByCaller(
+            String tenantId, UUID callerProcessInstanceId, UUID callerInvocationId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            java.util.Objects.requireNonNull(callerProcessInstanceId, "callerProcessInstanceId");
+            java.util.Objects.requireNonNull(callerInvocationId, "callerInvocationId");
+            synchronized (monitor) {
+                return flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(tenantId)
+                                && record.callerProcessInstanceId().equals(callerProcessInstanceId)
+                                && record.callerInvocationId().equals(callerInvocationId))
+                        .findFirst();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        try {
+            return complete(() -> {
+                requireCapability(StoreCapability.FLOW_INVOCATIONS);
+                requireTenantId(tenantId);
+                Objects.requireNonNull(mutation, "mutation");
+                synchronized (monitor) {
+                    var key = new FlowKey(tenantId, mutation.handle());
+                    var current = flowInvocations.get(key);
+                    if (current == null) return missingFlow(mutation.handle());
+                    if (current.revision() != mutation.expectedRevision()) {
+                        if (sameFlowMutation(current, mutation)) return current;
+                        throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
+                                mutation.expectedRevision(), current.revision());
+                    }
+                    requireFlowTransition(current, mutation);
+                    var next = new ai.ravenroot.api.flow.FlowInvocationRecord(
+                            current.tenantId(), current.handle(), current.callerProcessInstanceId(),
+                            current.callerTraversalId(), current.callerInvocationId(),
+                            current.callerSubject(), current.callerPrincipalType(), current.callerIssuer(),
+                            current.targetDeploymentId(), current.targetVersion(), current.targetDigest(),
+                            mutation.childProcessInstanceId(), mutation.childTraversalId(), mutation.status(),
+                            current.input(), mutation.result(), mutation.failureCode(), mutation.failureMessage(),
+                            mutation.continuationClaim(), current.revision() + 1, current.createdAt(),
+                            mutation.updatedAt(), current.deadlineAt(), current.retainedUntil());
+                    flowInvocations.put(key, next);
+                    return next;
+                }
+            });
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(refused);
+        }
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> unfinishedFlowInvocations(
+            String tenantId, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            synchronized (monitor) {
+                return flowInvocations.entrySet().stream()
+                        .filter(entry -> entry.getKey().tenantId().equals(tenantId))
+                        .map(Map.Entry::getValue)
+                        .filter(record -> !record.terminal())
+                        .sorted(java.util.Comparator.comparing(ai.ravenroot.api.flow.FlowInvocationRecord::createdAt)
+                                .thenComparing(record -> record.handle().toString()))
+                        .limit(limit)
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocations(
+            String tenantId, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS); requireTenantId(tenantId);
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            synchronized (monitor) {
+                return flowInvocations.values().stream().filter(record -> record.tenantId().equals(tenantId))
+                        .sorted(java.util.Comparator.comparing(ai.ravenroot.api.flow.FlowInvocationRecord::createdAt)
+                                .thenComparing(record -> record.handle().toString())).limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocationsAfter(
+            String tenantId, Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(afterExclusive, "afterExclusive");
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            String cursor = afterExclusive.map(Object::toString).orElse("");
+            synchronized (monitor) {
+                return flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(tenantId)
+                                && record.handle().toString().compareTo(cursor) > 0)
+                        .sorted(java.util.Comparator.comparing(record -> record.handle().toString()))
+                        .limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                long before = flowInvocations.size();
+                Instant now = clock.instant();
+                flowInvocations.entrySet().removeIf(entry -> entry.getKey().tenantId().equals(tenantId)
+                        && entry.getValue().terminal()
+                        && !entry.getValue().retainedUntil().isAfter(now));
+                return before - (long) flowInvocations.size();
+            }
+        });
+    }
+
+    private static ai.ravenroot.api.flow.FlowInvocationRecord missingFlow(
+            ai.ravenroot.api.flow.FlowHandle handle) {
+        throw new IllegalArgumentException("unknown flow handle " + handle);
+    }
+
+    private static boolean sameFlowIntent(ai.ravenroot.api.flow.FlowInvocationRecord left,
+                                          ai.ravenroot.api.flow.FlowInvocationRecord right) {
+        return left.handle().equals(right.handle())
+                && left.callerProcessInstanceId().equals(right.callerProcessInstanceId())
+                && left.callerTraversalId().equals(right.callerTraversalId())
+                && left.callerInvocationId().equals(right.callerInvocationId())
+                && left.targetDeploymentId().equals(right.targetDeploymentId())
+                && left.targetVersion() == right.targetVersion()
+                && left.targetDigest().equals(right.targetDigest())
+                && java.util.Arrays.equals(left.input(), right.input());
+    }
+
+    private static boolean sameFlowMutation(ai.ravenroot.api.flow.FlowInvocationRecord current,
+                                            ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        return current.status() == mutation.status()
+                && Objects.equals(current.childProcessInstanceId(), mutation.childProcessInstanceId())
+                && Objects.equals(current.childTraversalId(), mutation.childTraversalId())
+                && java.util.Arrays.equals(current.result(), mutation.result())
+                && current.failureCode().equals(mutation.failureCode())
+                && current.failureMessage().equals(mutation.failureMessage())
+                && Objects.equals(current.continuationClaim(), mutation.continuationClaim());
+    }
+
+    private static void requireFlowTransition(ai.ravenroot.api.flow.FlowInvocationRecord current,
+                                              ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        if (mutation.updatedAt().isBefore(current.updatedAt())) {
+            throw new IllegalArgumentException("flow invocation update time cannot retreat");
+        }
+        if (current.terminal() && mutation.status() != current.status()) {
+            throw new IllegalStateException("a terminal flow invocation cannot change outcome");
+        }
+        if (current.childTraversalId() != null
+                && (!current.childTraversalId().equals(mutation.childTraversalId())
+                || !current.childProcessInstanceId().equals(mutation.childProcessInstanceId()))) {
+            throw new IllegalStateException("a flow invocation cannot change child identity");
+        }
+        if (current.status() == ai.ravenroot.api.flow.FlowInvocationStatus.INTENT
+                && mutation.status() != current.status()
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.LAUNCHED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.FAILED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.CANCELLED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.DEADLINE_EXCEEDED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.AMBIGUOUS) {
+            throw new IllegalStateException("invalid INTENT settlement");
+        }
+        if (current.status() == ai.ravenroot.api.flow.FlowInvocationStatus.LAUNCHED
+                && mutation.status() == ai.ravenroot.api.flow.FlowInvocationStatus.INTENT) {
+            throw new IllegalStateException("a launched flow invocation cannot return to INTENT");
+        }
+        if (current.continuationClaim() != null
+                && !current.continuationClaim().equals(mutation.continuationClaim())) {
+            throw new IllegalStateException("a flow invocation accepts at most one continuation claimant");
+        }
+    }
+
     /**
      * Discards everything, which for a <strong>non-durable</strong> adapter is exactly right
      * (ADR 0010 section 13.1): retaining state across close would falsely simulate durability, which
@@ -1869,6 +2112,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             inventoryRetainedFrom.clear();
             executionResults.clear();
             executionResultsRetainedFrom.clear();
+            flowInvocations.clear();
         }
     }
 
@@ -3534,6 +3778,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     /** A recorded result, addressable only with the tenant that owns it. */
     private record ResultKey(String tenantId, UUID traversalId) {
+    }
+
+    private record FlowKey(String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
     }
 
     private record IdempotencyKey(String tenantId, String key) {

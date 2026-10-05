@@ -14,6 +14,41 @@ class PostgresProcessControlMigrationTest {
     static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC);
 
     @Test
+    void intergraphMigrationAcceptsAnExistingTableAndPreservesItsRows() throws Exception {
+        var source = PostgresTestDatabase.dataSourceFor("flow-marker-recovery-" + UUID.randomUUID());
+        var handle = new ai.ravenroot.api.flow.FlowHandle(UUID.randomUUID());
+        var callerProcess = UUID.randomUUID();
+        var callerTraversal = UUID.randomUUID();
+        var callerInvocation = UUID.randomUUID();
+        Instant now = CLOCK.instant();
+        var intent = new ai.ravenroot.api.flow.FlowInvocationRecord("acme", handle, callerProcess,
+                callerTraversal, callerInvocation, "alice",
+                ai.ravenroot.api.security.PrincipalType.USER, "issuer",
+                ai.ravenroot.api.deployment.DeploymentId.of("target"), 3, "a".repeat(64),
+                UUID.randomUUID(), UUID.randomUUID(),
+                ai.ravenroot.api.flow.FlowInvocationStatus.INTENT,
+                "preserved-input".getBytes(java.nio.charset.StandardCharsets.UTF_8), null,
+                "", "", null, 1, now, now, now.plusSeconds(60), now.plusSeconds(120));
+
+        try (var store = new PostgresExecutionStore(source, CLOCK)) {
+            store.createFlowInvocation(intent).toCompletableFuture().join();
+        }
+        try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("DELETE FROM store_schema_history WHERE version = 16");
+            statement.execute("UPDATE store_schema_version SET version = 15");
+        }
+
+        try (var store = new PostgresExecutionStore(source, CLOCK)) {
+            var restored = store.loadFlowInvocation("acme", handle).toCompletableFuture().join()
+                    .orElseThrow();
+            assertEquals(callerProcess, restored.callerProcessInstanceId());
+            assertEquals(callerTraversal, restored.callerTraversalId());
+            assertEquals(callerInvocation, restored.callerInvocationId());
+            assertArrayEquals(intent.input(), restored.input());
+        }
+    }
+
+    @Test
     void legacyControlIsRecoveredOrExplicitlyHeldAndNewWritesNeverDependOnTheJournal() throws Exception {
         var source = PostgresTestDatabase.dataSourceFor("control-upgrade-" + UUID.randomUUID());
         java.util.function.Supplier<PostgresExecutionStore> open = () -> new PostgresExecutionStore(source, CLOCK);

@@ -185,6 +185,13 @@ public enum StoreCapability {
      */
     SELECTIVE_REPLAY_EVIDENCE,
 
+    /**
+     * Intergraph invocation intent, child correlation, settlement and single continuation claims
+     * are stored with compare-and-set revision semantics. Add {@link #DURABLE} when the relation
+     * survives process death.
+     */
+    FLOW_INVOCATIONS,
+
     /** Atomic process workspace and fenced runner jobs; add DURABLE for restart survival. */
     RUNNER_JOBS,
 

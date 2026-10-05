@@ -82,6 +82,8 @@ public final class HumanTaskService {
             ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_SCHEMA;
     public static final String CONFIRMATION_SCHEMA_VERSION =
             ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION;
+    /** Marker reserved for runtime-owned flow continuations, never a user Human Task. */
+    public static final String INTERNAL_FLOW_SCHEMA = "ravenroot.flow.result";
     private static final String EVENT_CONTENT_TYPE = "application/vnd.ravenroot.human-task-event+json";
     private final ExecutionStore store;
     private final Clock clock;
@@ -160,8 +162,20 @@ public final class HumanTaskService {
     }
 
     public HumanTaskResult suspend(NodeMessage message, HumanTaskDefinition definition) {
+        if (definition != null && INTERNAL_FLOW_SCHEMA.equals(definition.responseSchema().schema())) {
+            throw new IllegalArgumentException("the internal flow continuation schema is reserved");
+        }
+        return suspendInternal(message, definition, taskId(message));
+    }
+
+    /**
+     * Parks a node behind trusted runtime work whose opaque identifier is already durable.
+     * The supplied id is never accepted from graph properties or payloads.
+     */
+    public HumanTaskResult suspendInternal(NodeMessage message, HumanTaskDefinition definition, UUID taskId) {
         Objects.requireNonNull(message, "message");
         Objects.requireNonNull(definition, "definition");
+        Objects.requireNonNull(taskId, "taskId");
         ExecutionKey key = new ExecutionKey(message.security().tenantId(), message.processInstanceId());
         Set<String> configured = recoverableTenants;
         if (configured != null && !configured.contains(key.tenantId())) {
@@ -170,7 +184,6 @@ public final class HumanTaskService {
         LiveBinding binding = liveRecorders.get(key);
         if (binding == null) return new HumanTaskResult(HumanTaskResult.Code.UNAVAILABLE, null, null);
         ExecutionRecorder recorder = binding.recorder();
-        UUID taskId = taskId(message);
         DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         Instant now = clock.instant();
         int continuationVersion = 1;
@@ -227,6 +240,25 @@ public final class HumanTaskService {
         return new HumanTaskResult(HumanTaskResult.Code.CREATED, created, null);
     }
 
+    /** Resolves runtime-owned external work without manufacturing an ingress authorization context. */
+    public HumanTaskResult resolveInternal(String tenantId, UUID taskId, OpaquePayload response) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(response, "response");
+        DurableHumanTask task = await(store.loadHumanTask(tenantId, taskId)).orElse(null);
+        if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
+        if (!internalFlowTask(task)) {
+            return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
+        }
+        if (task.status().terminal()) return new HumanTaskResult(HumanTaskResult.Code.ALREADY_SETTLED,
+                task, resumeTraversalOf(task));
+        if (!validResponse(task, response)) {
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
+        }
+        return commitTerminal(task, task.generation(), HumanTaskStatus.RESOLVED,
+                "ravenroot|SERVICE|flow-runtime", response, "", "flow:" + taskId, null);
+    }
+
     private static Instant deadline(Instant now, Duration delay, String name) {
         try {
             return now.plus(delay);
@@ -248,7 +280,9 @@ public final class HumanTaskService {
             throw new IllegalArgumentException("human-task page limit must be between 1 and "
                     + policy.inboxMaxPageSize());
         }
-        return await(store.listHumanTasks(context.tenantId(), query));
+        HumanTaskPage page = await(store.listHumanTasks(context.tenantId(), query));
+        return new HumanTaskPage(page.items().stream().filter(task -> !internalFlowTask(task)).toList(),
+                page.nextCursor());
     }
 
     /** Administrative consistency classes, ordered from ordinary to unsafe. */
@@ -317,6 +351,7 @@ public final class HumanTaskService {
             UUID lastScanned = null;
             for (DurableHumanTask task : page.items()) {
                 lastScanned = task.request().taskId();
+                if (internalFlowTask(task)) continue;
                 AdminItem item = adminItem(task);
                 if (adminMatches(item, query)) {
                     result.add(item);
@@ -614,7 +649,12 @@ public final class HumanTaskService {
         var authorization = new HumanTaskAttentionAuthorization(
                 SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes(),
                 policy.responderEnforcementEnabled());
-        return await(store.listHumanTaskAttention(context.tenantId(), query, authorization));
+        HumanTaskAttentionPage page = await(store.listHumanTaskAttention(context.tenantId(), query, authorization));
+        // Internal flow waits use CLASSIC presentation and therefore cannot enter this projection.
+        // Keep the load check as a defense if a persistence adapter ever broadens that predicate.
+        var visible = page.items().stream().filter(item -> !internalFlowTask(context.tenantId(), item.taskId()))
+                .toList();
+        return new HumanTaskAttentionPage(visible, page.nextCursor(), page.counts(), page.nodeCounts());
     }
 
     /**
@@ -633,6 +673,7 @@ public final class HumanTaskService {
         var authorization = new HumanTaskAttentionAuthorization(
                 SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes(),
                 policy.responderEnforcementEnabled());
+        if (internalFlowTask(context.tenantId(), locator.taskId())) return Optional.empty();
         return await(store.findHumanTaskAttention(context.tenantId(), locator, authorization));
     }
 
@@ -656,6 +697,7 @@ public final class HumanTaskService {
                 policy.responderEnforcementEnabled(), true);
         Optional<HumanTaskAttentionItem> item = await(store.findHumanTaskAttention(
                 context.tenantId(), locator, authorization));
+        if (internalFlowTask(context.tenantId(), locator.taskId())) return Optional.empty();
         item.ifPresent(ignored -> auditOverrideAccess(context, locator, override));
         return item;
     }
@@ -922,6 +964,7 @@ public final class HumanTaskService {
         Objects.requireNonNull(settlement, "settlement");
         DurableHumanTask task = await(store.loadHumanTask(tenantId, taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
+        if (internalFlowTask(task)) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
         var presentation = task.request().presentation();
         boolean generationCurrent = task.generation() == expectedGeneration
                 || task.status().terminal() && task.generation() == expectedGeneration + 1;
@@ -1038,6 +1081,7 @@ public final class HumanTaskService {
         Objects.requireNonNull(context, "context");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
+        if (internalFlowTask(task)) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
         String actor = SecurityContext.of(context).qualifiedIdentity();
         if (!delegatedCapability && !authorized(task, context, target, override != null)) {
             auditOnly(task, override == null ? "HUMAN_TASK_UNAUTHORIZED"
@@ -1165,6 +1209,14 @@ public final class HumanTaskService {
         } catch (RuntimeException malformed) {
             return false;
         }
+    }
+
+    private boolean internalFlowTask(String tenantId, UUID taskId) {
+        return await(store.loadHumanTask(tenantId, taskId)).map(HumanTaskService::internalFlowTask).orElse(false);
+    }
+
+    private static boolean internalFlowTask(DurableHumanTask task) {
+        return INTERNAL_FLOW_SCHEMA.equals(task.request().responseSchema().schema());
     }
 
     private HumanTaskResult nonTerminal(ExecutionKey key, UUID taskId, long expectedGeneration,

@@ -299,6 +299,14 @@ public final class RavenrootServerMain {
                 : new ai.ravenroot.core.process.ProcessLifecycleService(
                         executionStore, application, humanTasks, java.time.Clock.systemUTC());
         var deploymentRegistry = executionStoreOwner.deploymentRegistry();
+        var flowInvocations = executionStore != null && deploymentRegistry != null && humanTasks != null
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.FLOW_INVOCATIONS)
+                ? new ai.ravenroot.core.flow.DefaultFlowInvocationCapability(
+                        executionStore, deploymentRegistry, application, humanTasks,
+                        ai.ravenroot.core.flow.FlowTargetAuthorizer.creatorOwnedTargets(),
+                        ai.ravenroot.core.flow.FlowInvocationPolicy.DEFAULTS, java.time.Clock.systemUTC())
+                : null;
+        if (flowInvocations != null) behaviors.withFlowInvocations(flowInvocations);
         var deploymentSingleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
@@ -331,6 +339,11 @@ public final class RavenrootServerMain {
         } else {
             var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
                     .fromEnvironment(System.getenv());
+            if (flowInvocations != null) {
+                for (String tenantId : recoveryConfiguration.tenantIds()) {
+                    flowInvocations.recoverTenant(tenantId).toCompletableFuture().join();
+                }
+            }
             // The same replica and the same JVM start as the runtime above, and a different role.
             // Distinct on purpose: the shared store's claim-candidate query skips instances whose
             // live lease belongs to a different worker, and a claim by the same worker keeps the
@@ -625,6 +638,7 @@ public final class RavenrootServerMain {
             } finally {
                 if (approvalRecovery != null) approvalRecovery.close();
                 if (runnerRecovery != null) runnerRecovery.close();
+                if (flowInvocations != null) flowInvocations.close();
                 if (recoveryDiscovery != null) recoveryDiscovery.close();
                 if (localRunner != null) try { localRunner.close(); }
                 catch (RuntimeException unconfirmed) {
@@ -693,6 +707,7 @@ public final class RavenrootServerMain {
             if (recoveryDiscovery != null) recoveryDiscovery.close();
             if (approvalRecovery != null) approvalRecovery.close();
             if (runnerRecovery != null) runnerRecovery.close();
+            if (flowInvocations != null) flowInvocations.close();
             userCredentials.close();
             closeEmbedRegistrations(embedRegistrations);
             assistantComposition.close();

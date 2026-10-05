@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1788,7 +1788,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -5663,7 +5663,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
+          "digest": "09c0851b2ab14ebd3f2a8ad8c26f712986e9977659a3c14ec7b3539eba51e4ce",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],

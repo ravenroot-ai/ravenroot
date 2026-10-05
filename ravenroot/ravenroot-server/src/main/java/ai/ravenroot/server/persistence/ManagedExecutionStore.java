@@ -69,7 +69,10 @@ public final class ManagedExecutionStore implements InvocationHandler {
             "purgeExpiredProcessInstances", "executionResultRetention", "maxExecutionResultPayloadBytes",
             "recordExecutionResult", "loadExecutionResult", "executionResultsRetainedFrom",
             "purgeExpiredExecutionResults", "replayEvidence", "recordReplaySettlement",
-            "replaySettlement", "derivedAncestry", "loadSaga", "listSagas", "listSagaCommands", "close");
+            "replaySettlement", "derivedAncestry", "loadSaga", "listSagas", "listSagaCommands",
+            "createFlowInvocation", "admitFlowInvocation", "loadFlowInvocation",
+            "findFlowInvocationByCaller", "mutateFlowInvocation", "unfinishedFlowInvocations",
+            "retainedFlowInvocations", "retainedFlowInvocationsAfter", "purgeExpiredFlowInvocations", "close");
 
     private final ExecutionStore delegate;
     private final ExecutionManifestStore manifests;

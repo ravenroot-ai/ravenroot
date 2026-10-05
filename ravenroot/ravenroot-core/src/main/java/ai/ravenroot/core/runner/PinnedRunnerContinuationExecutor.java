@@ -268,7 +268,7 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
         };
         try {
             if (humanTasks != null) bindings.add(humanTasks.bindLive(key, recorder, runner));
-            if (approvals != null) bindings.add(approvals.bindLive(key, recorder, runner::continuationBudget));
+            if (approvals != null) bindings.add(approvals.bindLive(key, recorder, runner));
             if (agentBudgets != null) bindings.add(agentBudgets.bindLive(key, recorder));
             return release;
         } catch (RuntimeException failure) { release.run(); throw failure; }

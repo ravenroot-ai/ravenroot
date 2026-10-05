@@ -45,6 +45,19 @@ public final class BehaviorRegistry {
     }
 
     public ai.ravenroot.core.runner.RunnerJobService runnerJobs() { return runnerJobs; }
+    private ai.ravenroot.api.flow.FlowInvocationCapability flowInvocations;
+
+    /** Installs the internal intergraph capability and its three built-in authoring nodes. */
+    public BehaviorRegistry withFlowInvocations(ai.ravenroot.api.flow.FlowInvocationCapability capability) {
+        if (flowInvocations != null) throw new IllegalStateException("flow invocations already configured");
+        ai.ravenroot.core.runtime.builtin.FlowNodeBehaviorFactories.all(
+                        java.util.Objects.requireNonNull(capability, "capability"))
+                .forEach(factory -> registerFactory(factory, NodeCatalogSource.core()));
+        flowInvocations = capability;
+        return this;
+    }
+
+    public ai.ravenroot.api.flow.FlowInvocationCapability flowInvocations() { return flowInvocations; }
     private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
             "log", "delay", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
             "cel-decision", "json-path", "boundary-guard");

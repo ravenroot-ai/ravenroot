@@ -108,6 +108,11 @@ import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.flow.FlowHandle;
+import ai.ravenroot.api.flow.FlowInvocationMutation;
+import ai.ravenroot.api.flow.FlowInvocationRecord;
+import ai.ravenroot.api.flow.FlowInvocationStatus;
 import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.PrincipalType;
@@ -130,6 +135,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -6611,6 +6617,106 @@ public abstract class ExecutionStoreContract {
     // ---- tenant isolation ----
 
     @Test
+    final void flowInvocationRelationSurvivesReopenAndFencesItsContinuationClaim() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        UUID callerProcess = UUID.randomUUID();
+        UUID callerTraversal = UUID.randomUUID();
+        UUID callerInvocation = UUID.randomUUID();
+        FlowInvocationRecord intent = flowIntent(DEFAULT_TENANT, callerProcess, callerTraversal, callerInvocation);
+        FlowInvocationRecord created = await(store().createFlowInvocation(intent));
+        assertEquals(created.handle(), await(store().findFlowInvocationByCaller(DEFAULT_TENANT,
+                callerProcess, callerInvocation)).orElseThrow().handle());
+        assertTrue(await(store().loadFlowInvocation("other", created.handle())).isEmpty());
+
+        ExecutionStore reopened = store().supports(StoreCapability.DURABLE) ? reopen() : store();
+        FlowInvocationRecord retained = await(reopened.loadFlowInvocation(DEFAULT_TENANT,
+                created.handle())).orElseThrow();
+        UUID claimant = UUID.randomUUID();
+        FlowInvocationRecord claimed = await(reopened.mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(retained, retained.status(), null, claimant)));
+        assertEquals(claimant, claimed.continuationClaim());
+        assertThrows(CompletionException.class, () -> await(reopened.mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(claimed, claimed.status(), null, UUID.randomUUID()))));
+    }
+
+    @Test
+    final void oneCallerInvocationCreatesOneFlowIntentAndTerminalRetentionIsExplicit() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        UUID callerProcess = UUID.randomUUID();
+        UUID callerTraversal = UUID.randomUUID();
+        UUID callerInvocation = UUID.randomUUID();
+        FlowInvocationRecord first = await(store().createFlowInvocation(
+                flowIntent(DEFAULT_TENANT, callerProcess, callerTraversal, callerInvocation)));
+        FlowInvocationRecord replay = await(store().createFlowInvocation(
+                flowIntent(DEFAULT_TENANT, callerProcess, callerTraversal, callerInvocation)));
+        assertEquals(first.handle(), replay.handle(), "caller retry must reuse the first durable intent");
+        assertEquals(1, await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).size());
+
+        FlowInvocationRecord launched = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(first, FlowInvocationStatus.LAUNCHED, null, null)));
+        byte[] output = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+        FlowInvocationRecord completed = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(launched, FlowInvocationStatus.COMPLETED, output, null)));
+        assertArrayEquals(output, completed.result());
+        assertTrue(await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).isEmpty());
+        assertEquals(1, await(store().retainedFlowInvocations(DEFAULT_TENANT, 10)).size());
+        clock().set(completed.retainedUntil());
+        assertEquals(1L, await(store().purgeExpiredFlowInvocations(DEFAULT_TENANT)));
+        assertTrue(await(store().loadFlowInvocation(DEFAULT_TENANT, completed.handle())).isEmpty());
+    }
+
+    @Test
+    final void concurrentFlowAdmissionCannotExceedTheTenantQuota() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        var gate = new CountDownLatch(1);
+        var attempts = java.util.stream.IntStream.range(0, 16)
+                .mapToObj(index -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        assertTrue(gate.await(10, TimeUnit.SECONDS));
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(interrupted);
+                    }
+                    return await(store().admitFlowInvocation(flowIntent(DEFAULT_TENANT,
+                            UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()), 1));
+                })).toList();
+        gate.countDown();
+        var admitted = new java.util.ArrayList<FlowInvocationRecord>();
+        var refused = new java.util.ArrayList<Throwable>();
+        for (var attempt : attempts) {
+            try {
+                admitted.add(attempt.join());
+            } catch (CompletionException failure) {
+                Throwable cause = failure;
+                while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+                refused.add(cause);
+            }
+        }
+        assertEquals(1, admitted.size());
+        assertEquals(15, refused.size());
+        assertTrue(refused.stream().allMatch(IllegalStateException.class::isInstance));
+        assertEquals(1, await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).size());
+    }
+
+    @Test
+    final void retainedFlowPagesAdvanceByAStableExclusiveHandleCursor() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        var created = java.util.stream.IntStream.range(0, 5)
+                .mapToObj(index -> await(store().createFlowInvocation(flowIntent(DEFAULT_TENANT,
+                        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))))
+                .sorted(java.util.Comparator.comparing(record -> record.handle().toString()))
+                .toList();
+        var first = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT, Optional.empty(), 2));
+        var second = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT,
+                Optional.of(first.getLast().handle()), 2));
+        var third = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT,
+                Optional.of(second.getLast().handle()), 2));
+        var paged = java.util.stream.Stream.of(first, second, third).flatMap(List::stream).toList();
+        assertEquals(created.stream().map(FlowInvocationRecord::handle).toList(),
+                paged.stream().map(FlowInvocationRecord::handle).toList());
+    }
+
+    @Test
     final void aCrossTenantResultReadIsIndistinguishableFromAMissingOne() {
         assumeCapability(StoreCapability.EXECUTION_RESULTS);
         String owner = "result-tenant-owner";
@@ -7220,6 +7326,23 @@ public abstract class ExecutionStoreContract {
     }
 
     private record SagaCommandFixture(ExecutionKey key, UUID sagaId, SagaCommandIntent command) { }
+
+    private FlowInvocationRecord flowIntent(String tenant, UUID callerProcess, UUID callerTraversal,
+                                            UUID callerInvocation) {
+        Instant now = clock().instant();
+        return new FlowInvocationRecord(tenant, new FlowHandle(UUID.randomUUID()), callerProcess,
+                callerTraversal, callerInvocation, "alice", PrincipalType.USER, "issuer",
+                DeploymentId.of("target"), 7, "a".repeat(64), UUID.randomUUID(), UUID.randomUUID(),
+                FlowInvocationStatus.INTENT, "{\"input\":1}".getBytes(StandardCharsets.UTF_8), null,
+                "", "", null, 1, now, now, now.plusSeconds(60), now.plusSeconds(120));
+    }
+
+    private FlowInvocationMutation flowMutation(FlowInvocationRecord current, FlowInvocationStatus status,
+                                                  byte[] result, UUID claimant) {
+        return new FlowInvocationMutation(current.handle(), current.revision(), status,
+                current.childProcessInstanceId(), current.childTraversalId(), result, "", "", claimant,
+                clock().instant());
+    }
 
     private static <T> T await(CompletionStage<T> stage) {
         return stage.toCompletableFuture().join();

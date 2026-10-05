@@ -1213,17 +1213,17 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         expected = audit.external_io_policy_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(expected)
         assert expected is not None
-        self.assertEqual(40, len(expected["contracts"]))
-        self.assertEqual(81, sum(len(contract["candidateIds"])
+        self.assertEqual(41, len(expected["contracts"]))
+        self.assertEqual(84, sum(len(contract["candidateIds"])
                                  for contract in expected["contracts"]))
         self.assertEqual({
             "derived": 11, "presentation-text": 38,
-            "protocol-or-format-invariant": 70,
+            "protocol-or-format-invariant": 104,
             "published-contract-description": 2,
-            "security-ceiling-or-default": 78,
+            "security-ceiling-or-default": 86,
         }, {partition["classification"]: len(partition["candidateIds"])
             for partition in expected["semanticPartitions"]})
-        self.assertEqual(280, len(expected["candidateIds"]))
+        self.assertEqual(325, len(expected["candidateIds"]))
         self.assertEqual(set(expected["candidateIds"]),
                          audit.external_io_policy_cohort_candidate_ids(discovered))
 
@@ -1295,7 +1295,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        self.assertEqual(1232, len(program["candidateIds"]))
+        self.assertEqual(1240, len(program["candidateIds"]))
         self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
@@ -7104,7 +7104,7 @@ class JwkPolicyAuditTest(unittest.TestCase):
 
     def test_jwk_policy_is_derived_from_exact_settings_typed_slots_and_consumers(self) -> None:
         self.assertEqual(3, self.authority["logicalSettingCount"])
-        self.assertEqual(26, len(self.authority["candidateIds"]))
+        self.assertEqual(29, len(self.authority["candidateIds"]))
         contracts = {contract["setting"]: contract for contract in self.authority["contracts"]}
         self.assertEqual("already-centralized", contracts["security.oidc.jwks-cache-seconds"]["status"])
         self.assertEqual([], contracts["security.oidc.jwks-cache-seconds"]["defaultCandidateIds"])

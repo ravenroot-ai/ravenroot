@@ -3471,6 +3471,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"settings", "semanticPartitions"} and path[3].isdigit() \
             and path[4] == "candidateIds":
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "activityCaptureAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "activityCaptureAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultEvidence"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -3695,6 +3702,18 @@ def remap_declared_candidate_references(document: dict[str, object],
                 for row in authority.get(field, []):
                     if isinstance(row, dict):
                         remap_list(row, "candidateIds")
+
+    activity_capture_authorities = document.get("activityCaptureAuthorities")
+    if isinstance(activity_capture_authorities, dict):
+        for authority in activity_capture_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultEvidence")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None

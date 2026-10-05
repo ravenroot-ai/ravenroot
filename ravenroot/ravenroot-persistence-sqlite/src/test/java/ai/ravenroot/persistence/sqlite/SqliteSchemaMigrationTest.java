@@ -10,6 +10,7 @@ import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -82,6 +83,11 @@ class SqliteSchemaMigrationTest {
     @Test
     void intergraphMigrationAcceptsAnExistingTableAndPreservesItsRows() throws Exception {
         Path file = databaseDirectory.resolve("flow-marker-recovery.db");
+        int flowVersion = SqliteSchema.migrations().stream()
+                .filter(migration -> migration.statements().stream()
+                        .anyMatch(statement -> statement.contains("CREATE TABLE IF NOT EXISTS flow_invocation")))
+                .mapToInt(SchemaMigration::version)
+                .findFirst().orElseThrow(() -> new AssertionError("no intergraph invocation migration"));
         var handle = new ai.ravenroot.api.flow.FlowHandle(UUID.randomUUID());
         var callerProcess = UUID.randomUUID();
         var callerTraversal = UUID.randomUUID();
@@ -100,9 +106,12 @@ class SqliteSchemaMigrationTest {
             store.createFlowInvocation(intent).toCompletableFuture().join();
         }
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + file);
+             PreparedStatement removeMarker = connection.prepareStatement(
+                     "DELETE FROM store_schema_history WHERE version = ?");
              Statement statement = connection.createStatement()) {
-            statement.execute("DELETE FROM store_schema_history WHERE version = 36");
-            statement.execute("PRAGMA user_version = 35");
+            removeMarker.setInt(1, flowVersion);
+            assertEquals(1, removeMarker.executeUpdate());
+            statement.execute("PRAGMA user_version = " + (flowVersion - 1));
         }
 
         try (var store = new SqliteExecutionStore(file, CLOCK)) {

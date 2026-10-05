@@ -149,6 +149,13 @@ ROW_BOUNDARIES = {
     "RAVENROOT_TRUSTED_PROXY_ADDRESSES": (
         "comma-separated exact IP literals trusted as proxy peers; blank trusts none"
     ),
+    "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY": (
+        "administrator-owned canonical padded Base64 of strict version-1 JSON; unset grants no "
+        "scoped reserved-network admission or plaintext; rules bind exact finite protocol, port, "
+        "profile and destination scopes, while legacy exceptions remain admission-only and never "
+        "widen plaintext; see the [schema and precedence contract]"
+        "(../operator-guide/credentials-egress.md#trusted-networks-and-plaintext-transports)"
+    ),
 }
 
 
@@ -292,7 +299,8 @@ def group(name: str) -> str:
             or name in {"RAVENROOT_NODE_PACKAGES", "RAVENROOT_PLUGINS_INSTALL_DIR"}:
         return "plugin"
     if name.startswith("RAVENROOT_CREDENTIAL_") or name.startswith("RAVENROOT_HTTP_") \
-            or name in {"RAVENROOT_EGRESS_RESERVED_EXCEPTIONS", "RAVENROOT_TOKEN"}:
+            or name in {"RAVENROOT_EGRESS_RESERVED_EXCEPTIONS",
+                        "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY", "RAVENROOT_TOKEN"}:
         return "credential"
     if name.startswith(("RAVENROOT_AUTH_", "RAVENROOT_BROWSER_", "RAVENROOT_TRUSTED_TLS_")) \
             or name in {"RAVENROOT_BIND_ADDRESS", "RAVENROOT_CONTAINER_LOOPBACK_ONLY",

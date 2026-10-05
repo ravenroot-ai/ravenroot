@@ -97,6 +97,16 @@ that rule may an administrator change the profile security mode to `PLAIN`. Quer
 long-lived consumers repeat admission and plaintext checks immediately before each connection.
 `IMAPS` and required `STARTTLS` keep their existing certificate and hostname verification.
 
+Kafka rules must cover more than `bootstrap.servers`. Kafka uses bootstrap endpoints to discover
+advertised brokers and group coordinators, so every advertised hostname and port must fit the exact
+`kafka` tenant/profile rule. Ravenroot's pinned Kafka 4.1.2 adapter validates full metadata updates
+atomically, registers direct coordinator paths, resolves the original endpoint again immediately
+before every socket connection or reconnect, and permits only an address from that endpoint's fresh
+admitted set. A reused node id, numeric alias, changed port, failed metadata batch, or stale DNS answer
+cannot inherit a bootstrap grant. TLS connections keep Kafka's standard chain, hostname, and SNI
+verification. The guarded consumer uses Kafka's classic group protocol; a Kafka client upgrade must
+recompile this version-pinned adapter before deployment.
+
 ### Private PKI
 
 Mount the internal CA as a PKCS12 or JKS trust store and configure the JVM with
@@ -128,6 +138,8 @@ plaintext rule never downgrades an encrypted profile.
   only through an exact rule. IMAP queries, mutations, and consumers require an exact-scope proof
   from the administrator resolver and revalidate the destination at transport time; ordinary public
   constructors remain limited to `IMAPS` and required `STARTTLS`.
+  Kafka producer, consumer, DLQ, advertised-broker, coordinator, refresh, and reconnect paths share
+  the exact profile rule and revalidate at the final socket boundary.
 - S3-compatible object storage may use signed HTTP only when both its exact SigV4 service grant and
   a matching trusted-network plaintext rule admit the origin; HTTPS remains the default.
 - Assistant, JWKS, runner control/model, and OTLP administrator endpoints apply scoped admission and

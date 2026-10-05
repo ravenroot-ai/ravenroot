@@ -93,7 +93,7 @@ public record KafkaConsumerProfile(
                 || !POISON.contains(poisonPolicy)
                 || "dead-letter".equals(poisonPolicy) && (deadLetterTopic == null || !topic(deadLetterTopic))
                 || deadLetterTopic != null && topics.contains(deadLetterTopic)
-                || !tls && bootstrapServers.stream().filter(server -> !KafkaProfile.loopback(server))
+                || !tls && bootstrapServers.stream()
                 .anyMatch(server -> authorizations.stream().noneMatch(authorization ->
                         authorization.matches("kafka", tenant + "/" + name, host(server), port(server))))) {
             throw new IllegalArgumentException("invalid Kafka consumer operator profile");

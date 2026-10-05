@@ -1,5 +1,7 @@
 package ai.ravenroot.extensions.kafka;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -11,6 +13,11 @@ import java.util.Set;
 /** Narrow, byte-only consumer seam used to test lifecycle and offset semantics without a broker. */
 interface KafkaConsumerProtocol {
     Owner open(KafkaConsumerProfile profile, char[] password);
+
+    default Owner open(KafkaConsumerProfile profile, char[] password,
+                       ReservedNetworkPolicy destinationPolicy) {
+        return open(profile, password);
+    }
 
     interface Owner {
         void subscribe(Subscription subscription, RebalanceListener listener);

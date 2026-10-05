@@ -26,9 +26,10 @@ record-size, and correlation defaults. The tenant-scoped operator profile owns b
 DNS lookup, TLS/SASL, client id, credential reference, exact topic/header authority, partition and
 timestamp permissions, compression, auto-creation, quotas and all producer durability settings.
 Production endpoints default to authenticated `SASL_SSL`, JVM trust validation and hostname checking.
-Authenticated plaintext requires an exact administrator trusted-network rule for every bootstrap
-protocol, port, tenant/profile, host, and complete resolved address set; the legacy exact-loopback
-case remains available. Ravenroot generates the JAAS
+Authenticated plaintext requires an exact administrator trusted-network rule for every bootstrap,
+advertised broker, and discovered coordinator protocol, port, tenant/profile, host, and complete
+resolved address set. This includes loopback; the legacy loopback exception grants admission only
+and never plaintext. Ravenroot generates the JAAS
 entry for PLAIN or SCRAM and accepts no raw JAAS, security protocol, serializer, interceptor, class
 name, admin operation or arbitrary Kafka property from a graph. Environment resolver keys encode
 tenant/profile/reference identifiers as injective UTF-8 hex values.
@@ -74,6 +75,23 @@ pool. The deterministic tests exercise the injectable client seam; they do not c
 Testcontainers run. A local broker example may use loopback SASL plaintext. A mesh-terminated
 deployment may use authenticated plaintext only under the shared trusted-network rule; other
 production deployments use authenticated TLS.
+
+Kafka bootstrap addresses only locate the cluster; broker metadata and group coordination may name
+different endpoints. Ravenroot therefore builds the pinned Kafka 4.1.2 producer and classic-group
+consumer around a guarded metadata path, guarded node-ready path, scoped resolver, and final socket
+selector. Each new connection and reconnect binds Kafka's node id to its original hostname and port,
+resolves that exact endpoint again, requires the same profile rule to admit every answer (and to grant
+plaintext when TLS is off), and allows the selected address only from that fresh set before socket or
+SASL I/O. A numeric alias, renamed endpoint, reused node id, different advertised port, failed partial
+metadata update, or stale DNS address cannot inherit another node's authorization. An already-open
+connection is rechecked when Kafka reconnects; Ravenroot does not interrupt a live socket solely
+because DNS later changes.
+
+This boundary intentionally compiles against narrow package-private Kafka 4.1.2 constructors. The
+build fails if that provider API changes instead of silently falling back to the standard unguarded
+client. The consumer is pinned to Kafka's classic group protocol because that is the constructor
+path on which the complete connection boundary can be injected. TLS still uses Kafka's standard
+channel builder with certificate-chain, hostname, and SNI behavior unchanged.
 
 Primary references: [producer configuration](https://kafka.apache.org/41/configuration/producer-configs/)
 and [KafkaProducer API](https://kafka.apache.org/41/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html).

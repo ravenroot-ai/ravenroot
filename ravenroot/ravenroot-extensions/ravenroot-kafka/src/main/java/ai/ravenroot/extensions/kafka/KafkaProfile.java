@@ -53,7 +53,7 @@ public record KafkaProfile(
                 || maxPerSecond < 1 || maxPerSecond > 1_000 || timeoutMs < 100 || timeoutMs > 30_000
                 || maxRecordBytes < 1 || maxRecordBytes > 1_048_576
                 || bufferMemoryBytes < maxRecordBytes || bufferMemoryBytes > 16_777_216L
-                || !tls && bootstrapServers.stream().filter(server -> !loopback(server))
+                || !tls && bootstrapServers.stream()
                 .anyMatch(server -> authorizations.stream().noneMatch(authorization ->
                         authorization.matches("kafka", tenant + "/" + name, host(server), port(server))))) {
             throw new IllegalArgumentException("invalid Kafka operator profile");

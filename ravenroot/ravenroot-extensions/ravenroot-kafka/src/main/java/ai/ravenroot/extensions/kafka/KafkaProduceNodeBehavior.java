@@ -172,7 +172,8 @@ public final class KafkaProduceNodeBehavior implements NodeBehavior {
             throws KafkaProtocol.ClientFailure, DeadlineExceeded {
         int budget = remainingMillis(deadline); if (budget == 0) throw new DeadlineExceeded();
         char[] copy = password.clone(); KafkaProtocol.CreateAttempt attempt;
-        try { attempt = protocol.beginCreate(profile, copy, budget); } finally { Arrays.fill(copy, '\0'); }
+        try { attempt = protocol.beginCreate(profile, copy, budget, destinationPolicy); }
+        finally { Arrays.fill(copy, '\0'); }
         FutureTask<Void> task = new FutureTask<>(() -> { attempt.establish(); return null; });
         Thread worker = Thread.ofVirtual().name("ravenroot-kafka-create").start(task);
         try { task.get(remainingNanos(deadline), TimeUnit.NANOSECONDS); }

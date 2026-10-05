@@ -136,7 +136,7 @@ final class KafkaConsumerSource implements InboundSource {
             Optional<SecretValue> resolved = credentials.resolve(settings.profile.credentialRef());
             if (resolved == null || resolved.isEmpty()) throw sourceFailure(KafkaSourceStartFailure.CREDENTIAL_UNAVAILABLE);
             secret = resolved.get(); password = secret.copy();
-            client = protocol.open(settings.profile, password);
+            client = protocol.open(settings.profile, password, destinationAdmission.connectionPolicy());
             owner = client;
             runtime = new RuntimeState(settings, context, client);
             RuntimeState active = runtime;
@@ -548,13 +548,21 @@ final class KafkaConsumerSource implements InboundSource {
 
     static DestinationAdmission defaultDestinationAdmission() {
         ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(System.getenv());
-        return profile -> EnvironmentKafkaProfileResolver.requireDestinations(
-                String.join(",", profile.bootstrapServers()), policy,
-                profile.tenant() + "/" + profile.name(), profile.tls());
+        return new DestinationAdmission() {
+            @Override public void requireAllowed(KafkaConsumerProfile profile) {
+                EnvironmentKafkaProfileResolver.requireDestinations(
+                        String.join(",", profile.bootstrapServers()), policy,
+                        profile.tenant() + "/" + profile.name(), profile.tls());
+            }
+            @Override public ReservedNetworkPolicy connectionPolicy() { return policy; }
+        };
     }
 
     @FunctionalInterface
     interface DestinationAdmission {
         void requireAllowed(KafkaConsumerProfile profile);
+        default ReservedNetworkPolicy connectionPolicy() {
+            return ReservedNetworkPolicy.denyAllReserved();
+        }
     }
 }

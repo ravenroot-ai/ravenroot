@@ -64,7 +64,7 @@ public final class EnvironmentKafkaProfileResolver implements KafkaProfileResolv
             String host = host(authority);
             int port = Integer.parseInt(authority.substring(authority.lastIndexOf(':') + 1));
             policy.requireAllowedDestination("kafka", profile, host, port);
-            if (!tls && !KafkaProfile.loopback(authority))
+            if (!tls)
                 plaintextAuthorizations.add(policy.authorizePlaintext("kafka", profile, host, port));
         }
         return List.copyOf(plaintextAuthorizations);

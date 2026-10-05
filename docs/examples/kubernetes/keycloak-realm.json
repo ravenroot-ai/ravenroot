@@ -1,0 +1,193 @@
+{
+  "realm": "ravenroot",
+  "enabled": true,
+  "sslRequired": "external",
+  "defaultSignatureAlgorithm": "RS256",
+  "roles": {
+    "client": {
+      "ravenroot-api": [
+        {
+          "name": "VIEWER"
+        },
+        {
+          "name": "OPERATOR"
+        },
+        {
+          "name": "DEVELOPER"
+        },
+        {
+          "name": "APPROVER"
+        },
+        {
+          "name": "TENANT_ADMIN"
+        },
+        {
+          "name": "PLATFORM_ADMIN"
+        }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "ravenroot-api",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "ravenroot-workstation",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "fullScopeAllowed": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "defaultClientScopes": [
+        "ravenroot-user",
+        "ravenroot.read",
+        "ravenroot.graph.inspect",
+        "ravenroot.execute",
+        "ravenroot.observe",
+        "ravenroot.execution.control"
+      ]
+    },
+    {
+      "clientId": "ravenroot-admin-workstation",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "fullScopeAllowed": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "defaultClientScopes": [
+        "ravenroot-user",
+        "ravenroot.observe"
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "ravenroot-user",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "ravenroot-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "ravenroot-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "ravenroot-user-kind",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "token_kind",
+            "claim.value": "user",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "ravenroot-tenant",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "tenant_id",
+            "claim.value": "example-tenant",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "ravenroot-client-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "ravenroot-api",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ravenroot.read",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "ravenroot.graph.inspect",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "ravenroot.execute",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "ravenroot.observe",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "ravenroot.execution.control",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    }
+  ],
+  "clientScopeMappings": {
+    "ravenroot-api": [
+      {
+        "client": "ravenroot-workstation",
+        "roles": [
+          "OPERATOR"
+        ]
+      },
+      {
+        "client": "ravenroot-admin-workstation",
+        "roles": [
+          "PLATFORM_ADMIN"
+        ]
+      }
+    ]
+  }
+}

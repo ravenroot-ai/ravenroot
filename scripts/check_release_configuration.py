@@ -225,6 +225,19 @@ def check_workflows() -> None:
         if required not in public:
             raise ValueError(f"anonymous release verification is missing: {required}")
 
+    for required in (
+        "Dockerfile.ui", "scripts/package_ui.py", "ravenroot-ui-image.tar",
+        "local-ui-image.outputs.image_digest", "subject-name: ghcr.io/ravenroot-ai/ravenroot-ui",
+        "needs.publish.outputs.ui_image_digest",
+    ):
+        if required not in publication:
+            raise ValueError(f"independent UI release contract is missing: {required}")
+    ui_job = job_blocks(ci).get("full-ui-build", "")
+    for required in ("node --test ui-server/server.test.mjs", "scripts/package_ui.py",
+                     "docker build --file Dockerfile.ui", "scripts/verify_ui_container.py"):
+        if required not in ui_job:
+            raise ValueError(f"UI runtime CI verification is missing: {required}")
+
     github_release = (ROOT / "scripts/github_release.py").read_text(encoding="utf-8")
     for required in ('"--draft"', '"--draft=false"', '"--latest=false"'):
         if required not in github_release:

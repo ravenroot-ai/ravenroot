@@ -12719,8 +12719,8 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': '343c054d99c539004f7bd4c0469c849ad303ad53301bfa16d68a2796aab6ec4a',
- 'scripts/tests/test_publish_environment_reference.py': '96578f49ed01f0a61d0ffdaad6870f003167fba3d54cdbfe502137f9c5c121c0',
+ 'scripts/publish_environment_reference.py': '32eb4a51ebc94a089a90a294a4e4ff57a69fc6d7756b646f686d7e655c01f88f',
+ 'scripts/tests/test_publish_environment_reference.py': 'de2ca4be25ab8951ec9afd357a6abc5aaa8d75c1e88fa9fd1ad5871b7c82c915',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
@@ -14380,6 +14380,28 @@ def environment_reference_description_candidate_ids(
                 and candidate.kind == "environment-binding" \
                 and any(name.startswith(expression) for name in production_names):
             identifiers.add(candidate.id)
+    # The independent UI mapping publishes the exact Node runtime names separately
+    # from Java bindings. Only literal atoms in that maintained dictionary qualify.
+    ui_source = root / "ui-server" / "server.mjs"
+    publisher = root / ENVIRONMENT_REFERENCE_PATH
+    if ui_source.is_file() and publisher.is_file():
+        tree = ast.parse(publisher.read_text(encoding="utf-8"))
+        mappings = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == "UI_SETTINGS"
+                            for target in node.targets) and isinstance(node.value, ast.Dict)]
+        runtime_names = set(re.findall(r"env\.(RAVENROOT_UI_[A-Z0-9_]+)",
+                                       ui_source.read_text(encoding="utf-8")))
+        if len(mappings) == 1:
+            names = {key.value for key in mappings[0].keys
+                     if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+            atoms = {node.value for node in ast.walk(mappings[0])
+                     if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+            if names == runtime_names and names:
+                for candidate in candidates:
+                    expression = candidate.expression.strip("\"'")
+                    if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                            and candidate.symbol == "module" and expression in atoms:
+                        identifiers.add(candidate.id)
     identifiers.update(interaction_websocket_publication_candidate_ids(root, candidates))
     return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(

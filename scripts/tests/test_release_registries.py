@@ -60,6 +60,7 @@ def make_layout(
     root: Path,
     *,
     version: str = VERSION,
+    repository: str = "ghcr.io/ravenroot-ai/ravenroot",
     predicates=None,
     subject_version: str | None = None,
     statement_predicate_type: str | None = None,
@@ -81,7 +82,7 @@ def make_layout(
     image_digest = image["digest"]
     subject = {
         "name": (
-            "pkg:docker/ghcr.io/ravenroot-ai/ravenroot@"
+            f"pkg:docker/{repository}@"
             f"{subject_version or version}?platform=linux%2Famd64"
         ),
         "digest": {"sha256": image_digest.removeprefix("sha256:")},
@@ -140,6 +141,18 @@ def make_attestation_layout(root: Path, **values):
 
 
 class OciRegistryTest(unittest.TestCase):
+    def test_independent_ui_repository_has_its_own_bound_provenance(self):
+        repository = "ghcr.io/ravenroot-ai/ravenroot-ui"
+        with tempfile.TemporaryDirectory() as directory:
+            layout = Path(directory)
+            digest = make_layout(layout, repository=repository)
+            with self.assertRaisesRegex(OciRegistryError, "wrong image subject"):
+                validate_local(layout, VERSION, COMMIT)
+            with mock.patch("scripts.oci_registry.REPOSITORY", repository):
+                self.assertEqual(validate_local(layout, VERSION, COMMIT)["index_digest"], digest)
+                absent = subprocess.CompletedProcess([], 1, "", "reading manifest x in ghcr.io/ravenroot-ai/ravenroot-ui: manifest unknown")
+                self.assertTrue(remote_absent(absent))
+
     def test_validates_exact_local_identity_and_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             layout = Path(directory)

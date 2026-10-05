@@ -15313,9 +15313,12 @@ def route_table_authority_errors(root: Path, authorities: object,
 
 
 def assistant_limit_binding_call(source: str, component: str) -> tuple[str, int, int] | None:
+    components = java_record_components(source, "AssistantConfiguration")
+    if components is None or component not in components:
+        return None
     call = java_constructor_component_call(
         source, "AssistantConfiguration", "fromEnvironment", "AssistantConfiguration",
-        ASSISTANT_LIMIT_COMPONENTS, component,
+        components, component,
     )
     return call
 

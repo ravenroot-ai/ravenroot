@@ -350,7 +350,10 @@ import {
   createCommandHistory,
   discardChangesMessage,
   shouldWarnBeforeUnload,
+  updateGraphPropertiesCommand,
 } from './graph-commands.js';
+import { createDrawingModelController } from './drawing-model-controller.js';
+import { createFrontendPluginSandbox } from './frontend-plugin-sandbox.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
@@ -2703,6 +2706,7 @@ window.ravenroot = {
   _setWorkspaceSnapshotReaderForTest: reader => {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
+  _createFrontendPluginSandboxForTest: (source, options) => createFrontendPluginSandbox(source, options),
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -3854,6 +3858,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
     if (humanTaskController) void configureHumanTasks(document_);
+    drawingModelController?.scheduleRefresh(document_.id);
   }
   refreshCommands();
 }
@@ -3908,6 +3913,7 @@ function syncActiveDocumentChrome() {
   syncSourceSessionChrome(workspace.active);
   syncProgramReadinessChrome(workspace.active);
   refreshCommands();
+  void drawingModelController?.reload();
 }
 
 function syncExecutionReconciliationChrome(hasDocument) {
@@ -4942,7 +4948,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
       bypassed: Boolean(n.data('bypassed')),
       labelSide: layeredLabelSide(owner?.layoutMode),
     }));
-    applyRuntimeVisual(n);
+    applyRuntimeVisual(n, owner);
   });
   // Restated after the per-node style above, which writes this family's placement inline: a
   // restyle must not drag the names back under the cards of a top-down drawing.
@@ -6683,7 +6689,7 @@ function syncGraphRendererInPlace({
       element.data(next.data);
       if (restoreModelPositionIds?.has(id)) element.position(next.position);
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(element, owner);
-      else applyRuntimeVisual(element);
+      else applyRuntimeVisual(element, owner);
       const after = {
         x: element.position('x'), y: element.position('y'),
         width: element.width(), height: element.height(),
@@ -8246,7 +8252,7 @@ function programPhase(owner, nodeId, result) {
     const runtimeState = phase === 'READY' ? 'completed'
       : phase === 'FAILED' || phase === 'RETIRED' || result.transportError ? 'failed' : 'idle';
     node.data('runtimeState', runtimeState);
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, nodeId, 0, runtimeState);
   }
   if (owner === workspace.active) {
@@ -8442,7 +8448,7 @@ function resetProgramGeneration(owner, state, plan) {
     if (!node?.length) return;
     node.removeData('programPhase');
     node.data('runtimeState', 'idle');
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, model.id, 0, 'idle');
   });
 }
@@ -12591,7 +12597,20 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     target.execution.monitoringFlow ||= createMonitoringRuntimeState();
     const knownEdgeIds = new Set((targetGraph?.edges || []).map(edge => edge.id));
     const observation = observeEdgeTraversal(target.execution.monitoringFlow, event, { knownEdgeIds });
-    if (observation.changed) updateD3RuntimeEdge(target, observation.edgeId);
+    if (observation.changed) {
+      updateD3RuntimeEdge(target, observation.edgeId);
+      if (isActive) {
+        drawingModelController?.scheduleRefresh(target.id);
+        const generation = target.execution.generation;
+        const delay = Math.max(0, observation.expiresAt - Date.now()) + 1;
+        setTimeout(() => {
+          if (workspace.find(target.id) === target && target === workspace.active
+              && target.execution.generation === generation) {
+            drawingModelController?.scheduleRefresh(target.id);
+          }
+        }, delay);
+      }
+    }
     return;
   }
   if (!event.nodeId || !targetCy) return;
@@ -12669,7 +12688,7 @@ function flushRuntimeNodePaint(owner, queue) {
     node.data('lastOccurredAt', view.lastOccurredAt);
     node.data('processingDuration', view.processingDuration);
     node.data('fallback', view.fallback);
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, nodeId, view.instances, view.state, view.arrivals, {
       type: view.lastEventType,
       occurredAt: view.lastOccurredAt,
@@ -12680,6 +12699,10 @@ function flushRuntimeNodePaint(owner, queue) {
     if (groupId) affectedGroups.add(groupId);
   }
   affectedGroups.forEach(groupId => paintVisibleGroupRuntime(owner, groupId));
+  // Schedule from the owner-scoped flush rather than only from non-idle styling. Reset/rebind can
+  // legitimately paint an observed node back to idle, and that removal is evidence the plugin must
+  // receive just as promptly as an active highlight.
+  if (isActive) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function paintVisibleGroupRuntime(owner, groupId) {
@@ -12734,7 +12757,10 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
   runtimeNodePaintQueues.get(owner)?.nodes.clear();
-  if (!targetCy) return;
+  if (!targetCy) {
+    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
+    return;
+  }
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
     node.data('instances', 0);
@@ -12756,6 +12782,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
   } else if (isN8nFamilyLayout(targetVisualStyle)) {
     applyN8nNodeStyle(targetCy, owner);
   }
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function runtimeColor(state) {
@@ -12812,7 +12839,7 @@ function runtimeNodeLabel(node) {
   return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }
 
-function applyRuntimeVisual(node) {
+function applyRuntimeVisual(node, owner = workspace.active) {
   const state = node.data('runtimeState') || 'idle';
   const active = Number(node.data('instances')) || 0;
   node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
@@ -12826,6 +12853,7 @@ function applyRuntimeVisual(node) {
     'underlay-opacity': state === 'active' ? 0.28 : 0.12,
     'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
   });
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArrivals = 0, event = {}) {
@@ -12892,6 +12920,7 @@ function updateD3RuntimeEdge(owner, edgeId) {
       visible?.data('runtimeCount', flow.count);
     }
     scheduleMinimap(owner);
+    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
   };
   paint();
 }
@@ -16187,6 +16216,46 @@ document.getElementById('help-box').addEventListener('click', event => {
   event.stopPropagation();
 });
 
+const drawingModelController = createDrawingModelController({
+  document: window.document,
+  getContext: () => {
+    const owner = workspace.find(workspace.activeId);
+    return owner && graphData ? {
+      documentId: owner.id,
+      graph: graphData,
+      container: owner.container,
+      operational: {
+        activeNodeIds: owner.cy?.nodes()
+          .filter(node => node.data('runtimeObserved') && node.data('runtimeState') !== 'idle')
+          .map(node => node.id()) || [],
+        activeEdgeIds: graphData.edges
+          .filter(edge => edgeFlowSnapshot(owner.execution.monitoringFlow, edge.id).recent > 0)
+          .map(edge => edge.id),
+      },
+    } : null;
+  },
+  editGraphProperties: (patch, unset, label) => {
+    if (!graphData || graphData.format !== 'graphml' || !documentIsEditable(workspace.active)) return false;
+    editHistory.execute(graphData, updateGraphPropertiesCommand(patch, label, unset));
+    updateHistoryUi();
+    return true;
+  },
+  selectEvidence: ({ role, id, nodeIds, edgeIds, documentId }) => {
+    const owner = workspace.find(documentId);
+    if (!owner || owner !== workspace.active || owner.cy !== cy) return;
+    invalidateStableSelection();
+    owner.cy.elements().unselect();
+    [...nodeIds, ...edgeIds].forEach(elementId => owner.cy.getElementById(elementId).select());
+    revealInspector();
+    if (nodeIds.length === 1) showNodeInfo(owner.cy.getElementById(nodeIds[0]));
+    else showInspectorMessage(`${role === 'transition' ? 'Transition' : 'State'} ${id} maps to `
+      + `${nodeIds.length} workflow node(s) and ${edgeIds.length} ordered workflow edge(s).`);
+    addActivityMessage('drawing-model', `Inspected mapped ${role} ${id}`, 'completed');
+  },
+  notify: (message, state) => addActivityMessage('drawing-model', message, state),
+});
+window.ravenroot.drawingModels = drawingModelController;
+
 // ═══════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════
@@ -16237,4 +16306,5 @@ window.addEventListener('load', () => {
   const fileParam = params.get('file');
   if (fileParam) autoLoadUrl(fileParam);
   else newWorkflow();
+  void drawingModelController.reload();
 });

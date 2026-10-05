@@ -327,6 +327,7 @@ class RavenrootServerTest {
         Files.writeString(uiDirectory.resolve("assets/app.js"), "export const ready = true;");
         Files.writeString(uiDirectory.resolve("embed-viewer.js"), "export const viewer = true;");
         Files.writeString(uiDirectory.resolve("embed-viewer.css"), ".embed-viewer{}");
+        Files.writeString(uiDirectory.resolve("frontend-plugin-sandbox.html"), "<!doctype html><title>Plugin sandbox</title>");
 
         try (var engine = new PekkoExecutionEngine("ravenroot-server-ui-test");
              var server = testServer(
@@ -342,6 +343,19 @@ class RavenrootServerTest {
             assertTrue(page.headers().firstValue("Content-Type").orElse("").startsWith("text/html"));
             assertEquals("no-referrer", page.headers().firstValue("Referrer-Policy").orElseThrow());
             assertEquals("DENY", page.headers().firstValue("X-Frame-Options").orElseThrow());
+            assertTrue(page.headers().firstValue("Content-Security-Policy").orElseThrow()
+                    .contains("frame-src 'self'"));
+
+            var pluginSandbox = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + server.port() + "/frontend-plugin-sandbox.html"))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            String pluginCsp = pluginSandbox.headers().firstValue("Content-Security-Policy").orElseThrow();
+            assertEquals(200, pluginSandbox.statusCode());
+            assertTrue(pluginCsp.contains("script-src 'self' blob:"), pluginCsp);
+            assertTrue(pluginCsp.contains("connect-src 'none'"), pluginCsp);
+            assertTrue(pluginCsp.contains("frame-ancestors 'self'"), pluginCsp);
+            assertTrue(pluginCsp.contains("worker-src 'none'"), pluginCsp);
+            assertEquals(java.util.List.of(), pluginSandbox.headers().allValues("X-Frame-Options"));
 
             var asset = client.send(HttpRequest.newBuilder(
                     URI.create("http://localhost:" + server.port() + "/assets/app.js")).GET().build(),
@@ -367,6 +381,18 @@ class RavenrootServerTest {
                     .contains("frame-ancestors 'none'"));
             assertTrue(RavenrootHealthcheck.isHealthy(server.port()));
         }
+    }
+
+    @Test
+    void workbenchFramePolicyPreservesRegisteredPresentationOrigins() {
+        String configured = "default-src 'self'; frame-src https://a.example https://z.example";
+        assertEquals("default-src 'self'; frame-src https://a.example https://z.example 'self'",
+                StaticUiHandler.allowSameOriginFrames(configured));
+        assertEquals("default-src 'self'; frame-src 'self'",
+                StaticUiHandler.allowSameOriginFrames("default-src 'self'; frame-src 'none'"));
+        assertEquals("default-src 'self'; frame-src 'self' https://a.example",
+                StaticUiHandler.allowSameOriginFrames(
+                        "default-src 'self'; frame-src 'self' https://a.example"));
     }
 
     @Test

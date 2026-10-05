@@ -246,6 +246,8 @@
       url: /developer-guide/embed-viewer-verification.html
     - title: Extensions and adapters
       url: /developer-guide/extension-development.html
+    - title: Frontend drawing model plugins
+      url: /developer-guide/frontend-drawing-models.html
     - title: API, documentation, and releases
       url: /developer-guide/api-doc-release.html
     - title: Governance and releases

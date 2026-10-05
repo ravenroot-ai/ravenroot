@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="name" for="node" attr.name="name" attr.type="string"/>
+  <graph id="dfa-even-ones-sanitized" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="state-q-even"><data key="kind">BEHAVIOR</data><data key="name">Executable state checkpoint</data></node>
+    <node id="even-check-empty"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-decide-empty"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-read-symbol"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-check-symbol-valid"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-decide-symbol-valid"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-test-zero"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-decide-symbol"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-on-zero-consume"><data key="kind">BEHAVIOR</data></node>
+    <node id="even-on-one-consume"><data key="kind">BEHAVIOR</data></node>
+    <node id="state-q-odd"><data key="kind">BEHAVIOR</data><data key="name">Executable state checkpoint</data></node>
+    <node id="odd-check-empty"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-decide-empty"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-read-symbol"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-check-symbol-valid"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-decide-symbol-valid"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-test-zero"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-decide-symbol"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-on-zero-consume"><data key="kind">BEHAVIOR</data></node>
+    <node id="odd-on-one-consume"><data key="kind">BEHAVIOR</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="entry" source="start" target="state-q-even"/>
+    <edge id="e10" source="state-q-even" target="even-check-empty"/>
+    <edge id="e11" source="even-check-empty" target="even-decide-empty"/>
+    <edge id="e13" source="even-decide-empty" target="even-read-symbol"/>
+    <edge id="e14" source="even-read-symbol" target="even-check-symbol-valid"/>
+    <edge id="e15" source="even-check-symbol-valid" target="even-decide-symbol-valid"/>
+    <edge id="e16" source="even-decide-symbol-valid" target="even-test-zero"/>
+    <edge id="e18" source="even-test-zero" target="even-decide-symbol"/>
+    <edge id="e19" source="even-decide-symbol" target="even-on-zero-consume"/>
+    <edge id="e20" source="even-decide-symbol" target="even-on-one-consume"/>
+    <edge id="e21" source="even-on-zero-consume" target="state-q-even"/>
+    <edge id="e22" source="even-on-one-consume" target="state-q-odd"/>
+    <edge id="e30" source="state-q-odd" target="odd-check-empty"/>
+    <edge id="e31" source="odd-check-empty" target="odd-decide-empty"/>
+    <edge id="e33" source="odd-decide-empty" target="odd-read-symbol"/>
+    <edge id="e34" source="odd-read-symbol" target="odd-check-symbol-valid"/>
+    <edge id="e35" source="odd-check-symbol-valid" target="odd-decide-symbol-valid"/>
+    <edge id="e36" source="odd-decide-symbol-valid" target="odd-test-zero"/>
+    <edge id="e38" source="odd-test-zero" target="odd-decide-symbol"/>
+    <edge id="e39" source="odd-decide-symbol" target="odd-on-zero-consume"/>
+    <edge id="e40" source="odd-decide-symbol" target="odd-on-one-consume"/>
+    <edge id="e41" source="odd-on-zero-consume" target="state-q-odd"/>
+    <edge id="e42" source="odd-on-one-consume" target="state-q-even"/>
+    <edge id="exit" source="state-q-even" target="end"/>
+  </graph>
+</graphml>

@@ -14380,6 +14380,28 @@ def environment_reference_description_candidate_ids(
                 and candidate.kind == "environment-binding" \
                 and any(name.startswith(expression) for name in production_names):
             identifiers.add(candidate.id)
+    # The independent UI mapping publishes the exact Node runtime names separately
+    # from Java bindings. Only literal atoms in that maintained dictionary qualify.
+    ui_source = root / "ui-server" / "server.mjs"
+    publisher = root / ENVIRONMENT_REFERENCE_PATH
+    if ui_source.is_file() and publisher.is_file():
+        tree = ast.parse(publisher.read_text(encoding="utf-8"))
+        mappings = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == "UI_SETTINGS"
+                            for target in node.targets) and isinstance(node.value, ast.Dict)]
+        runtime_names = set(re.findall(r"env\.(RAVENROOT_UI_[A-Z0-9_]+)",
+                                       ui_source.read_text(encoding="utf-8")))
+        if len(mappings) == 1:
+            names = {key.value for key in mappings[0].keys
+                     if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+            atoms = {node.value for node in ast.walk(mappings[0])
+                     if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+            if names == runtime_names and names:
+                for candidate in candidates:
+                    expression = candidate.expression.strip("\"'")
+                    if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                            and candidate.symbol == "module" and expression in atoms:
+                        identifiers.add(candidate.id)
     identifiers.update(interaction_websocket_publication_candidate_ids(root, candidates))
     return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(

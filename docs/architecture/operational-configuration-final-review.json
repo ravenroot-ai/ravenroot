@@ -8378,12 +8378,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "343c054d99c539004f7bd4c0469c849ad303ad53301bfa16d68a2796aab6ec4a",
+          "digest": "32eb4a51ebc94a089a90a294a4e4ff57a69fc6d7756b646f686d7e655c01f88f",
           "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged."
         },
         {
           "path": "scripts/check_release_configuration.py",
-          "digest": "97ad9d0ef8f5b253e07be3a0d92e3039092211be7026e889cf56b1ce556b1dfa",
+          "digest": "87a82dc5a8c319bcfdcd8604c38e72d6ed5d1f797d7c577c16428a1eba7a9391",
           "assertion": "Release checker consumes external tool configuration names and now verifies the built-in actor/token binding for the tagged release fixture preflight."
         }
       ],
@@ -11503,7 +11503,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "6f07f8296d2ebfeb8d8d5a03c740a192dedda17c0892e9889b17a7b2ec5f7b24",
+          "digest": "705d7a6b0688bd0780af5f7de089a646c4ec8116b84991d70c84952622411789",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],
@@ -11577,7 +11577,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "6f07f8296d2ebfeb8d8d5a03c740a192dedda17c0892e9889b17a7b2ec5f7b24",
+          "digest": "705d7a6b0688bd0780af5f7de089a646c4ec8116b84991d70c84952622411789",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],
@@ -11648,7 +11648,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "6f07f8296d2ebfeb8d8d5a03c740a192dedda17c0892e9889b17a7b2ec5f7b24",
+          "digest": "705d7a6b0688bd0780af5f7de089a646c4ec8116b84991d70c84952622411789",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
         }
       ],

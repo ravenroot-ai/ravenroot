@@ -28,6 +28,29 @@ async function nodePoint(page, id) {
   }, id);
 }
 
+async function blankCanvasPoint(page, preferred) {
+  const { canvas, boxes } = await page.evaluate(() => {
+    const rect = window.cy.container().getBoundingClientRect();
+    return {
+      canvas: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      boxes: window.cy.nodes().map(node => node.renderedBoundingBox()),
+    };
+  });
+  const candidates = [];
+  for (let y = 28; y < canvas.height - 28; y += 32) {
+    for (let x = 28; x < canvas.width - 28; x += 32) {
+      const clear = boxes.every(box => x < box.x1 - 16 || x > box.x2 + 16
+        || y < box.y1 - 16 || y > box.y2 + 16);
+      if (clear) candidates.push({ x: canvas.x + x, y: canvas.y + y });
+    }
+  }
+  candidates.sort((left, right) =>
+    Math.hypot(left.x - preferred.x, left.y - preferred.y)
+      - Math.hypot(right.x - preferred.x, right.y - preferred.y));
+  if (candidates.length) return candidates[0];
+  throw new Error('Cyto canvas has no measured blank point');
+}
+
 /**
  * Hover a node until its minibar is genuinely showing, then leave the pointer on it.
  *
@@ -515,7 +538,9 @@ test('a delayed sequence stays owned through hide and releases on its matching t
   await page.evaluate(() => { window.cy.$(':selected').unselect(); });
   const beforeStage = await graphState(page);
   const canvas = await page.locator('#cy-wrap').boundingBox();
-  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height - 36);
+  const blank = await blankCanvasPoint(page,
+    { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height - 36 });
+  await page.mouse.click(blank.x, blank.y);
   await expect.poll(() => page.evaluate(() => window.__nodeActionStageEvents)).toBeGreaterThan(0);
   await expect.poll(() => graphState(page)).toMatchObject({
     historyDepth: beforeStage.historyDepth + 1,
@@ -609,7 +634,9 @@ test('destroy during a claimed press retains only the anchor until terminal rele
   await page.evaluate(() => { window.cy.$(':selected').unselect(); });
   const beforeNext = await graphState(page);
   const canvas = await page.locator('#cy-wrap').boundingBox();
-  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height - 36);
+  const blank = await blankCanvasPoint(page,
+    { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height - 36 });
+  await page.mouse.click(blank.x, blank.y);
   await expect.poll(() => graphState(page)).toMatchObject({
     historyDepth: beforeNext.historyDepth + 1,
   });

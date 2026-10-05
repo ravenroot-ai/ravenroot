@@ -554,6 +554,9 @@ public final class RavenrootServerMain {
                 if (agentBudgets != null) {
                     server.installAgentAuthorityControl(agentBudgets);
                 }
+                if (executionStoreOwner.nodePaletteStore() != null) {
+                    server.installNodePalettes(executionStoreOwner.nodePaletteStore());
+                }
                 if (executionManifests != null) {
                     server.installExecutionManifests(executionManifests);
                 }

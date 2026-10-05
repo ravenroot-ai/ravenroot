@@ -1244,6 +1244,49 @@ export class RavenrootRuntimeClient {
     return result;
   }
 
+  nodePalettes() {
+    return this.#json('/v1/node-palettes', { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+
+  createNodePalette(name) {
+    return this.#json('/v1/node-palettes', { method: 'POST', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  }
+
+  renameNodePalette(id, version, name) {
+    return this.#json('/v1/node-palettes/' + encodeURIComponent(id), { method: 'PATCH', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ name }) });
+  }
+
+  deleteNodePalette(id, version) {
+    return this.#json('/v1/node-palettes/' + encodeURIComponent(id), { method: 'DELETE', headers: {
+      Accept: 'application/json', 'If-Match': String(version) } });
+  }
+
+  createNodeTemplate(paletteId, name, node) {
+    return this.#json('/v1/node-palettes/templates', { method: 'POST', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paletteId, name, node }) });
+  }
+
+  updateNodeTemplate(id, version, paletteId, name) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id), { method: 'PATCH', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ paletteId, name }) });
+  }
+
+  deleteNodeTemplate(id, version) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id), { method: 'DELETE', headers: {
+      Accept: 'application/json', 'If-Match': String(version) } });
+  }
+
+  validateNodeTemplate(id) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id) + '/validate', {
+      method: 'POST', headers: { Accept: 'application/json' },
+    });
+  }
+
   /** The connected runtime's effective, operator-owned browser ingestion configuration. */
   async configuration() {
     const result = await this.#json('/v1/configuration', {

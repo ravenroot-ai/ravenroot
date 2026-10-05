@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-// The panel system has seven panels in three zones, with Runtime activity in a bottom dock instead
+// The panel system has nine panels in three zones, with Runtime activity in a bottom dock instead
 // of the right column into a bottom dock.
 //
 // This tier had NO coverage at all before this file — no spec matched `#info`, `#sidebar`,
@@ -8,7 +8,8 @@ import { expect, test } from '@playwright/test';
 // survived in the markup for so long. These are the guarantees the panel system makes, so
 // they are asserted rather than left to the next reader to rediscover.
 
-const PANELS = ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats', 'inspector', 'assistant', 'activity'];
+const LEFT_PANELS = ['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats'];
+const PANELS = [...LEFT_PANELS, 'inspector', 'assistant', 'activity'];
 
 async function clickFirstGraphNode(page) {
   await expect.poll(() => page.evaluate(() => Boolean(
@@ -90,7 +91,7 @@ test('every panel is a panel: one header, one title, in a declared zone', async 
   // The zones each panel belongs to on first run. Activity's is the one deliberate relocation.
   await expect(page.locator('.panel[data-panel-id="inspector"]')).toHaveAttribute('data-panel-zone', 'right');
   await expect(page.locator('.panel[data-panel-id="activity"]')).toHaveAttribute('data-panel-zone', 'bottom');
-  await expect(page.locator('#sidebar .panel')).toHaveCount(5);
+  await expect(page.locator('#sidebar .panel')).toHaveCount(LEFT_PANELS.length);
 
   // Every panel carries close and menu controls only because the rail and Panels index provide a
   // discoverable route back. A closable panel without that route is a trap, so the controls and
@@ -353,12 +354,13 @@ test.describe('the workspace splitters', () => {
     const workspaceSplitters = page.locator('[data-splitter-kind="workspace"]');
     await expect(workspaceSplitters).toHaveCount(3);
     const panelSplitters = page.locator('[data-splitter-kind="panel"]');
-    await expect(panelSplitters).toHaveCount(4);
+    await expect(panelSplitters).toHaveCount(5);
     expect(await panelSplitters.evaluateAll(items => items.map(item =>
       `${item.dataset.panelBefore}|${item.dataset.panelAfter}`))).toEqual([
       'search|node-types',
       'node-types|node-catalog',
-      'node-catalog|edge-types',
+      'node-catalog|node-palettes',
+      'node-palettes|edge-types',
       'edge-types|graph-stats',
     ]);
     for (const zone of ['left', 'right', 'bottom']) {
@@ -482,7 +484,8 @@ test.describe('the workspace splitters', () => {
       .toBeCloseTo(nodeTypesSize, 6);
     expect(await page.locator('[data-splitter-kind="panel"][data-panel-zone="left"]')
       .evaluateAll(items => items.map(item => `${item.dataset.panelBefore}|${item.dataset.panelAfter}`)))
-      .toEqual(['search|node-catalog', 'node-catalog|edge-types', 'edge-types|graph-stats']);
+      .toEqual(['search|node-catalog', 'node-catalog|node-palettes',
+        'node-palettes|edge-types', 'edge-types|graph-stats']);
 
     await page.locator('#sidebar [data-rail-panel="node-types"]').click();
     await expect(page.locator('[data-panel-id="node-types"]')).toBeVisible();
@@ -589,7 +592,7 @@ test.describe('the workspace splitters', () => {
     }, LAYOUT_KEY);
     await page.reload();
     await expect(page.locator('#sidebar')).not.toHaveClass(/zone--collapsed/);
-    await expect(page.locator('#sidebar-scroll .panel:not([hidden])')).toHaveCount(5);
+    await expect(page.locator('#sidebar-scroll .panel:not([hidden])')).toHaveCount(LEFT_PANELS.length);
     expect(Math.round(await page.locator('#sidebar')
       .evaluate(element => element.getBoundingClientRect().width))).toBe(224);
   });
@@ -640,7 +643,7 @@ test.describe('the workspace splitters', () => {
     // longer "nothing hidden" — it is "exactly the Assistant hidden", which is a stronger control
     // than the empty array was, because it would also catch the panel being dropped entirely.
     expect(exactDefault).toMatchObject({
-      left: ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats'],
+      left: LEFT_PANELS,
       right: ['inspector', 'assistant'], bottom: ['activity'], hidden: ['assistant'], short: [],
       leftCollapsed: false, leftWidth: 224,
     });
@@ -727,7 +730,7 @@ test.describe('the workspace splitters', () => {
   test('disables an empty side boundary until a panel is reopened', async ({ page }) => {
     for (const spec of [
       {
-        zone: 'left', column: '#sidebar', panelIds: ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats'],
+        zone: 'left', column: '#sidebar', panelIds: LEFT_PANELS,
         reopen: 'search', outward: 'ArrowRight', pointerDelta: 36,
       },
       {
@@ -935,7 +938,7 @@ test.describe('closing a panel', () => {
 
   test('collapses a column to its rail when every panel in it is closed', async ({ page }) => {
     await page.goto('/');
-    for (const id of ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats']) {
+    for (const id of LEFT_PANELS) {
       await page.locator(`.panel[data-panel-id="${id}"] [data-action="panel-close"]`).click();
       await page.waitForTimeout(80);
     }
@@ -972,9 +975,9 @@ test.describe('the Panels index', () => {
 
     const index = page.locator('#panels-index');
     await expect(index).toBeVisible();
-    // The index lists all eight panels that EXIST, which is precisely what makes a
+    // The index lists all nine panels that EXIST, which is precisely what makes a
     // closed one reachable — and the Assistant ships closed, so it is the case this route serves.
-    await expect(index.locator('[data-index-panel]')).toHaveCount(8);
+    await expect(index.locator('[data-index-panel]')).toHaveCount(PANELS.length);
     await expect(index.locator('[data-index-panel="graph-stats"]')).toHaveAttribute('data-closed', 'true');
     // CONTROL: an open panel must read as open, or "closed" would be meaningless.
     await expect(index.locator('[data-index-panel="search"]')).toHaveAttribute('data-closed', 'false');
@@ -1093,8 +1096,8 @@ test.describe('persistence', () => {
         await page.waitForTimeout(400);
 
         // Every panel is where the default puts it, and nothing is missing.
-        await expect(page.locator('.panel')).toHaveCount(8);
-        await expect(page.locator('#sidebar-scroll .panel:not([hidden])')).toHaveCount(5);
+        await expect(page.locator('.panel')).toHaveCount(PANELS.length);
+        await expect(page.locator('#sidebar-scroll .panel:not([hidden])')).toHaveCount(LEFT_PANELS.length);
         await expect(page.locator('#info-body-zone .panel[data-panel-id="inspector"]')).toBeVisible();
         await expect(page.locator('#dock .panel[data-panel-id="activity"]')).toBeVisible();
       });
@@ -1130,8 +1133,8 @@ test.describe('the rail identity marks', () => {
     // When a column is collapsed the rail has no visible labels at all, so the mark IS the title.
     // A rail that dropped the accessible name would leave those panels unnameable.
     const marks = page.locator('#sidebar .rail-panel-btn');
-    await expect(marks).toHaveCount(5);
-    for (const id of PANELS.slice(0, 5)) {
+    await expect(marks).toHaveCount(LEFT_PANELS.length);
+    for (const id of LEFT_PANELS) {
       const mark = page.locator(`#sidebar .rail-panel-btn[data-rail-panel="${id}"]`);
       await expect(mark).toHaveCount(1);
       await expect(mark).not.toHaveAttribute('aria-label', '');
@@ -1323,7 +1326,7 @@ test.describe('dragging a panel', () => {
     await page.goto('/');
     expect((await leftOrder(page))[0]).toBe('search');
 
-    const from = await headerBox(page, 'edge-types');
+    const from = await headerBox(page, 'node-palettes');
     const first = await headerBox(page, 'search');
     await page.mouse.move(from.x + 40, from.y + 16);
     await page.mouse.down();
@@ -1334,7 +1337,7 @@ test.describe('dragging a panel', () => {
 
     // Appending would have left it last. A drag says exactly where, and landing anywhere else
     // would make the gesture a lie.
-    expect((await leftOrder(page))[0]).toBe('edge-types');
+    expect((await leftOrder(page))[0]).toBe('node-palettes');
   });
 
   test('keeps the gesture while the pointer is over the Cytoscape canvas', async ({ page }) => {
@@ -1490,7 +1493,7 @@ test.describe('the short form', () => {
     };
   });
 
-  test('closes the measured palette overflow', async ({ page }) => {
+  test('closes the measured six-panel overflow through the compact stack', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
     await page.waitForTimeout(300);
@@ -1502,12 +1505,15 @@ test.describe('the short form', () => {
       .toBeGreaterThan(0);
     expect(before.statsAboveFold).toBe(false);
 
-    await shorten(page, 'node-types');
-    await shorten(page, 'edge-types');
+    for (const id of ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'search', 'graph-stats']) {
+      await shorten(page, id);
+    }
 
     const after = await column(page);
+    await expect(page.locator('#sidebar')).toHaveClass(/zone--compact/);
     expect(after.overflow).toBe(0);
     expect(after.statsAboveFold).toBe(true);
+    expect(after.endReachable).toBe(true);
   });
 
   test('reflows the list into a wrapped grid, which is the only reason it saves anything', async ({ page }) => {
@@ -1699,7 +1705,7 @@ test.describe('the short form', () => {
   // Graph Stats offered no short command at all, so 77px was a floor, not a starting point. This
   // gives both a short form so the column can close the rest of the way.
   const shortenAll = async page => {
-    for (const id of ['node-types', 'edge-types', 'node-catalog', 'search', 'graph-stats']) {
+    for (const id of ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'search', 'graph-stats']) {
       await shorten(page, id);
     }
   };
@@ -1764,9 +1770,8 @@ test.describe('the short form', () => {
   });
 
   test('keeps the compact panel content reachable with the narrow runtime row', async ({ page }) => {
-    // The existing shorten set uses node-types and edge-types only, never touching
-    // the two new short forms, because THOSE viewports must remain closed through their existing
-    // mechanism rather than requiring the new short forms there.
+    // Preserve the two-palette measurement at 1280, then exercise the complete compact stack at
+    // the larger viewports. With six panels, zero overflow is a property of that complete stack.
     const resetTo = async (width, height) => {
       await page.setViewportSize({ width, height });
       await page.goto('/');
@@ -1780,8 +1785,9 @@ test.describe('the short form', () => {
     };
     const at = async (width, height) => {
       await resetTo(width, height);
-      await shorten(page, 'node-types');
-      await shorten(page, 'edge-types');
+      for (const id of ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'search', 'graph-stats']) {
+        await shorten(page, id);
+      }
       return column(page);
     };
 
@@ -1844,7 +1850,7 @@ test.describe('the short form', () => {
 
 // ══ A SHORT STACK CAN BECOME ONE INLINE CELL ══════════════════════════════════════════════════
 test.describe('compact side stacks', () => {
-  const shortenable = ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats'];
+  const shortenable = ['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats'];
   const shortenAll = async page => {
     for (const id of shortenable) await shortenPanel(page, id);
   };
@@ -2021,7 +2027,7 @@ test.describe('compact side stacks', () => {
     await page.mouse.move(splitterBox.x - 500, splitterBox.y + 100, { steps: 4 });
     await page.mouse.up();
     const minimum = Math.round(await sidebar.evaluate(element => Number.parseFloat(getComputedStyle(element).minWidth)));
-    expect(minimum).toBe(101);
+    expect(minimum).toBe(125);
     expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(minimum);
     const columns = () => page.locator('#leg-nodes .li').evaluateAll(items =>
       new Set(items.map(item => Math.round(item.getBoundingClientRect().left))).size);
@@ -2056,7 +2062,8 @@ test.describe('compact side stacks', () => {
       expect(geometry.lastFits).toBe(true);
       expect(geometry.longestFits).toBe(true);
     };
-    expect(await columns()).toBe(1);
+    // The four-control header floor leaves room for two complete compact cells.
+    expect(await columns()).toBe(2);
     expectStatsContained(await statsContainment());
     await expect(page.locator('[data-panel-id="node-types"] .panel-menu')).toBeVisible();
     await expect(page.locator('[data-panel-id="node-types"] .panel-close')).toBeVisible();
@@ -2068,10 +2075,10 @@ test.describe('compact side stacks', () => {
     expectStatsContained(await statsContainment());
     await page.keyboard.press('ArrowRight');
     expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(minimum + 32);
-    expect(await columns()).toBe(2);
+    expect(await columns()).toBe(3);
     await page.keyboard.press('ArrowRight');
     expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(minimum + 64);
-    expect(await columns()).toBe(3);
+    expect(await columns()).toBe(4);
 
     const adaptivePath = testInfo.outputPath('short-panels-adaptive-zoom-100.png');
     await page.screenshot({ path: adaptivePath, fullPage: true });
@@ -2119,22 +2126,25 @@ test.describe('compact side stacks', () => {
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
-    expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(101);
+    expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(125);
 
     const ownership = await page.evaluate(() => [...document.querySelectorAll(
       '#sidebar .panel:not([hidden]) .panel-grip, #sidebar .panel:not([hidden]) .panel-menu, '
-      + '#sidebar .panel:not([hidden]) .panel-close',
+      + '#sidebar .panel:not([hidden]) .panel-close, '
+      + '#sidebar .panel:not([hidden]) [data-action="panel-disclosure"]',
     )].map(control => {
       const box = control.getBoundingClientRect();
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       return {
         panel: control.closest('.panel').dataset.panelId,
         kind: control.classList.contains('panel-grip') ? 'grip'
-          : control.classList.contains('panel-menu') ? 'menu' : 'close',
+          : control.classList.contains('panel-menu') ? 'menu'
+            : control.classList.contains('panel-close') ? 'close' : 'disclosure',
         owned: hit === control || control.contains(hit),
       };
     }));
-    expect(ownership).toHaveLength(shortenable.length * 3);
+    // The three collapsible left panels add a disclosure to the common grip/menu/close trio.
+    expect(ownership).toHaveLength(shortenable.length * 3 + 3);
     expect(ownership.every(control => control.owned), ownership).toBe(true);
 
     for (const id of shortenable) {
@@ -2154,7 +2164,7 @@ test.describe('compact side stacks', () => {
       await expect(page.locator(`[data-panel-id="${id}"]`)).toBeHidden();
       await page.locator(`#sidebar [data-rail-panel="${id}"]`).click();
       await expect(page.locator(`[data-panel-id="${id}"]`)).toBeVisible();
-      expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(101);
+      expect(Math.round(await sidebar.evaluate(element => element.getBoundingClientRect().width))).toBe(125);
     }
 
     await page.locator('#search-inp').fill('Outcome');
@@ -2173,14 +2183,14 @@ test.describe('compact side stacks', () => {
           && rowBox.left >= statsBox.left && rowBox.right <= statsBox.right;
       }),
     }))).toEqual({ forced: true, xOverflow: 0, contentFits: true, statsFits: true, rowsFit: true });
-    const path = testInfo.outputPath('short-panels-forced-colors-floor-101.png');
+    const path = testInfo.outputPath('short-panels-forced-colors-floor-125.png');
     await page.screenshot({ path, fullPage: true });
-    await testInfo.attach('short-panels-forced-colors-floor-101', { path, contentType: 'image/png' });
-    const statsPath = testInfo.outputPath('graph-stats-forced-colors-floor-101.png');
+    await testInfo.attach('short-panels-forced-colors-floor-125', { path, contentType: 'image/png' });
+    const statsPath = testInfo.outputPath('graph-stats-forced-colors-floor-125.png');
     await page.locator('[data-panel-id="graph-stats"] .panel-body')
       .evaluate(element => { element.scrollTop = element.scrollHeight; });
     await page.locator('[data-panel-id="graph-stats"]').screenshot({ path: statsPath });
-    await testInfo.attach('graph-stats-forced-colors-floor-101', {
+    await testInfo.attach('graph-stats-forced-colors-floor-125', {
       path: statsPath, contentType: 'image/png',
     });
     await context.close();
@@ -2190,16 +2200,15 @@ test.describe('compact side stacks', () => {
 // ══ QA-10 / UI-13: pinning the left column's overflow measurements in the suite ════════════════
 //
 // The suite covers all four measured viewports: 1440x900, 1280x800, 1920x1080 and 1180x800.
-// At 1180x800, UI-13 reaches 0px overflow ONLY with a specific five-panel configuration. With the
-// intentional narrow runtime row, GRAPH STATS remains load-bearing: it saves 92px against the
-// current 107px floor, leaving 15px; Search saves 16px. Pinning only UI-13's five-panel total would stay
-// green if Search's short form disappeared entirely, so the contributions are also decomposed.
+// At 1180x800, UI-13 reaches 0px overflow only when every open shortenable panel participates in
+// the compact stack. The tests below pin that complete configuration and prove that either end of
+// the stack can prevent compact activation when it remains full length.
 //
 // A PIN NEEDS ITS CONFIGURATION, NOT JUST ITS NUMBER. "1180x800 -> 0px" is not a property of the
 // viewport alone — it is a property of the viewport AND the specific set of panels shortened. A
 // test asserting the number without naming the panels would pass or fail for reasons unrelated to
 // the property it exists to defend: change what "default" means, or change how many panels start
-// short, and the assertion moves for a reason that has nothing to do with any of the five panels'
+// short, and the assertion moves for a reason that has nothing to do with any of the six panels'
 // own short-form CSS. So every test below names its panels explicitly, in the order they are
 // shortened, rather than deriving them from `canShorten()` or looping over `PANELS`.
 //
@@ -2475,7 +2484,7 @@ test.describe('the left column overflow, pinned for every measured viewport', ()
     expect(floor.endReachable).toBe(true);
   });
 
-  test('1180x800: 0px, but only with the full five-panel configuration named explicitly', async ({ page }) => {
+  test('1180x800: 0px, but only with the full six-panel configuration named explicitly', async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 800 });
     await page.reload();
     await page.waitForTimeout(300);
@@ -2488,7 +2497,7 @@ test.describe('the left column overflow, pinned for every measured viewport', ()
     // other generic loop. A generic loop would make this test pass for a future sixth panel of
     // kind `control` or `bounded` without anyone deciding it should join this configuration; a
     // literal list forces that decision, here, by hand.
-    for (const id of ['node-types', 'edge-types', 'node-catalog', 'search', 'graph-stats']) {
+    for (const id of ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'search', 'graph-stats']) {
       await shortenPanel(page, id);
     }
     const after = await sidebarOverflow(page);
@@ -2496,75 +2505,45 @@ test.describe('the left column overflow, pinned for every measured viewport', ()
     expect(after.statsAboveFold).toBe(true);
   });
 
-  // ── The decomposition ──────────────────────────────────────────────────────────────────────
-  // A STRONGER guard than the total above: each of these fails when its OWN load-bearing panel
-  // regresses, rather than only when the five-panel sum does. Both start from the SAME residual
-  // floor as the test above — reasserted here rather than assumed, because a decomposition that
-  // trusted an unverified precondition would not be proving what it claims to. What actually
-  // needs protecting is not the floor's raw pixel count (see FLOOR_OVERFLOW_MIN above) but the
-  // SHAPE of the decomposition — Graph Stats does most of the remaining work, Search does little of
-  // it. That shape held on both measured hosts (floor 107px: 92px vs 16px saved; floor
-  // 176px: 141px vs 16px saved) even though the floor itself did not, so it is asserted as a
-  // fraction of that test's own floor rather than as either side's absolute pixel count.
-
-  test('the decomposition: Graph Stats removes most of the floor and remains the load-bearing panel', async ({ page }) => {
+  test('Graph Stats remains the last blocker until all six panels can enter compact mode', async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 800 });
     await page.reload();
     await page.waitForTimeout(300);
 
-    await shortenPanel(page, 'node-types');
-    await shortenPanel(page, 'edge-types');
-    await shortenPanel(page, 'node-catalog');
-    const floor = await sidebarOverflow(page);
-    expect(floor.overflow, 'the residual floor this decomposes did not reproduce').toBeGreaterThan(FLOOR_OVERFLOW_MIN);
+    for (const id of ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'search']) {
+      await shortenPanel(page, id);
+    }
+    await expect(page.locator('#sidebar')).not.toHaveClass(/zone--compact/);
+    const blocked = await sidebarOverflow(page);
+    expect(blocked.overflow, 'the full-length Graph Stats panel no longer holds a residual floor')
+      .toBeGreaterThan(FLOOR_OVERFLOW_MIN);
 
     await shortenPanel(page, 'graph-stats');
     const after = await sidebarOverflow(page);
-    const graphStatsSaving = floor.overflow - after.overflow;
-    // A 0.7 threshold is too tight for the observed 80-86% margin at floors 107/176. The two
-    // points fit ratio ~= 0.71 + 16/floor —
-    // Search's own fixed 16px saving (see the sibling test) riding on top of an asymptote just
-    // above 0.7 — and the fit converges FROM ABOVE as floor grows, in the same direction the two
-    // hosts already differ (107 -> 176). Two points make that fit fragile, and a THIRD measured
-    // host would be needed to defend 0.7 with any margin below the asymptote. The 0.6 threshold
-    // sits clearly outside the convergence band, so it does not carry the same risk of
-    // going false-red on a legitimate third host the way 0.7 would.
-    expect(graphStatsSaving, 'graph-stats stopped being the load-bearing short form').toBeGreaterThan(floor.overflow * 0.6);
+    await expect(page.locator('#sidebar')).toHaveClass(/zone--compact/);
+    expect(after.overflow).toBe(0);
+    expect(after.statsAboveFold).toBe(true);
     expect(after.endReachable).toBe(true);
   });
 
-  test('the decomposition: Search alone leaves most of the floor standing — it is not load-bearing for the zero', async ({ page }) => {
+  test('Search remains the first blocker until all six panels can enter compact mode', async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 800 });
     await page.reload();
     await page.waitForTimeout(300);
 
-    await shortenPanel(page, 'node-types');
-    await shortenPanel(page, 'edge-types');
-    await shortenPanel(page, 'node-catalog');
-    const floor = await sidebarOverflow(page);
-    expect(floor.overflow, 'the residual floor this decomposes did not reproduce').toBeGreaterThan(FLOOR_OVERFLOW_MIN);
+    for (const id of ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'graph-stats']) {
+      await shortenPanel(page, id);
+    }
+    await expect(page.locator('#sidebar')).not.toHaveClass(/zone--compact/);
+    const blocked = await sidebarOverflow(page);
+    expect(blocked.overflow, 'the full-length Search panel no longer holds a residual floor')
+      .toBeGreaterThan(FLOOR_OVERFLOW_MIN);
 
     await shortenPanel(page, 'search');
     const after = await sidebarOverflow(page);
-    const searchSaving = floor.overflow - after.overflow;
-    // Search's own short form saves a FIXED 16px — measured identical on three different floors
-    // (72, 107, 176). That makes this ratio exactly `16 / floor.overflow`,
-    // not an independent quantity: whatever cap C is chosen here is equivalent to requiring
-    // `floor.overflow > 16 / C`, which must stay consistent with FLOOR_OVERFLOW_MIN above rather
-    // than be picked on its own. A cap of 0.25 would require floor > 64, but FLOOR_OVERFLOW_MIN
-    // only requires floor > 40, so on
-    // any floor in 41-64 (reachable and admitted by the sibling test above) the two thresholds
-    // contradicted each other: the floor test says "fine", this one says "search became
-    // load-bearing" even though Search never moved. Mutating the floor down to 43 without touching
-    // Search demonstrates the contradiction.
-    //
-    // The constraint, for whoever picks these two numbers next: C * FLOOR_OVERFLOW_MIN >= 16 (the
-    // invariant Search saving), the two thresholds chosen TOGETHER, never one at a time. 0.4 is the
-    // tight solution: 0.4 * 40 = 16 exactly, and FLOOR_OVERFLOW_MIN's own strict `>` means floor is
-    // at least 41 in practice, giving 0.4 * 41 = 16.4 > 16 — a real, if thin, margin at the
-    // boundary. The measurement therefore supports 0.4.
-    expect(searchSaving, 'search became load-bearing for the zero, which the Graph Stats test above must own instead').toBeLessThan(floor.overflow * 0.4);
-    expect(after.statsAboveFold).toBe(false);
+    await expect(page.locator('#sidebar')).toHaveClass(/zone--compact/);
+    expect(after.overflow).toBe(0);
+    expect(after.statsAboveFold).toBe(true);
     expect(after.endReachable).toBe(true);
   });
 });

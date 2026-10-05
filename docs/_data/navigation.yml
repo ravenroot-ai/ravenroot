@@ -145,6 +145,8 @@
       url: /reference/human-tasks.html
     - title: Session memory
       url: /reference/session-memory.html
+    - title: Personal node palettes
+      url: /reference/personal-node-palettes.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: Interaction WebSocket protocol

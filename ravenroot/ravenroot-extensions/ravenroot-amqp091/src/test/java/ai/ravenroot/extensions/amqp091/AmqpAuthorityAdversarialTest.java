@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.amqp091;
 
+import ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.SecretValue;
 import org.junit.jupiter.api.Test;
@@ -13,11 +14,42 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpAuthorityAdversarialTest {
+    @Test
+    void savedPublisherProfilesAreRevalidatedForTheDestinationTenantWithoutCredentials() {
+        AtomicInteger credentials = new AtomicInteger();
+        AtomicInteger profiles = new AtomicInteger();
+        var matching = new AmqpPublishNodeBehavior(reference -> {
+            credentials.incrementAndGet();
+            return Optional.empty();
+        }, (tenant, name) -> {
+            profiles.incrementAndGet();
+            return Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2));
+        });
+        assertDoesNotThrow(() -> matching.validateTemplateReferences(
+                AmqpTestSupport.configuration(), AmqpTestSupport.TENANT));
+        assertEquals(0, credentials.get());
+        assertEquals(1, profiles.get());
+
+        var crossTenant = new AmqpPublishNodeBehavior(reference -> Optional.empty(),
+                (tenant, name) -> Optional.of(AmqpTestSupport.profile("other", name, 4, 100, 1_000, 2)));
+        assertThrows(NodeTemplateReferenceUnavailableException.class, () -> crossTenant.validateTemplateReferences(
+                AmqpTestSupport.configuration(), AmqpTestSupport.TENANT));
+
+        profiles.set(0);
+        var malformed = assertThrows(IllegalArgumentException.class, () -> matching.validateTemplateReferences(
+                AmqpTestSupport.configuration(Map.of("mandatory", "false")), AmqpTestSupport.TENANT));
+        assertEquals(IllegalArgumentException.class, malformed.getClass());
+        assertEquals(0, profiles.get(), "authored settings must be refused before profile resolution");
+        assertThrows(NodeTemplateReferenceUnavailableException.class, () -> matching.validateTemplateReferences(
+                AmqpTestSupport.configuration(Map.of("exchange", "not-authorized")), AmqpTestSupport.TENANT));
+    }
+
     @Test
     void graphPriorityAndExpirationAreEffectivePayloadCapsIncludingNullAndZero() {
         var protocol = new AmqpTestSupport.FakeProtocol(

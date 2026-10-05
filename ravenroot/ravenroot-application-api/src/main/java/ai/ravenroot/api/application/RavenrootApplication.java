@@ -43,6 +43,18 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     List<NodeTypeDescriptor> nodeTypes();
 
+    /**
+     * Validates operator-owned references for one sanitized template in its destination tenant.
+     * @param tenantId authenticated destination tenant
+     * @param behavior installed behavior identifier
+     * @param properties descriptor-filtered authored properties
+     * @throws IllegalArgumentException when the authored properties are malformed
+     * @throws NodeTemplateReferenceUnavailableException when the behavior or a destination authority
+     *         reference is unavailable to the authenticated tenant
+     */
+    default void validateNodeTemplateReferences(String tenantId, String behavior,
+                                                Map<String, String> properties) { }
+
 /**
  * Runtime-owned provenance keyed by behavior; absent entries are treated as installed bundles.
  * @return provenance by behavior for entries whose source is known to the runtime

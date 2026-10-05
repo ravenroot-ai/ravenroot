@@ -74,6 +74,9 @@ public enum ErrorCode {
     EXECUTION_RESULT_REDACTED(410, "the execution result was never retained"),
     /** The request violates an input contract without disclosing rejected content. */
     INVALID_REQUEST(400, "the request was rejected as invalid"),
+    /** A saved node names operator authority unavailable in the authenticated destination tenant. */
+    NODE_TEMPLATE_REFERENCE_UNAVAILABLE(409, "a saved node reference is unavailable in this tenant; "
+            + "choose an available plugin, profile, policy, or destination reference"),
     /**
      * A bounded read was asked for more items than the server will return in one answer.
      *

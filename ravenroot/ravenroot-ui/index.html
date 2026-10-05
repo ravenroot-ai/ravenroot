@@ -338,6 +338,8 @@
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
           <h2 class="panel-title" id="panel-nodetypes-t">Node Types</h2>
+        <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-types"
+                aria-expanded="true" aria-controls="panel-nodetypes-body" aria-label="Collapse Node Types">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-types"
                 aria-haspopup="menu" aria-expanded="false"
                 aria-label="Node Types panel options" data-tooltip="Node Types panel options">
@@ -348,13 +350,15 @@
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
-        <div class="panel-body"><div class="panel-content"><div id="leg-nodes"></div></div></div>
+        <div class="panel-body" id="panel-nodetypes-body"><div class="panel-content"><div id="leg-nodes"></div></div></div>
       </section>
 
       <section class="panel" data-panel-id="node-catalog" data-panel-zone="left" aria-labelledby="panel-catalog-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
           <h2 class="panel-title" id="panel-catalog-t">Node Catalog</h2>
+        <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-catalog"
+                aria-expanded="true" aria-controls="panel-catalog-body" aria-label="Collapse Node Catalog">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-catalog"
                 aria-haspopup="menu" aria-expanded="false"
                 aria-label="Node Catalog panel options" data-tooltip="Node Catalog panel options">
@@ -365,8 +369,29 @@
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
-        <div class="panel-body"><div class="panel-content">
+        <div class="panel-body" id="panel-catalog-body"><div class="panel-content">
           <div id="node-catalog" class="node-catalog"><div class="catalog-empty">Connect to the service to load programmable nodes.</div></div>
+        </div></div>
+      </section>
+
+      <section class="panel" data-panel-id="node-palettes" data-panel-zone="left" aria-labelledby="panel-palettes-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-palettes-t">Personal Palettes</h2>
+        <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-palettes"
+                aria-expanded="true" aria-controls="panel-palettes-body" aria-label="Collapse Personal Palettes">▾</button>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-palettes"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Personal Palettes panel options" data-tooltip="Personal Palettes panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-palettes"
+                aria-label="Close Personal Palettes panel" data-tooltip="Close Personal Palettes panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body" id="panel-palettes-body"><div class="panel-content">
+          <div id="node-palettes" class="node-palettes"><div class="catalog-empty">Connect to load personal palettes.</div></div>
         </div></div>
       </section>
 

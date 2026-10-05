@@ -593,6 +593,20 @@ public final class BehaviorRegistry {
         if (factory != null) factory.validate(node);
     }
 
+    /** Validates references through the exact registered behavior without constructing an action. */
+    public void validateTemplateReferences(GraphNode node, String tenantId) {
+        if (node == null || node.behavior() == null) return;
+        var factory = factories.get(node.behavior());
+        if (factory == null) {
+            throw new ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException();
+        }
+        // Schema and cross-property validation remain invalid authored payloads. The behavior hook
+        // owns the classification boundary because only the behavior knows whether a refusal came
+        // from authored settings or from an operator-owned destination reference.
+        factory.validate(node);
+        factory.validateTemplateReferences(node, tenantId);
+    }
+
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */
     public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
         if (node == null || node.behavior() == null) return Optional.empty();

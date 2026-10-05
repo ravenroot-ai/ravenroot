@@ -148,6 +148,23 @@ class DefaultAuthorizationServiceTest {
         assertTrue(events.stream().noneMatch(AuthorizationAuditEvent::allowed));
     }
 
+    @Test
+    void personalPalettesRequireAUserPrincipalAndExactTenantEvenForPlatformAdmins() {
+        var service = new DefaultAuthorizationService(event -> { });
+        for (var action : Set.of(AuthorizationAction.PALETTE_READ, AuthorizationAction.PALETTE_MANAGE)) {
+            var workload = new RequestContext("request", "runner", PrincipalType.WORKLOAD, "issuer", "tenant-a",
+                    Set.of(Role.PLATFORM_ADMIN), Set.of(action.requiredScope()));
+            assertFalse(service.decide(workload, action,
+                    ProtectedResource.collection("node-palettes", "tenant-a")).allowed());
+            assertFalse(service.decide(context("tenant-a", Set.of(Role.PLATFORM_ADMIN),
+                            Set.of(action.requiredScope())), action,
+                    ProtectedResource.collection("node-palettes", "tenant-b")).allowed());
+            assertFalse(service.decide(context("tenant-a", Set.of(Role.PLATFORM_ADMIN),
+                            Set.of(action.requiredScope())), action,
+                    ProtectedResource.unknownOwnership("node-palettes", "node-palettes")).allowed());
+        }
+    }
+
     private static RequestContext context(String tenant, Set<Role> roles, Set<String> scopes) {
         return new RequestContext("request-1", "alice", PrincipalType.USER, "issuer", tenant, roles, scopes);
     }
@@ -164,14 +181,14 @@ class DefaultAuthorizationServiceTest {
 
     private static Role permittedRole(AuthorizationAction action) {
         return switch (action) {
-            case RUNNER_READ, STATUS_READ, CATALOG_READ, ARTIFACT_LIST, EMBED_GRAPH_READ,
+            case RUNNER_READ, STATUS_READ, CATALOG_READ, PALETTE_READ, ARTIFACT_LIST, EMBED_GRAPH_READ,
                     EMBED_SESSION_CREATE, DEPLOYMENT_OBSERVE, EMBED_DEPLOYMENT_RUN_READ,
                     EMBED_DEPLOYMENT_EXECUTE, EMBED_DEPLOYMENT_DISCOVER -> Role.VIEWER;
             // EMBED_REGISTRATION_ADMIN is deliberately not in the VIEWER arm above, unlike the
             // two embed actions beside it. Deciding which snapshot an embed may expose is operations.
             case RUNNER_CONTROL, RUNNER_DISPATCH, GRAPH_READ, EXECUTION_START, EXECUTION_READ, EXECUTION_CONTROL,
                     EMBED_REGISTRATION_ADMIN -> Role.OPERATOR;
-            case ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
+            case PALETTE_MANAGE, ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
             case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE -> Role.APPROVER;
             case RUNTIME_OBSERVE, AGENT_AUTHORITY_CONTROL, AUDIT_ADMIN -> Role.PLATFORM_ADMIN;
             case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN,
@@ -188,6 +205,7 @@ class DefaultAuthorizationServiceTest {
 
     private static boolean isViewerAction(AuthorizationAction action) {
         return action == AuthorizationAction.RUNNER_READ || action == AuthorizationAction.STATUS_READ || action == AuthorizationAction.CATALOG_READ
+                || action == AuthorizationAction.PALETTE_READ
                 || action == AuthorizationAction.ARTIFACT_LIST
                 || action == AuthorizationAction.EMBED_GRAPH_READ
                 || action == AuthorizationAction.EMBED_SESSION_CREATE

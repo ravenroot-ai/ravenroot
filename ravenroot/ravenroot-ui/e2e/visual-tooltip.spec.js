@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-const PANELS = ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats', 'inspector', 'assistant', 'activity'];
-const SHORTENABLE = ['node-types', 'edge-types', 'node-catalog', 'search', 'graph-stats'];
+const PANELS = ['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats', 'inspector', 'assistant', 'activity'];
+const SHORTENABLE = ['node-types', 'edge-types', 'node-catalog', 'node-palettes', 'search', 'graph-stats'];
 const CATALOG = JSON.stringify([
   { behavior: 'alpha', displayName: 'Alpha template', category: 'core', description: 'Alpha', visualType: 'flow', agentic: false },
   { behavior: 'beta', displayName: 'Beta template', category: 'extension', description: 'Beta', visualType: 'agent', agentic: true },
@@ -10,6 +10,9 @@ const CATALOG = JSON.stringify([
 async function serveCatalog(page) {
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json; charset=utf-8', body: CATALOG,
+  }));
+  await page.route('**/v1/node-palettes', route => route.fulfill({
+    status: 200, contentType: 'application/json; charset=utf-8', body: '{"palettes":[],"templates":[]}',
   }));
   await page.route('**/v1/events', route => route.fulfill({ status: 204, body: '' }));
 }
@@ -51,10 +54,10 @@ test('inventories every panel family without native-title or unnamed glyph fallb
   }
   await expect(page.locator('.panel-hd [title]')).toHaveCount(0);
   await expect(page.locator('.rail [title]')).toHaveCount(0);
-  // There are 11: two rails x (toggle + index) = 4, plus one identity mark per panel — five on
+  // There are 12: two rails x (toggle + index) = 4, plus one identity mark per panel — six on
   // the left, now two on the right. The mark is present whether the panel is open or closed,
   // which is what makes a closed panel reachable at all.
-  await expect(page.locator('.rail-btn[data-tooltip]')).toHaveCount(11);
+  await expect(page.locator('.rail-btn[data-tooltip]')).toHaveCount(12);
 
   const legend = page.locator('[data-legend-kind]');
   await expect(legend).toHaveCount(23);
@@ -206,7 +209,7 @@ test('keeps compact Search and menu names outside the one-cell owner', async ({ 
 
 test('keeps an unavailable zone control focusable and gates pointer and keyboard activation', async ({ page }) => {
   await page.goto('/');
-  for (const id of ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats']) {
+  for (const id of ['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats']) {
     await page.locator(`.panel[data-panel-id="${id}"] [data-action="panel-close"]`).click();
   }
   const toggle = page.locator('#sidebar .rail-toggle');

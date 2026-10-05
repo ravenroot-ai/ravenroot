@@ -133,7 +133,7 @@ public final class ExecutionStoreBootstrap {
             if (!enabled) {
                 ActivityArchive activity = activityConfiguration.policy().enabled()
                         ? new SqliteActivityArchive(location, clock, activityConfiguration.maxPageSize()) : null;
-                return new Opened(null, null, null, null, activity,
+                return new Opened(null, null, null, null, activity, null,
                         activity == null ? () -> { } : activity::close, maintenanceLock::close);
             }
             var store = new SqliteExecutionStore(location, clock,
@@ -186,6 +186,8 @@ public final class ExecutionStoreBootstrap {
                 }
                 throw failed;
             }
+            var palettes = ai.ravenroot.server.palette.JdbcNodePaletteStore.sqlite(
+                    location.databaseFile(), clock);
             ActivityArchive activity;
             try {
                 activity = activityConfiguration.policy().enabled()
@@ -194,7 +196,7 @@ public final class ExecutionStoreBootstrap {
                 closeInOrder(store, definitions, manifests, deployments, null).run();
                 throw failed;
             }
-            return new Opened(store, definitions, manifests, deployments, activity,
+            return new Opened(store, definitions, manifests, deployments, activity, palettes,
                     closeInOrder(store, definitions, manifests, deployments, activity), maintenanceLock::close);
         } catch (RuntimeException failed) {
             maintenanceLock.close();
@@ -281,7 +283,9 @@ public final class ExecutionStoreBootstrap {
             // must be released strictly after all three of them. It is not a maintenance lease and
             // excludes nobody — see this class's own explanation of why the shared store must not
             // have one.
-            return new Opened(store, definitions, manifests, deployments, activity,
+            var palettes = ai.ravenroot.server.palette.JdbcNodePaletteStore.postgresql(
+                    pool.dataSource(), clock);
+            return new Opened(store, definitions, manifests, deployments, activity, palettes,
                     closeInOrder(store, definitions, manifests, deployments, activity), pool::close);
         } catch (RuntimeException failed) {
             pool.close();
@@ -350,6 +354,7 @@ public final class ExecutionStoreBootstrap {
         private final ExecutionManifestStore executionManifestStore;
         private final DeploymentRegistry deploymentRegistry;
         private final ActivityArchive activityArchive;
+        private final ai.ravenroot.server.palette.NodePaletteStore nodePaletteStore;
         private final Runnable closeStore;
         private final Runnable releaseBackingResource;
         private final AtomicBoolean closed = new AtomicBoolean();
@@ -358,19 +363,21 @@ public final class ExecutionStoreBootstrap {
                        ExecutionManifestStore executionManifestStore,
                        DeploymentRegistry deploymentRegistry,
                        ActivityArchive activityArchive,
+                       ai.ravenroot.server.palette.NodePaletteStore nodePaletteStore,
                        Runnable closeStore, Runnable releaseBackingResource) {
             this.store = store;
             this.graphDefinitionStore = graphDefinitionStore;
             this.executionManifestStore = executionManifestStore;
             this.deploymentRegistry = deploymentRegistry;
             this.activityArchive = activityArchive;
+            this.nodePaletteStore = nodePaletteStore;
             this.closeStore = Objects.requireNonNull(closeStore, "closeStore");
             this.releaseBackingResource = Objects.requireNonNull(
                     releaseBackingResource, "releaseBackingResource");
         }
 
         static Opened forTest(Runnable closeStore, Runnable releaseBackingResource) {
-            return new Opened(null, null, null, null, null, closeStore, releaseBackingResource);
+            return new Opened(null, null, null, null, null, null, closeStore, releaseBackingResource);
         }
 
         public ExecutionStore store() {
@@ -407,6 +414,11 @@ public final class ExecutionStoreBootstrap {
         /** Optional content archive; it is separate from the execution event journal. */
         public ActivityArchive activityArchive() {
             return activityArchive;
+        }
+
+        /** Personal author palettes in the selected durable store; absent when persistence is disabled. */
+        public ai.ravenroot.server.palette.NodePaletteStore nodePaletteStore() {
+            return nodePaletteStore;
         }
 
         /**

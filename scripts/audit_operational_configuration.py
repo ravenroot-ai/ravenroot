@@ -446,6 +446,7 @@ HELM_FIXED_LIST_CONTRACTS = {
 }
 HELM_JAVA_CARRIER_PREFIXES = (
     "executionRuntime.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
+    "activityCapture.",
 )
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(

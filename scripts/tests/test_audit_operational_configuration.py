@@ -495,6 +495,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertNotIn("appVersion", authority["chartMetadata"])
         self.assertEqual(
             ["version", "appVersion"], authority["releaseVersionEvidence"]["fields"])
+        self.assertEqual({
+            "activityCapture.contents", "activityCapture.enabled",
+            "activityCapture.maxInFlight", "activityCapture.maxPageSize",
+            "activityCapture.maxPayloadBytes", "activityCapture.nodes",
+            "activityCapture.policy", "activityCapture.redactKeys",
+            "activityCapture.retentionSeconds", "activityCapture.writeTimeoutMillis",
+        }, {path for path in authority["javaCarrierPaths"]
+            if path.startswith("activityCapture.")})
         chart_candidate_ids = {
             candidate.id for candidate in candidates if candidate.path == audit.HELM_CHART_PATH}
         contract_candidate_ids = {

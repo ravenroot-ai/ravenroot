@@ -61,6 +61,7 @@ UI_RELEASE_EXAMPLES = (
 def bump_ui_examples(root: Path, previous: str, target: str) -> dict[Path, str]:
     """Keep new installation coordinates current, including their first upcoming release."""
     updates = {}
+    upcoming = str(expected_next(parse_tag(f"v{previous}"), "minor"))
     pattern = r"(?<![A-Za-z0-9])\d+\.\d+\.\d+-(?:alpha|beta|rc)\.\d+(?![A-Za-z0-9])"
     for relative in UI_RELEASE_EXAMPLES:
         path = root / relative
@@ -68,7 +69,7 @@ def bump_ui_examples(root: Path, previous: str, target: str) -> dict[Path, str]:
             continue
         contents = path.read_text(encoding="utf-8")
         versions = set(re.findall(pattern, contents))
-        if not versions or versions.difference({previous, target}):
+        if not versions or versions.difference({previous, target, upcoming}):
             raise ReleaseContractError(f"{relative}: unexpected installation version coordinates")
         updates[path] = re.sub(pattern, target, contents)
     return updates

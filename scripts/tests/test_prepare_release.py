@@ -85,6 +85,11 @@ class PrepareReleaseTest(unittest.TestCase):
             for contents in updates.values():
                 self.assertNotIn(PREVIOUS, contents)
                 self.assertEqual(contents.count("0.2.0-alpha.1"), 2)
+            # A patch preparation must rewrite the initially anticipated minor coordinates too.
+            patch_updates = bump_ui_examples(root, PREVIOUS, "0.1.1-alpha.1")
+            for contents in patch_updates.values():
+                self.assertEqual(contents.count("0.1.1-alpha.1"), 2)
+                self.assertNotIn("0.2.0-alpha.1", contents)
             (root / UI_RELEASE_EXAMPLES[0]).write_text("version 9.9.9-alpha.1")
             with self.assertRaises(ReleaseContractError):
                 bump_ui_examples(root, PREVIOUS, "0.2.0-alpha.1")

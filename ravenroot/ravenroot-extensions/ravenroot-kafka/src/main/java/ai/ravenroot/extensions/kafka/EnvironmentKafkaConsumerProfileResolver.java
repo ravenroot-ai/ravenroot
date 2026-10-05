@@ -28,14 +28,14 @@ public final class EnvironmentKafkaConsumerProfileResolver implements KafkaConsu
         if (p.length != 34) return Optional.empty();
         try {
             boolean tls = bool(p[2]);
-            EnvironmentKafkaProfileResolver.requireDestinations(
+            var plaintextAuthorizations = EnvironmentKafkaProfileResolver.requireDestinations(
                     p[0], destinationPolicy, tenant + "/" + profile, tls);
             return Optional.of(new KafkaConsumerProfile(tenant, profile, csvList(p[0]), p[1], tls,
                     p[3], p[4], p[5], p[6], p[7], p[8], p[9], csv(p[10]), p[11], csv(p[12]),
                     p[13], p[14], p[15], integer(p[16]), integer(p[17]), integer(p[18]), integer(p[19]),
                     integer(p[20]), integer(p[21]), integer(p[22]), integer(p[23]), integer(p[24]),
                     integer(p[25]), integer(p[26]), integer(p[27]), integer(p[28]), integer(p[29]),
-                    integer(p[30]), integer(p[31]), p[32], p[33]));
+                    integer(p[30]), integer(p[31]), p[32], p[33], plaintextAuthorizations));
         } catch (SecurityException refused) { throw refused; }
         catch (RuntimeException invalid) { return Optional.empty(); }
     }

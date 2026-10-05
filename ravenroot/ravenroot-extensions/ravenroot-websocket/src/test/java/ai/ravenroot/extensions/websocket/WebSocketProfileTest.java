@@ -36,6 +36,28 @@ class WebSocketProfileTest {
     }
 
     @Test
+    void administratorRuleAuthorizesOnlyTheResolverConstructedWsProfile() {
+        String json = """
+                {"destination":"ws://127.0.0.1:8080/events","headers":{},"subprotocols":["events.v1"],
+                "credentialBindingId":"handshake","credentialReference":"secret",
+                "maximumMessageBytes":1024,"maximumFragments":4,"timeoutMs":2000,"reconnectBackoffMs":10,
+                "maxConcurrency":2,"maxBufferedEvents":8}
+                """.replace("\n", "");
+        String policy = """
+                {"version":1,"rules":[{"name":"websocket-mesh","protocols":["websocket"],
+                "ports":[8080],"hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.websocket"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        String key = EnvironmentWebSocketProfileResolver.variable("events");
+        var resolved = new EnvironmentWebSocketProfileResolver(Map.of(
+                key, Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8)),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8))))
+                .resolve("events").orElseThrow();
+        assertEquals(URI.create("ws://127.0.0.1:8080/events"), resolved.destination());
+    }
+
+    @Test
     void profileRejectsUnsafeAuthorityHeadersAndSubprotocols() {
         assertThrows(IllegalArgumentException.class, () -> profile("ws://socket.example.test/events",
                 Map.of(), List.of("events.v1")));

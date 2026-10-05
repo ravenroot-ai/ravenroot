@@ -125,18 +125,12 @@ class GitWorkspaceSecurityTest {
     void httpRemoteWithoutExactPlaintextRuleFailsBeforeGitStarts() throws Exception {
         Path root = Files.createDirectory(temporary.resolve("refused-http-root"));
         Path git = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
-        GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
-                "http://127.0.0.1:8080/org/repository.git", "refs/heads/dev", "refs/heads/issues/",
-                git, GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1",
-                null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10,
-                ReservedNetworkPolicy.denyAllReserved());
-        GitWorkspaceStore store = new GitWorkspaceStore(profile);
-        GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
-                System.nanoTime() + Duration.ofSeconds(5).toNanos(), System::nanoTime);
-
         SecurityException refused = org.junit.jupiter.api.Assertions.assertThrows(SecurityException.class,
-                () -> new GitCommandRunner(profile, store.home(), store.hooks(), control)
-                        .configuration(null, true));
+                () -> new GitWorkspaceProfile("tenant", "profile", root,
+                        "http://127.0.0.1:8080/org/repository.git", "refs/heads/dev", "refs/heads/issues/",
+                        git, GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1",
+                        null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10,
+                        ReservedNetworkPolicy.denyAllReserved()));
         assertEquals("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED", refused.getMessage());
     }
 

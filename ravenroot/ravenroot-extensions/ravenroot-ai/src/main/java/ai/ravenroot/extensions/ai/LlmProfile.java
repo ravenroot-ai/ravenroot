@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.Locale;
@@ -35,7 +36,15 @@ import java.util.Optional;
 public record LlmProfile(String name, URI endpoint, String model,
                          Optional<OutboundCredentialBinding> credentialBinding,
                          int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
-                         String systemPreamble) {
+                         String systemPreamble, PlaintextAuthorization plaintextAuthorization) {
+
+    public LlmProfile(String name, URI endpoint, String model,
+                      Optional<OutboundCredentialBinding> credentialBinding,
+                      int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
+                      String systemPreamble) {
+        this(name, endpoint, model, credentialBinding, timeoutMs, maxRequestBytes, maxResponseBytes,
+                maxConcurrency, systemPreamble, null);
+    }
 
     public LlmProfile {
         Objects.requireNonNull(name, "name");
@@ -50,8 +59,10 @@ public record LlmProfile(String name, URI endpoint, String model,
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw new IllegalArgumentException("endpoint");
         }
-        // Credential transport is decided by the administrator-owned service grant plus the shared
-        // trusted-network policy. Keeping it out of graph-owned profile selection prevents widening.
+        int endpointPort = endpoint.getPort() == -1 ? scheme.equals("https") ? 443 : 80 : endpoint.getPort();
+        if (credentialBinding.isPresent() && scheme.equals("http") && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", AiNodePackage.ID,
+                        endpoint.getHost(), endpointPort))) throw new IllegalArgumentException("endpoint");
         if (model.isBlank() || model.length() > 256) {
             throw new IllegalArgumentException("model");
         }

@@ -60,10 +60,11 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
         } catch (java.io.IOException unavailable) {
             throw new IllegalArgumentException("invalid Git workspace profile", unavailable);
         }
-        remote = validateRemote(remote, credentialRef != null);
+        remote = validateRemote(remote, credentialRef != null, egressPolicy, tenant + "/" + name);
     }
 
-    private static String validateRemote(String value, boolean credentialled) {
+    private static String validateRemote(String value, boolean credentialled,
+                                         ReservedNetworkPolicy egressPolicy, String profile) {
         if (value == null || value.length() > 2048 || value.isBlank()
                 || value.codePoints().anyMatch(cp -> cp <= 0x20 || cp == 0x7f)) {
             throw new IllegalArgumentException("invalid Git workspace profile");
@@ -75,6 +76,10 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
             }
             if (("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
                     && uri.getHost() != null && !uri.getHost().isBlank()) {
+                if ("http".equals(uri.getScheme())) {
+                    int port = uri.getPort() == -1 ? 80 : uri.getPort();
+                    egressPolicy.authorizePlaintext("git", profile, uri.getHost(), port);
+                }
                 return uri.normalize().toASCIIString();
             }
             if (!credentialled && "file".equals(uri.getScheme())) {

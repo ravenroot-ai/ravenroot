@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.openapi.client;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.time.Duration;
@@ -19,14 +20,27 @@ public record OpenApiClientProfile(
         Set<String> allowedOperations, Map<String, List<String>> fixedHeaders,
         Set<String> allowedInputHeaders, Set<String> projectedResponseHeaders,
         String credentialBindingId, String credentialReference,
-        int maxRequestBytes, int maxResponseBytes, int timeoutMs, int maxConcurrency) {
+        int maxRequestBytes, int maxResponseBytes, int timeoutMs, int maxConcurrency,
+        PlaintextAuthorization plaintextAuthorization) {
 
     public static final int HARD_MAX_SPEC_BYTES = 2 * 1024 * 1024;
     public static final int HARD_MAX_BODY_BYTES = 16 * 1024 * 1024;
+    static final String PACKAGE_ID = "ai.ravenroot.extensions.openapi.client";
+
+    public OpenApiClientProfile(
+            String name, URI origin, byte[] specification, String specificationSha256,
+            Set<String> allowedOperations, Map<String, List<String>> fixedHeaders,
+            Set<String> allowedInputHeaders, Set<String> projectedResponseHeaders,
+            String credentialBindingId, String credentialReference,
+            int maxRequestBytes, int maxResponseBytes, int timeoutMs, int maxConcurrency) {
+        this(name, origin, specification, specificationSha256, allowedOperations, fixedHeaders,
+                allowedInputHeaders, projectedResponseHeaders, credentialBindingId, credentialReference,
+                maxRequestBytes, maxResponseBytes, timeoutMs, maxConcurrency, null);
+    }
 
     public OpenApiClientProfile {
         name = token(name, "name", 64);
-        origin = exactOrigin(origin);
+        origin = exactOrigin(origin, plaintextAuthorization);
         specification = Objects.requireNonNull(specification, "specification").clone();
         if (specification.length == 0 || specification.length > HARD_MAX_SPEC_BYTES) {
             throw new IllegalArgumentException("specification size is invalid");
@@ -61,7 +75,7 @@ public record OpenApiClientProfile(
                 : Optional.of(new OutboundCredentialBinding(credentialBindingId, credentialReference));
     }
 
-    private static URI exactOrigin(URI value) {
+    private static URI exactOrigin(URI value, PlaintextAuthorization plaintextAuthorization) {
         Objects.requireNonNull(value, "origin");
         if (!Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
                 || value.getFragment() != null || value.getQuery() != null
@@ -69,6 +83,11 @@ public record OpenApiClientProfile(
             throw new IllegalArgumentException("origin must be an exact HTTP authority");
         }
         int defaultPort = "https".equals(value.getScheme()) ? 443 : 80;
+        int port = value.getPort() == -1 ? defaultPort : value.getPort();
+        if ("http".equals(value.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", PACKAGE_ID, value.getHost(), port))) {
+            throw new IllegalArgumentException("origin requires administrator plaintext authorization");
+        }
         return URI.create(value.getScheme() + "://" + value.getHost().toLowerCase(Locale.ROOT)
                 + (value.getPort() == -1 || value.getPort() == defaultPort ? "" : ":" + value.getPort()));
     }

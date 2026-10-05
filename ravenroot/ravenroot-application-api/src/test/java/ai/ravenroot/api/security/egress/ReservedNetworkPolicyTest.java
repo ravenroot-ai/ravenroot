@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -66,5 +68,37 @@ class ReservedNetworkPolicyTest {
         assertFalse(mapped.permitsLiteral("127.0.0.1"));
         assertThrows(IllegalArgumentException.class,
                 () -> ReservedNetworkPolicy.fromCommaSeparatedExceptions("127.000.0.1:LOOPBACK"));
+    }
+
+    @Test
+    void plaintextAuthorizationIsOpaqueAndBoundToItsExactScope() {
+        String json = """
+                {"version":1,"rules":[{"name":"local-http","protocols":["http"],"ports":[8080],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],"profiles":["pkg"],
+                "allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(Map.of(
+                TrustedNetworkPolicy.ENVIRONMENT_VARIABLE,
+                Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8))));
+
+        ReservedNetworkPolicy.PlaintextAuthorization proof =
+                policy.authorizePlaintext("http", "pkg", "127.0.0.1", 8080);
+        assertTrue(proof.matches("HTTP", "pkg", "127.0.0.1", 8080));
+        assertFalse(proof.matches("websocket", "pkg", "127.0.0.1", 8080));
+        assertFalse(proof.matches("http", "other", "127.0.0.1", 8080));
+        assertFalse(proof.matches("http", "pkg", "127.0.0.2", 8080));
+        assertFalse(proof.matches("http", "pkg", "127.0.0.1", 8081));
+        assertFalse(proof.toString().contains("127.0.0.1"));
+    }
+
+    @Test
+    void plaintextAuthorizationPreservesIpv6ZoneIdentity() throws Exception {
+        var constructor = ReservedNetworkPolicy.PlaintextAuthorization.class.getDeclaredConstructor(
+                String.class, String.class, String.class, int.class);
+        constructor.setAccessible(true);
+        var proof = constructor.newInstance("http", "pkg", "[fe80::1%25ETH0]", 8080);
+
+        assertTrue(proof.matches("http", "pkg", "fe80::1%25ETH0", 8080));
+        assertFalse(proof.matches("http", "pkg", "fe80::1%25eth0", 8080));
     }
 }

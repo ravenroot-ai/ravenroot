@@ -1,5 +1,6 @@
 package ai.ravenroot.observability.otel;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import org.junit.jupiter.api.Test;
 
@@ -34,7 +35,11 @@ class TelemetrySupportOtlpConstructionTest {
                 // Loopback, port 1: no listener is possible and no real network egress occurs, but
                 // close() still takes ~5.1s -- see this class's own Javadoc for why (the SDK's own
                 // default shutdown timeout, not connection time).
-                TelemetryConfiguration.ENDPOINT_VARIABLE, "http://127.0.0.1:1"));
+                TelemetryConfiguration.ENDPOINT_VARIABLE, "http://127.0.0.1:1",
+                // A literal loopback address is not covered by the shipped, name-scoped
+                // localhost exception. Admit this dead test endpoint explicitly without granting
+                // plaintext to any non-loopback destination.
+                ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE, "127.0.0.1:LOOPBACK"));
         var monitor = new ExecutionMonitor();
 
         var telemetry = assertDoesNotThrow(() -> TelemetrySupport.install(configuration, monitor),

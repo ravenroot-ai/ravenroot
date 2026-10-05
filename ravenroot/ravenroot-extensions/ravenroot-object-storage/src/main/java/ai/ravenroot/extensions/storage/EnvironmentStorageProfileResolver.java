@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.storage;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.util.Base64;
@@ -20,9 +21,13 @@ public final class EnvironmentStorageProfileResolver implements StorageProfileRe
             "addressingStyle", "signingBindingId", "operations", "contentTypes", "allowIfMatch",
             "allowIfNoneMatch", "maxObjectBytes", "timeoutMs", "maxConcurrency", "maxRequestsPerSecond");
     private final Map<String, String> environment;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public EnvironmentStorageProfileResolver() { this(System.getenv()); }
-    EnvironmentStorageProfileResolver(Map<String, String> environment) { this.environment = Map.copyOf(environment); }
+    EnvironmentStorageProfileResolver(Map<String, String> environment) {
+        this.environment = Map.copyOf(environment);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
+    }
 
     @Override public Optional<StorageProfile> resolve(String name) {
         if (name == null || !name.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) return Optional.empty();
@@ -33,8 +38,13 @@ public final class EnvironmentStorageProfileResolver implements StorageProfileRe
             if (!Base64.getEncoder().encodeToString(json).equals(encoded)) return Optional.empty();
             Map<String, Object> root = StorageValues.object(PayloadJson.read(json, LIMITS).toJava(), "profile");
             StorageValues.exactKeys(root, FIELDS, "profile");
+            URI origin = URI.create(StorageValues.string(root.get("origin"), "origin", 512));
+            int port = origin.getPort() == -1 ? "https".equals(origin.getScheme()) ? 443 : 80 : origin.getPort();
+            ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = "http".equals(origin.getScheme())
+                    ? destinationPolicy.authorizePlaintext("http", StorageProfile.PACKAGE_ID, origin.getHost(), port)
+                    : null;
             return Optional.of(new StorageProfile(name,
-                    URI.create(StorageValues.string(root.get("origin"), "origin", 512)),
+                    origin,
                     StorageValues.string(root.get("region"), "region", 63),
                     StorageValues.string(root.get("bucket"), "bucket", 63),
                     root.get("keyPrefix") instanceof String prefix ? prefix : throwInvalid("keyPrefix"),
@@ -48,7 +58,8 @@ public final class EnvironmentStorageProfileResolver implements StorageProfileRe
                             StorageProfile.HARD_MAX_OBJECT_BYTES),
                     StorageValues.integer(root.get("timeoutMs"), "timeoutMs", 1, 300_000),
                     StorageValues.integer(root.get("maxConcurrency"), "maxConcurrency", 1, 256),
-                    StorageValues.integer(root.get("maxRequestsPerSecond"), "maxRequestsPerSecond", 1, 10_000)));
+                    StorageValues.integer(root.get("maxRequestsPerSecond"), "maxRequestsPerSecond", 1, 10_000),
+                    plaintextAuthorization));
         } catch (RuntimeException invalid) {
             return Optional.empty();
         }

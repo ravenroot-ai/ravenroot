@@ -27,11 +27,13 @@ public final class EnvironmentKafkaProfileResolver implements KafkaProfileResolv
         if (p.length != 24) return Optional.empty();
         try {
             boolean tls = bool(p[2]);
-            requireDestinations(p[0], destinationPolicy, tenant + "/" + profile, tls);
+            var plaintextAuthorizations = requireDestinations(
+                    p[0], destinationPolicy, tenant + "/" + profile, tls);
             return Optional.of(new KafkaProfile(tenant, profile, List.of(p[0].split(",", -1)), p[1], tls,
                     p[3], p[4], p[5], p[6], p[7], csv(p[8]), csv(p[9]), bool(p[10]), integer(p[11]), bool(p[12]),
                     p[13], p[14], bool(p[15]), integer(p[16]), integer(p[17]), bool(p[18]), integer(p[19]),
-                    integer(p[20]), integer(p[21]), integer(p[22]), Long.parseLong(p[23])));
+                    integer(p[20]), integer(p[21]), integer(p[22]), Long.parseLong(p[23]),
+                    plaintextAuthorizations));
         } catch (SecurityException refused) { throw refused; }
         catch (RuntimeException invalid) { return Optional.empty(); }
     }
@@ -55,15 +57,17 @@ public final class EnvironmentKafkaProfileResolver implements KafkaProfileResolv
         throw new IllegalArgumentException("invalid boolean");
     }
     private static Set<String> csv(String value) { return value.isEmpty() ? Set.of() : Set.of(value.split(",", -1)); }
-    static void requireDestinations(String bootstrapServers, ReservedNetworkPolicy policy,
-                                    String profile, boolean tls) {
+    static List<ReservedNetworkPolicy.PlaintextAuthorization> requireDestinations(
+            String bootstrapServers, ReservedNetworkPolicy policy, String profile, boolean tls) {
+        List<ReservedNetworkPolicy.PlaintextAuthorization> plaintextAuthorizations = new java.util.ArrayList<>();
         for (String authority : bootstrapServers.split(",", -1)) {
             String host = host(authority);
             int port = Integer.parseInt(authority.substring(authority.lastIndexOf(':') + 1));
             policy.requireAllowedDestination("kafka", profile, host, port);
             if (!tls && !KafkaProfile.loopback(authority))
-                policy.requirePlaintext("kafka", profile, host, port);
+                plaintextAuthorizations.add(policy.authorizePlaintext("kafka", profile, host, port));
         }
+        return List.copyOf(plaintextAuthorizations);
     }
     private static String host(String authority) {
         String value = authority.trim();

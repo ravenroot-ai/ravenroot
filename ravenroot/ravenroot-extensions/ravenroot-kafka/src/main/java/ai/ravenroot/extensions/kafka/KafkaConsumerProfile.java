@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.kafka;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -17,7 +18,7 @@ public record KafkaConsumerProfile(
         int heartbeatIntervalMs, int maxInFlight, int maxFetchBytes, int maxPartitionFetchBytes,
         int maxRecordBytes, int maxKeyBytes, int maxValueBytes, int maxHeaderBytes,
         int drainTimeoutMs, int retryBackoffMs, int maxRetryBackoffMs, int poisonAttempts,
-        String poisonPolicy, String deadLetterTopic) {
+        String poisonPolicy, String deadLetterTopic, List<PlaintextAuthorization> plaintextAuthorizations) {
 
     private static final Set<String> DNS = Set.of(
             "use_all_dns_ips", "resolve_canonical_bootstrap_servers_only");
@@ -26,8 +27,31 @@ public record KafkaConsumerProfile(
     private static final Set<String> RESET = Set.of("earliest", "latest", "none");
     private static final Set<String> POISON = Set.of("halt", "dead-letter");
 
+    public KafkaConsumerProfile(
+            String tenant, String name, List<String> bootstrapServers, String clientDnsLookup, boolean tls,
+            String saslMechanism, String username, String credentialRef, String clientId,
+            String groupLogicalName, String groupId, String staticMemberId,
+            Set<String> topics, String topicPattern, Set<String> headers,
+            String assignmentStrategy, String autoOffsetReset, String isolationLevel,
+            int startupTimeoutMs, int pollTimeoutMs, int maxPollIntervalMs, int sessionTimeoutMs,
+            int heartbeatIntervalMs, int maxInFlight, int maxFetchBytes, int maxPartitionFetchBytes,
+            int maxRecordBytes, int maxKeyBytes, int maxValueBytes, int maxHeaderBytes,
+            int drainTimeoutMs, int retryBackoffMs, int maxRetryBackoffMs, int poisonAttempts,
+            String poisonPolicy, String deadLetterTopic) {
+        this(tenant, name, bootstrapServers, clientDnsLookup, tls, saslMechanism, username, credentialRef,
+                clientId, groupLogicalName, groupId, staticMemberId, topics, topicPattern, headers,
+                assignmentStrategy, autoOffsetReset, isolationLevel, startupTimeoutMs, pollTimeoutMs,
+                maxPollIntervalMs, sessionTimeoutMs, heartbeatIntervalMs, maxInFlight, maxFetchBytes,
+                maxPartitionFetchBytes, maxRecordBytes, maxKeyBytes, maxValueBytes, maxHeaderBytes,
+                drainTimeoutMs, retryBackoffMs, maxRetryBackoffMs, poisonAttempts, poisonPolicy,
+                deadLetterTopic, List.of());
+    }
+
     public KafkaConsumerProfile {
         bootstrapServers = List.copyOf(bootstrapServers == null ? List.of() : bootstrapServers);
+        List<PlaintextAuthorization> authorizations = List.copyOf(
+                plaintextAuthorizations == null ? List.of() : plaintextAuthorizations);
+        plaintextAuthorizations = authorizations;
         topics = Set.copyOf(topics == null ? Set.of() : topics);
         headers = Set.copyOf(headers == null ? Set.of() : headers);
         staticMemberId = blankToNull(staticMemberId);
@@ -68,7 +92,10 @@ public record KafkaConsumerProfile(
                 || poisonAttempts < 1 || poisonAttempts > 1_000
                 || !POISON.contains(poisonPolicy)
                 || "dead-letter".equals(poisonPolicy) && (deadLetterTopic == null || !topic(deadLetterTopic))
-                || deadLetterTopic != null && topics.contains(deadLetterTopic)) {
+                || deadLetterTopic != null && topics.contains(deadLetterTopic)
+                || !tls && bootstrapServers.stream().filter(server -> !KafkaProfile.loopback(server))
+                .anyMatch(server -> authorizations.stream().noneMatch(authorization ->
+                        authorization.matches("kafka", tenant + "/" + name, host(server), port(server))))) {
             throw new IllegalArgumentException("invalid Kafka consumer operator profile");
         }
     }
@@ -115,5 +142,14 @@ public record KafkaConsumerProfile(
                 || value.matches("\\[[0-9A-Fa-f:]+]:[1-9][0-9]{0,4}"))) return false;
         try { return Integer.parseInt(value.substring(value.lastIndexOf(':') + 1)) <= 65_535; }
         catch (NumberFormatException invalid) { return false; }
+    }
+
+    private static String host(String value) {
+        return value.startsWith("[") ? value.substring(1, value.indexOf(']'))
+                : value.substring(0, value.lastIndexOf(':'));
+    }
+
+    private static int port(String value) {
+        return Integer.parseInt(value.substring(value.lastIndexOf(':') + 1));
     }
 }

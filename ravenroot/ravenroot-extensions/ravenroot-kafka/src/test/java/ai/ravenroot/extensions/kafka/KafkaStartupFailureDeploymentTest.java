@@ -87,7 +87,7 @@ class KafkaStartupFailureDeploymentTest {
     void destinationPolicyFailureKeepsItsCauseAndDeclaredProjection() throws Exception {
         var sentinel = new SecurityException("host=private.example password=secret");
         NodeBehavior behavior = behaviorWithDestinationAdmission(profile -> { throw sentinel; });
-        assertFailure(sentinel, behavior, "cluster-profile-unavailable", true);
+        assertFailure(sentinel, behavior, "outbound-destination-policy-refused", true);
     }
 
     @Test

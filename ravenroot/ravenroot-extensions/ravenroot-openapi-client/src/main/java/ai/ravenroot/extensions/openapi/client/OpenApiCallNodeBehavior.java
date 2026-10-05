@@ -466,7 +466,9 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
             return expected.getScheme().equals(actual.getScheme()) && expected.getHost().equalsIgnoreCase(actual.getHost())
                     && effectivePort(expected) == effectivePort(actual) && actual.getUserInfo() == null;
         }
-        private static int effectivePort(URI value) { return value.getPort() == -1 ? 443 : value.getPort(); }
+        private static int effectivePort(URI value) {
+            return value.getPort() == -1 ? "https".equals(value.getScheme()) ? 443 : 80 : value.getPort();
+        }
         private static void invalid() { throw new OpenApiClientException(OpenApiClientException.Code.INVALID_INPUT); }
     }
 

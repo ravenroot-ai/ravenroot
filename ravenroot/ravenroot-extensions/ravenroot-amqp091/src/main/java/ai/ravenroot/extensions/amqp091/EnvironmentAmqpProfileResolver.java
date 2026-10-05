@@ -39,12 +39,13 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
             boolean tls = strictBoolean(p[2]);
             destinationPolicy.requireAllowedDestination(
                     "amqp091", tenant + "/" + profile, p[0], port);
-            if (!tls && !AmqpProfile.loopback(p[0]))
-                destinationPolicy.requirePlaintext("amqp091", tenant + "/" + profile, p[0], port);
+            ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = null;
+            if (!tls && !AmqpProfile.loopback(p[0])) plaintextAuthorization = destinationPolicy
+                    .authorizePlaintext("amqp091", tenant + "/" + profile, p[0], port);
             return Optional.of(new AmqpProfile(tenant, profile, p[0], port, tls, p[3],
                     p[4], p[5], p[6], csv(p[7]), p[8], csv(p[9]), csv(p[10]), csv(p[11]),
                     strictBoolean(p[12]), integer(p[13]), Long.parseLong(p[14]), integer(p[15]), integer(p[16]),
-                    integer(p[17]), integer(p[18]), integer(p[19])));
+                    integer(p[17]), integer(p[18]), integer(p[19]), plaintextAuthorization));
         } catch (SecurityException refused) {
             throw refused;
         } catch (RuntimeException invalid) {

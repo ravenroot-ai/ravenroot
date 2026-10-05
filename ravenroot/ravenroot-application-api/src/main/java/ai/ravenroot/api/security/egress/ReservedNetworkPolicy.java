@@ -168,6 +168,17 @@ public final class ReservedNetworkPolicy {
         resolveAllowedPlaintextDestination(protocol, profile, host, port);
     }
 
+    /**
+     * Returns an opaque, exact-scope proof after validating an administrator plaintext rule.
+     * Profile constructors use this proof to keep their ordinary public construction fail-closed;
+     * only trusted configuration resolvers that possess this policy can construct plaintext
+     * profiles, and a proof for one protocol/profile/host/port cannot authorize another.
+     */
+    public PlaintextAuthorization authorizePlaintext(String protocol, String profile, String host, int port) {
+        resolveAllowedPlaintextDestination(protocol, profile, host, port);
+        return new PlaintextAuthorization(protocol, profile, host, port);
+    }
+
     /** Resolves one address set admitted by the same scoped plaintext rule. */
     public List<InetAddress> resolveAllowedPlaintextDestination(
             String protocol, String profile, String host, int port) {
@@ -186,6 +197,40 @@ public final class ReservedNetworkPolicy {
         return exceptions.keySet();
     }
 
+    /** Opaque exact-scope proof issued only after {@link #authorizePlaintext} succeeds. */
+    public static final class PlaintextAuthorization {
+        private final String protocol;
+        private final String profile;
+        private final String host;
+        private final int port;
+
+        private PlaintextAuthorization(String protocol, String profile, String host, int port) {
+            this.protocol = protocol == null ? "" : protocol.trim().toLowerCase(Locale.ROOT);
+            this.profile = profile == null ? "" : profile.trim();
+            this.host = normalizeAuthorizationHost(host);
+            this.port = port;
+        }
+
+        /** True only for the exact scope that produced this proof. */
+        public boolean matches(String protocol, String profile, String host, int port) {
+            return this.protocol.equals(protocol == null ? "" : protocol.trim().toLowerCase(Locale.ROOT))
+                    && this.profile.equals(profile == null ? "" : profile.trim())
+                    && this.host.equals(normalizeAuthorizationHost(host))
+                    && this.port == port;
+        }
+
+        private static String normalizeAuthorizationHost(String value) {
+            String normalized = value == null ? "" : value.trim();
+            if (normalized.startsWith("[") && normalized.endsWith("]"))
+                normalized = normalized.substring(1, normalized.length() - 1);
+            int zone = normalized.indexOf('%');
+            return zone < 0 ? normalized.toLowerCase(Locale.ROOT)
+                    : normalized.substring(0, zone).toLowerCase(Locale.ROOT) + normalized.substring(zone);
+        }
+
+        @Override public String toString() { return "PlaintextAuthorization[redacted]"; }
+    }
+
     private boolean legacyPermits(String name, InetAddress address) {
         ReservedNetwork network = ReservedNetwork.of(address);
         if (!network.isReserved()) return true;
@@ -197,7 +242,10 @@ public final class ReservedNetworkPolicy {
         Literal literal = Literal.parse(host);
         if (literal.kind() == LiteralKind.HOSTNAME) return true;
         if (literal.kind() == LiteralKind.MALFORMED) return false;
-        return legacyPermits(literal.normalized(), literal.address());
+        ReservedNetwork network = ReservedNetwork.of(literal.address());
+        if (!network.isReserved()) return true;
+        Set<ReservedNetwork> allowed = exceptions.get(literal.normalized());
+        return allowed != null && allowed.contains(network);
     }
 
     private static List<InetAddress> resolve(String host) {

@@ -4,6 +4,8 @@ import ai.ravenroot.api.security.EnvironmentKeyCodec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -81,6 +83,24 @@ class EnvironmentMcpProfileResolverTest {
         assertTrue(resolve("{\"endpoint\":\"https://mcp.example.test/mcp\","
                 + "\"credentialBindingId\":\"mcp\",\"credentialReference\":\"mcp-token\","
                 + "\"allowedTools\":[\"search\"]}").isPresent());
+    }
+
+    @Test
+    void administratorRuleAuthorizesCredentialedPlaintextOnlyThroughTheResolver() {
+        String json = "{\"endpoint\":\"http://127.0.0.1:8080/mcp\","
+                + "\"credentialBindingId\":\"mcp\",\"credentialReference\":\"mcp-token\","
+                + "\"allowedTools\":[\"search\"]}";
+        String policy = """
+                {"version":1,"rules":[{"name":"mcp-mesh","protocols":["http"],"ports":[8080],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.ai"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        var resolver = new EnvironmentMcpProfileResolver(Map.of(
+                VARIABLE, AiTestSupport.encodedMcpProfile(json),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8))));
+        assertEquals("http://127.0.0.1:8080/mcp",
+                resolver.resolve(NAME).orElseThrow().endpoint().toString());
     }
 
     @Test

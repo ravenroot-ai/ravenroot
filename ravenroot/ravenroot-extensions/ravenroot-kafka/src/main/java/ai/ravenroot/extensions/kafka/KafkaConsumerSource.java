@@ -522,7 +522,8 @@ final class KafkaConsumerSource implements InboundSource {
                     p.isolationLevel(), p.startupTimeoutMs(), p.pollTimeoutMs(), p.maxPollIntervalMs(), p.sessionTimeoutMs(),
                     p.heartbeatIntervalMs(), p.maxInFlight(), p.maxFetchBytes(), p.maxPartitionFetchBytes(),
                     p.maxRecordBytes(), p.maxKeyBytes(), p.maxValueBytes(), p.maxHeaderBytes(), p.drainTimeoutMs(),
-                    p.retryBackoffMs(), p.maxRetryBackoffMs(), p.poisonAttempts(), p.poisonPolicy(), p.deadLetterTopic());
+                    p.retryBackoffMs(), p.maxRetryBackoffMs(), p.poisonAttempts(), p.poisonPolicy(), p.deadLetterTopic(),
+                    p.plaintextAuthorizations());
         }
         private static KafkaConsumerProfile tightened(KafkaConsumerProfile p, int maxInFlight, int pollTimeout,
                 int drainTimeout, int retryBackoff, int maxRetryBackoff, int poisonAttempts) {
@@ -533,7 +534,7 @@ final class KafkaConsumerSource implements InboundSource {
                     p.sessionTimeoutMs(), p.heartbeatIntervalMs(), maxInFlight, p.maxFetchBytes(),
                     p.maxPartitionFetchBytes(), p.maxRecordBytes(), p.maxKeyBytes(), p.maxValueBytes(),
                     p.maxHeaderBytes(), drainTimeout, retryBackoff, maxRetryBackoff, poisonAttempts,
-                    p.poisonPolicy(), p.deadLetterTopic());
+                    p.poisonPolicy(), p.deadLetterTopic(), p.plaintextAuthorizations());
         }
     }
 

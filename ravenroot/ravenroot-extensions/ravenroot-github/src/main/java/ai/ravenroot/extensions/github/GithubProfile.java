@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.github;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.List;
@@ -16,7 +17,20 @@ public record GithubProfile(
         String webhookSecretReference, String route, Map<String, Set<String>> webhookEvents,
         ProjectPolicy project, Set<Long> workflowIds, ReleasePolicy release,
         int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
-        int maxPolls, int pollIntervalMs) {
+        int maxPolls, int pollIntervalMs, PlaintextAuthorization plaintextAuthorization) {
+
+    public GithubProfile(
+            String name, String tenantId, URI apiOrigin, String owner, String repository, long repositoryId,
+            long installationId, String reviewerLogin, String credentialBindingId, String credentialReference,
+            String webhookSecretReference, String route, Map<String, Set<String>> webhookEvents,
+            ProjectPolicy project, Set<Long> workflowIds, ReleasePolicy release,
+            int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
+            int maxPolls, int pollIntervalMs) {
+        this(name, tenantId, apiOrigin, owner, repository, repositoryId, installationId, reviewerLogin,
+                credentialBindingId, credentialReference, webhookSecretReference, route, webhookEvents,
+                project, workflowIds, release, timeoutMs, maxRequestBytes, maxResponseBytes,
+                maxConcurrency, maxPolls, pollIntervalMs, null);
+    }
 
     public GithubProfile {
         name = token(name, 64); tenantId = token(tenantId, 160);
@@ -25,6 +39,11 @@ public record GithubProfile(
                 || apiOrigin.getUserInfo() != null || apiOrigin.getQuery() != null || apiOrigin.getFragment() != null
                 || apiOrigin.getPort() != -1 && apiOrigin.getPort() != 443 && apiOrigin.getPort() != 80
                 || apiOrigin.getPath() != null && !apiOrigin.getPath().isEmpty()) throw invalid();
+        int apiPort = apiOrigin.getPort() == -1 ? "https".equalsIgnoreCase(apiOrigin.getScheme()) ? 443 : 80
+                : apiOrigin.getPort();
+        if ("http".equalsIgnoreCase(apiOrigin.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", GithubConfiguration.PACKAGE_ID,
+                        apiOrigin.getHost(), apiPort))) throw invalid();
         owner = repositoryToken(owner); repository = repositoryToken(repository);
         if (repositoryId < 1 || installationId < 1) throw invalid();
         reviewerLogin = reviewer(reviewerLogin); credentialBindingId = token(credentialBindingId, 256);

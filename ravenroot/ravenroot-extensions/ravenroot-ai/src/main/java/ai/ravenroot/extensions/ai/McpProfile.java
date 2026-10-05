@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.LinkedHashSet;
@@ -49,7 +50,8 @@ import java.util.Set;
 public record McpProfile(String name, URI endpoint,
                          Optional<OutboundCredentialBinding> credentialBinding,
                          int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
-                         int maxDiscoveredTools, Set<String> allowedTools) {
+                         int maxDiscoveredTools, Set<String> allowedTools,
+                         PlaintextAuthorization plaintextAuthorization) {
 
     /**
      * What separates a profile name from a tool name in the name the model is given.
@@ -72,6 +74,13 @@ public record McpProfile(String name, URI endpoint,
      */
     private static final String EXPOSED_NAME_PATTERN = "[A-Za-z0-9_-]{1,64}";
 
+    public McpProfile(String name, URI endpoint, Optional<OutboundCredentialBinding> credentialBinding,
+                      int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
+                      int maxDiscoveredTools, Set<String> allowedTools) {
+        this(name, endpoint, credentialBinding, timeoutMs, maxRequestBytes, maxResponseBytes,
+                maxConcurrency, maxDiscoveredTools, allowedTools, null);
+    }
+
     public McpProfile {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(endpoint, "endpoint");
@@ -85,8 +94,10 @@ public record McpProfile(String name, URI endpoint,
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw new IllegalArgumentException("endpoint");
         }
-        // Credential transport is decided by the administrator-owned service grant plus the shared
-        // trusted-network policy. The profile still cannot create either authority.
+        int endpointPort = endpoint.getPort() == -1 ? scheme.equals("https") ? 443 : 80 : endpoint.getPort();
+        if (credentialBinding.isPresent() && scheme.equals("http") && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", AiNodePackage.ID,
+                        endpoint.getHost(), endpointPort))) throw new IllegalArgumentException("endpoint");
         if (timeoutMs < 1) {
             throw new IllegalArgumentException("timeoutMs");
         }

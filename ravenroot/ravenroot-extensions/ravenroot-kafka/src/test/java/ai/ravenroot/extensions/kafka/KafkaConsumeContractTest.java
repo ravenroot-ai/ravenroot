@@ -23,6 +23,7 @@ class KafkaConsumeContractTest {
                 "consumer-failed", "consumer-wakeup", "credential-unavailable",
                 "dead-letter-topic-forbidden", "durable-ingress-lost", "durable-ingress-required",
                 "group-forbidden", "invalid-tightening", "membership-invalid", "partition-order-violation",
+                "outbound-destination-policy-refused", "outbound-transport-encryption-required",
                 "poison-policy-forbidden", "poison-record-halted", "startup-cancelled",
                 "subscription-mode-invalid", "topic-pattern-forbidden", "topics-forbidden", "topics-invalid",
                 "unknown-graph-property");

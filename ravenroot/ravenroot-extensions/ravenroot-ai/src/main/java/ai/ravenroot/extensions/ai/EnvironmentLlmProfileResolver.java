@@ -4,6 +4,7 @@ import ai.ravenroot.api.node.service.OutboundCredentialBinding;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.util.Base64;
@@ -52,6 +53,7 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
 
     private final Map<String, String> environment;
     private final AgentOperationalConfiguration policy;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public EnvironmentLlmProfileResolver() {
         this(System.getenv(), AgentOperationalConfiguration.fromEnvironment(System.getenv()));
@@ -65,6 +67,7 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
                                   AgentOperationalConfiguration policy) {
         this.environment = Map.copyOf(environment);
         this.policy = java.util.Objects.requireNonNull(policy, "policy");
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
     }
 
     /** The exact variable an operator must set to declare {@code profileName}. */
@@ -118,11 +121,19 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
             atMost("maxResponseBytes", maxResponseBytes, policy.maxLlmResponseBytes());
             atMost("maxConcurrency", maxConcurrency, policy.maxLlmConcurrency());
             atMost("systemPreamble", systemPreamble.length(), policy.maxSystemPreambleChars());
-            return Optional.of(new LlmProfile(profileName,
-                    new URI(text(root.get("endpoint"), null)),
+            URI endpoint = new URI(text(root.get("endpoint"), null));
+            int endpointPort = endpoint.getPort() == -1 ? "https".equals(endpoint.getScheme()) ? 443 : 80
+                    : endpoint.getPort();
+            ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization =
+                    credential.isPresent() && "http".equals(endpoint.getScheme())
+                            ? destinationPolicy.authorizePlaintext(
+                                    "http", AiNodePackage.ID, endpoint.getHost(), endpointPort)
+                            : null;
+            return Optional.of(new LlmProfile(profileName, endpoint,
                     text(root.get("model"), null),
                     credential,
-                    timeoutMs, maxRequestBytes, maxResponseBytes, maxConcurrency, systemPreamble));
+                    timeoutMs, maxRequestBytes, maxResponseBytes, maxConcurrency, systemPreamble,
+                    plaintextAuthorization));
         } catch (RuntimeException | java.net.URISyntaxException invalid) {
             return Optional.empty();
         }

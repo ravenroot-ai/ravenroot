@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.matrix;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.Set;
@@ -10,12 +11,24 @@ record MatrixProfile(String tenantId, String name, URI homeserverOrigin, String 
                      Set<String> eventTypes, String credentialBindingId, String credentialReference,
                      int requestTimeoutMs, int maxRequestBytes, int maxResponseBytes, int maxTextChars,
                      int maxConcurrency, int maxPerSecond, int pollTimeoutMs, int retryBackoffMs,
-                     int maxEventsPerSync, InitialSyncMode initialSyncMode, String initialSince) {
+                     int maxEventsPerSync, InitialSyncMode initialSyncMode, String initialSince,
+                     PlaintextAuthorization plaintextAuthorization) {
     enum InitialSyncMode { SKIP, DELIVER_BOUNDED }
+
+    MatrixProfile(String tenantId, String name, URI homeserverOrigin, String userId, Set<String> roomIds,
+                  Set<String> eventTypes, String credentialBindingId, String credentialReference,
+                  int requestTimeoutMs, int maxRequestBytes, int maxResponseBytes, int maxTextChars,
+                  int maxConcurrency, int maxPerSecond, int pollTimeoutMs, int retryBackoffMs,
+                  int maxEventsPerSync, InitialSyncMode initialSyncMode, String initialSince) {
+        this(tenantId, name, homeserverOrigin, userId, roomIds, eventTypes, credentialBindingId,
+                credentialReference, requestTimeoutMs, maxRequestBytes, maxResponseBytes, maxTextChars,
+                maxConcurrency, maxPerSecond, pollTimeoutMs, retryBackoffMs, maxEventsPerSync,
+                initialSyncMode, initialSince, null);
+    }
 
     MatrixProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
-        homeserverOrigin = origin(homeserverOrigin);
+        homeserverOrigin = origin(homeserverOrigin, plaintextAuthorization);
         userId = matrixId(userId, '@', 255);
         roomIds = bounded(roomIds, 256, value -> matrixId(value, '!', 255));
         eventTypes = bounded(eventTypes, 64, value -> {
@@ -56,11 +69,14 @@ record MatrixProfile(String tenantId, String name, URI homeserverOrigin, String 
         return value;
     }
 
-    private static URI origin(URI value) {
+    private static URI origin(URI value, PlaintextAuthorization plaintextAuthorization) {
         if (value == null || !Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null
                 || value.getUserInfo() != null || value.getPort() != -1 || value.getRawQuery() != null
                 || value.getFragment() != null || !(value.getRawPath().isEmpty() || "/".equals(value.getRawPath())))
             throw configuration();
+        if ("http".equals(value.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", MatrixConfiguration.PACKAGE_ID,
+                        value.getHost(), 80))) throw configuration();
         return URI.create(value.getScheme() + "://"
                 + value.getHost().toLowerCase(java.util.Locale.ROOT) + "/");
     }

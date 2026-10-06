@@ -8004,31 +8004,136 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
             self.assertEqual(ordinary, git("rev-parse", f"{invalid_preparation}^"))
 
         with tempfile.TemporaryDirectory() as location:
-            combined = Path(location) / "combined"
-            subprocess.run(
-                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(combined)], check=True)
-            subprocess.run(["git", "checkout", "--quiet", "HEAD"], cwd=combined, check=True)
-            inventory = combined / "scripts/operational-configuration-inventory.json"
-            fragment = combined / ".changes/535.fix.md"
-            lockfile = combined / "ravenroot/ravenroot-ui/package-lock.json"
-            notes = combined / "docs/releases/v0.6.0-alpha.1.md"
-            authoritative_inventory = inventory.read_bytes()
-            issue_fragment = fragment.read_bytes()
-            self.assertIn("## Security", notes.read_text(encoding="utf-8"))
-            self.assertEqual(
-                "1.2.2", json.loads(lockfile.read_text(encoding="utf-8"))["packages"][
-                    "node_modules/source-map-js"]["version"])
+            location_root = Path(location)
 
-            reverse_release_preparation_delta(
-                combined, "ac184932b13c0683b4315e98f25931ddab8dec2e", "0.6.0-alpha.1")
+            def clone(name: str, source: Path) -> Path:
+                root = location_root / name
+                subprocess.run(
+                    ["git", "clone", "--quiet", "--no-local", str(source), str(root)], check=True)
+                subprocess.run(["git", "checkout", "--quiet", "HEAD"], cwd=root, check=True)
+                subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+                subprocess.run(
+                    ["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
+                return root
 
-            self.assertEqual("0.5.1-alpha.1", product_version(combined))
-            self.assertFalse(notes.exists())
-            self.assertEqual(authoritative_inventory, inventory.read_bytes())
-            self.assertEqual(issue_fragment, fragment.read_bytes())
+            def fixture_git(root: Path, *arguments: str) -> str:
+                return subprocess.run(
+                    ["git", *arguments], cwd=root, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            def normalize_prepared_source(root: Path) -> str:
+                source_version = str(latest_release(root))
+                current_version = product_version(root)
+                if current_version == source_version:
+                    return source_version
+                preparation_revision = None
+                for revision in fixture_git(root, "rev-list", "--topo-order", "HEAD").splitlines():
+                    ancestry = fixture_git(
+                        root, "rev-list", "--parents", "-n", "1", revision).split()
+                    if len(ancestry) != 2:
+                        continue
+                    parent = ancestry[1]
+                    prepared_pom = fixture_git(root, "show", f"{revision}:ravenroot/pom.xml")
+                    source_pom = fixture_git(root, "show", f"{parent}:ravenroot/pom.xml")
+                    if f"<version>{current_version}</version>" in prepared_pom \
+                            and f"<version>{source_version}</version>" in source_pom:
+                        preparation_revision = revision
+                        break
+                if preparation_revision is None:
+                    self.fail("no exact release-preparation revision is reachable from the prepared tree")
+                reverse_release_preparation_delta(
+                    root, preparation_revision, current_version)
+                fixture_git(root, "add", ".")
+                fixture_git(root, "commit", "-qm", "normalize prepared authoritative source")
+                self.assertEqual(source_version, product_version(root))
+                return source_version
+
+            def exercise_later_security_note(root: Path) -> None:
+                source_version = normalize_prepared_source(root)
+                fragments = sorted(
+                    path for path in (root / ".changes").glob("*.md")
+                    if path.name != "README.md")
+                if not fragments:
+                    fragment = root / ".changes/history-safe-release.fix.md"
+                    fragment.write_text("Exercise bounded release reconstruction.\n", encoding="utf-8")
+                    fixture_git(root, "add", fragment.relative_to(root).as_posix())
+                    fixture_git(root, "commit", "-qm", "seed release reconstruction fixture")
+                    fragments = [fragment]
+                fragment_bytes = {
+                    path.relative_to(root).as_posix(): path.read_bytes() for path in fragments}
+                inventory = root / "scripts/operational-configuration-inventory.json"
+                lockfile = root / "ravenroot/ravenroot-ui/package-lock.json"
+                authoritative_inventory = inventory.read_bytes()
+                authoritative_lock = lockfile.read_bytes()
+                authoritative_runtime = {
+                    path.relative_to(root).as_posix(): path.read_bytes()
+                    for path in sorted((root / "ravenroot").rglob("*.java"))
+                }
+
+                prepared = prepare(root, "patch")
+                prepared_version = str(prepared["version"])
+                self.assertEqual(
+                    str(expected_next(parse_tag(f"v{source_version}"), "patch")), prepared_version)
+                fixture_git(root, "add", ".")
+                fixture_git(root, "commit", "-qm", "prepare generated patch fixture")
+                preparation_revision = fixture_git(root, "rev-parse", "HEAD")
+                notes = root / f"docs/releases/v{prepared_version}.md"
+                security_note = (
+                    "\n## Security\n\n"
+                    "- Update the UI build dependency `source-map-js` to 1.2.2, correcting indexed "
+                    "source-map offset validation that could cause event-loop denial of service "
+                    "(GHSA-68fv-2mgg-jv7q).\n"
+                )
+                notes.write_text(
+                    notes.read_text(encoding="utf-8") + security_note, encoding="utf-8")
+                fixture_git(root, "add", notes.relative_to(root).as_posix())
+                fixture_git(root, "commit", "-qm", "append later security note")
+
+                reverse_release_preparation_delta(
+                    root, preparation_revision, prepared_version)
+
+                self.assertEqual(source_version, product_version(root))
+                self.assertFalse(notes.exists())
+                self.assertEqual(authoritative_inventory, inventory.read_bytes())
+                self.assertEqual(authoritative_lock, lockfile.read_bytes())
+                self.assertEqual(
+                    authoritative_runtime,
+                    {path.relative_to(root).as_posix(): path.read_bytes()
+                     for path in sorted((root / "ravenroot").rglob("*.java"))},
+                )
+                self.assertEqual(
+                    fragment_bytes,
+                    {path.relative_to(root).as_posix(): path.read_bytes()
+                     for path in sorted((root / ".changes").glob("*.md"))
+                     if path.name != "README.md"},
+                )
+
+            authoritative = clone("authoritative", ROOT)
+            historical_notes = authoritative / "docs/releases/v0.6.0-alpha.1.md"
+            self.assertIn(
+                "## Security\n\n- Update the UI build dependency `source-map-js` to 1.2.2",
+                historical_notes.read_text(encoding="utf-8"),
+            )
+            source_version = normalize_prepared_source(authoritative)
+            if not any(path.name != "README.md"
+                       for path in (authoritative / ".changes").glob("*.md")):
+                fragment = authoritative / ".changes/history-safe-release.fix.md"
+                fragment.write_text("Exercise prepared and already-tagged states.\n", encoding="utf-8")
+                fixture_git(authoritative, "add", fragment.relative_to(authoritative).as_posix())
+                fixture_git(authoritative, "commit", "-qm", "seed future patch fixture")
+
+            prepared_source = clone("prepared-source-history", authoritative)
+            prepared = prepare(prepared_source, "patch")
+            prepared_version = str(prepared["version"])
             self.assertEqual(
-                "1.2.2", json.loads(lockfile.read_text(encoding="utf-8"))["packages"][
-                    "node_modules/source-map-js"]["version"])
+                str(expected_next(parse_tag(f"v{source_version}"), "patch")), prepared_version)
+            fixture_git(prepared_source, "add", ".")
+            fixture_git(prepared_source, "commit", "-qm", "prepare future patch source")
+            tagged_source = clone("tagged-source-history", prepared_source)
+            fixture_git(tagged_source, "tag", f"v{prepared_version}")
+
+            exercise_later_security_note(prepared_source)
+            exercise_later_security_note(tagged_source)
 
 
 RELEASE_PREPARATION_PATHS = {

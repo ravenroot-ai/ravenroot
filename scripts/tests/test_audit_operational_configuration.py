@@ -2637,6 +2637,34 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("published-contract-description requires a closed publication authority"
                                 in error for error in errors), errors)
 
+    def test_ui_publication_authority_refuses_unmatched_runtime_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            (root / "ui-server").mkdir()
+            publisher = root / audit.ENVIRONMENT_REFERENCE_PATH
+            publisher.write_text('UI_SETTINGS = {"RAVENROOT_UI_PORT": "Integer TCP port"}\n')
+            server = root / "ui-server/server.mjs"
+            server.write_text('const port = env.RAVENROOT_UI_PORT;\n')
+            candidate = audit.Candidate(
+                id="ui-port", path=audit.ENVIRONMENT_REFERENCE_PATH.as_posix(),
+                line=1, symbol="module", kind="inline-script-operational",
+                role="RAVENROOT_UI_PORT", expression='"RAVENROOT_UI_PORT"',
+                expression_digest="expression", evidence="UI mapping",
+                evidence_digest="evidence", surface="script")
+            self.assertEqual({candidate.id},
+                             audit.environment_reference_description_candidate_ids(root, [candidate]))
+            server.write_text('const port = env.RAVENROOT_UI_PORT; const extra = env.RAVENROOT_UI_NEW;\n')
+            self.assertEqual(set(),
+                             audit.environment_reference_description_candidate_ids(root, [candidate]))
+            server.write_text('const port = env.RAVENROOT_UI_PORT;\n')
+            publisher.write_text('UI_SETTINGS = {"RAVENROOT_UI_PORT": "Integer TCP port"}\n'
+                                 'UNRELATED = "arbitrary"\n')
+            from dataclasses import replace
+            unrelated = replace(candidate, id="unrelated", expression='"arbitrary"')
+            self.assertEqual({candidate.id}, audit.environment_reference_description_candidate_ids(
+                root, [candidate, unrelated]))
+
     def test_environment_reference_publication_authority_has_source_derived_membership(self) -> None:
         candidates = audit.discover(ROOT)
         eligible = audit.environment_reference_description_candidate_ids(ROOT, candidates)

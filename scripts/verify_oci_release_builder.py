@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import oci_registry
 from oci_registry import validate_local
 
 
@@ -33,7 +34,7 @@ COPY payload /payload
 """
 
 
-def verify(builder: str | None = None) -> dict[str, str]:
+def verify(builder: str | None = None, repository: str = "ghcr.io/ravenroot-ai/ravenroot") -> dict[str, str]:
     with tempfile.TemporaryDirectory(prefix="ravenroot-oci-contract-") as directory:
         root = Path(directory)
         context = root / "context"
@@ -51,7 +52,7 @@ def verify(builder: str | None = None) -> dict[str, str]:
                 "--platform",
                 "linux/amd64",
                 "--tag",
-                f"ghcr.io/ravenroot-ai/ravenroot:{VERSION}",
+                f"{repository}:{VERSION}",
                 "--build-arg",
                 f"VERSION={VERSION}",
                 "--build-arg",
@@ -66,14 +67,20 @@ def verify(builder: str | None = None) -> dict[str, str]:
         layout = root / "layout"
         layout.mkdir()
         subprocess.run(("tar", "-xf", str(archive), "-C", str(layout)), check=True)
-        return validate_local(layout, VERSION, COMMIT)
+        previous = oci_registry.REPOSITORY
+        try:
+            oci_registry.REPOSITORY = repository
+            return validate_local(layout, VERSION, COMMIT)
+        finally:
+            oci_registry.REPOSITORY = previous
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--builder")
+    parser.add_argument("--repository", choices=("ghcr.io/ravenroot-ai/ravenroot", "ghcr.io/ravenroot-ai/ravenroot-ui"), default="ghcr.io/ravenroot-ai/ravenroot")
     arguments = parser.parse_args()
-    result = verify(arguments.builder)
+    result = verify(arguments.builder, arguments.repository)
     print(
         "Validated the pinned BuildKit OCI contract: "
         f"index={result['index_digest']} image={result['image_digest']}"

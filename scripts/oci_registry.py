@@ -229,7 +229,7 @@ def remote_absent(result: subprocess.CompletedProcess[str]) -> bool:
             r'(?:time="[^"\r\n]+" level=fatal msg="|fatal\[\d+\]\s+)?'
             r'(?:error parsing image name(?:\s+(?:\\?"[^"\r\n]+\\?"|docker://\S+))?:\s*)?'
             r"reading manifest [^\s]+ in "
-            r"ghcr\.io/ravenroot-ai/ravenroot:\s*"
+            rf"{re.escape(REPOSITORY)}:\s*"
             r'manifest(?:_| )unknown(?::[^"\r\n]*)?"?',
             message,
         )
@@ -435,11 +435,15 @@ def parser() -> argparse.ArgumentParser:
     public.add_argument("--version", required=True)
     public.add_argument("--digest", required=True)
     public.add_argument("--commit", required=True)
+    for command in (local, publish, public):
+        command.add_argument("--repository", choices=("ghcr.io/ravenroot-ai/ravenroot", "ghcr.io/ravenroot-ai/ravenroot-ui"), default=REPOSITORY)
     return result
 
 
 def main() -> int:
+    global REPOSITORY
     arguments = parser().parse_args()
+    REPOSITORY = arguments.repository
     try:
         if arguments.command == "validate-local":
             values = validate_local(arguments.layout, arguments.version, arguments.commit)

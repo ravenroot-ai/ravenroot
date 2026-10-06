@@ -26,85 +26,6 @@ from scripts.release_contract import expected_next, parse_tag  # noqa: E402
 ROOT = SCRIPTS.parent
 
 
-RELEASE_PREPARATION_PATHS = {
-    "README.md",
-    "deploy/helm/ravenroot/Chart.yaml",
-    "docs/_data/navigation.yml",
-    "docs/integrator-guide/extension-pack.md",
-    "docs/operator-guide/kubernetes-installation.md",
-    "docs/operator-guide/kubernetes-ui-only.md",
-    "docs/examples/kubernetes/full.yaml",
-    "docs/examples/kubernetes/ui-only.yaml",
-    "ravenroot/ravenroot-ui/package.json",
-    "ravenroot/ravenroot-ui/package-lock.json",
-}
-
-
-def reverse_release_preparation_delta(
-        root: Path, preparation_revision: str, target_version: str) -> None:
-    """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
-    ancestry = subprocess.run(
-        ["git", "rev-list", "--parents", "-n", "1", preparation_revision], cwd=root,
-        check=True, capture_output=True, text=True,
-    ).stdout.split()
-    if len(ancestry) != 2:
-        raise AssertionError("release preparation must be one non-merge commit")
-    parent = ancestry[1]
-    changes = []
-    for line in subprocess.run(
-            ["git", "diff", "--name-status", parent, preparation_revision], cwd=root,
-            check=True, capture_output=True, text=True,
-    ).stdout.splitlines():
-        fields = line.split("\t")
-        if len(fields) != 2:
-            raise AssertionError(f"release preparation has a non-path-preserving change: {line}")
-        changes.append((fields[0], fields[1]))
-
-    notes = f"docs/releases/v{target_version}.md"
-    pom_paths = {
-        path for path in subprocess.run(
-            ["git", "ls-tree", "-r", "--name-only", preparation_revision], cwd=root,
-            check=True, capture_output=True, text=True,
-        ).stdout.splitlines()
-        if path.endswith("pom.xml")
-    }
-    inverse_paths = []
-    for status, path in changes:
-        fragment = path.startswith(".changes/") and path.endswith(".md") \
-            and path != ".changes/README.md"
-        if path == notes:
-            if status != "A":
-                raise AssertionError("release notes must be added by the preparation")
-            continue
-        if fragment:
-            if status != "D":
-                raise AssertionError(f"release fragment has unexpected preparation status: {path}")
-        elif path in RELEASE_PREPARATION_PATHS or path in pom_paths:
-            if status != "M":
-                raise AssertionError(f"release surface has unexpected preparation status: {path}")
-        else:
-            raise AssertionError(f"release preparation changed an unexpected path: {path}")
-        inverse_paths.append(path)
-
-    if not any(path == notes for _, path in changes):
-        raise AssertionError("release preparation did not add its release notes")
-    if subprocess.run(
-            ["git", "status", "--porcelain"], cwd=root, check=True,
-            capture_output=True, text=True,
-    ).stdout:
-        raise AssertionError("authoritative release fixture must start clean")
-
-    patch = subprocess.run(
-        ["git", "diff", "--binary", parent, preparation_revision, "--", *inverse_paths],
-        cwd=root, check=True, capture_output=True,
-    ).stdout
-    subprocess.run(
-        ["git", "apply", "--reverse", "--3way", "--index"], cwd=root,
-        input=patch, check=True, capture_output=True,
-    )
-    subprocess.run(["git", "rm", "--", notes], cwd=root, check=True, capture_output=True)
-
-
 def synthetic_repository() -> tempfile.TemporaryDirectory[str]:
     temporary = tempfile.TemporaryDirectory()
     root = Path(temporary.name)
@@ -346,8 +267,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                         break
                 if preparation_revision is None:
                     self.fail("no exact release-preparation revision is reachable from the prepared tree")
-                reverse_release_preparation_delta(
-                    source_fixture, preparation_revision, current_version)
+                reverse_release_preparation_delta(source_fixture, preparation_revision, current_version)
                 self.assertEqual(source_version, product_version(source_fixture))
                 self.assertEqual(
                     [],
@@ -435,104 +355,6 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             )
             self.assertTrue(any("Helm settings require the exact source-derived closed values authority" in error
                                 for error in errors), errors)
-
-    def test_release_preparation_inverse_is_bounded_after_later_note_edits(self) -> None:
-        with tempfile.TemporaryDirectory() as location:
-            root = Path(location)
-
-            def git(*arguments: str) -> str:
-                return subprocess.run(
-                    ["git", *arguments], cwd=root, check=True, capture_output=True, text=True,
-                ).stdout.strip()
-
-            def commit(message: str) -> str:
-                git("add", ".")
-                git("commit", "-qm", message)
-                return git("rev-parse", "HEAD")
-
-            git("init", "-q")
-            git("config", "user.name", "Test")
-            git("config", "user.email", "test@example.invalid")
-            pom = root / "ravenroot/pom.xml"
-            pom.parent.mkdir(parents=True)
-            pom.write_text("<project><version>0.5.1-alpha.1</version></project>\n", encoding="utf-8")
-            fragment = root / ".changes/example.fix.md"
-            fragment.parent.mkdir()
-            fragment.write_text("Original release work.\n", encoding="utf-8")
-            navigation = root / "docs/_data/navigation.yml"
-            navigation.parent.mkdir(parents=True)
-            navigation.write_text("release-notes:\n  metadata: original\n", encoding="utf-8")
-            unrelated = root / "authoritative-source.txt"
-            unrelated.write_text("accepted before preparation\n", encoding="utf-8")
-            commit("ordinary source")
-
-            pom.write_text("<project><version>0.6.0-alpha.1</version></project>\n", encoding="utf-8")
-            fragment.unlink()
-            notes = root / "docs/releases/v0.6.0-alpha.1.md"
-            notes.parent.mkdir(parents=True)
-            notes.write_text("# Ravenroot 0.6.0-alpha.1\n", encoding="utf-8")
-            navigation.write_text(
-                "release-notes:\n  - v0.6.0-alpha.1\n  metadata: original\n", encoding="utf-8")
-            preparation = commit("prepare release")
-
-            notes.write_text(
-                notes.read_text(encoding="utf-8")
-                + "\n## Security\n\n- Correct the accepted dependency vulnerability.\n",
-                encoding="utf-8",
-            )
-            unrelated.write_text("accepted after preparation\n", encoding="utf-8")
-            commit("amend prepared release evidence")
-
-            reverse_release_preparation_delta(root, preparation, "0.6.0-alpha.1")
-
-            self.assertEqual("<project><version>0.5.1-alpha.1</version></project>\n",
-                             pom.read_text(encoding="utf-8"))
-            self.assertEqual("Original release work.\n", fragment.read_text(encoding="utf-8"))
-            self.assertFalse(notes.exists())
-            self.assertEqual("release-notes:\n  metadata: original\n",
-                             navigation.read_text(encoding="utf-8"))
-            self.assertEqual("accepted after preparation\n", unrelated.read_text(encoding="utf-8"))
-
-            unexpected = root / "unexpected-runtime-policy.txt"
-            unexpected.write_text("ordinary\n", encoding="utf-8")
-            ordinary = commit("next ordinary source")
-            unexpected.write_text("prepared mutation\n", encoding="utf-8")
-            invalid_preparation = commit("invalid preparation")
-            with self.assertRaisesRegex(AssertionError, "unexpected path"):
-                reverse_release_preparation_delta(root, invalid_preparation, "0.7.0-alpha.1")
-            self.assertEqual(ordinary, git("rev-parse", f"{invalid_preparation}^"))
-
-        with tempfile.TemporaryDirectory() as location:
-            combined = Path(location) / "combined"
-            subprocess.run(
-                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(combined)], check=True)
-            subprocess.run(
-                ["git", "checkout", "--quiet", "HEAD"], cwd=combined, check=True)
-            inventory = combined / "scripts/operational-configuration-inventory.json"
-            fragment = combined / ".changes/535.fix.md"
-            lockfile = combined / "ravenroot/ravenroot-ui/package-lock.json"
-            notes = combined / "docs/releases/v0.6.0-alpha.1.md"
-            authoritative_inventory = inventory.read_bytes()
-            issue_fragment = fragment.read_bytes()
-            self.assertIn("## Security", notes.read_text(encoding="utf-8"))
-            self.assertEqual(
-                "1.2.2",
-                json.loads(lockfile.read_text(encoding="utf-8"))["packages"][
-                    "node_modules/source-map-js"]["version"],
-            )
-
-            reverse_release_preparation_delta(
-                combined, "ac184932b13c0683b4315e98f25931ddab8dec2e", "0.6.0-alpha.1")
-
-            self.assertEqual("0.5.1-alpha.1", product_version(combined))
-            self.assertFalse(notes.exists())
-            self.assertEqual(authoritative_inventory, inventory.read_bytes())
-            self.assertEqual(issue_fragment, fragment.read_bytes())
-            self.assertEqual(
-                "1.2.2",
-                json.loads(lockfile.read_text(encoding="utf-8"))["packages"][
-                    "node_modules/source-map-js"]["version"],
-            )
 
     def test_final_review_authority_applies_one_exact_source_anchored_partition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -8115,6 +7937,170 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
             duration = {**base, "id": "oc-timeout", "expression": "500", "line": 3}
             self.assertEqual([], audit.final_review_candidate_semantic_errors(
                 root, duration, "security-ceiling-or-default"))
+
+    def test_release_preparation_inverse_is_bounded_after_later_note_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+
+            def git(*arguments: str) -> str:
+                return subprocess.run(
+                    ["git", *arguments], cwd=root, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            def commit(message: str) -> str:
+                git("add", ".")
+                git("commit", "-qm", message)
+                return git("rev-parse", "HEAD")
+
+            git("init", "-q")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            pom = root / "ravenroot/pom.xml"
+            pom.parent.mkdir(parents=True)
+            pom.write_text("<project><version>0.5.1-alpha.1</version></project>\n", encoding="utf-8")
+            fragment = root / ".changes/example.fix.md"
+            fragment.parent.mkdir()
+            fragment.write_text("Original release work.\n", encoding="utf-8")
+            navigation = root / "docs/_data/navigation.yml"
+            navigation.parent.mkdir(parents=True)
+            navigation.write_text("release-notes:\n  metadata: original\n", encoding="utf-8")
+            unrelated = root / "authoritative-source.txt"
+            unrelated.write_text("accepted before preparation\n", encoding="utf-8")
+            commit("ordinary source")
+
+            pom.write_text("<project><version>0.6.0-alpha.1</version></project>\n", encoding="utf-8")
+            fragment.unlink()
+            notes = root / "docs/releases/v0.6.0-alpha.1.md"
+            notes.parent.mkdir(parents=True)
+            notes.write_text("# Ravenroot 0.6.0-alpha.1\n", encoding="utf-8")
+            navigation.write_text(
+                "release-notes:\n  - v0.6.0-alpha.1\n  metadata: original\n", encoding="utf-8")
+            preparation = commit("prepare release")
+
+            notes.write_text(
+                notes.read_text(encoding="utf-8")
+                + "\n## Security\n\n- Correct the accepted dependency vulnerability.\n",
+                encoding="utf-8",
+            )
+            unrelated.write_text("accepted after preparation\n", encoding="utf-8")
+            commit("amend prepared release evidence")
+            reverse_release_preparation_delta(root, preparation, "0.6.0-alpha.1")
+
+            self.assertEqual("<project><version>0.5.1-alpha.1</version></project>\n",
+                             pom.read_text(encoding="utf-8"))
+            self.assertEqual("Original release work.\n", fragment.read_text(encoding="utf-8"))
+            self.assertFalse(notes.exists())
+            self.assertEqual("release-notes:\n  metadata: original\n",
+                             navigation.read_text(encoding="utf-8"))
+            self.assertEqual("accepted after preparation\n", unrelated.read_text(encoding="utf-8"))
+
+            unexpected = root / "unexpected-runtime-policy.txt"
+            unexpected.write_text("ordinary\n", encoding="utf-8")
+            ordinary = commit("next ordinary source")
+            unexpected.write_text("prepared mutation\n", encoding="utf-8")
+            invalid_preparation = commit("invalid preparation")
+            with self.assertRaisesRegex(AssertionError, "unexpected path"):
+                reverse_release_preparation_delta(root, invalid_preparation, "0.7.0-alpha.1")
+            self.assertEqual(ordinary, git("rev-parse", f"{invalid_preparation}^"))
+
+        with tempfile.TemporaryDirectory() as location:
+            combined = Path(location) / "combined"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(combined)], check=True)
+            subprocess.run(["git", "checkout", "--quiet", "HEAD"], cwd=combined, check=True)
+            inventory = combined / "scripts/operational-configuration-inventory.json"
+            fragment = combined / ".changes/535.fix.md"
+            lockfile = combined / "ravenroot/ravenroot-ui/package-lock.json"
+            notes = combined / "docs/releases/v0.6.0-alpha.1.md"
+            authoritative_inventory = inventory.read_bytes()
+            issue_fragment = fragment.read_bytes()
+            self.assertIn("## Security", notes.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "1.2.2", json.loads(lockfile.read_text(encoding="utf-8"))["packages"][
+                    "node_modules/source-map-js"]["version"])
+
+            reverse_release_preparation_delta(
+                combined, "ac184932b13c0683b4315e98f25931ddab8dec2e", "0.6.0-alpha.1")
+
+            self.assertEqual("0.5.1-alpha.1", product_version(combined))
+            self.assertFalse(notes.exists())
+            self.assertEqual(authoritative_inventory, inventory.read_bytes())
+            self.assertEqual(issue_fragment, fragment.read_bytes())
+            self.assertEqual(
+                "1.2.2", json.loads(lockfile.read_text(encoding="utf-8"))["packages"][
+                    "node_modules/source-map-js"]["version"])
+
+
+RELEASE_PREPARATION_PATHS = {
+    "README.md", "deploy/helm/ravenroot/Chart.yaml", "docs/_data/navigation.yml",
+    "docs/integrator-guide/extension-pack.md", "docs/operator-guide/kubernetes-installation.md",
+    "docs/operator-guide/kubernetes-ui-only.md", "docs/examples/kubernetes/full.yaml",
+    "docs/examples/kubernetes/ui-only.yaml", "ravenroot/ravenroot-ui/package.json",
+    "ravenroot/ravenroot-ui/package-lock.json",
+}
+
+
+def reverse_release_preparation_delta(
+        root: Path, preparation_revision: str, target_version: str) -> None:
+    """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
+    ancestry = subprocess.run(
+        ["git", "rev-list", "--parents", "-n", "1", preparation_revision], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    if len(ancestry) != 2:
+        raise AssertionError("release preparation must be one non-merge commit")
+    parent = ancestry[1]
+    changes = []
+    for line in subprocess.run(
+            ["git", "diff", "--name-status", parent, preparation_revision], cwd=root,
+            check=True, capture_output=True, text=True,
+    ).stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 2:
+            raise AssertionError(f"release preparation has a non-path-preserving change: {line}")
+        changes.append((fields[0], fields[1]))
+
+    notes = f"docs/releases/v{target_version}.md"
+    pom_paths = {
+        path for path in subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", preparation_revision], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines() if path.endswith("pom.xml")
+    }
+    inverse_paths = []
+    for status, path in changes:
+        fragment = path.startswith(".changes/") and path.endswith(".md") \
+            and path != ".changes/README.md"
+        if path == notes:
+            if status != "A":
+                raise AssertionError("release notes must be added by the preparation")
+            continue
+        if fragment:
+            if status != "D":
+                raise AssertionError(f"release fragment has unexpected preparation status: {path}")
+        elif path in RELEASE_PREPARATION_PATHS or path in pom_paths:
+            if status != "M":
+                raise AssertionError(f"release surface has unexpected preparation status: {path}")
+        else:
+            raise AssertionError(f"release preparation changed an unexpected path: {path}")
+        inverse_paths.append(path)
+
+    if not any(path == notes for _, path in changes):
+        raise AssertionError("release preparation did not add its release notes")
+    if subprocess.run(
+            ["git", "status", "--porcelain"], cwd=root, check=True,
+            capture_output=True, text=True,
+    ).stdout:
+        raise AssertionError("authoritative release fixture must start clean")
+    patch = subprocess.run(
+        ["git", "diff", "--binary", parent, preparation_revision, "--", *inverse_paths],
+        cwd=root, check=True, capture_output=True,
+    ).stdout
+    subprocess.run(
+        ["git", "apply", "--reverse", "--3way", "--index"], cwd=root,
+        input=patch, check=True, capture_output=True,
+    )
+    subprocess.run(["git", "rm", "--", notes], cwd=root, check=True, capture_output=True)
 
 
 if __name__ == "__main__":

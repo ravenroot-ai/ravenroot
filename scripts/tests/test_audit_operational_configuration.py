@@ -238,23 +238,49 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 return str(prepared["version"])
 
             source_version = str(latest_release(ROOT))
-            source_revision = "HEAD"
-            if product_version(ROOT) != source_version:
+            current_version = product_version(ROOT)
+            source_fixture = isolated_tree("source", ROOT, "HEAD")
+            if current_version != source_version:
+                preparation_revision = None
                 for revision in subprocess.run(
                         ["git", "rev-list", "--topo-order", "HEAD"], cwd=ROOT,
                         check=True, capture_output=True, text=True,
                 ).stdout.splitlines():
-                    pom = subprocess.run(
+                    ancestry = subprocess.run(
+                        ["git", "rev-list", "--parents", "-n", "1", revision], cwd=ROOT,
+                        check=True, capture_output=True, text=True,
+                    ).stdout.split()
+                    if len(ancestry) != 2:
+                        continue
+                    parent = ancestry[1]
+                    prepared_pom = subprocess.run(
                         ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=ROOT,
                         check=True, capture_output=True, text=True,
                     ).stdout
-                    if f"<version>{source_version}</version>" in pom:
-                        source_revision = revision
+                    source_pom = subprocess.run(
+                        ["git", "show", f"{parent}:ravenroot/pom.xml"], cwd=ROOT,
+                        check=True, capture_output=True, text=True,
+                    ).stdout
+                    if f"<version>{current_version}</version>" in prepared_pom \
+                            and f"<version>{source_version}</version>" in source_pom:
+                        preparation_revision = revision
                         break
-                else:
-                    self.fail("no ordinary product source is reachable from the latest release tag")
-
-            source_fixture = isolated_tree("source", ROOT, source_revision)
+                if preparation_revision is None:
+                    self.fail("no exact release-preparation revision is reachable from the prepared tree")
+                fixture_git(source_fixture, "revert", "--no-commit", preparation_revision)
+                self.assertEqual(source_version, product_version(source_fixture))
+                self.assertEqual(
+                    [],
+                    audit.check(
+                        source_fixture,
+                        source_fixture / "scripts/operational-configuration-inventory.json",
+                        source_fixture / "docs/architecture/operational-configuration-audit.md",
+                    ),
+                )
+                fixture_git(source_fixture, "add", ".")
+                fixture_git(source_fixture, "-c", "user.name=Test", "-c",
+                            "user.email=test@example.invalid", "commit", "-qm",
+                            "ordinary authoritative source snapshot")
             source_revision = fixture_git(source_fixture, "rev-parse", "HEAD")
             future_version = str(expected_next(parse_tag(f"v{source_version}"), "minor"))
             future_commit = fixture_git(

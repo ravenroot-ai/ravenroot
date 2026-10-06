@@ -75,8 +75,14 @@ public record StorageProfile(
                 || !plaintextAuthorization.matches("http", PACKAGE_ID, value.getHost(), port))) {
             throw new IllegalArgumentException("origin requires administrator plaintext authorization");
         }
-        return URI.create(value.getScheme() + "://" + value.getHost().toLowerCase(Locale.ROOT)
+        return URI.create(value.getScheme() + "://" + normalizeHost(value.getHost())
                 + (value.getPort() == -1 || value.getPort() == defaultPort ? "" : ":" + value.getPort()));
+    }
+
+    private static String normalizeHost(String host) {
+        int zone = host.indexOf('%');
+        return zone < 0 ? host.toLowerCase(Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     private static String bucket(String value) {

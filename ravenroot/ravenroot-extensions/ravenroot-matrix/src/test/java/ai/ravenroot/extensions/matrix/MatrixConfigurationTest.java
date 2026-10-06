@@ -82,4 +82,18 @@ class MatrixConfigurationTest {
                 configuration.profile(MatrixTestSupport.TENANT, MatrixTestSupport.PROFILE)
                         .orElseThrow().homeserverOrigin());
     }
+
+    @Test void httpsHomeserverNormalizationPreservesNamedIpv6ZoneCase() {
+        MatrixProfile base = MatrixTestSupport.configuration(directory.resolve("zone.db"))
+                .profiles().values().iterator().next();
+        MatrixProfile profile = new MatrixProfile(base.tenantId(), base.name(),
+                java.net.URI.create("https://[FE80::A%LO0]/"), base.userId(), base.roomIds(),
+                base.eventTypes(), base.credentialBindingId(), base.credentialReference(),
+                base.requestTimeoutMs(), base.maxRequestBytes(), base.maxResponseBytes(),
+                base.maxTextChars(), base.maxConcurrency(), base.maxPerSecond(), base.pollTimeoutMs(),
+                base.retryBackoffMs(), base.maxEventsPerSync(), base.initialSyncMode(), base.initialSince());
+
+        assertEquals("[fe80::a%LO0]", profile.homeserverOrigin().getHost());
+        assertEquals("[fe80::a%LO0]", profile.endpoint("/_matrix/client/v3/sync").getHost());
+    }
 }

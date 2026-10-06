@@ -28,6 +28,10 @@ bound to the scope selected by the resolver: raw `%2` and `%252` therefore remai
 scopes. Restart the process after changing the environment so every immutable connector snapshot
 and the DNS guard receive the same policy.
 
+HTTP allowlists and fixed HTTP origins apply the same identity rule. DNS names and IPv6 address
+digits are case-normalized, while every byte after the first `%` remains exact through admission,
+plaintext proof matching, the stored transport URI, and request signing.
+
 Unset or blank configuration preserves the shipped localhost-only exception
 `localhost:LOOPBACK`; it does not authorize other loopback names or addresses. The development
 benchmark harness may export a broader named exception set when its variable is absent. That

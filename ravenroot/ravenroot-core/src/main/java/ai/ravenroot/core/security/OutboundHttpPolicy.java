@@ -86,7 +86,7 @@ public final class OutboundHttpPolicy {
                               Collection<Integer> allowedPorts, long maximumResponseBytes,
                               long maximumRequestBytes) {
         this.allowedHosts = allowedHosts == null ? Set.of() : allowedHosts.stream()
-                .map(String::trim).filter(value -> !value.isEmpty()).map(value -> value.toLowerCase(Locale.ROOT))
+                .map(String::trim).filter(value -> !value.isEmpty()).map(OutboundHttpPolicy::normalizeHost)
                 .collect(Collectors.toUnmodifiableSet());
         this.maximumTimeout = maximumTimeout == null ? Duration.ofSeconds(30) : maximumTimeout;
         this.allowedPorts = allowedPorts == null || allowedPorts.isEmpty()
@@ -174,7 +174,7 @@ public final class OutboundHttpPolicy {
     public void requireAllowed(URI uri, ReservedNetworkPolicy.PlaintextAuthorization authorization,
                                String protocol, String profile) {
         String scheme = uri == null ? "" : String.valueOf(uri.getScheme()).toLowerCase(Locale.ROOT);
-        String host = uri == null || uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        String host = uri == null || uri.getHost() == null ? "" : normalizeHost(uri.getHost());
         if (!("http".equals(scheme) || "https".equals(scheme)) || !allowedHosts.contains(host)) {
             throw new SecurityException("Outbound HTTP destination is not allowlisted: " + host);
         }
@@ -197,6 +197,13 @@ public final class OutboundHttpPolicy {
      */
     private void requireLiteralNotReserved(String host) {
         EgressAddressGuard.requireAllowedLiteral(host);
+    }
+
+    private static String normalizeHost(String host) {
+        int zone = host.indexOf('%');
+        return zone < 0
+                ? host.toLowerCase(Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     public Duration timeout(long requestedMillis) {

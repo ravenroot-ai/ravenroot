@@ -78,7 +78,13 @@ record MatrixProfile(String tenantId, String name, URI homeserverOrigin, String 
                 || !plaintextAuthorization.matches("http", MatrixConfiguration.PACKAGE_ID,
                         value.getHost(), 80))) throw configuration();
         return URI.create(value.getScheme() + "://"
-                + value.getHost().toLowerCase(java.util.Locale.ROOT) + "/");
+                + normalizeHost(value.getHost()) + "/");
+    }
+
+    private static String normalizeHost(String host) {
+        int zone = host.indexOf('%');
+        return zone < 0 ? host.toLowerCase(java.util.Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(java.util.Locale.ROOT) + host.substring(zone);
     }
 
     private static String token(String value, int maximum) {

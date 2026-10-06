@@ -114,12 +114,22 @@ class ReservedNetworkPolicyTest {
         assertEquals(2, scopeTwo.getScopeId());
         assertEquals(252, scopeTwoHundredFiftyTwo.getScopeId());
 
-        var constructor = ReservedNetworkPolicy.PlaintextAuthorization.class.getDeclaredConstructor(
-                String.class, String.class, String.class, int.class);
-        constructor.setAccessible(true);
-        var proof = constructor.newInstance("http", "pkg", "[FE80::1%2]", 8080);
+        String json = """
+                {"version":1,"rules":[{"name":"numeric-zone","protocols":["http"],
+                "ports":[8080],"hosts":["[FE80::1%2]"],"addresses":["fe80::/10"],
+                "profiles":["pkg"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(Map.of(
+                TrustedNetworkPolicy.ENVIRONMENT_VARIABLE,
+                Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8))));
+        ReservedNetworkPolicy.PlaintextAuthorization proof =
+                policy.authorizePlaintext("http", "pkg", "fe80::1%2", 8080);
 
         assertTrue(proof.matches("http", "pkg", "fe80::1%2", 8080));
         assertFalse(proof.matches("http", "pkg", "fe80::1%252", 8080));
+        assertFalse(proof.matches("http", "other", "fe80::1%2", 8080));
+        assertFalse(proof.matches("http", "pkg", "fe80::1%2", 8081));
+        assertThrows(SecurityException.class,
+                () -> policy.authorizePlaintext("http", "pkg", "fe80::1%252", 8080));
     }
 }

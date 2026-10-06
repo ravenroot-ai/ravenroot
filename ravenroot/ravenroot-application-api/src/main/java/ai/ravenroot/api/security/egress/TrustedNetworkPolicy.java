@@ -323,8 +323,13 @@ public final class TrustedNetworkPolicy {
 
     private static String host(String value) {
         String normalized = normalizeHost(value);
+        int zone = normalized.indexOf('%');
+        String name = zone < 0 ? normalized : normalized.substring(0, zone);
+        String zoneIdentifier = zone < 0 ? "" : normalized.substring(zone + 1);
         if (normalized.isEmpty() || normalized.contains("*") || normalized.length() > 253
-                || !normalized.matches("[a-z0-9._:%-]+")) throw invalid();
+                || !name.matches("[a-z0-9._:-]+")
+                || zone >= 0 && (name.indexOf(':') < 0 || zoneIdentifier.isEmpty()
+                        || !zoneIdentifier.matches("[A-Za-z0-9_.~-]+"))) throw invalid();
         return normalized;
     }
 
@@ -339,10 +344,14 @@ public final class TrustedNetworkPolicy {
         return value;
     }
 
-    private static String normalizeHost(String value) {
-        String host = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    static String normalizeHost(String value) {
+        String host = value == null ? "" : value.trim();
         if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
-        return host;
+        int zone = host.indexOf('%');
+        if (zone < 0) return host.toLowerCase(Locale.ROOT);
+        int separatorLength = host.regionMatches(true, zone, "%25", 0, 3) ? 3 : 1;
+        return host.substring(0, zone).toLowerCase(Locale.ROOT)
+                + "%" + host.substring(zone + separatorLength);
     }
 
     private static boolean numericShape(String value) {

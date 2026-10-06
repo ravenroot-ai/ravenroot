@@ -268,12 +268,7 @@ public final class ReservedNetworkPolicy {
         }
 
         private static String normalizeAuthorizationHost(String value) {
-            String normalized = value == null ? "" : value.trim();
-            if (normalized.startsWith("[") && normalized.endsWith("]"))
-                normalized = normalized.substring(1, normalized.length() - 1);
-            int zone = normalized.indexOf('%');
-            return zone < 0 ? normalized.toLowerCase(Locale.ROOT)
-                    : normalized.substring(0, zone).toLowerCase(Locale.ROOT) + normalized.substring(zone);
+            return TrustedNetworkPolicy.normalizeHost(value);
         }
 
         @Override public String toString() { return "PlaintextAuthorization[redacted]"; }

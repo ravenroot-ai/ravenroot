@@ -33,6 +33,53 @@ class TrustedNetworkPolicyTest {
     }
 
     @Test
+    void ipv6ZoneCaseIsExactWhileAddressAndDelimiterSpellingsNormalize() throws Exception {
+        TrustedNetworkPolicy policy = policy("""
+                {"version":1,"rules":[{"name":"link-local-http","protocols":["http"],
+                "ports":[8080],"hosts":["[FE80::A%25ETH0]"],"addresses":["fe80::/10"],
+                "profiles":["pkg"],"allowPlaintext":true}]}
+                """);
+        List<InetAddress> linkLocal = List.of(InetAddress.getByName("fe80::a"));
+
+        assertTrue(policy.permitsAll("http", "pkg", "fe80::a%ETH0", 8080, linkLocal));
+        assertTrue(policy.permitsAllPlaintext(
+                "http", "pkg", "[fe80::A%25ETH0]", 8080, linkLocal));
+        assertFalse(policy.permitsAll("http", "pkg", "fe80::a%eth0", 8080, linkLocal));
+        assertFalse(policy.permitsAllPlaintext(
+                "http", "pkg", "[FE80::A%25eth0]", 8080, linkLocal));
+        assertFalse(policy.permitsAllPlaintext("websocket", "pkg", "fe80::a%ETH0", 8080, linkLocal));
+        assertFalse(policy.permitsAllPlaintext("http", "other", "fe80::a%ETH0", 8080, linkLocal));
+        assertFalse(policy.permitsAllPlaintext("http", "pkg", "fe80::a%ETH0", 8081, linkLocal));
+        assertFalse(policy.permitsAllPlaintext("http", "pkg", "fe80::a%ETH0", 8080,
+                List.of(InetAddress.getByName("fd00::a"))));
+    }
+
+    @Test
+    void dnsHostCaseRemainsNormalizedWithinTheSameRuleBoundaries() throws Exception {
+        TrustedNetworkPolicy policy = policy("""
+                {"version":1,"rules":[{"name":"dns-http","protocols":["http"],
+                "ports":[8080],"hosts":["Service.Example"],"addresses":["10.0.0.0/8"],
+                "profiles":["pkg"],"allowPlaintext":true}]}
+                """);
+        List<InetAddress> address = List.of(InetAddress.getByName("10.2.3.4"));
+
+        assertTrue(policy.permitsAllPlaintext("http", "pkg", "service.example", 8080, address));
+        assertTrue(policy.permitsAllPlaintext("HTTP", "pkg", "SERVICE.EXAMPLE", 8080, address));
+        assertFalse(policy.permitsAllPlaintext("http", "pkg", "service.example", 8081, address));
+    }
+
+    @Test
+    void zoneGrammarDoesNotBroadenDnsOrMalformedIpv6Hosts() {
+        for (String host : List.of("service.example%ETH0", "fe80::1%ETH:0", "fe80::1%25")) {
+            assertThrows(IllegalArgumentException.class, () -> policy("""
+                    {"version":1,"rules":[{"name":"invalid-zone","protocols":["http"],
+                    "ports":[8080],"hosts":["%s"],"addresses":["fe80::/10"],
+                    "profiles":["pkg"],"allowPlaintext":true}]}
+                    """.formatted(host)));
+        }
+    }
+
+    @Test
     void everyDnsAnswerMustBeAdmittedByOneRule() throws Exception {
         TrustedNetworkPolicy split = policy("""
                 {"version":1,"rules":[

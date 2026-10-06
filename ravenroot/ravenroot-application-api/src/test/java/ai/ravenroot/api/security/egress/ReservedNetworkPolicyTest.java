@@ -96,9 +96,10 @@ class ReservedNetworkPolicyTest {
         var constructor = ReservedNetworkPolicy.PlaintextAuthorization.class.getDeclaredConstructor(
                 String.class, String.class, String.class, int.class);
         constructor.setAccessible(true);
-        var proof = constructor.newInstance("http", "pkg", "[fe80::1%25ETH0]", 8080);
+        var proof = constructor.newInstance("http", "pkg", "[FE80::A%25ETH0]", 8080);
 
-        assertTrue(proof.matches("http", "pkg", "fe80::1%25ETH0", 8080));
-        assertFalse(proof.matches("http", "pkg", "fe80::1%25eth0", 8080));
+        assertTrue(proof.matches("http", "pkg", "fe80::a%ETH0", 8080));
+        assertTrue(proof.matches("http", "pkg", "[fe80::A%25ETH0]", 8080));
+        assertFalse(proof.matches("http", "pkg", "fe80::a%eth0", 8080));
     }
 }

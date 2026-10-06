@@ -223,6 +223,122 @@ class DefaultGraphDeploymentDurableIngressTest {
         }
     }
 
+    @Test
+    void redeliveryRepairsInboxCommitThatPrecededTraversalCreation() throws Exception {
+        Path file = databaseDirectory.resolve("commit-before-dispatch.db");
+        var deploymentId = DeploymentId.of("recover-" + UUID.randomUUID());
+        String sourceId = "poller-1";
+        String key = "key-crash-window";
+        String destination = deploymentId.value() + "/" + sourceId;
+        UUID eventId = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + destination + '\0' + key)
+                .getBytes(StandardCharsets.UTF_8));
+        try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
+            assertTrue(store.recordInboxDelivery(IDENTITY.tenantId(), destination, eventId,
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION).toCompletableFuture().get(10, TimeUnit.SECONDS));
+            var completions = countCompletions();
+            var deployment = deployment(deploymentId, engine, store, completions.monitor());
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            IngressReceipt repaired = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(),
+                    "payload", sourceId, key);
+
+            assertInstanceOf(IngressReceipt.Duplicate.class, repaired,
+                    "the durable custody was pre-existing even though its execution had to be repaired");
+            assertTrue(completions.latch().await(10, TimeUnit.SECONDS),
+                    "redelivery must create and dispatch the traversal missing after the crash boundary");
+            assertEquals(1, completions.count().get());
+            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void redeliveryRepairsExecutionCreatedBeforeFirstNodeDispatch() throws Exception {
+        Path file = databaseDirectory.resolve("execution-before-dispatch.db");
+        var deploymentId = DeploymentId.of("recover-partial-" + UUID.randomUUID());
+        String sourceId = "poller-1";
+        String key = "key-partial-execution";
+        var failRunningWrite = new AtomicBoolean(true);
+        try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
+            ExecutionStore interrupted = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                    ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class},
+                    (proxy, method, args) -> {
+                        if (method.getName().equals("apply") && args[0] instanceof ai.ravenroot.api.persistence.ExecutionBatch batch
+                                && batch.transitions().stream().anyMatch(transition ->
+                                        transition instanceof ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned)
+                                && failRunningWrite.compareAndSet(true, false)) {
+                            return CompletableFuture.failedFuture(new IllegalStateException("simulated crash boundary"));
+                        }
+                        try { return method.invoke(store, args); }
+                        catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    });
+            var first = deployment(deploymentId, engine, interrupted, countCompletions().monitor());
+            first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertThrows(RuntimeException.class, () -> first.ingress().offerDurably(IDENTITY,
+                    IngressTarget.start(), "payload", sourceId, key));
+            first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+        try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
+            byte[] changedGraph = GRAPH.replace("id=\"wiring\"", "id=\"replacement\"")
+                    .getBytes(StandardCharsets.UTF_8);
+            var changed = new DefaultGraphDeployment(deploymentId, engine,
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                    ExecutionIdentitySource.randomUuids(), changedGraph,
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
+            changed.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertInstanceOf(IngressReceipt.Ambiguous.class, changed.ingress().offerDurably(
+                    IDENTITY, IngressTarget.start(), "payload", sourceId, key),
+                    "a replacement graph cannot acknowledge an unstarted execution pinned to older content");
+            changed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            var completions = countCompletions();
+            var restarted = deployment(deploymentId, engine, store, completions.monitor());
+            restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var receipt = restarted.ingress().offerDurably(IDENTITY, IngressTarget.start(),
+                    "payload", sourceId, key);
+            assertInstanceOf(IngressReceipt.Duplicate.class, receipt);
+            assertTrue(completions.latch().await(10, TimeUnit.SECONDS),
+                    "the saved but unstarted execution must dispatch after redelivery");
+            assertEquals(1, completions.count().get());
+            restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void redeliveryRepairsRunningTraversalBeforeItsFirstInvocation() throws Exception {
+        Path file = databaseDirectory.resolve("running-before-dispatch.db");
+        var deploymentId = DeploymentId.of("recover-running-" + UUID.randomUUID());
+        String sourceId = "poller-1";
+        String key = "key-running-execution";
+        var failClaim = new AtomicBoolean(true);
+        try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
+            ExecutionStore interrupted = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                    ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class},
+                    (proxy, method, args) -> {
+                        if (method.getName().equals("claim") && failClaim.compareAndSet(true, false)) {
+                            return CompletableFuture.failedFuture(new IllegalStateException("simulated crash boundary"));
+                        }
+                        try { return method.invoke(store, args); }
+                        catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    });
+            var first = deployment(deploymentId, engine, interrupted, countCompletions().monitor());
+            first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertThrows(RuntimeException.class, () -> first.ingress().offerDurably(IDENTITY,
+                    IngressTarget.start(), "payload", sourceId, key));
+            first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+        try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
+            var completions = countCompletions();
+            var restarted = deployment(deploymentId, engine, store, completions.monitor());
+            restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertInstanceOf(IngressReceipt.Duplicate.class, restarted.ingress().offerDurably(
+                    IDENTITY, IngressTarget.start(), "payload", sourceId, key));
+            assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
+            assertEquals(1, completions.count().get());
+            restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
     /**
      * A source offers, the commit lands durably, and the process "dies" before
      * anything else observes it -- simulated by never dispatching a second event against the first

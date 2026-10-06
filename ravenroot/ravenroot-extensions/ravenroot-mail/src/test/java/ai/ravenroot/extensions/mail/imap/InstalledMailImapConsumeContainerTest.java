@@ -168,6 +168,38 @@ class InstalledMailImapConsumeContainerTest {
                         deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
                 assertNoSourceResidue(installedLoader);
             }
+
+            if (mode.equals("earliest")) {
+                int sharedBaseline = captured.size();
+                try (var reopened = new SqliteExecutionStore(database, Clock.systemUTC());
+                     var firstEngine = new PekkoExecutionEngine("installed-mail-consumer-shared-first");
+                     var secondEngine = new PekkoExecutionEngine("installed-mail-consumer-shared-second")) {
+                    var firstShared = deployment(firstEngine, registry, monitor, reopened,
+                            java.util.UUID.randomUUID().toString(), "shared-reader-a", "latest");
+                    var secondShared = deployment(secondEngine, registry, monitor, reopened,
+                            java.util.UUID.randomUUID().toString(), "shared-reader-b", "latest");
+                    try {
+                        assertEquals(DeploymentState.READY,
+                                firstShared.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS).state());
+                        assertEquals(DeploymentState.READY,
+                                secondShared.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS).state());
+                        user.deliver(message("shared-both", "both"));
+                        awaitCount(captured, sharedBaseline + 2);
+                        assertEquals(2, captured.subList(sharedBaseline, sharedBaseline + 2).stream()
+                                .filter(payload -> payload.get("subject").equals("shared-both")).count());
+
+                        assertEquals(DeploymentState.STOPPED,
+                                firstShared.stop().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
+                        user.deliver(message("shared-survivor", "survivor"));
+                        awaitCount(captured, sharedBaseline + 3);
+                        assertEquals("shared-survivor", captured.get(sharedBaseline + 2).get("subject"));
+                    } finally {
+                        firstShared.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                        secondShared.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    }
+                    assertNoSourceResidue(installedLoader);
+                }
+            }
         }
     }
 

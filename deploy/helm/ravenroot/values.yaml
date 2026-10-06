@@ -58,6 +58,19 @@ executionRuntime:
   terminalHistoryCapacity: ""
   runnerShutdownStepSeconds: ""
 
+# Optional durable node-content archive. Capture remains disabled unless an operator opts in.
+activityCapture:
+  enabled: false
+  policy: BEST_EFFORT
+  nodes: ""
+  contents: INPUT_PAYLOAD,OUTPUT_PAYLOAD
+  maxPayloadBytes: 65536
+  maxInFlight: 64
+  writeTimeoutMillis: 2000
+  retentionSeconds: 604800
+  maxPageSize: 100
+  redactKeys: password,secret,token,authorization,api_key,apikey
+
 # Graph admission and execution policy. Empty values are intentional: they are rendered into the
 # pod and resolved by GraphExecutionLimits, which owns the numerical defaults and safety ceilings.
 # Use YAML integers for configured values; the template converts them to environment strings.

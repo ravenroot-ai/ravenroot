@@ -25,7 +25,8 @@ public final class MailImapConsumeNodeBehavior implements NodeBehavior, InboundS
     public static final String BEHAVIOR = "mail.imap.consume";
     private static final Set<String> CONFIGURATION = Set.of("profile", "folder", "pollIntervalMs",
             "batchSize", "maxInFlight", "retryBackoffMs", "maxRetryBackoffMs", "poisonAttempts",
-            "contentMode", "previewChars", "allowedHeaders", "checkpointPolicy", "consumerId", "initialPosition");
+            "contentMode", "previewChars", "allowedHeaders", "checkpointPolicy", "consumerId", "initialPosition",
+            "resourceMode");
 
     private final CredentialResolver credentials;
     private final ImapProfileResolver profiles;
@@ -89,6 +90,11 @@ public final class MailImapConsumeNodeBehavior implements NodeBehavior, InboundS
         properties.add(new NodePropertyDescriptor("checkpointPolicy", "Checkpoint policy",
                 NodePropertyType.STRING, false, "Only durable checkpointing is supported.",
                 "require-durable", List.of("require-durable")));
+        properties.add(new NodePropertyDescriptor("resourceMode", "Resource mode",
+                NodePropertyType.STRING, false,
+                "Shared allows independent sources to consume the authorized folder. Exclusive permits only one "
+                        + "process-local source for the tenant, profile and folder.",
+                "shared", List.of("shared", "exclusive")));
         return new NodeTypeDescriptor(BEHAVIOR, "Consume mailbox messages", "Mail",
                 "Polls one operator-authorized IMAP folder and starts one durable traversal per message.",
                 "actor", false, List.copyOf(properties),

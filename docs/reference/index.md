@@ -10,6 +10,7 @@ Look up exact GraphML, node, execution, API, configuration, embed, extension, an
 - [Core node reference](core-nodes.md) — Use every default node with exact properties, payloads, outcomes, side effects, retry/cancellation applicability, and examples.
 - [Node descriptor contracts](node-contracts.md) — Inspect every compiled field, condition, descriptor limit, declared outcome, and complete GraphML example for all 60 supported nodes.
 - [First-party bundle reference](bundles/index.md) — Reach every optional first-party package and node through its canonical, generated publication view.
+- [First-party source multiplicity](source-multiplicity.md) — Choose shared or process-local exclusive ownership for AMQP and IMAP and compare the fixed ownership rules of other source types.
 - [Operational coverage inventory](coverage-inventory.md) — Map the documented baseline, scripts, nodes, bundles, configuration, APIs, procedures, and validation evidence.
 - [Production environment-variable inventory](environment-variables.md) — Reach every production Java environment name or dynamic family and its semantic contract.
 - [Durable human tasks](human-tasks.md) — Author restart-safe human decisions and use the bounded tenant inbox and generation-fenced decision API.

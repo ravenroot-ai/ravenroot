@@ -60,6 +60,26 @@ spec:
               value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.terminalHistoryCapacity }}
             - name: RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS
               value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.runnerShutdownStepSeconds }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_ENABLED
+              value: {{ .Values.activityCapture.enabled | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_POLICY
+              value: {{ .Values.activityCapture.policy | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_NODES
+              value: {{ .Values.activityCapture.nodes | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_CONTENTS
+              value: {{ .Values.activityCapture.contents | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES
+              value: {{ .Values.activityCapture.maxPayloadBytes | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT
+              value: {{ .Values.activityCapture.maxInFlight | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS
+              value: {{ .Values.activityCapture.writeTimeoutMillis | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS
+              value: {{ .Values.activityCapture.retentionSeconds | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE
+              value: {{ .Values.activityCapture.maxPageSize | quote }}
+            - name: RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS
+              value: {{ .Values.activityCapture.redactKeys | quote }}
             # Empty graph-limit values select the Java typed defaults at startup. Explicit Helm
             # integers are rendered as quoted environment strings after schema validation.
             - name: RAVENROOT_GRAPHML_MAX_BYTES

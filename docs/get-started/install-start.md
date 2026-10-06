@@ -48,3 +48,8 @@ Liveness returns `{"status":"UP"}`. Readiness admits traffic only after required
 Authentication may be disabled only on loopback, where Ravenroot emits a warning. A non-loopback listener refuses startup unless authentication is configured. Use a local token of at least 32 characters for controlled local access, or OIDC for an externally reachable deployment. Never copy a token into GraphML.
 
 If a probe fails, follow [Startup and readiness](../troubleshooting/startup-readiness.md). Exact defaults are listed in [Configuration](../reference/configuration.md).
+
+## Kubernetes installation paths
+
+- [Complete service with PostgreSQL, OIDC/Keycloak and persistent local data](../operator-guide/kubernetes-installation.md).
+- [Independent UI connected to an existing backend](../operator-guide/kubernetes-ui-only.md).

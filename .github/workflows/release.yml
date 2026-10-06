@@ -105,6 +105,8 @@ jobs:
           npm audit --audit-level=moderate
           npm test
           npm run build
+      - name: Verify independent UI runtime
+        run: node --test ui-server/server.test.mjs
       - name: Build and test the tagged Maven reactor
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress clean verify
@@ -123,6 +125,7 @@ jobs:
       packages: write
     outputs:
       image_digest: ${{ steps.image.outputs.digest }}
+      ui_image_digest: ${{ steps.ui-image.outputs.digest }}
     steps:
       - name: Check out the validated tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -202,6 +205,11 @@ jobs:
           cp ravenroot/ravenroot-distribution/target/ravenroot-bin.zip "release-assets/ravenroot-$version.zip"
           cp ravenroot/target/ravenroot-sbom.json release-assets/ravenroot-sbom.json
           cp docs/security/release-signing-key.asc release-assets/ravenroot-release-signing-key.asc
+      - name: Package independent static UI
+        run: >-
+          python3 scripts/package_ui.py
+          --output 'release-assets/ravenroot-ui-${{ needs.validate.outputs.version }}.zip'
+          --epoch "$(git show -s --format=%ct '${{ needs.validate.outputs.commit }}')"
       - name: Build the provenance-bearing OCI layout once
         run: |
           set -euo pipefail
@@ -219,6 +227,30 @@ jobs:
             --output type=oci,rewrite-timestamp=true,dest=ci-artifacts/ravenroot-image.tar .
           mkdir -p ci-artifacts/oci-layout
           tar -xf ci-artifacts/ravenroot-image.tar -C ci-artifacts/oci-layout
+      - name: Build the independent UI provenance-bearing OCI layout
+        run: |
+          set -euo pipefail
+          created=$(git show -s --format=%cI '${{ needs.validate.outputs.commit }}')
+          source_date_epoch=$(git show -s --format=%ct '${{ needs.validate.outputs.commit }}')
+          export SOURCE_DATE_EPOCH="$source_date_epoch"
+          docker buildx build --file Dockerfile.ui --platform linux/amd64 \
+            --tag 'ghcr.io/ravenroot-ai/ravenroot-ui:${{ needs.validate.outputs.version }}' \
+            --build-arg 'VERSION=${{ needs.validate.outputs.version }}' \
+            --build-arg 'REVISION=${{ needs.validate.outputs.commit }}' \
+            --build-arg "CREATED=$created" --build-arg "SOURCE_DATE_EPOCH=$source_date_epoch" \
+            --provenance=mode=max,reproducible=true \
+            --sbom=generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9 \
+            --output type=oci,rewrite-timestamp=true,dest=ci-artifacts/ravenroot-ui-image.tar .
+          mkdir -p ci-artifacts/ui-oci-layout
+          tar -xf ci-artifacts/ravenroot-ui-image.tar -C ci-artifacts/ui-oci-layout
+      - name: Validate independent UI publication inputs
+        id: local-ui-image
+        run: >-
+          python3 scripts/oci_registry.py validate-local
+          --repository ghcr.io/ravenroot-ai/ravenroot-ui
+          --layout ci-artifacts/ui-oci-layout
+          --version '${{ needs.validate.outputs.version }}'
+          --commit '${{ needs.validate.outputs.commit }}'
       - name: Validate every publication input before the first external write
         id: local-image
         run: |
@@ -257,6 +289,16 @@ jobs:
             --archive ci-artifacts/ravenroot-image.tar \
             --version '${{ needs.validate.outputs.version }}' \
             --digest '${{ steps.local-image.outputs.image_digest }}'
+      - name: Publish or verify the immutable UI-only GHCR image
+        id: ui-image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/oci_registry.py reconcile
+          --repository ghcr.io/ravenroot-ai/ravenroot-ui
+          --archive ci-artifacts/ravenroot-ui-image.tar
+          --version '${{ needs.validate.outputs.version }}'
+          --digest '${{ steps.local-ui-image.outputs.image_digest }}'
       - name: Attest release files
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
@@ -272,6 +314,12 @@ jobs:
         with:
           subject-name: ghcr.io/ravenroot-ai/ravenroot
           subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Attest the published independent UI OCI digest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ghcr.io/ravenroot-ai/ravenroot-ui
+          subject-digest: ${{ steps.ui-image.outputs.digest }}
           push-to-registry: true
       - name: Create or verify the immutable GitHub prerelease
         env:
@@ -304,4 +352,11 @@ jobs:
           python3 scripts/oci_registry.py verify-public
           --version '${{ needs.validate.outputs.version }}'
           --digest '${{ needs.publish.outputs.image_digest }}'
+          --commit '${{ needs.validate.outputs.commit }}'
+      - name: Pull the public UI image by tag and immutable digest without credentials
+        run: >-
+          python3 scripts/oci_registry.py verify-public
+          --repository ghcr.io/ravenroot-ai/ravenroot-ui
+          --version '${{ needs.validate.outputs.version }}'
+          --digest '${{ needs.publish.outputs.ui_image_digest }}'
           --commit '${{ needs.validate.outputs.commit }}'

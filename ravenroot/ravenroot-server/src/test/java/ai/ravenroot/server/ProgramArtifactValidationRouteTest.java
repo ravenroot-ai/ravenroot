@@ -19,8 +19,15 @@ import ai.ravenroot.core.security.OutboundHttpPolicy;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import ai.ravenroot.server.security.RequestAuthenticator;
+import com.nimbusds.jose.shaded.gson.JsonObject;
+import com.nimbusds.jose.shaded.gson.JsonParser;
+import com.nimbusds.jose.shaded.gson.Strictness;
+import com.nimbusds.jose.shaded.gson.stream.JsonReader;
+import com.nimbusds.jose.shaded.gson.stream.JsonToken;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.StringReader;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -246,24 +253,39 @@ class ProgramArtifactValidationRouteTest {
                 "after_launch", Duration.ofMillis(100), Duration.ofMillis(103))))) {
             String id = fixture.createArtifact();
             var response = fixture.post("/" + id + "/validate");
+            JsonObject error = parseErrorEnvelope(response.body());
 
             assertEquals(504, response.statusCode(),
                     "nothing about the request was wrong, so 400 was false; and it conflicts with no "
                             + "state, so 409 was false too. What is left is a fact about one run's "
                             + "elapsed time against a configured budget, not about a capability this "
                             + "deployment lacks, and 504 is the status for that");
-            assertTrue(response.body().contains("\"code\":\"PROGRAM_EXECUTION_TIMEOUT\""), response.body());
-            assertTrue(response.body().contains("The artifact source is not at fault"),
+            assertEquals("PROGRAM_EXECUTION_TIMEOUT", error.get("code").getAsString(), response.body());
+            assertTrue(error.get("message").getAsString().contains("The artifact source is not at fault"),
                     "the sentence that stops the reader going back to their own code, was: " + response.body());
-            assertFalse(response.body().contains("rejected as invalid"), response.body());
-            assertFalse(response.body().contains("conflicts with the current state"),
+            assertFalse(error.get("message").getAsString().contains("rejected as invalid"), response.body());
+            assertFalse(error.get("message").getAsString().contains("conflicts with the current state"),
                     "the 409 was the worse of the two failures precisely because it NAMES a cause, so "
                             + "a reader believes it instead of suspecting the classification, was: "
                             + response.body());
-            assertFalse(response.body().contains("after_launch"),
+            assertFalse(error.get("message").getAsString().contains("after_launch"),
                     "the stage is an internal token for the server log, like the launcher path");
-            assertFalse(response.body().contains("103"),
+            assertFalse(error.get("message").getAsString().contains("103"),
                     "the elapsed wait describes this deployment's load, not the caller's request");
+            assertFalse(error.get("error").getAsString().contains("after_launch"), response.body());
+            assertFalse(error.get("error").getAsString().contains("103"), response.body());
+            assertTrue(error.has("correlationId") && !error.get("correlationId").getAsString().isBlank(),
+                    "the correlation ID remains the request-scoped public support handle");
+        }
+    }
+
+    private static JsonObject parseErrorEnvelope(String body) throws IOException {
+        try (var reader = new JsonReader(new StringReader(body))) {
+            reader.setStrictness(Strictness.STRICT);
+            var value = JsonParser.parseReader(reader);
+            assertEquals(JsonToken.END_DOCUMENT, reader.peek(), "error response has trailing JSON content");
+            assertTrue(value.isJsonObject(), "error response must be a JSON object");
+            return value.getAsJsonObject();
         }
     }
 

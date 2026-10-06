@@ -50,6 +50,29 @@ README = Path("README.md")
 EXTENSION_PACK_GUIDE = Path("docs/integrator-guide/extension-pack.md")
 NAVIGATION = Path("docs/_data/navigation.yml")
 FRAGMENTS = Path(".changes")
+UI_RELEASE_EXAMPLES = (
+    Path("docs/operator-guide/kubernetes-installation.md"),
+    Path("docs/operator-guide/kubernetes-ui-only.md"),
+    Path("docs/examples/kubernetes/full.yaml"),
+    Path("docs/examples/kubernetes/ui-only.yaml"),
+)
+
+
+def bump_ui_examples(root: Path, previous: str, target: str) -> dict[Path, str]:
+    """Keep new installation coordinates current, including their first upcoming release."""
+    updates = {}
+    upcoming = str(expected_next(parse_tag(f"v{previous}"), "minor"))
+    pattern = r"(?<![A-Za-z0-9])\d+\.\d+\.\d+-(?:alpha|beta|rc)\.\d+(?![A-Za-z0-9])"
+    for relative in UI_RELEASE_EXAMPLES:
+        path = root / relative
+        if not path.exists():  # Older release checkouts predate independent UI delivery.
+            continue
+        contents = path.read_text(encoding="utf-8")
+        versions = set(re.findall(pattern, contents))
+        if not versions or versions.difference({previous, target, upcoming}):
+            raise ReleaseContractError(f"{relative}: unexpected installation version coordinates")
+        updates[path] = re.sub(pattern, target, contents)
+    return updates
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -140,6 +163,7 @@ def bump_surfaces(root: Path, previous: str, target: str) -> None:
     updates[guide_path] = replaced_exactly(
         guide_path, guide, f"-Dravenroot.version={previous}", f"-Dravenroot.version={target}", 1,
     )
+    updates.update(bump_ui_examples(root, previous, target))
     for path, contents in updates.items():
         path.write_text(contents, encoding="utf-8")
 

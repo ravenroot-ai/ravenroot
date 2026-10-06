@@ -17,3 +17,10 @@ Run Ravenroot as a controlled service with explicit identity, storage, deploymen
 ## Authority boundary
 
 Operator procedures may change service configuration or durable state and therefore include verification and recovery. They never delegate that authority to graph content.
+
+- [Durable activity content capture](activity-capture.md) configures optional redacted node-content retention, strict persistence boundaries, and incremental reads.
+
+## Kubernetes installation paths
+
+- [Complete service with PostgreSQL, OIDC/Keycloak and persistent local data](kubernetes-installation.md).
+- [Independent UI connected to an existing backend](kubernetes-ui-only.md).

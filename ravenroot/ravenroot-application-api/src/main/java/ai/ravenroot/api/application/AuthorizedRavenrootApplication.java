@@ -1382,6 +1382,37 @@ public final class AuthorizedRavenrootApplication {
         return delegate.durableEventsAfter(context.tenantId(), afterOffset, limit);
     }
 
+    /**
+     * Reports whether the delegate exposes the optional durable activity-content archive.
+     *
+     * @return whether the optional durable activity-content archive is composed
+     */
+    public boolean activityArchiveAvailable() {
+        return delegate.activityArchiveAvailable();
+    }
+
+    /**
+     * Reports the activity history page limit accepted by the delegate.
+     *
+     * @return maximum supported activity history page size
+     */
+    public int activityArchiveMaxPageSize() {
+        return delegate.activityArchiveMaxPageSize();
+    }
+
+    /**
+     * Reads retained activity for the authenticated tenant. The query deliberately has no tenant
+     * field, so an HTTP parameter cannot replace the tenant established by authentication.
+     * @param context authenticated request context
+     * @param query bounded incremental query
+     * @return retained activity page
+     */
+    public ai.ravenroot.api.activity.ActivityPage activityAfter(
+            RequestContext context, ai.ravenroot.api.activity.ActivityQuery query) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("activity", context));
+        return delegate.activityAfter(context.tenantId(), java.util.Objects.requireNonNull(query, "query"));
+    }
+
 /**
  * Reports whether execution results are retained for later retrieval.
  * @see RavenrootApplication#executionResultsRetained()

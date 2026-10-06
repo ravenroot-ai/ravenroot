@@ -23,6 +23,18 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Explicit behavior composition; no reflection and no dependency-injection container. */
 public final class BehaviorRegistry {
     private ai.ravenroot.core.runner.RunnerJobService runnerJobs;
+    private ai.ravenroot.core.activity.ActivityCapture activityCapture =
+            ai.ravenroot.core.activity.ActivityCapture.disabled();
+
+    /** Installs one process-owned activity archive boundary before any runner is built. */
+    public BehaviorRegistry withActivityCapture(ai.ravenroot.core.activity.ActivityCapture capture) {
+        if (activityCapture.enabled()) throw new IllegalStateException("activity capture already configured");
+        activityCapture = java.util.Objects.requireNonNull(capture, "capture");
+        return this;
+    }
+
+    /** Activity capture selected by the embedding composition root. */
+    public ai.ravenroot.core.activity.ActivityCapture activityCapture() { return activityCapture; }
 
     /** Explicit composition opt-in; existing bounded Agent and embedding behavior remain unchanged. */
     public BehaviorRegistry withRunnerJobs(ai.ravenroot.core.runner.RunnerJobService service) {
@@ -181,6 +193,10 @@ public final class BehaviorRegistry {
         if (factory == null || factory.descriptor() == null) {
             throw new IllegalArgumentException("Behavior factory and descriptor are required");
         }
+        if (factory instanceof CoreInboundSourceFactory
+                && source.origin() != NodeCatalogSource.Origin.CORE) {
+            throw new IllegalArgumentException("core inbound source factories require core registration");
+        }
         // Fail-closed descriptor validation on the ONE path every registration takes --
         // built-ins, SDK node packages and plugin bundles alike. Validating only in NodePackages
         // would leave built-in descriptors unchecked, and a control that cannot fire on the paths
@@ -206,10 +222,16 @@ public final class BehaviorRegistry {
     }
 
     private static java.util.Set<String> declaredSourceFailures(NodeBehaviorFactory factory) {
+        if (factory instanceof CoreInboundSourceFactory core) {
+            return validateSourceFailureCodes(core.sourceStartFailureCodes());
+        }
         if (!(factory instanceof NodePackages.SdkNodeBehaviorFactory sdk)
                 || !(sdk.behavior() instanceof InboundSourceCapable capable)) return java.util.Set.of();
-        java.util.Set<String> declared = java.util.Objects.requireNonNull(
-                capable.sourceStartFailureCodes(), "sourceStartFailureCodes");
+        return validateSourceFailureCodes(capable.sourceStartFailureCodes());
+    }
+
+    private static java.util.Set<String> validateSourceFailureCodes(java.util.Set<String> declaredCodes) {
+        java.util.Set<String> declared = java.util.Objects.requireNonNull(declaredCodes, "sourceStartFailureCodes");
         var validated = new java.util.TreeSet<String>();
         for (String code : declared) {
             String safe = ai.ravenroot.api.deployment.SourceStartFailureCode.requireValid(code);
@@ -246,7 +268,8 @@ public final class BehaviorRegistry {
      */
     private static NodeTypeDescriptor resolveNature(NodeBehaviorFactory factory) {
         NodeTypeDescriptor descriptor = factory.descriptor();
-        boolean sourceCapable = factory instanceof NodePackages.SdkNodeBehaviorFactory sdk
+        boolean sourceCapable = factory instanceof CoreInboundSourceFactory
+                || factory instanceof NodePackages.SdkNodeBehaviorFactory sdk
                 && sdk.behavior() instanceof InboundSourceCapable;
         if (!sourceCapable) {
             return descriptor;
@@ -456,6 +479,13 @@ public final class BehaviorRegistry {
     public interface SourceRegistration extends AutoCloseable {
         void activate();
         @Override void close();
+
+        static SourceRegistration none() {
+            return new SourceRegistration() {
+                @Override public void activate() { }
+                @Override public void close() { }
+            };
+        }
     }
 
     private static final class SourceBinding implements
@@ -634,6 +664,38 @@ public final class BehaviorRegistry {
             return Optional.of(sdk);
         }
         return Optional.empty();
+    }
+
+    Optional<InboundSourceFactory> inboundSourceFactory(String behaviorName) {
+        if (behaviorName == null) return Optional.empty();
+        NodeBehaviorFactory factory = factories.get(behaviorName);
+        if (factory instanceof CoreInboundSourceFactory core) {
+            return Optional.of(new InboundSourceFactory() {
+                @Override public ai.ravenroot.api.deployment.InboundSource create(
+                        GraphNode node, ai.ravenroot.api.deployment.InboundSourceContext context) {
+                    return core.createSource(node, context);
+                }
+                @Override public Optional<String> packageId() { return Optional.empty(); }
+            });
+        }
+        if (factory instanceof NodePackages.SdkNodeBehaviorFactory sdk
+                && sdk.behavior() instanceof InboundSourceCapable) {
+            String packageId = behaviorPackageIds.get(behaviorName);
+            return Optional.of(new InboundSourceFactory() {
+                @Override public ai.ravenroot.api.deployment.InboundSource create(
+                        GraphNode node, ai.ravenroot.api.deployment.InboundSourceContext context) {
+                    return sdk.createSource(node, context);
+                }
+                @Override public Optional<String> packageId() { return Optional.of(packageId); }
+            });
+        }
+        return Optional.empty();
+    }
+
+    interface InboundSourceFactory {
+        ai.ravenroot.api.deployment.InboundSource create(
+                GraphNode node, ai.ravenroot.api.deployment.InboundSourceContext context);
+        Optional<String> packageId();
     }
 
     /** Trusted codes registered for one source-capable behavior. */

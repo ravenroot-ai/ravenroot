@@ -9,6 +9,7 @@ from unittest.mock import patch
 from scripts import publish_environment_reference as publisher
 
 from scripts.publish_environment_reference import (
+    ACTIVITY_CAPTURE_VARIABLES,
     INTERACTION_WEBSOCKET_VARIABLES,
     boundary,
     group,
@@ -19,6 +20,48 @@ from scripts.publish_environment_reference import (
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
+    def test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory(self):
+        names = publisher.ui_settings()
+        self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_PREFIX",
+                          "RAVENROOT_UI_PORT", "RAVENROOT_UI_ROOT"}, set(names))
+        self.assertFalse(set(names).intersection(variables()))
+        section = render().split("## Independent UI web server", 1)[1]
+        for name in names:
+            self.assertIn(f"`{name}`", section)
+        self.assertIn("not the Java backend", section)
+        self.assertIn("Node.js itself", section)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "server.mjs"
+            source.write_text(publisher.UI_SERVER_SOURCE.read_text() + "\nenv.RAVENROOT_UI_TYPO;\n")
+            with patch.object(publisher, "UI_SERVER_SOURCE", source):
+                with self.assertRaisesRegex(ValueError, "RAVENROOT_UI_TYPO"):
+                    render()
+
+    def test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract(self):
+        names = variables()
+        activity_names = {
+            name for name in names if name.startswith("RAVENROOT_ACTIVITY_CAPTURE_")
+        }
+        self.assertEqual(ACTIVITY_CAPTURE_VARIABLES, activity_names)
+        for name in ACTIVITY_CAPTURE_VARIABLES:
+            with self.subTest(name=name):
+                self.assertEqual("activity", group(name))
+                self.assertNotEqual(
+                    "See the linked contract for exact type, default, and applicability.",
+                    boundary(name),
+                )
+
+        published = render()
+        section = published.split("## Activity content archive", 1)[1].split("## ", 1)[0]
+        self.assertIn("../operator-guide/activity-capture.md#service-configuration", section)
+        self.assertIn("default `INPUT_PAYLOAD,OUTPUT_PAYLOAD`", section)
+        self.assertIn("unset defaults to `false`", section)
+        for name in ACTIVITY_CAPTURE_VARIABLES:
+            self.assertIn(f"`{name}`", section)
+
+        with self.assertRaisesRegex(ValueError, "RAVENROOT_ACTIVITY_CAPTURE_TYPO"):
+            group("RAVENROOT_ACTIVITY_CAPTURE_TYPO")
+
     def test_runner_coordinator_bindings_are_exact_and_have_independent_semantics(self):
         expected = {"RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
                     "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE", "RAVENROOT_LOCAL_RUNNER_CONFIG",

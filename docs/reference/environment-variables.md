@@ -45,6 +45,23 @@ Detailed contract: [Agent authority](configuration.md#agent-authority-and-budget
 | `RAVENROOT_AGENT_RUNTIME_INSTANCE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_RUNNER_CONFIG` | unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart |
 
+## Activity content archive
+
+Detailed contract: [Activity content archive](../operator-guide/activity-capture.md#service-configuration).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_ACTIVITY_CAPTURE_CONTENTS` | comma-separated content kinds; default `INPUT_PAYLOAD,OUTPUT_PAYLOAD` |
+| `RAVENROOT_ACTIVITY_CAPTURE_ENABLED` | optional durable node-content archive; unset defaults to `false` and performs no archive schema or content I/O |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT` | process-wide pending-write ceiling; default `64`, from `1` through `10000` |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE` | history page ceiling; default `100`, from `1` through `1000` records |
+| `RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES` | post-redaction canonical JSON ceiling; default `65536`, from `1` through `67108864` bytes |
+| `RAVENROOT_ACTIVITY_CAPTURE_NODES` | exact comma-separated node IDs; blank selects every node |
+| `RAVENROOT_ACTIVITY_CAPTURE_POLICY` | `BEST_EFFORT` by default when enabled; `STRICT` gates invocation and downstream publication |
+| `RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS` | case-insensitive structured keys redacted before size checks; defaults to the documented credential-key list |
+| `RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS` | content retention; default `604800`, from `1` through `315360000` seconds |
+| `RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS` | per-content persistence deadline; default `2000`, from `1` through `300000` milliseconds |
+
 ## Authoring assistant
 
 Detailed contract: [Authoring assistant](../operator-guide/authoring-assistant.md#setting-reference).
@@ -473,3 +490,17 @@ Detailed contract: [Tool and approval policy](configuration.md#tool-and-approval
 from production Java, refuses any unclassified name, and compares this page byte-for-byte.
 Dynamic suffixes and settings assembled outside Java literals remain covered by their
 maintained parser or command-help checks rather than being invented here.
+
+## Independent UI web server
+
+These variables configure the optional UI-only static server, not the Java backend.
+
+| Variable | Contract |
+|---|---|
+| `RAVENROOT_UI_BACKEND_URL` | Server-side HTTP(S) upstream; unset selects static-only mode with backend routes returning `503`; optional backend path prefix, no credentials/query/fragment |
+| `RAVENROOT_UI_PREFIX` | Empty (root) or public slash-prefixed path without trailing slash |
+| `RAVENROOT_UI_PORT` | Integer TCP port, default `8080` |
+| `RAVENROOT_UI_ROOT` | Asset directory, default `/opt/ravenroot/ui` |
+| `NODE_EXTRA_CA_CERTS` | Optional read-only PEM trust bundle for the HTTPS upstream; consumed by Node.js itself |
+
+See [UI-only installation](../operator-guide/kubernetes-ui-only.md) for routing, probes and TLS.

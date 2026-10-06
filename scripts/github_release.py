@@ -10,10 +10,13 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DRAFT_VISIBILITY_RETRIES = 30
+DRAFT_VISIBILITY_RETRY_INTERVAL_SECONDS = 1
 
 
 class GitHubReleaseError(ValueError):
@@ -78,6 +81,17 @@ def create_release(tag: str, notes: Path, prerelease: bool) -> None:
     if prerelease:
         arguments.append("--prerelease")
     gh(*arguments, capture=False)
+
+
+def created_draft(tag: str) -> dict[str, object] | None:
+    """Find a newly created draft once GitHub's list catches up."""
+    document = release(tag)
+    for _ in range(DRAFT_VISIBILITY_RETRIES):
+        if document is not None:
+            return document
+        time.sleep(DRAFT_VISIBILITY_RETRY_INTERVAL_SECONDS)
+        document = release(tag)
+    return document
 
 
 def verify_release(
@@ -173,7 +187,7 @@ def main() -> int:
         document = release(arguments.tag)
         if document is None:
             create_release(arguments.tag, notes, prerelease)
-            document = release(arguments.tag)
+            document = created_draft(arguments.tag)
             if document is None:
                 raise GitHubReleaseError("GitHub Release was not visible after creation")
         draft = bool(document.get("draft"))

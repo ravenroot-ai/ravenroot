@@ -466,6 +466,11 @@ persist in the credential database and can rotate without rebuilding GraphML. Se
 
 ## Persistence paths
 
+Optional node input/output retention is configured separately from the event journal. It is disabled
+by default, uses the selected execution-store database without requiring another database, and offers
+bounded `BEST_EFFORT` and `STRICT` policies. See
+[Durable activity content capture](../operator-guide/activity-capture.md) for every value and boundary.
+
 | Variable | Type and default |
 |---|---|
 | `RAVENROOT_EXECUTION_STORE_ENABLED` | enabled unless set to `false`, `off`, `0`, or `no` |

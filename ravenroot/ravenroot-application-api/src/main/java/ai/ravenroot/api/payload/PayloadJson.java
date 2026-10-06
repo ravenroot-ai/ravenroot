@@ -35,6 +35,17 @@ public final class PayloadJson {
     private PayloadJson() {
     }
 
+    /**
+     * Encodes a Java payload through the bounded public payload type model.
+     *
+     * @param value supported Java payload value to normalize and encode
+     * @param limits structural and encoded-size limits applied during normalization
+     * @return canonical UTF-8 JSON bytes
+     */
+    public static byte[] writeJava(Object value, PayloadLimits limits) {
+        return write(PayloadValue.fromJava(value, limits)).getBytes(StandardCharsets.UTF_8);
+    }
+
 /**
  * Canonical encoding: sorted map keys, no insignificant whitespace.
  * @param value payload type-model value to encode

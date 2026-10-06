@@ -18,7 +18,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntConsumer;
@@ -26,7 +25,7 @@ import java.util.function.IntConsumer;
 /** One serial poll owner controls every channel operation and generation transition. */
 final class AmqpConsumerSource implements InboundSource {
     enum State { STOPPED, STARTING, READY, BACKING_OFF, RECONNECTING, STOPPING, FAILED }
-    private static final ConcurrentHashMap<String, Object> LEASES = new ConcurrentHashMap<>();
+    private static final AmqpConsumerLeaseRegistry RESOURCE_LEASES = new AmqpConsumerLeaseRegistry();
 
     private final NodeConfiguration configuration;
     private final CredentialResolver credentials;
@@ -123,8 +122,7 @@ final class AmqpConsumerSource implements InboundSource {
         Settings settings = null;
         SecretValue secret = null;
         char[] password = null;
-        Object lease = null;
-        String leaseKey = null;
+        AmqpConsumerLeaseRegistry.Lease resourceLease = null;
         Map<String, Integer> attempts = new HashMap<>();
         FailureStreak reconnectFailures = new FailureStreak();
         try {
@@ -133,9 +131,10 @@ final class AmqpConsumerSource implements InboundSource {
             policy = resolvePolicy(context.identity().tenantId(), profileName);
             settings = Settings.resolve(configuration, policy);
             probeDurability(context, profile.timeoutMs());
-            leaseKey = policy.tenant() + "\0" + policy.profile() + "\0" + policy.queue();
-            lease = new Object();
-            if (LEASES.putIfAbsent(leaseKey, lease) != null) throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_ALREADY_ACTIVE);
+            String leaseKey = policy.tenant() + "\0" + policy.profile() + "\0" + policy.queue();
+            resourceLease = RESOURCE_LEASES.tryAcquire(leaseKey, settings.resourceMode);
+            if (resourceLease == null)
+                throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_ALREADY_ACTIVE);
             Optional<SecretValue> resolved = credentials.resolve(profile.credentialRef());
             if (resolved == null || resolved.isEmpty()) throw sourceFailure(AmqpSourceStartFailure.CREDENTIAL_UNAVAILABLE);
             secret = resolved.get(); password = secret.copy();
@@ -166,7 +165,7 @@ final class AmqpConsumerSource implements InboundSource {
             synchronized (lifecycle) { generation++; owner = null; }
             if (password != null) java.util.Arrays.fill(password, '\0');
             if (secret != null) secret.close();
-            if (leaseKey != null && lease != null) LEASES.remove(leaseKey, lease);
+            if (resourceLease != null) resourceLease.close();
             synchronized (lifecycle) {
                 if (!ready.isDone()) ready.completeExceptionally(
                         new IllegalStateException("AMQP source stopped before readiness"));
@@ -356,7 +355,8 @@ final class AmqpConsumerSource implements InboundSource {
     }
 
     private record Settings(int prefetch, int retryBackoffMs, int maxRetryBackoffMs,
-                            int poisonAttempts, int drainTimeoutMs) {
+                            int poisonAttempts, int drainTimeoutMs,
+                            AmqpConsumerLeaseRegistry.Mode resourceMode) {
         static Settings resolve(NodeConfiguration c, AmqpConsumerPolicy policy) {
             if (!AmqpConsumeNodeBehavior.knownConfiguration().containsAll(c.properties().keySet()))
                 throw sourceFailure(AmqpSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
@@ -388,7 +388,12 @@ final class AmqpConsumerSource implements InboundSource {
                 throw sourceFailure(AmqpSourceStartFailure.INVALID_DEAD_LETTER_MODE);
             if (!c.property("checkpointPolicy", "require-durable").equals("require-durable"))
                 throw sourceFailure(AmqpSourceStartFailure.INVALID_CHECKPOINT_POLICY);
-            return new Settings(prefetch, retry, maximum, poison, drain);
+            AmqpConsumerLeaseRegistry.Mode resourceMode = switch (c.property("resourceMode", "shared")) {
+                case "shared" -> AmqpConsumerLeaseRegistry.Mode.SHARED;
+                case "exclusive" -> AmqpConsumerLeaseRegistry.Mode.EXCLUSIVE;
+                default -> throw sourceFailure(AmqpSourceStartFailure.INVALID_RESOURCE_MODE);
+            };
+            return new Settings(prefetch, retry, maximum, poison, drain, resourceMode);
         }
 
         private static int tighten(String raw, int ceiling, int minimum, AmqpSourceStartFailure reason) {

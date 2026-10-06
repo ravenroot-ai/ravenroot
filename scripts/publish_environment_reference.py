@@ -16,6 +16,18 @@ SOURCE = ROOT / "ravenroot"
 OUTPUT = ROOT / "docs" / "reference" / "environment-variables.md"
 VARIABLE = re.compile(r'"(RAVENROOT_[A-Z0-9_]+)"')
 
+UI_SERVER_SOURCE = ROOT / "ui-server" / "server.mjs"
+UI_SETTINGS = {
+    "RAVENROOT_UI_BACKEND_URL": (
+        "Server-side HTTP(S) upstream; unset selects static-only mode with backend routes returning `503`; optional backend path prefix, "
+        "no credentials/query/fragment"
+    ),
+    "RAVENROOT_UI_PREFIX": "Empty (root) or public slash-prefixed path without trailing slash",
+    "RAVENROOT_UI_PORT": "Integer TCP port, default `8080`",
+    "RAVENROOT_UI_ROOT": "Asset directory, default `/opt/ravenroot/ui`",
+}
+
+
 # This reviewed literal is a startsWith namespace guard, not an environment key
 # or an open dynamic family. Pin the complete source so even a benign file change
 # requires re-review: a new use of the same literal must never be silently hidden.
@@ -35,6 +47,9 @@ class Group:
 
 GROUPS = {
     "agent": Group("Agent authority", "configuration.md#agent-authority-and-budgets"),
+    "activity": Group(
+        "Activity content archive", "../operator-guide/activity-capture.md#service-configuration"
+    ),
     "assistant": Group("Authoring assistant", "../operator-guide/authoring-assistant.md#setting-reference"),
     "bundle": Group("Bundle profile", "bundles/"),
     "credential": Group("Credentials and egress", "configuration.md#secret-handling"),
@@ -58,6 +73,38 @@ GROUPS = {
 }
 
 ROW_BOUNDARIES = {
+    "RAVENROOT_ACTIVITY_CAPTURE_ENABLED": (
+        "optional durable node-content archive; unset defaults to `false` and performs no archive "
+        "schema or content I/O"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_POLICY": (
+        "`BEST_EFFORT` by default when enabled; `STRICT` gates invocation and downstream publication"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_NODES": (
+        "exact comma-separated node IDs; blank selects every node"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_CONTENTS": (
+        "comma-separated content kinds; default `INPUT_PAYLOAD,OUTPUT_PAYLOAD`"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES": (
+        "post-redaction canonical JSON ceiling; default `65536`, from `1` through `67108864` bytes"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT": (
+        "process-wide pending-write ceiling; default `64`, from `1` through `10000`"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS": (
+        "per-content persistence deadline; default `2000`, from `1` through `300000` milliseconds"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS": (
+        "content retention; default `604800`, from `1` through `315360000` seconds"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE": (
+        "history page ceiling; default `100`, from `1` through `1000` records"
+    ),
+    "RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS": (
+        "case-insensitive structured keys redacted before size checks; defaults to the documented "
+        "credential-key list"
+    ),
     "RAVENROOT_POD_UID": "manager-generated Downward API Pod UID; required inside the native Agent, never an operator authority override",
     "RAVENROOT_NETWORK_CONTROL_HOST": "manager-resolved numeric address of the secretless TCP/9443 attestation control; required inside the native Agent",
     "RAVENROOT_WORKSPACE_LIMIT_BYTES": "manager-generated positive Workspace storage ceiling in bytes; actual filesystem enforcement must be positively attested",
@@ -153,6 +200,19 @@ INTERACTION_WEBSOCKET_VARIABLES = frozenset({
     "RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS",
 })
 
+ACTIVITY_CAPTURE_VARIABLES = frozenset({
+    "RAVENROOT_ACTIVITY_CAPTURE_ENABLED",
+    "RAVENROOT_ACTIVITY_CAPTURE_POLICY",
+    "RAVENROOT_ACTIVITY_CAPTURE_NODES",
+    "RAVENROOT_ACTIVITY_CAPTURE_CONTENTS",
+    "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES",
+    "RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT",
+    "RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS",
+    "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS",
+    "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE",
+    "RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS",
+})
+
 
 def variables() -> dict[str, tuple[Path, ...]]:
     found: dict[str, set[Path]] = {}
@@ -179,6 +239,8 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name in ACTIVITY_CAPTURE_VARIABLES:
+        return "activity"
     if name in {"RAVENROOT_POD_UID", "RAVENROOT_NETWORK_CONTROL_HOST", "RAVENROOT_WORKSPACE_LIMIT_BYTES",
                 "RAVENROOT_MEMORY_LIMIT_BYTES", "RAVENROOT_CPU_MILLICORES", "RAVENROOT_PROCESS_LIMIT"}:
         return "native-runner"
@@ -257,6 +319,16 @@ def group(name: str) -> str:
     raise ValueError(f"unclassified production environment variable: {name}")
 
 
+def ui_settings() -> dict[str, str]:
+    """Maintain the non-Java web-server boundary separately, refusing unclassified runtime names."""
+    names = set(re.findall(r"\benv\.(RAVENROOT_[A-Z0-9_]+)",
+                           UI_SERVER_SOURCE.read_text(encoding="utf-8")))
+    if names != set(UI_SETTINGS):
+        raise ValueError("UI server environment mapping differs from runtime: "
+                         + ", ".join(sorted(names.symmetric_difference(UI_SETTINGS))))
+    return UI_SETTINGS
+
+
 def render() -> str:
     inventory = variables()
     rows: dict[str, list[str]] = {key: [] for key in GROUPS}
@@ -292,6 +364,12 @@ def render() -> str:
                  "from production Java, refuses any unclassified name, and compares this page byte-for-byte.",
                  "Dynamic suffixes and settings assembled outside Java literals remain covered by their",
                  "maintained parser or command-help checks rather than being invented here.", ""))
+    body.extend(("## Independent UI web server", "",
+                 "These variables configure the optional UI-only static server, not the Java backend.", "",
+                 "| Variable | Contract |", "|---|---|"))
+    body.extend(f"| `{name}` | {contract} |" for name, contract in ui_settings().items())
+    body.extend(("| `NODE_EXTRA_CA_CERTS` | Optional read-only PEM trust bundle for the HTTPS upstream; consumed by Node.js itself |", "",
+                 "See [UI-only installation](../operator-guide/kubernetes-ui-only.md) for routing, probes and TLS.", ""))
     return "\n".join(body)
 
 

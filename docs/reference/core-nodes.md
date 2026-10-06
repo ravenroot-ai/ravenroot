@@ -1,6 +1,6 @@
 # Core node reference
 
-These 12 node types are registered by the standard core catalog at the documented development
+These 14 node types are registered by the standard core catalog at the documented development
 baseline. The running `GET /v1/node-types` response remains authoritative for a particular
 deployment. Optional bundle nodes are in the [bundle reference](bundles/).
 
@@ -29,6 +29,7 @@ Use the maintained complete GraphML file for the behavior you want to try:
 - [`log`](../examples/nodes/log.graphml), [`delay`](../examples/nodes/delay.graphml),
   [`template`](../examples/nodes/template.graphml), [`json-parse`](../examples/nodes/json-parse.graphml),
   [`bigint-op`](../examples/nodes/bigint-op.graphml), and [`json-path`](../examples/nodes/json-path.graphml)
+- [`timer`](../examples/nodes/timer.graphml) and [`crontab`](../examples/nodes/crontab.graphml)
 - [`cel-transform`](../examples/nodes/cel-transform.graphml) and
   [`cel-decision`](../examples/nodes/cel-decision.graphml)
 - [`human-task`](../examples/nodes/human-task.graphml),
@@ -50,6 +51,8 @@ ravenroot run example.graphml 'example input'
 Use the UI's Test action before Run when a node can perform an effect. The fragments below show the
 action node's exact GraphML `data` entries for explanation; they are not standalone graphs or a
 replacement syntax.
+The `timer` and `crontab` examples are deployment sources: start them with a durable execution
+store and they emit their own payload at scheduled times. They need no input supplied by `run`.
 
 ## `log`
 
@@ -87,6 +90,84 @@ logged attribute, and follows `continue`.
 ```
 
 Run completes after at least the scheduled wait and returns `example input` on `continue`.
+
+## `timer`
+
+`timer` is a deployment source. It starts new traversals; it does not delay a traversal already in
+progress. Its required `zoneId` is an IANA timezone such as `Europe/Rome` or `UTC`. `times` is a
+comma-separated list of at most 64 unique ISO local times in `HH:mm` or `HH:mm:ss` form. Optional
+`weekdays` is a comma-separated list of `MONDAY` through `SUNDAY`; omission means every day.
+
+`mode` is required. `ONCE` emits the first matching occurrence after the schedule is first activated
+and then exhausts. It retains that first occurrence through downtime: `LATEST_ONLY` delivers that
+same occurrence late, while `SKIP` exhausts it when overdue. `RECURRING` continues with later
+matches. `misfirePolicy` is `LATEST_ONLY` by
+default: after a pause, restart, failover, forward clock correction, or downtime, all overdue matches
+are coalesced into the latest one. `SKIP` advances past overdue matches without starting a traversal.
+An occurrence is overdue when more than one match is due since the cursor or its scheduled instant
+is more than 30 seconds behind the current clock. This grace covers normal scheduler jitter. There
+is no unbounded catch-up mode.
+
+## `crontab`
+
+`crontab` is a deployment source with a required IANA `zoneId` and bounded multiline `entries` text.
+Each active line has exactly five numeric fields:
+
+```text
+minute hour day-of-month month day-of-week
+```
+
+Fields support `*`, comma lists, inclusive ranges, and `/step`. Minutes are 0–59, hours 0–23,
+days of month 1–31, months 1–12, and days of week 0–7 with both 0 and 7 meaning Sunday. If both
+day-of-month and day-of-week are restricted, a date matching either field is selected. Blank lines
+and lines whose first non-space character is `#` are comments. Names, macros, seconds, years,
+environment assignments, inline comments, and command tails are rejected. Ravenroot never invokes a
+shell. One invalid line rejects the node before deployment; up to 128 entries are accepted, and
+entries selecting the same instant coalesce into one occurrence. `misfirePolicy` has the same
+`LATEST_ONLY` and `SKIP` contract as `timer`.
+An expression with no real occurrence in the next eight years is rejected at admission.
+
+## Scheduled-source lifecycle and payload
+
+Both scheduled sources require a durable execution store. SQLite excludes a competing process with
+host filesystem ownership; PostgreSQL uses a session advisory lock that is released when its owning
+connection or process ends. Ownership and cursors are scoped by tenant, deployment, node, and schedule
+fingerprint. A changed schedule begins a new timeline. A replacement instance with the same schedule
+resumes its cursor, and a stable occurrence key prevents a second traversal start.
+The occurrence cursor advances after the first `InvocationAdded` is durable, not merely after an
+inbox receipt or an accepted or running execution row. If a process stops after an inbox receipt or
+accepted execution but before that first invocation, the source retains and re-offers that exact
+occurrence on restart. This custody takes priority over `SKIP` and `LATEST_ONLY`, even when later
+ticks are due or the clock moves backward. A new `LATEST_ONLY` selection first checkpoints only
+its older unaccepted ticks, leaving the selected occurrence as the first uncheckpointed tick.
+Ravenroot resumes the same execution after its prior lease expires; it does not create another
+process instance for the same occurrence. An inbox-only receipt is also re-offered to finish
+execution creation.
+When a replacement graph has different content while an older occurrence is still accepted but
+unstarted, admission stays degraded until that pinned execution is recovered with its original
+graph. Restore the graph bytes identified by the execution's graph version pin from the durable
+definition store or backup, then reactivate the matching source identity and schedule. After the
+old lease expires, the source re-offers the original occurrence and checkpoints it once the first
+invocation is durable. If the pinned graph cannot be restored, preserve the execution and cursor,
+keep the source degraded, and resolve it through an audited operator recovery process. Ravenroot
+does not automatically rebind the occurrence to a newer graph or skip it.
+
+Pause and drain close graph admission. The source retains the due occurrence and applies its misfire
+policy when admission reopens. Cancel affects active traversals and leaves the future schedule active.
+Stop and undeploy cancel the local wake-up and release durable ownership. Scheduler wake-ups are only
+hints: the durable cursor and occurrence key decide correctness after restart, failover, backward
+clock changes, and concurrent activation attempts.
+
+A nonexistent local time in a daylight-saving gap is skipped. Both real instants in an overlap fire,
+with distinct offsets and occurrence IDs. Future calculations use the JVM's timezone database loaded
+by the active process; each emitted occurrence records the timezone database version, chosen offset,
+and absolute instant.
+
+The emitted payload is a bounded map with `kind`, `scheduledAt`, `actualAt`, `scheduledLocal`,
+`zoneId`, `offset`, `occurrenceId`, `misfire`, `missedCount`, `schedule`, and `tzdbVersion`. The
+`missedCount` value saturates at 64 so a long outage cannot force unbounded calendar scans. The
+`schedule` value is a timer's local time or a crontab line number; the full authored crontab is never
+copied into an execution payload. The source node passes this payload through on `continue`.
 
 ## `template`
 

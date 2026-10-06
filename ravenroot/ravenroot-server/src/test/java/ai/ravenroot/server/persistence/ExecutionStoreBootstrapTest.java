@@ -56,6 +56,8 @@ class ExecutionStoreBootstrapTest {
 
         try (var opened = ExecutionStoreBootstrap.openOwned(configuration, Clock.systemUTC())) {
             assertNull(opened.store());
+            assertNull(opened.activityArchive(),
+                    "disabled activity capture must not initialize an archive or its schema");
             var refused = assertThrows(SqliteStoreMaintenanceLock.MaintenanceLockException.class,
                     () -> SqliteStoreMaintenanceLock.acquire(location));
             assertEquals(SqliteStoreMaintenanceLock.Failure.BUSY, refused.failure(),
@@ -64,6 +66,26 @@ class ExecutionStoreBootstrapTest {
         assertFalse(Files.exists(location.databaseFile()), "disabled mode must not create a SQLite store");
         try (var maintenance = SqliteStoreMaintenanceLock.acquire(location)) {
             assertTrue(Files.isRegularFile(location.directory().resolve(SqliteStoreMaintenanceLock.FILE_NAME)));
+        }
+    }
+
+    @Test
+    void activityArchiveCanUseTheConfiguredSQLiteDatabaseWithoutExecutionJournaling() throws Exception {
+        var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("activity-only"));
+        var activity = ai.ravenroot.server.activity.ActivityCaptureConfiguration.fromSystem(
+                new java.util.Properties(), java.util.Map.of("RAVENROOT_ACTIVITY_CAPTURE_ENABLED", "true"));
+        try (var opened = ExecutionStoreBootstrap.openOwned(
+                new ExecutionStoreConfiguration.Disabled(location), Clock.systemUTC(), GraphMlLimits.DEFAULTS,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS, activity)) {
+            assertNull(opened.store());
+            assertTrue(opened.activityArchive() instanceof ai.ravenroot.persistence.sqlite.SqliteActivityArchive);
+            assertTrue(Files.isRegularFile(location.databaseFile()));
+            try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + location.databaseFile());
+                 var row = connection.createStatement().executeQuery(
+                         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='activity_event'")) {
+                assertTrue(row.next());
+                assertEquals(1, row.getInt(1));
+            }
         }
     }
 

@@ -66,7 +66,7 @@ boundary, consistent with the SDK's `SecretValue` contract.
 | Node | Required string properties | Optional properties and defaults |
 |---|---|---|
 | `amqp.publish` | `brokerProfile` | strings `exchange`, `routingKey`, `contentType`, `contentEncoding`, `messageId`, `correlationId`, `replyTo`, `type`, `appId`; text `headers`; integers `priority`, `expirationMs`, `confirmTimeoutMs`, `maxConcurrency`, `retries`; Boolean `mandatory=true`, `persistent=false`; `recovery.repeatable` has no default |
-| `amqp.consume` | `brokerProfile` | string `queue`; integers `prefetch`, `maxInFlight`, `retryBackoffMs`, `maxRetryBackoffMs`, `drainTimeoutMs`, `poisonAttempts`; `poisonPolicy=profile` (`profile` or `dead-letter`); conditional `deadLetterMode=broker-dlx`; `checkpointPolicy=require-durable` |
+| `amqp.consume` | `brokerProfile` | string `queue`; integers `prefetch`, `maxInFlight`, `retryBackoffMs`, `maxRetryBackoffMs`, `drainTimeoutMs`, `poisonAttempts`; `poisonPolicy=profile` (`profile` or `dead-letter`); conditional `deadLetterMode=broker-dlx`; `checkpointPolicy=require-durable`; `resourceMode=shared` (`shared`, `exclusive`) |
 
 Blank optional numeric or string fields use the operator profile. Every numeric value can only
 tighten its profile rule, except the consumer reconnect fields whose direction is stated below.
@@ -137,7 +137,7 @@ which is the ordering used to distinguish `RETURNED` from `CONFIRMED`. See the o
 
 The consumer is created only when a deployment containing the node starts. Startup resolves the
 tenant's publish profile and a separate inbound authority, probes `TrustedIngress` for durable
-receipts, acquires a process-local queue lease, resolves the credential, opens one connection and
+receipts, acquires a process-local queue lease in the requested resource mode, resolves the credential, opens one connection and
 one channel, applies QoS and calls `basic.consume`. Readiness is published only after the broker's
 `consume-ok`. Existing publish profiles therefore remain publish-only unless the operator adds the
 separate consumer value:
@@ -159,6 +159,15 @@ opaque profile, an exact queue confirmation and numeric tightening. `poisonPolic
 requires `deadLetterMode=broker-dlx`; the extension never declares, binds or modifies broker topology.
 The queue must already have the operator's intended dead-letter configuration.
 
+`resourceMode=shared` is the default and allows independent deployed sources in this process to
+consume the same authorized queue. RabbitMQ distributes messages among those consumers; it does not
+copy every message to every graph. Topic-style fan-out still requires a distinct predeclared bound
+queue for each subscriber. `resourceMode=exclusive` reserves the tenant/profile/queue tuple for one
+source in this process. An exclusive holder conflicts with both shared and exclusive acquisition,
+regardless of startup order. This setting does not create a broker-exclusive consumer and does not
+coordinate separate Ravenroot processes. See the [first-party source multiplicity inventory](../source-multiplicity.md)
+for the boundary used by other source bundles.
+
 Exactly one source thread owns the channel and is the only caller of ack, nack, cancel and close.
 RabbitMQ callback threads only enqueue immutable bounded delivery data. Automatic connection and
 topology recovery are disabled; transient loss revokes the session generation, closes it and creates
@@ -170,7 +179,7 @@ never below the enforced 100 ms minimum and never above `maxRetryBackoffMs`, who
 be below one second. A
 durably accepted and broker-acknowledged delivery resets that streak. A new `consume-ok` alone does
 not reset it. Stop, rollback and shutdown interrupt the wait, revoke the generation before cleanup,
-release the queue lease and close all resources. A late traversal completion from an old generation
+release that source's queue lease and close all resources. A late traversal completion from an old generation
 cannot acknowledge.
 
 Each delivery becomes a bounded immutable `amqp.delivery.v1` event. It contains safe exchange/routing,

@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef"
+    "b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6"
+    "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -198,7 +198,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "7fd1d2951bdb78fb282fdaa8d10f546acd198aa7b1a8f11c83ea4941da02dbf6",
+    EMBED_MAIN_PATH: "b13198e5cd4df7b610802c171717062f78b1139bdd1dc259f5881f9e86adc9cf",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -214,7 +214,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef",
+        "b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -445,7 +445,7 @@ HELM_FIXED_LIST_CONTRACTS = {
     "persistence.accessModes.0": "ReadWriteOnce",
 }
 HELM_JAVA_CARRIER_PREFIXES = (
-    "executionRuntime.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
+    "executionRuntime.", "activityCapture.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
 )
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(
@@ -1094,6 +1094,23 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
     rows: list[tuple[int, str, str, str, str, str]] = []
     suffix = relative.suffix
     markers = symbol_markers(text, suffix)
+    activity_capture_lines: tuple[int, int] | None = None
+    relative_path = relative.as_posix()
+    if relative_path == "deploy/helm/ravenroot/values.yaml":
+        section = re.search(r"(?m)^activityCapture:\s*$", text)
+        if section is not None:
+            following = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                                  text[section.end():])
+            last_offset = (section.end() + following.start() - 1
+                           if following is not None else len(text) - 1)
+            activity_capture_lines = (line_number(text, section.start()),
+                                      line_number(text, last_offset))
+    elif relative_path == "deploy/helm/ravenroot/values.schema.json":
+        spans = json_value_spans(text)
+        span = None if spans is None else spans.get(("properties", "activityCapture"))
+        if span is not None:
+            activity_capture_lines = (line_number(text, span[0]),
+                                      line_number(text, span[1] - 1))
     offset = 0
     for index, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -1138,6 +1155,12 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
             offset += len(raw) + 1
             continue
         if kind and label:
+            if activity_capture_lines is not None \
+                    and activity_capture_lines[0] <= index <= activity_capture_lines[1]:
+                # Repeated Helm leaf names are common. Preserve the closed parent setting in the
+                # normalized identity so inserting activity capture cannot renumber or resurrect
+                # an unrelated reviewed candidate with the same scalar spelling.
+                label = f"activityCapture.{label}"
             for atom in FIXED_ATOM.finditer(raw):
                 candidate_offset = offset + atom.start()
                 rows.append((candidate_offset, containing_symbol(markers, candidate_offset), kind,
@@ -3685,6 +3708,17 @@ def remap_declared_candidate_references(document: dict[str, object],
                         if field == "contracts":
                             remap_list(row, "defaultCandidateIds")
 
+    activity_authorities = document.get("activityCaptureAuthorities")
+    if isinstance(activity_authorities, dict):
+        for authority in activity_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for contract in authority.get("contracts", []):
+                if isinstance(contract, dict):
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultEvidence")
+
     ai_authorities = document.get("aiOperationalAuthorities")
     if isinstance(ai_authorities, dict):
         for authority in ai_authorities.values():
@@ -3991,6 +4025,25 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["interactionWebSocketAuthorities"] = {
             INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
+    if activity_capture_source_present(root):
+        activity_authority = activity_capture_authority_from_source(root, current)
+        if activity_authority is None:
+            return None, ["cannot derive the closed activity capture configuration authority"]
+        refreshed["activityCaptureAuthorities"] = {
+            ACTIVITY_CAPTURE_AUTHORITY_ID: activity_authority,
+        }
+        activity_by_id = {str(entry["id"]): entry for entry in merged}
+        for contract in activity_authority["contracts"]:
+            metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "activityCaptureAuthority": ACTIVITY_CAPTURE_AUTHORITY_ID,
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The typed activity capture configuration owns this optional setting and its disabled-by-default bounded runtime policy.",
+            }
+            for identifier in contract["candidateIds"]:
+                activity_by_id[identifier].update(metadata)
     if ai_operational_source_present(root):
         ai_operational_authority = ai_operational_authority_from_source(root, current)
         if ai_operational_authority is None:
@@ -6202,7 +6255,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef"),
+         "b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7404,7 +7457,7 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
          "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
-         "18ad28b71fb243532c3bd3dad8caf006071f088e4a79c0b10e0b0462e81b8c61"),
+         "71cfdbff190e3bca09f37e9b14de0b849af9434bd6e1f11d036c105c5c5f1f33"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
          "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
@@ -7808,7 +7861,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  'f949ae4ea25c316ce8d25de0e1a082b9d2580524905a0f973b2c533e4424cb2f',
+  'c4d68bec53c69fc6d168b4d7eddc0c653ba7e640513d43806e9c57f45653de7d',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -7832,7 +7885,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef',
+  'b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -7894,7 +7947,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'ensureProgramGraphReady',
   'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
   1),
- ('compose.yaml', 'file', '', '', '19fad875999c810bfa27a788cb4dd156b8953b2827e372181359867ab0b3ca92', 1),
+ ('compose.yaml', 'file', '', '', '51f37f7415b1aeefd2af6e1fa1918e3dc5cf00da1544299e69905f5436618787', 1),
  ('deploy/dev/sandbox-supervisor.sh',
   'file',
   '',
@@ -7905,19 +7958,19 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'a0b30f1e23071d1bcf28b8f186b520127d48f232636924bfc0dcbbfc3dd41370',
+  '82a8f2e4fb7c37bf599ec0c1fa9ec15e05de82fbb90bc6b1e30186c0d22c187a',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  'c80fc7534f0d6df9e0ffb7d8723b6417aaca6354b99823e3526be385947ff8da',
+  '07be85bc73d84f7edb1eff2171a0e300debdd5d16fef5bf050667c3d15159716',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  '7cfe78ac332704fda4dd73f0e12e156ea9b489547334819e62cdad4d72c6da1c',
+  'b513b197a031c3f8f7c56b77b69bf4f8f9f676deeb12ac4a0dbbfd00d99f6880',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
@@ -8187,7 +8240,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'e3c75dd071adc670b7243fd08ec53b95a0d4b4495aff5eee9766bcf36e3414d5',
+  'fa82cebc21ff9fc91ffd62fd6bbbd5b15430e5ed653816320783ccfb2bea5661',
   1),
  ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
   'file',
@@ -10913,6 +10966,12 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                         'oc-9819575b4746216caa6f',
                                                         'oc-cf86d4964468bbcc6453',
                                                         'oc-125c11a21e7762c3900d']},
+ 'github.release-draft-visibility-bound': {'classification': 'security-ceiling-or-default',
+                                           'status': 'retained',
+                                           'rationale': 'The fixed retry count and interval bound draft-listing '
+                                                        'eventual consistency before immutable release work continues.',
+                                           'candidateIds': ['oc-178f1c6b2fef488d4ec4',
+                                                            'oc-744c938a64bbb148937a']},
  'github.release-tool-diagnostic': {'classification': 'presentation-text',
                                     'status': 'retained',
                                     'rationale': 'The text is a CLI diagnostic/help contract and contains no '
@@ -11959,7 +12018,9 @@ def program_github_deployment_candidate(root: Path, candidate: Candidate) -> boo
         if candidate.path == paths["helmSchema"]:
             spans = json_value_spans(source)
             span = None if spans is None else spans.get(("properties", "programAuthoring"))
-            return span is not None and line_number(source, span[0]) <= candidate.line <= line_number(source, span[1] - 1)
+            return (span is not None
+                    and candidate.role != "type"
+                    and line_number(source, span[0]) <= candidate.line <= line_number(source, span[1] - 1))
         if candidate.path == paths["helmValues"]:
             return "programAuthoring" in candidate.role
         lines = source.splitlines()
@@ -12658,15 +12719,15 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': '205ce879d0b12403796b3f127734268b99fa47741c73a9632460d4854af15573',
- 'scripts/tests/test_publish_environment_reference.py': '214afdefb159e7419e39b39b59c7d014f2f106ed077df0fcd6c7a31c4010a175',
+ 'scripts/publish_environment_reference.py': '32eb4a51ebc94a089a90a294a4e4ff57a69fc6d7756b646f686d7e655c01f88f',
+ 'scripts/tests/test_publish_environment_reference.py': 'de2ca4be25ab8951ec9afd357a6abc5aaa8d75c1e88fa9fd1ad5871b7c82c915',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  '126ddd7b19a9cd9cccaf5e4f98e3a2aaa232c9cc707b953754bb8d568af476ef'),
+  'b53b6a114bb1dc1ef422130f1a31fb4f43959791ded5ed4921c0c5b11d91a77a'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -14040,6 +14101,59 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
 ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
 ENVIRONMENT_REFERENCE_AUTHORITY_ID = "environment-reference-generator-v1"
 ENVIRONMENT_REFERENCE_PATH = Path("scripts/publish_environment_reference.py")
+ACTIVITY_CAPTURE_AUTHORITY_ID = "activity-capture-configuration-v1"
+ACTIVITY_CAPTURE_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/activity/"
+    "ActivityCaptureConfiguration.java")
+ACTIVITY_CAPTURE_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/activity/"
+    "ActivityCapturePolicy.java")
+ACTIVITY_CAPTURE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/activity/"
+    "ActivityCaptureConfigurationTest.java")
+ACTIVITY_CAPTURE_CARRIER_PATHS = (
+    Path("compose.yaml"),
+    Path("deploy/helm/ravenroot/values.yaml"),
+    Path("deploy/helm/ravenroot/values.schema.json"),
+    Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+)
+ACTIVITY_CAPTURE_SETTINGS = (
+    ("activity.capture.enabled", "enabled", "enabled", "RAVENROOT_ACTIVITY_CAPTURE_ENABLED",
+     "ravenroot.activity-capture.enabled", "false", "false", "Strict Boolean true or false."),
+    ("activity.capture.policy", "policy", "failurePolicy", "RAVENROOT_ACTIVITY_CAPTURE_POLICY",
+     "ravenroot.activity-capture.policy", "BEST_EFFORT", "BEST_EFFORT", "BEST_EFFORT or STRICT."),
+    ("activity.capture.nodes", "nodes", "nodeIds", "RAVENROOT_ACTIVITY_CAPTURE_NODES",
+     "ravenroot.activity-capture.nodes", "empty selects every node", "", "Comma-separated exact node IDs."),
+    ("activity.capture.contents", "contents", "contents", "RAVENROOT_ACTIVITY_CAPTURE_CONTENTS",
+     "ravenroot.activity-capture.contents", "INPUT_PAYLOAD,OUTPUT_PAYLOAD", "INPUT_PAYLOAD,OUTPUT_PAYLOAD", "Nonempty content-kind list when enabled."),
+    ("activity.capture.max-payload-bytes", "maxPayloadBytes", "payloadLimits",
+     "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES", "ravenroot.activity-capture.max-payload-bytes",
+     "65536", "65536", "Positive whole bytes capped at 67108864."),
+    ("activity.capture.max-in-flight", "maxInFlight", "maxInFlightWrites",
+     "RAVENROOT_ACTIVITY_CAPTURE_MAX_IN_FLIGHT", "ravenroot.activity-capture.max-in-flight",
+     "64", "64", "Positive whole count capped at 10000."),
+    ("activity.capture.write-timeout-millis", "writeTimeoutMillis", "writeTimeout",
+     "RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS", "ravenroot.activity-capture.write-timeout-millis",
+     "2000", "2000", "Positive whole milliseconds capped at 300000."),
+    ("activity.capture.retention-seconds", "retentionSeconds", "retention",
+     "RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS", "ravenroot.activity-capture.retention-seconds",
+     "604800", "604800", "Positive whole seconds capped at 315360000."),
+    ("activity.capture.max-page-size", "maxPageSize", "maxPageSize",
+     "RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE", "ravenroot.activity-capture.max-page-size",
+     "100", "100", "Positive whole records capped at 1000."),
+    ("activity.capture.redact-keys", "redactKeys", "redactor",
+     "RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS", "ravenroot.activity-capture.redact-keys",
+     "password,secret,token,authorization,api_key,apikey", None, "Comma-separated structured keys."),
+)
+ACTIVITY_CAPTURE_SOURCE_PROOFS = {
+    ACTIVITY_CAPTURE_CONFIGURATION_PATH: "97449b115114f01987f0d7c9c1cc8c32e931eae8d14bcbd394bb9ce1d8953cf8",
+    ACTIVITY_CAPTURE_POLICY_PATH: "a6ac890d6852d66729e2e46ab632ee5fc663c7c0b2b247479f6351fa370177bf",
+    ACTIVITY_CAPTURE_TEST_PATH: "bc0c980884dcac6cbef97bc3867efacbb44a0428de8bcfdd6c2c7866743c6046",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "51f37f7415b1aeefd2af6e1fa1918e3dc5cf00da1544299e69905f5436618787",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "b513b197a031c3f8f7c56b77b69bf4f8f9f676deeb12ac4a0dbbfd00d99f6880",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "07be85bc73d84f7edb1eff2171a0e300debdd5d16fef5bf050667c3d15159716",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "82a8f2e4fb7c37bf599ec0c1fa9ec15e05de82fbb90bc6b1e30186c0d22c187a",
+}
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -14057,23 +14171,185 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-2eb120df7224207a3a99": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-711b799bdd1ab2e67421":
+    "oc-fd55d0a7257b34182233": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-32c4dad8f70a55879b3c":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-bb0dd8ec10288abbf2fa": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-268f33e38727c0d6ffb8": (
+    "oc-0b0cd0fa86930eafb8bd": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-c1b22a78cf99699bd70d": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-4f8926edd008856f9cfd": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-058c1a2778a552a15c5a": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-2eb120df7224207a3a99": "/v1/events",
-    "oc-711b799bdd1ab2e67421": "/v1/events",
-    "oc-bb0dd8ec10288abbf2fa": "/v1/events",
-    "oc-268f33e38727c0d6ffb8": "/v1/events/recent",
-    "oc-4f8926edd008856f9cfd": "/v1/events/recent",
+    "oc-fd55d0a7257b34182233": "/v1/events",
+    "oc-32c4dad8f70a55879b3c": "/v1/events",
+    "oc-0b0cd0fa86930eafb8bd": "/v1/events",
+    "oc-c1b22a78cf99699bd70d": "/v1/events/recent",
+    "oc-058c1a2778a552a15c5a": "/v1/events/recent",
 }
+
+
+def activity_capture_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the ten typed activity-capture settings and all deployment carriers."""
+    paths = (ACTIVITY_CAPTURE_CONFIGURATION_PATH, ACTIVITY_CAPTURE_POLICY_PATH,
+             ACTIVITY_CAPTURE_TEST_PATH, *ACTIVITY_CAPTURE_CARRIER_PATHS)
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except (OSError, UnicodeError):
+        return None
+    if any(_source_digest(sources[path]) != digest
+           for path, digest in ACTIVITY_CAPTURE_SOURCE_PROOFS.items()):
+        return None
+    configuration = sources[ACTIVITY_CAPTURE_CONFIGURATION_PATH]
+    policy = sources[ACTIVITY_CAPTURE_POLICY_PATH]
+    if java_record_components(configuration, "ActivityCaptureConfiguration") != ("policy", "maxPageSize") \
+            or java_record_components(policy, "ActivityCapturePolicy") != (
+                "enabled", "failurePolicy", "nodeIds", "contents", "payloadLimits",
+                "maxInFlightWrites", "writeTimeout", "retention", "redactor") \
+            or java_method_span(configuration, "ActivityCaptureConfiguration", "fromSystem") is None:
+        return None
+
+    positioned = java_source_candidates(ACTIVITY_CAPTURE_CONFIGURATION_PATH, configuration)
+    candidates_by_setting: dict[str, set[str]] = defaultdict(set)
+    default_by_setting: dict[str, list[str]] = {}
+    contracts: list[dict[str, object]] = []
+    by_environment = {item[3]: item for item in ACTIVITY_CAPTURE_SETTINGS}
+    by_helm_field = {item[1]: item for item in ACTIVITY_CAPTURE_SETTINGS}
+    values_source = sources[ACTIVITY_CAPTURE_CARRIER_PATHS[1]]
+    values_match = re.search(r"(?m)^activityCapture:\s*$", values_source)
+    schema_source = sources[ACTIVITY_CAPTURE_CARRIER_PATHS[2]]
+    schema_match = re.search(r'"activityCapture"\s*:\s*\{', schema_source)
+    if values_match is None or schema_match is None:
+        return None
+    next_values_key = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                                values_source[values_match.end():])
+    values_last_offset = (values_match.end() + next_values_key.start() - 1
+                          if next_values_key is not None else len(values_source) - 1)
+    schema_open = schema_source.find("{", schema_match.start())
+    schema_close = matching_delimiter(
+        strip_c_comments_and_literals(schema_source), schema_open, "{", "}")
+    if schema_close is None:
+        return None
+    helm_section_lines = {
+        ACTIVITY_CAPTURE_CARRIER_PATHS[1].as_posix(): (
+            line_number(values_source, values_match.start()),
+            line_number(values_source, values_last_offset),
+        ),
+        ACTIVITY_CAPTURE_CARRIER_PATHS[2].as_posix(): (
+            line_number(schema_source, schema_match.start()),
+            line_number(schema_source, schema_close),
+        ),
+    }
+    for setting, helm_field, field, environment, property_name, default, source_default, validation in ACTIVITY_CAPTURE_SETTINGS:
+        pattern = re.compile(
+            rf'value\s*\(\s*properties\s*,\s*environment\s*,\s*"{re.escape(property_name)}"\s*,\s*'
+            rf'"{re.escape(environment)}"\s*,', re.DOTALL)
+        matched = pattern.search(configuration)
+        if matched is None:
+            return None
+        opening = configuration.find("(", matched.start())
+        closing = matching_delimiter(strip_c_comments_and_literals(configuration), opening, "(", ")")
+        if closing is None:
+            return None
+        span_ids = [candidate.id for offset, candidate in positioned
+                    if matched.start() <= offset <= closing]
+        candidates_by_setting[setting].update(span_ids)
+        defaults = [identifier for identifier in span_ids
+                    if source_default is not None and discovered.get(identifier) is not None
+                    and discovered[identifier].expression.strip('"\'') == source_default]
+        if helm_field == "redactKeys":
+            defaults.extend(candidate.id for candidate in discovered.values()
+                            if candidate.path == ACTIVITY_CAPTURE_CONFIGURATION_PATH.as_posix()
+                            and candidate.role == "DEFAULT_REDACT_KEYS")
+        elif not defaults and helm_field in {"enabled", "policy", "nodes", "contents"}:
+            # The lexical scanner does not emit string/Boolean call arguments here. The exact
+            # source proof above pins the complete value(...) call, so its property and environment
+            # atoms are the closed evidence carrier for the nonnumeric fallback.
+            defaults.extend(span_ids)
+        if not defaults:
+            return None
+        default_by_setting[setting] = sorted(set(defaults))
+
+    for candidate in discovered.values():
+        item = by_environment.get(candidate.expression) or by_environment.get(candidate.role)
+        if item is None and candidate.path in helm_section_lines:
+            first_line, last_line = helm_section_lines[candidate.path]
+            if first_line <= candidate.line <= last_line:
+                item = by_helm_field.get(candidate.role.removeprefix("activityCapture."))
+        if item is not None and candidate.path in {
+                path.as_posix() for path in ACTIVITY_CAPTURE_CARRIER_PATHS}:
+            candidates_by_setting[item[0]].add(candidate.id)
+
+    for setting, _helm_field, field, environment, property_name, default, _source_default, validation in ACTIVITY_CAPTURE_SETTINGS:
+        ids = sorted(candidates_by_setting[setting])
+        if not ids or not default_by_setting[setting]:
+            return None
+        owner = (f"{ACTIVITY_CAPTURE_CONFIGURATION_PATH.as_posix()}#ActivityCaptureConfiguration"
+                 if field == "maxPageSize"
+                 else f"{ACTIVITY_CAPTURE_POLICY_PATH.as_posix()}#ActivityCapturePolicy")
+        contracts.append({
+            "setting": setting, "owner": owner, "field": field,
+            "bindings": [property_name, environment], "default": default,
+            "defaultEvidence": default_by_setting[setting], "validation": validation,
+            "scope": "One embedded application or Service process, resolved at composition/startup.",
+            "pinning": "Resolved once before graph execution and retained in the immutable activity capture policy.",
+            "coverage": "Typed parser and bounds, disabled startup, Compose and Helm carriers, runtime gate tests, and operator reference.",
+            "candidateIds": ids,
+        })
+    all_ids = [identifier for contract in contracts for identifier in contract["candidateIds"]]
+    if len(all_ids) != len(set(all_ids)):
+        return None
+    return {
+        "kind": "java-activity-capture-configuration-v1",
+        "contracts": contracts,
+        "candidateIds": sorted(all_ids),
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "factoryBodyDigest": java_method_digest(
+            configuration, "ActivityCaptureConfiguration", "fromSystem"),
+    }
+
+
+def activity_capture_source_present(root: Path) -> bool:
+    return any((root / path).exists()
+               for path in (ACTIVITY_CAPTURE_CONFIGURATION_PATH, ACTIVITY_CAPTURE_POLICY_PATH))
+
+
+def activity_capture_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    marked = {identifier for identifier, row in entries.items()
+              if row.get("activityCaptureAuthority") is not None}
+    if not activity_capture_source_present(root):
+        return ([] if authorities in (None, {}) and not marked
+                else ["activity capture authority exists without its typed source"])
+    expected = activity_capture_authority_from_source(root, discovered)
+    if expected is None:
+        return ["activity capture configuration source or deployment carriers are incomplete"]
+    if authorities != {ACTIVITY_CAPTURE_AUTHORITY_ID: expected}:
+        return ["activity capture settings require their exact source-derived authority"]
+    errors: list[str] = []
+    expected_ids: set[str] = set()
+    for contract in expected["contracts"]:
+        expected_metadata = {
+            "status": "already-centralized", "classification": "operator-configurable",
+            "activityCaptureAuthority": ACTIVITY_CAPTURE_AUTHORITY_ID,
+            **{key: contract[key] for key in (
+                "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                "validation", "scope", "pinning", "coverage")},
+            "rationale": "The typed activity capture configuration owns this optional setting and its disabled-by-default bounded runtime policy.",
+        }
+        for identifier in contract["candidateIds"]:
+            expected_ids.add(identifier)
+            row = entries.get(identifier, {})
+            for key, value in expected_metadata.items():
+                if row.get(key) != value:
+                    errors.append(f"{identifier}: activity capture {key} authority has drifted")
+    if marked != expected_ids:
+        errors.append("activity capture authority candidate partition is incomplete or foreign")
+    return errors
 
 
 def environment_reference_description_candidate_ids(
@@ -14104,6 +14380,28 @@ def environment_reference_description_candidate_ids(
                 and candidate.kind == "environment-binding" \
                 and any(name.startswith(expression) for name in production_names):
             identifiers.add(candidate.id)
+    # The independent UI mapping publishes the exact Node runtime names separately
+    # from Java bindings. Only literal atoms in that maintained dictionary qualify.
+    ui_source = root / "ui-server" / "server.mjs"
+    publisher = root / ENVIRONMENT_REFERENCE_PATH
+    if ui_source.is_file() and publisher.is_file():
+        tree = ast.parse(publisher.read_text(encoding="utf-8"))
+        mappings = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == "UI_SETTINGS"
+                            for target in node.targets) and isinstance(node.value, ast.Dict)]
+        runtime_names = set(re.findall(r"env\.(RAVENROOT_UI_[A-Z0-9_]+)",
+                                       ui_source.read_text(encoding="utf-8")))
+        if len(mappings) == 1:
+            names = {key.value for key in mappings[0].keys
+                     if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+            atoms = {node.value for node in ast.walk(mappings[0])
+                     if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+            if names == runtime_names and names:
+                for candidate in candidates:
+                    expression = candidate.expression.strip("\"'")
+                    if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                            and candidate.symbol == "module" and expression in atoms:
+                        identifiers.add(candidate.id)
     identifiers.update(interaction_websocket_publication_candidate_ids(root, candidates))
     return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
@@ -14878,9 +15176,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 107, "path": 97, "summary": 428, "successStatuses": 99}
-    if len(details) != 97 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 97/731 positional shape")
+    expected_counts = {"methods": 108, "path": 98, "summary": 432, "successStatuses": 100}
+    if len(details) != 98 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 98/738 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):
@@ -16061,6 +16359,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
+    errors.extend(activity_capture_authority_errors(
+        root, document.get("activityCaptureAuthorities"), entries, discovered,
+    ))
     errors.extend(ai_operational_authority_errors(
         root, document.get("aiOperationalAuthorities"), entries, discovered,
     ))
@@ -16094,6 +16395,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            continue
+        if representative.get("activityCaptureAuthority") == ACTIVITY_CAPTURE_AUTHORITY_ID:
             continue
         if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
             continue

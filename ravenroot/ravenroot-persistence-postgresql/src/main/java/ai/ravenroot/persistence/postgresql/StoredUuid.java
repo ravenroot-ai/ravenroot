@@ -60,6 +60,21 @@ final class StoredUuid {
         return rows.getObject(column, UUID.class);
     }
 
+    static UUID required(String stored, String table, String column, ExecutionKey key) {
+        if (stored == null) {
+            throw corrupted(key, table, column, "is missing");
+        }
+        try {
+            UUID decoded = UUID.fromString(stored);
+            if (!decoded.toString().equalsIgnoreCase(stored)) {
+                throw new IllegalArgumentException("non-canonical UUID");
+            }
+            return decoded;
+        } catch (IllegalArgumentException malformed) {
+            throw corrupted(key, table, column, "is not a canonical UUID");
+        }
+    }
+
     static UUID requiredMatching(ResultSet rows, String table, String column, ExecutionKey key,
                                  UUID expected) throws SQLException {
         UUID decoded = required(rows, table, column, key);

@@ -42,10 +42,16 @@
       url: /operator-guide/
     - title: Deployment and startup
       url: /operator-guide/deployment-startup.html
+    - title: Complete Kubernetes installation
+      url: /operator-guide/kubernetes-installation.html
+    - title: UI-only Kubernetes installation
+      url: /operator-guide/kubernetes-ui-only.html
     - title: Identity and browser boundary
       url: /operator-guide/identity-browser.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
+    - title: Durable activity content capture
+      url: /operator-guide/activity-capture.html
     - title: Global lifecycle console
       url: /operator-guide/lifecycle-console.html
     - title: Credentials, connectors, and egress
@@ -133,6 +139,8 @@
       url: /reference/core-nodes.html
     - title: Node descriptor contracts
       url: /reference/node-contracts.html
+    - title: First-party source multiplicity
+      url: /reference/source-multiplicity.html
     - title: Operational coverage inventory
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
@@ -240,6 +248,8 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.6.0-alpha.1 release notes
+      url: /releases/v0.6.0-alpha.1.html
     - title: Ravenroot 0.5.1-alpha.1 release notes
       url: /releases/v0.5.1-alpha.1.html
     - title: Ravenroot 0.5.0-alpha.1 release notes

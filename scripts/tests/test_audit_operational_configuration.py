@@ -8011,6 +8011,9 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 subprocess.run(
                     ["git", "clone", "--quiet", "--no-local", str(source), str(root)], check=True)
                 subprocess.run(["git", "checkout", "--quiet", "HEAD"], cwd=root, check=True)
+                unrelated_tags = fixture_git(root, "tag", "--no-merged", "HEAD").splitlines()
+                if unrelated_tags:
+                    fixture_git(root, "tag", "--delete", *unrelated_tags)
                 subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
                 subprocess.run(
                     ["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
@@ -8108,7 +8111,35 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                      if path.name != "README.md"},
                 )
 
-            authoritative = clone("authoritative", ROOT)
+            source = location_root / "source-with-unmerged-tag"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(source)], check=True)
+            subprocess.run(["git", "checkout", "--quiet", "HEAD"], cwd=source, check=True)
+            source_version = str(latest_release(source))
+            unrelated_version = str(expected_next(parse_tag(f"v{source_version}"), "patch"))
+            unrelated_tag = f"v{unrelated_version}"
+            unrelated_revision = fixture_git(
+                source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit-tree", "HEAD^{tree}", "-m", "unrelated future release")
+            fixture_git(source, "tag", unrelated_tag, unrelated_revision)
+            unrelated_tag_oid = fixture_git(source, "rev-parse", unrelated_tag)
+            reachable_tags = fixture_git(
+                source, "tag", "--merged", "HEAD", "--list", "v*").splitlines()
+            reachable_tag_oids = {
+                tag: fixture_git(source, "rev-parse", tag) for tag in reachable_tags}
+
+            authoritative = clone("authoritative", source)
+            self.assertEqual(unrelated_tag_oid, fixture_git(source, "rev-parse", unrelated_tag))
+            self.assertEqual(
+                reachable_tag_oids,
+                {tag: fixture_git(source, "rev-parse", tag) for tag in reachable_tags},
+            )
+            self.assertNotIn(
+                unrelated_tag, fixture_git(authoritative, "tag", "--list", "v*").splitlines())
+            self.assertEqual(
+                reachable_tag_oids,
+                {tag: fixture_git(authoritative, "rev-parse", tag) for tag in reachable_tags},
+            )
             historical_notes = authoritative / "docs/releases/v0.6.0-alpha.1.md"
             self.assertIn(
                 "## Security\n\n- Update the UI build dependency `source-map-js` to 1.2.2",

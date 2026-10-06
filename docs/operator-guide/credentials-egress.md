@@ -39,6 +39,12 @@ unencrypted hop when encryption terminates in an authenticated service mesh, tun
 A graph may select an existing profile, but no graph, workflow, payload, redirect, or remote response
 can create or widen a rule or service grant.
 
+Trusted-network host matching follows resolved-host spelling, separately from the legacy exception
+parser above. Matching outer IPv6 brackets are accepted, and DNS names and IPv6 hexadecimal digits
+are case-normalized, but the complete zone suffix is exact and case-sensitive. `%2` and `%252`
+remain different because the resolver assigns them scope IDs 2 and 252; this boundary does not
+decode `%25`.
+
 The decoded document has exactly this schema. Unknown or missing members, duplicate values, wildcard
 hosts/profiles, non-network CIDRs, noncanonical Base64, and unknown protocols fail closed:
 

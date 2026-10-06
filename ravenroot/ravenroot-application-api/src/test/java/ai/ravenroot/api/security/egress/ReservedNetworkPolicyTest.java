@@ -55,6 +55,44 @@ class ReservedNetworkPolicyTest {
     }
 
     @Test
+    void resolvedLegacyZonesCannotAliasAnotherPhysicalScope() throws Exception {
+        ReservedNetworkPolicy scopeTwoPolicy = ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[fe80::1%2]:LINK_LOCAL");
+        Inet6Address scopeTwo = (Inet6Address) InetAddress.getByName("fe80::1%2");
+        Inet6Address scopeTwoHundredFiftyTwo =
+                (Inet6Address) InetAddress.getByName("fe80::1%252");
+
+        assertTrue(scopeTwoPolicy.permits("fe80::1%2", scopeTwo));
+        assertDoesNotThrow(() -> scopeTwoPolicy.requireAllowedDestination(
+                "http", "pkg", "fe80::1%2", 8080));
+        assertFalse(scopeTwoPolicy.permits("fe80::1%252", scopeTwoHundredFiftyTwo));
+        assertThrows(SecurityException.class, () -> scopeTwoPolicy.requireAllowedDestination(
+                "http", "pkg", "fe80::1%252", 8080));
+
+        String trustedJson = """
+                {"version":1,"rules":[{"name":"numeric-zone","protocols":["http"],
+                "ports":[8080],"hosts":["fe80::1%2"],"addresses":["fe80::/10"],
+                "profiles":["pkg"],"allowPlaintext":false}]}
+                """.replaceAll("\\s+", "");
+        ReservedNetworkPolicy combinedPolicy = ReservedNetworkPolicy.fromEnvironment(Map.of(
+                ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE,
+                "[fe80::1%2]:LINK_LOCAL",
+                TrustedNetworkPolicy.ENVIRONMENT_VARIABLE,
+                Base64.getEncoder().encodeToString(trustedJson.getBytes(StandardCharsets.UTF_8))));
+        assertFalse(combinedPolicy.permits("fe80::1%252", scopeTwoHundredFiftyTwo));
+        assertThrows(SecurityException.class, () -> combinedPolicy.requireAllowedDestination(
+                "http", "pkg", "fe80::1%252", 8080));
+
+        ReservedNetworkPolicy scopeTwoHundredFiftyTwoPolicy =
+                ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                        "[fe80::1%25252]:LINK_LOCAL");
+        assertTrue(scopeTwoHundredFiftyTwoPolicy.permits(
+                "fe80::1%252", scopeTwoHundredFiftyTwo));
+        assertDoesNotThrow(() -> scopeTwoHundredFiftyTwoPolicy.requireAllowedDestination(
+                "http", "pkg", "fe80::1%252", 8080));
+    }
+
+    @Test
     void literalExceptionsDoNotAuthorizeAliasesOrOtherAddressFamilies() {
         ReservedNetworkPolicy dotted = ReservedNetworkPolicy.fromCommaSeparatedExceptions(
                 "127.0.0.1:LOOPBACK");

@@ -1,5 +1,6 @@
 package ai.ravenroot.api.security.egress;
 
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
@@ -122,6 +123,11 @@ public final class ReservedNetworkPolicy {
         if (!trustedNetworks.hasScope(protocol, profile, host, port)) {
             if (trustedNetworks.constrainsHost(host))
                 throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+            Literal literal = Literal.parse(host);
+            if (literal.kind() == LiteralKind.LITERAL && literal.normalized().contains("%")) {
+                resolveAllowedDestination(protocol, profile, host, port);
+                return;
+            }
             if (!legacyPermitsLiteral(host))
                 throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
             return;
@@ -277,8 +283,34 @@ public final class ReservedNetworkPolicy {
     private boolean legacyPermits(String name, InetAddress address) {
         ReservedNetwork network = ReservedNetwork.of(address);
         if (!network.isReserved()) return true;
-        Set<ReservedNetwork> allowed = exceptions.get(normalizeDestination(name));
+        String destination = resolvedLegacyDestination(name, address);
+        if (destination == null) return false;
+        Set<ReservedNetwork> allowed = exceptions.get(destination);
         return allowed != null && allowed.contains(network);
+    }
+
+    private static String resolvedLegacyDestination(String name, InetAddress address) {
+        Literal literal = Literal.parse(name);
+        if (!(address instanceof Inet6Address ipv6) || literal.kind() != LiteralKind.LITERAL)
+            return normalizeDestination(name);
+        String host = TrustedNetworkPolicy.normalizeHost(name);
+        int delimiter = host.indexOf('%');
+        if (delimiter < 0) return normalizeDestination(name);
+        String requestedZone = host.substring(delimiter + 1);
+        String resolvedZone;
+        if (requestedZone.chars().allMatch(Character::isDigit)) {
+            resolvedZone = Integer.toString(ipv6.getScopeId());
+        } else if (ipv6.getScopedInterface() != null) {
+            resolvedZone = ipv6.getScopedInterface().getName();
+        } else {
+            return null;
+        }
+        if (!requestedZone.equals(resolvedZone)) return null;
+        String normalized = literal.normalized();
+        int normalizedDelimiter = normalized.indexOf('%');
+        String addressKey = normalizedDelimiter < 0
+                ? normalized : normalized.substring(0, normalizedDelimiter);
+        return addressKey + "%" + requestedZone;
     }
 
     private boolean legacyPermitsLiteral(String host) {

@@ -1,10 +1,17 @@
 package ai.ravenroot.extensions.kafka;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
+
 import java.util.Map;
 
 /** Injectable boundary around the official Kafka producer. */
 interface KafkaProtocol {
     CreateAttempt beginCreate(KafkaProfile profile, char[] password, int timeoutMs) throws ClientFailure;
+
+    default CreateAttempt beginCreate(KafkaProfile profile, char[] password, int timeoutMs,
+                                      ReservedNetworkPolicy destinationPolicy) throws ClientFailure {
+        return beginCreate(profile, password, timeoutMs);
+    }
 
     interface CreateAttempt {
         void establish() throws ClientFailure;

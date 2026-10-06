@@ -178,6 +178,10 @@ final class ImapConsumerSource implements InboundSource {
                 SecretValue secret = null;
                 char[] password = null;
                 try {
+                    destinationPolicy.requireAllowedDestination(
+                            "imap", profile.tenant() + "/" + profile.id(), profile.host(), profile.port());
+                    if (profile.securityMode().equals("PLAIN")) destinationPolicy.requirePlaintext(
+                            "imap", profile.tenant() + "/" + profile.id(), profile.host(), profile.port());
                     secret = resolveCredential(profile, sessionGeneration);
                     password = secret.copy();
                     ImapConsumerProtocol.Opening candidateOpening = new ImapConsumerProtocol.Opening();
@@ -501,7 +505,8 @@ final class ImapConsumerSource implements InboundSource {
                     .orElseThrow(() -> sourceFailure(ImapSourceStartFailure.IMAP_PROFILE_UNAVAILABLE));
             if (!tenant.equals(profile.tenant()) || !name.equals(profile.id()))
                 throw sourceFailure(ImapSourceStartFailure.IMAP_PROFILE_UNAVAILABLE);
-            destinationPolicy.requireAllowedLiteral(profile.host());
+            destinationPolicy.requireAllowedDestination(
+                    "imap", tenant + "/" + name, profile.host(), profile.port());
             return profile;
         } catch (SourceStartException failure) { throw failure; }
         catch (RuntimeException failure) {

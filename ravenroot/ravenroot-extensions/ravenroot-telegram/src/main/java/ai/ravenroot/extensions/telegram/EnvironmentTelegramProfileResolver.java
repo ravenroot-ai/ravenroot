@@ -19,7 +19,7 @@ public final class EnvironmentTelegramProfileResolver implements TelegramProfile
         if (raw == null) return Optional.empty();
         String[] p = raw.split(";", -1);
         if (p.length != 13) return Optional.empty();
-        try { return Optional.of(new TelegramProfile(tenant, profile, p[0], csv(p[1]), csv(p[2]), lowerCsv(p[3]),
+        try { return Optional.of(new TelegramProfile(tenant, profile, p[0], csv(p[1]), csv(p[2]), csv(p[3]),
                 bool(p[4]), integer(p[5]), integer(p[6]), integer(p[7]), integer(p[8]),
                 integer(p[9]), integer(p[10]), integer(p[11]), integer(p[12]))); }
         catch (RuntimeException invalid) { return Optional.empty(); }
@@ -41,5 +41,4 @@ public final class EnvironmentTelegramProfileResolver implements TelegramProfile
     }
     private static boolean safeId(String value) { return value != null && value.matches("[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"); }
     private static Set<String> csv(String value) { return value.isBlank() ? Set.of() : Set.of(value.split(",")); }
-    private static Set<String> lowerCsv(String value) { return csv(value).stream().map(v -> v.toLowerCase(java.util.Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet()); }
 }

@@ -117,6 +117,17 @@ UI panel. Never place a credential in that URL, an image layer or browser asset.
 HTTP methods, bodies, query strings, authorization and browser Origin are forwarded; hop-by-hop
 headers and untrusted forwarded-authority headers are removed. The optional interaction WebSocket
 is not supported by this proxy. UI REST and fetch-based SSE require no WebSocket route.
+`RAVENROOT_UI_BACKEND_URL` is the administrator-owned outbound authority for this standalone
+Node.js proxy: its scheme, hostname, finite port and optional path prefix are fixed at process
+startup. A browser request can add only the documented API path and query below that prefix; it
+cannot replace the upstream scheme, authority or port. Node's HTTP client does not follow upstream
+redirects, so a backend redirect is returned to the browser rather than becoming a second
+server-side outbound request. `http://` therefore explicitly authorizes a plaintext hop that may
+forward the browser's authorization header; use it only inside the operator-controlled network or
+authenticated mesh. `https://` uses Node's normal certificate-chain and hostname verification,
+with private roots supplied through `NODE_EXTRA_CA_CERTS`; disabling verification is refused.
+DNS resolution and connection reuse remain Node transport behavior, so enforce the configured
+backend name/address boundary with namespace egress policy or a controlled mesh endpoint.
 For root deployment, remove `RAVENROOT_UI_PREFIX`, set HTTPRoute PathPrefix to `/`, and use a
 **dedicated hostname** so you do not replace another application's routes. The backend prefix can
 remain `/automation`. Requests to `/ravenroot` redirect to `/ravenroot/`; unknown paths return 404.

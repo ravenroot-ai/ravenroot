@@ -6,6 +6,7 @@ import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
 import ai.ravenroot.api.security.ToolCallAuditSink;
 import ai.ravenroot.api.security.ToolPolicy;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
 import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
@@ -93,10 +94,9 @@ import java.util.TreeMap;
  * <p>Almost everything above is validated by {@link NodePackageEgressPolicy.Builder}. Two things are
  * decided here because they are only reachable through this variable:</p>
  * <ul>
- *   <li>A {@code credentialBindings} entry must target an {@code https} or {@code wss} origin. The
- *       policy accepts {@code http}/{@code ws} for a plain destination, which is fine, and applies no
- *       scheme rule to a credential placement, which is not — see {@code requireEncryptedOrigin} for
- *       why the check lives here rather than beside the identical SigV4 rule in core.</li>
+ *   <li>A {@code credentialBindings} entry uses {@code https}/{@code wss} by default. An
+ *       {@code http}/{@code ws} binding additionally requires one scoped administrator rule that
+ *       admits every resolved address and grants plaintext; see {@code requireCredentialOrigin}.</li>
  *   <li>{@code credentialReferences}, when written, is the set of references this package may
  *       resolve at all, unioned with the references its own SigV4 bindings name. It is the <em>only
  *       boundary that exists</em> for {@code credential-resolution}: on that path no egress policy is
@@ -132,7 +132,7 @@ public final class EnvironmentNodePackageServiceGrants {
     private static final Set<String> GRANT_KEYS = Set.of("capabilities", "origins", "httpMethods",
             "requestHeaders", "responseHeaders", "webSocketSubprotocols", "credentialBindings",
             "awsSigV4Bindings", "credentialReferences", "limits");
-    /** Schemes a credential binding may target. See {@link #requireEncryptedOrigin}. */
+    /** Schemes a credential binding may target without a scoped plaintext rule. */
     private static final Set<String> ENCRYPTED_SCHEMES = Set.of("https", "wss");
     private static final Set<String> LIMIT_KEYS = Set.of("maxRequestBytes", "maxResponseBytes",
             "maxWebSocketMessageBytes", "maxWebSocketFragments", "maxQueuedWebSocketSends",
@@ -223,12 +223,14 @@ public final class EnvironmentNodePackageServiceGrants {
         }
 
         NodePackageServiceRegistry.Builder registry = NodePackageServiceRegistry.builder();
+        ReservedNetworkPolicy destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
         family.forEach((variable, encoded) -> {
             String packageId = packageIdOf(variable);
             Map<String, Object> grant = decode(variable, encoded);
             try {
                 registry.grant(packageId, services(variable, packageId, grant, credentials,
-                        toolPolicy, toolAuditSink, approvals, approvalSettings, agentBudgets));
+                        toolPolicy, toolAuditSink, approvals, approvalSettings, agentBudgets,
+                        destinationPolicy));
             } catch (IllegalArgumentException refused) {
                 // Everything the operator wrote about origins, headers, methods, subprotocols,
                 // bindings and ceilings is validated by NodePackageEgressPolicy.Builder and by the
@@ -308,13 +310,15 @@ public final class EnvironmentNodePackageServiceGrants {
                                                        ToolCallAuditSink toolAuditSink,
                                                        ToolApprovalService approvals,
                                                        ToolApprovalSettings approvalSettings,
-                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                                       ReservedNetworkPolicy destinationPolicy) {
         exactlyKnownKeys(variable, grant, GRANT_KEYS, "grant");
         Set<NodePackageCapability> capabilities = capabilities(variable, grant.get("capabilities"));
 
         NodePackageEgressPolicy.Builder policy = NodePackageEgressPolicy.builder();
         for (Object origin : optionalList(variable, grant, "origins")) {
             NodePackageEgressPolicy.Origin parsed = origin(variable, origin, "origins");
+            requireDestination(variable, packageId, destinationPolicy, parsed);
             policy.allowOrigin(parsed.scheme(), parsed.host(), parsed.port());
         }
         for (Object method : optionalList(variable, grant, "httpMethods")) {
@@ -333,7 +337,7 @@ public final class EnvironmentNodePackageServiceGrants {
             Map<String, Object> entry = object(variable, binding, "credentialBindings");
             exactlyKnownKeys(variable, entry, CREDENTIAL_BINDING_KEYS, "credentialBindings");
             policy.bindCredential(text(variable, entry.get("bindingId"), "credentialBindings.bindingId"),
-                    requireEncryptedOrigin(variable,
+                    requireCredentialOrigin(variable, packageId, destinationPolicy,
                             origin(variable, entry.get("origin"), "credentialBindings.origin"),
                             "credentialBindings.origin"),
                     text(variable, entry.get("headerName"), "credentialBindings.headerName"),
@@ -352,10 +356,12 @@ public final class EnvironmentNodePackageServiceGrants {
             // Both stripped on the way in: core's safeToken strips what it stores, so an unstripped
             // copy here would fail to admit the very reference the signer will ask for.
             boundReferences.put(bindingId.strip(), reference.strip());
-            policy.bindAwsSigV4(bindingId,
-                    // SigV4 already refuses anything but HTTPS itself; passed through unchanged so
-                    // the refusal keeps coming from the component that owns the rule.
+            NodePackageEgressPolicy.Origin signingOrigin = requireCredentialOrigin(
+                    variable, packageId, destinationPolicy,
                     origin(variable, entry.get("origin"), "awsSigV4Bindings.origin"),
+                    "awsSigV4Bindings.origin");
+            policy.bindAwsSigV4(bindingId,
+                    signingOrigin,
                     reference,
                     text(variable, entry.get("region"), "awsSigV4Bindings.region"),
                     text(variable, entry.get("service"), "awsSigV4Bindings.service"));
@@ -473,33 +479,39 @@ public final class EnvironmentNodePackageServiceGrants {
     }
 
     /**
-     * Refuses a credential binding aimed at a cleartext origin.
-     *
-     * <h2>Why the check is here and not beside the SigV4 one in core</h2>
-     * <p>{@code NodePackageEgressPolicy.AwsSigV4SigningGrant} rejects a non-HTTPS origin in its own
-     * compact constructor, and {@code CredentialPlacement} — the same kind of binding, carrying the
-     * same kind of secret — does not. The obvious tidy-up is to move this rule next to that one, and
-     * it is the wrong move: {@code CredentialPlacement} is a public core type an embedder composes
-     * directly, so tightening it changes a published contract. The gap is <em>reachable</em> through
-     * the environment-grant surface, so it is closed at that surface, at the price of the asymmetry
-     * this paragraph explains. Moving it for symmetry without
-     * replacing it reopens a hole that ships a deployment secret in the clear.</p>
-     *
-     * <h2>Why loopback is not excepted</h2>
-     * <p>A literal-loopback exception for a same-host sidecar was considered and declined. No shipped
-     * bundle needs one, and the asymmetry of the two mistakes decides it: the exception can be added
-     * later against a real deployment, whereas withdrawing it later would break a grant an operator
-     * had already written. A cleartext credential binding is precisely the thing this rule exists to
-     * prevent, so it is not conceded speculatively.</p>
+     * Refuses a credential binding aimed at a cleartext origin unless one administrator rule grants
+     * both that transport and every address returned by the current DNS resolution. The check stays
+     * at the environment-grant boundary because direct policy composition is a separate public API.
      */
-    private static NodePackageEgressPolicy.Origin requireEncryptedOrigin(
-            String variable, NodePackageEgressPolicy.Origin origin, String field) {
+    private static NodePackageEgressPolicy.Origin requireCredentialOrigin(
+            String variable, String packageId, ReservedNetworkPolicy destinationPolicy,
+            NodePackageEgressPolicy.Origin origin, String field) {
         if (!ENCRYPTED_SCHEMES.contains(origin.scheme())) {
-            throw new NodePackageServiceGrantException(variable,
-                    "node package service grant binds a credential to a cleartext origin in " + field
-                            + "; a credential binding requires https or wss");
+            String protocol = "http".equals(origin.scheme()) ? "http" : "websocket";
+            try {
+                destinationPolicy.requirePlaintext(protocol, packageId, origin.host(), origin.port());
+                return origin;
+            } catch (SecurityException refused) {
+                throw new NodePackageServiceGrantException(variable,
+                        "node package service grant binds a credential to a cleartext origin in " + field
+                                + "; " + refused.getMessage());
+            }
         }
+        requireDestination(variable, packageId, destinationPolicy, origin);
         return origin;
+    }
+
+    private static void requireDestination(String variable, String packageId,
+                                           ReservedNetworkPolicy destinationPolicy,
+                                           NodePackageEgressPolicy.Origin origin) {
+        String protocol = Set.of("ws", "wss").contains(origin.scheme()) ? "websocket" : "http";
+        try {
+            destinationPolicy.requireAllowedDestination(
+                    protocol, packageId, origin.host(), origin.port());
+        } catch (SecurityException refused) {
+            throw new NodePackageServiceGrantException(
+                    variable, "node package service grant origin: OUTBOUND_DESTINATION_POLICY_REFUSED");
+        }
     }
 
     private static Set<NodePackageCapability> capabilities(String variable, Object declared) {

@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.storage;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Locale;
@@ -12,15 +13,27 @@ public record StorageProfile(
         String name, URI origin, String region, String bucket, String keyPrefix,
         AddressingStyle addressingStyle, String signingBindingId, Set<Operation> allowedOperations,
         Set<String> allowedContentTypes, boolean allowIfMatch, boolean allowIfNoneMatch,
-        int maxObjectBytes, int timeoutMs, int maxConcurrency, int maxRequestsPerSecond) {
+        int maxObjectBytes, int timeoutMs, int maxConcurrency, int maxRequestsPerSecond,
+        PlaintextAuthorization plaintextAuthorization) {
 
     public enum AddressingStyle { PATH, VIRTUAL_HOSTED }
     public enum Operation { GET, PUT, LIST, DELETE, DELETE_VERSION }
     public static final int HARD_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
+    static final String PACKAGE_ID = "ai.ravenroot.extensions.storage";
+
+    public StorageProfile(
+            String name, URI origin, String region, String bucket, String keyPrefix,
+            AddressingStyle addressingStyle, String signingBindingId, Set<Operation> allowedOperations,
+            Set<String> allowedContentTypes, boolean allowIfMatch, boolean allowIfNoneMatch,
+            int maxObjectBytes, int timeoutMs, int maxConcurrency, int maxRequestsPerSecond) {
+        this(name, origin, region, bucket, keyPrefix, addressingStyle, signingBindingId,
+                allowedOperations, allowedContentTypes, allowIfMatch, allowIfNoneMatch, maxObjectBytes,
+                timeoutMs, maxConcurrency, maxRequestsPerSecond, null);
+    }
 
     public StorageProfile {
         name = token(name, "name", 64);
-        origin = exactHttpsOrigin(origin);
+        origin = exactOrigin(origin, plaintextAuthorization);
         region = awsComponent(region, "region");
         bucket = bucket(bucket);
         keyPrefix = StorageUri.validatePrefix(keyPrefix == null ? "" : keyPrefix);
@@ -49,15 +62,27 @@ public record StorageProfile(
         }
     }
 
-    private static URI exactHttpsOrigin(URI value) {
+    private static URI exactOrigin(URI value, PlaintextAuthorization plaintextAuthorization) {
         Objects.requireNonNull(value, "origin");
-        if (!"https".equals(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
+        if (!Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null || value.getUserInfo() != null
                 || value.getQuery() != null || value.getFragment() != null
                 || !(value.getPath().isEmpty() || "/".equals(value.getPath()))) {
-            throw new IllegalArgumentException("origin must be an exact HTTPS authority");
+            throw new IllegalArgumentException("origin must be an exact HTTP authority");
         }
-        return URI.create("https://" + value.getHost().toLowerCase(Locale.ROOT)
-                + (value.getPort() == -1 || value.getPort() == 443 ? "" : ":" + value.getPort()));
+        int defaultPort = "https".equals(value.getScheme()) ? 443 : 80;
+        int port = value.getPort() == -1 ? defaultPort : value.getPort();
+        if ("http".equals(value.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", PACKAGE_ID, value.getHost(), port))) {
+            throw new IllegalArgumentException("origin requires administrator plaintext authorization");
+        }
+        return URI.create(value.getScheme() + "://" + normalizeHost(value.getHost())
+                + (value.getPort() == -1 || value.getPort() == defaultPort ? "" : ":" + value.getPort()));
+    }
+
+    private static String normalizeHost(String host) {
+        int zone = host.indexOf('%');
+        return zone < 0 ? host.toLowerCase(Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     private static String bucket(String value) {

@@ -42,6 +42,25 @@ class MattermostConfigurationTest {
                 MattermostProfile.MAX_ACK_TIMEOUT_MS + 1, 0));
     }
 
+    @Test void administratorRuleAuthorizesOnlyConfigurationBuiltHttpProfile() {
+        String json = configuration("operations", MattermostTestSupport.TENANT,
+                MattermostTestSupport.TEAM, MattermostTestSupport.CHANNEL, "/outgoing")
+                .replace("https://mattermost.example.test", "http://127.0.0.1:8080");
+        String policy = """
+                {"version":1,"rules":[{"name":"mattermost-mesh","protocols":["http"],"ports":[8080],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.mattermost"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        MattermostConfiguration value = MattermostConfiguration.fromEnvironment(Map.of(
+                MattermostConfiguration.ENVIRONMENT,
+                Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8)),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8))));
+        assertEquals("http://127.0.0.1:8080",
+                value.profile(MattermostTestSupport.TENANT, "operations").orElseThrow()
+                        .origin().toString());
+    }
+
     static String configuration(String name, String tenant, String team, String channel, String route) {
         return """
                 {"authority":{"listenerId":"main","pathPrefix":"/managed/mattermost",

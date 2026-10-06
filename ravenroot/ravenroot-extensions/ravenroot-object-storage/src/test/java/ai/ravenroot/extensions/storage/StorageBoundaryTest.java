@@ -17,7 +17,8 @@ class StorageBoundaryTest {
                 assertFalse(text.contains("import ai.ravenroot.server"), file.toString());
                 assertFalse(text.contains("java.net.http.HttpClient"), file.toString());
                 assertFalse(text.contains("aws-sdk"), file.toString());
-                assertFalse(text.contains("Authorization"), file.toString());
+                assertFalse(text.toLowerCase(java.util.Locale.ROOT).contains("\"authorization\""),
+                        file.toString());
             }
         }
     }

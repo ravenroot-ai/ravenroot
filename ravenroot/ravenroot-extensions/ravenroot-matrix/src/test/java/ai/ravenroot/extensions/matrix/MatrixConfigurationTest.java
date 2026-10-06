@@ -51,4 +51,49 @@ class MatrixConfigurationTest {
                 base.maxResponseBytes(), base.maxTextChars(), base.maxConcurrency(), base.maxPerSecond(),
                 1_000, base.retryBackoffMs(), base.maxEventsPerSync(), base.initialSyncMode(), base.initialSince()));
     }
+
+    @Test void administratorRuleAuthorizesOnlyConfigurationBuiltHttpProfile() {
+        Map<String, Object> root = Map.of("store", Map.of("path", directory.resolve("http.db").toString(),
+                        "maxDeliveries", 100L, "retentionHours", 24L, "maxSources", 10L),
+                "profiles", Map.of(MatrixTestSupport.PROFILE, Map.ofEntries(
+                        Map.entry("tenantId", MatrixTestSupport.TENANT),
+                        Map.entry("homeserverOrigin", "http://127.0.0.1/"),
+                        Map.entry("userId", MatrixTestSupport.USER), Map.entry("rooms", List.of(MatrixTestSupport.ROOM)),
+                        Map.entry("eventTypes", List.of("m.room.message")),
+                        Map.entry("credentialBindingId", "matrix-bearer"),
+                        Map.entry("credentialReference", "matrix-access-token"),
+                        Map.entry("initialSyncMode", "deliver-bounded"), Map.entry("initialSince", "seed"),
+                        Map.entry("limits", Map.ofEntries(Map.entry("requestTimeoutMs", 5000L),
+                                Map.entry("maxRequestBytes", 1048576L), Map.entry("maxResponseBytes", 1048576L),
+                                Map.entry("maxTextChars", 4000L), Map.entry("maxConcurrency", 2L),
+                                Map.entry("maxPerSecond", 20L), Map.entry("pollTimeoutMs", 1000L),
+                                Map.entry("retryBackoffMs", 100L), Map.entry("maxEventsPerSync", 10L))))));
+        String policy = """
+                {"version":1,"rules":[{"name":"matrix-mesh","protocols":["http"],"ports":[80],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.matrix"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        MatrixConfiguration configuration = MatrixConfiguration.fromEnvironment(Map.of(
+                MatrixConfiguration.ENVIRONMENT,
+                Base64.getEncoder().encodeToString(MatrixValues.jsonBytes(root)),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8))));
+        assertEquals(java.net.URI.create("http://127.0.0.1/"),
+                configuration.profile(MatrixTestSupport.TENANT, MatrixTestSupport.PROFILE)
+                        .orElseThrow().homeserverOrigin());
+    }
+
+    @Test void httpsHomeserverNormalizationPreservesNamedIpv6ZoneCase() {
+        MatrixProfile base = MatrixTestSupport.configuration(directory.resolve("zone.db"))
+                .profiles().values().iterator().next();
+        MatrixProfile profile = new MatrixProfile(base.tenantId(), base.name(),
+                java.net.URI.create("https://[FE80::A%LO0]/"), base.userId(), base.roomIds(),
+                base.eventTypes(), base.credentialBindingId(), base.credentialReference(),
+                base.requestTimeoutMs(), base.maxRequestBytes(), base.maxResponseBytes(),
+                base.maxTextChars(), base.maxConcurrency(), base.maxPerSecond(), base.pollTimeoutMs(),
+                base.retryBackoffMs(), base.maxEventsPerSync(), base.initialSyncMode(), base.initialSince());
+
+        assertEquals("[fe80::a%LO0]", profile.homeserverOrigin().getHost());
+        assertEquals("[fe80::a%LO0]", profile.endpoint("/_matrix/client/v3/sync").getHost());
+    }
 }

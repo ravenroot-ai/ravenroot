@@ -133,13 +133,21 @@ final class AwsSigV4Signer {
     }
 
     private static String canonicalHost(URI uri) {
-        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        String host = normalizeHost(uri.getHost());
         if (host.indexOf(':') >= 0 && !(host.startsWith("[") && host.endsWith("]"))) {
             host = '[' + host + ']';
         }
         int port = uri.getPort();
-        boolean defaultPort = port == -1 || (port == 443 && "https".equalsIgnoreCase(uri.getScheme()));
+        boolean defaultPort = port == -1
+                || port == 443 && "https".equalsIgnoreCase(uri.getScheme())
+                || port == 80 && "http".equalsIgnoreCase(uri.getScheme());
         return defaultPort ? host : host + ':' + port;
+    }
+
+    private static String normalizeHost(String host) {
+        int zone = host.indexOf('%');
+        return zone < 0 ? host.toLowerCase(Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     private static String canonicalPath(URI uri) {

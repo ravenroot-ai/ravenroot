@@ -66,9 +66,10 @@ class OpenAiCompatibleAssistantConfigurationTest {
                 "http://[::1]:8081/v1/chat/completions");
         env.put(AssistantConfiguration.ALLOWED_HOSTS_VARIABLE, "[::1]");
 
-        assertEquals(AssistantAvailability.InertReason.HOST_NOT_ALLOWLISTED,
-                AssistantConfiguration.fromEnvironment(env).availability().reason(),
-                "IPv6 loopback must clear the plaintext-local check before SEC-10 applies");
+        SecurityException refusal = assertThrows(SecurityException.class,
+                () -> AssistantConfiguration.fromEnvironment(env));
+        assertEquals("OUTBOUND_DESTINATION_POLICY_REFUSED", refusal.getMessage(),
+                "IPv6 loopback remains local for plaintext classification but still needs its own admission grant");
     }
 
     @Test
@@ -78,8 +79,9 @@ class OpenAiCompatibleAssistantConfigurationTest {
                 "http://127.0.0.1:8081/v1/chat/completions");
         env.put(AssistantConfiguration.ALLOWED_HOSTS_VARIABLE, "127.0.0.1");
 
-        assertEquals(AssistantAvailability.InertReason.HOST_NOT_ALLOWLISTED,
-                AssistantConfiguration.fromEnvironment(env).availability().reason());
+        SecurityException refusal = assertThrows(SecurityException.class,
+                () -> AssistantConfiguration.fromEnvironment(env));
+        assertEquals("OUTBOUND_DESTINATION_POLICY_REFUSED", refusal.getMessage());
     }
 
     @Test

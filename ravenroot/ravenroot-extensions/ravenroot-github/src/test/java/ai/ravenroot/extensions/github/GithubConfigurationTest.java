@@ -27,6 +27,22 @@ class GithubConfigurationTest {
         assertTrue(parsed.profile("tenant-b", "automation").isEmpty());
     }
 
+    @Test void administratorRuleAuthorizesOnlyConfigurationBuiltHttpProfile() {
+        String configuration = json().replace("https://api.github.com", "http://127.0.0.1");
+        String policy = """
+                {"version":1,"rules":[{"name":"github-mesh","protocols":["http"],"ports":[80],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.github"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        GithubConfiguration parsed = GithubConfiguration.fromEnvironment(Map.of(
+                GithubConfiguration.ENVIRONMENT,
+                Base64.getEncoder().encodeToString(configuration.getBytes(StandardCharsets.UTF_8)),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8))));
+        assertEquals("http://127.0.0.1",
+                parsed.profile("tenant-a", "automation").orElseThrow().apiOrigin().toString());
+    }
+
     @Test void unknownFieldsAndNonCanonicalBase64FailClosed() {
         String encoded = Base64.getEncoder().encodeToString(json().getBytes(StandardCharsets.UTF_8));
         assertThrows(GithubException.class, () -> GithubConfiguration.fromEnvironment(Map.of(

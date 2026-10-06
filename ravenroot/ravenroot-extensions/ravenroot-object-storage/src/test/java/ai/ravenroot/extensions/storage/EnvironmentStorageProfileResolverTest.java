@@ -36,6 +36,24 @@ class EnvironmentStorageProfileResolverTest {
         assertTrue(new EnvironmentStorageProfileResolver(Map.of(key, JSON)).resolve("assets").isEmpty());
     }
 
+    @Test void administratorRuleAloneAuthorizesItsExactHttpProfile() {
+        String key = EnvironmentStorageProfileResolver.environmentVariableName("assets");
+        String http = JSON.replace("https://s3.example.test", "http://127.0.0.1:9000");
+        String policy = """
+                {"version":1,"rules":[{"name":"storage-mesh","protocols":["http"],
+                "ports":[9000],"hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.storage"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        Map<String, String> environment = Map.of(
+                key, Base64.getEncoder().encodeToString(http.getBytes(StandardCharsets.UTF_8)),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8)));
+
+        StorageProfile profile = new EnvironmentStorageProfileResolver(environment).resolve("assets").orElseThrow();
+        assertEquals("http://127.0.0.1:9000/bucket-a/tenant-data/object",
+                StorageUri.destination(profile, "object").toASCIIString());
+    }
+
     @Test void listAndVersionDeleteRequireExplicitExistingOperationAllowlistValues() {
         String key = EnvironmentStorageProfileResolver.environmentVariableName("assets");
         String expanded = JSON.replace("[\"get\",\"put\"]",

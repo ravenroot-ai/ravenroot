@@ -101,18 +101,13 @@ public final class EgressAddressGuard {
      */
     static List<InetAddress> filter(String name, List<InetAddress> resolved) throws UnknownHostException {
         ReservedNetworkPolicy current = policy();
-        List<InetAddress> permitted = resolved.stream()
-                .filter(address -> current.permits(name, address))
-                .toList();
-        if (permitted.size() != resolved.size()) {
+        boolean permitted = resolved.stream().allMatch(address -> current.permits(name, address));
+        if (!permitted) {
             REFUSALS.incrementAndGet();
-        }
-        if (permitted.isEmpty() && !resolved.isEmpty()) {
             throw new UnknownHostException(name
-                    + ": refused, the name resolves only into reserved address space ("
-                    + ReservedNetwork.of(resolved.get(0)) + "); see RAVENROOT_EGRESS_RESERVED_EXCEPTIONS");
+                    + ": OUTBOUND_DESTINATION_POLICY_REFUSED");
         }
-        return permitted;
+        return List.copyOf(resolved);
     }
 
     // ---------------------------------------------------------------------

@@ -33,6 +33,12 @@ final class ApacheKafkaProtocol implements KafkaProtocol {
         return new Attempt(profile, new String(password), timeoutMs);
     }
 
+    @Override public CreateAttempt beginCreate(KafkaProfile profile, char[] password, int timeoutMs,
+                                               ai.ravenroot.api.security.egress.ReservedNetworkPolicy policy) {
+        return new Attempt(profile, new String(password), timeoutMs,
+                properties -> KafkaClientFactory.producer(properties, profile, policy));
+    }
+
     private final class Attempt implements CreateAttempt {
         private final KafkaProfile profile;
         private final String password;
@@ -42,14 +48,23 @@ final class ApacheKafkaProtocol implements KafkaProtocol {
         private boolean established;
         private boolean claimed;
         private Producer<byte[], byte[]> producer;
+        private final java.util.function.Function<Map<String, Object>, Producer<byte[], byte[]>> guardedFactory;
 
         private Attempt(KafkaProfile profile, String password, int timeoutMs) {
+            this(profile, password, timeoutMs, null);
+        }
+
+        private Attempt(KafkaProfile profile, String password, int timeoutMs,
+                        java.util.function.Function<Map<String, Object>, Producer<byte[], byte[]>> guardedFactory) {
             this.profile = profile; this.password = password; this.timeoutMs = timeoutMs;
+            this.guardedFactory = guardedFactory;
         }
 
         @Override public void establish() throws ClientFailure {
             try {
-                Producer<byte[], byte[]> opened = factories.apply(properties(profile, password, timeoutMs), timeoutMs);
+                Map<String, Object> properties = properties(profile, password, timeoutMs);
+                Producer<byte[], byte[]> opened = guardedFactory == null
+                        ? factories.apply(properties, timeoutMs) : guardedFactory.apply(properties);
                 synchronized (this) {
                     if (cancelled) { closeOwned(opened); throw new ClientFailure(FailureKind.TEMPORARY); }
                     producer = Objects.requireNonNull(opened);

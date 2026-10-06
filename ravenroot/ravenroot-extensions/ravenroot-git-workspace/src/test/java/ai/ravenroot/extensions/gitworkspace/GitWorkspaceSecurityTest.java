@@ -1,5 +1,7 @@
 package ai.ravenroot.extensions.gitworkspace;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
+import ai.ravenroot.api.security.egress.TrustedNetworkPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -7,6 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executors;
@@ -85,6 +90,48 @@ class GitWorkspaceSecurityTest {
         assertFalse(output.contains("GIT_ASKPASS="));
         assertFalse(output.contains("SSH_AUTH_SOCK="));
         assertTrue(control.reapOwned());
+    }
+
+    @Test
+    void trustedHttpRemoteIsDnsPinnedAndRedirectsStayDisabled() throws Exception {
+        Path root = Files.createDirectory(temporary.resolve("trusted-http-root"));
+        Path git = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
+        String encoded = Base64.getEncoder().encodeToString("""
+                {"version":1,"rules":[{"name":"git-mesh","protocols":["git"],"ports":[8080],
+                 "hosts":["localhost"],"addresses":["127.0.0.0/8","::1/128"],
+                 "profiles":["tenant/profile"],"allowPlaintext":true}]}
+                """.getBytes(StandardCharsets.UTF_8));
+        ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(
+                Map.of(TrustedNetworkPolicy.ENVIRONMENT_VARIABLE, encoded));
+        GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
+                "http://localhost:8080/org/repository.git", "refs/heads/dev", "refs/heads/issues/",
+                git, GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1",
+                "credential-ref", "git-user", Duration.ofSeconds(5), 1, 64 * 1024, 10, policy);
+        GitWorkspaceStore store = new GitWorkspaceStore(profile);
+        GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
+                System.nanoTime() + Duration.ofSeconds(5).toNanos(), System::nanoTime);
+
+        var configuration = new GitCommandRunner(profile, store.home(), store.hooks(), control)
+                .configuration(null, true);
+        assertTrue(configuration.contains(Map.entry("protocol.http.allow", "always")));
+        assertTrue(configuration.contains(Map.entry("http.followRedirects", "false")));
+        assertTrue(configuration.stream().filter(entry -> entry.getKey().equals("http.curloptResolve"))
+                .allMatch(entry -> entry.getValue().startsWith("localhost:8080:")));
+        assertFalse(configuration.stream().filter(entry -> entry.getKey().equals("http.curloptResolve"))
+                .toList().isEmpty());
+    }
+
+    @Test
+    void httpRemoteWithoutExactPlaintextRuleFailsBeforeGitStarts() throws Exception {
+        Path root = Files.createDirectory(temporary.resolve("refused-http-root"));
+        Path git = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
+        SecurityException refused = org.junit.jupiter.api.Assertions.assertThrows(SecurityException.class,
+                () -> new GitWorkspaceProfile("tenant", "profile", root,
+                        "http://127.0.0.1:8080/org/repository.git", "refs/heads/dev", "refs/heads/issues/",
+                        git, GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1",
+                        null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10,
+                        ReservedNetworkPolicy.denyAllReserved()));
+        assertEquals("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED", refused.getMessage());
     }
 
     @Test

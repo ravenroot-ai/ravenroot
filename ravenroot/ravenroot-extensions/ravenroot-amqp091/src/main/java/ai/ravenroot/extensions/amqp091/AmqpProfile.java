@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.amqp091;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 import java.util.Set;
 
 /** Immutable operator-owned endpoint, authority and resource ceilings for one tenant. */
@@ -25,7 +26,19 @@ public record AmqpProfile(
         int maxPerSecond,
         int timeoutMs,
         int maxBodyBytes,
-        int retries) {
+        int retries,
+        PlaintextAuthorization plaintextAuthorization) {
+
+    public AmqpProfile(
+            String tenant, String name, String host, int port, boolean tls, String vhost,
+            String username, String credentialRef, String defaultExchange, Set<String> exchanges,
+            String defaultRoutingKey, Set<String> routingKeys, Set<String> headers, Set<String> replyTo,
+            boolean allowPersistent, int maxPriority, long maxExpirationMs, int maxConcurrency,
+            int maxPerSecond, int timeoutMs, int maxBodyBytes, int retries) {
+        this(tenant, name, host, port, tls, vhost, username, credentialRef, defaultExchange, exchanges,
+                defaultRoutingKey, routingKeys, headers, replyTo, allowPersistent, maxPriority,
+                maxExpirationMs, maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries, null);
+    }
 
     public AmqpProfile {
         exchanges = copy(exchanges);
@@ -45,7 +58,9 @@ public record AmqpProfile(
                 || timeoutMs < 100 || timeoutMs > 30_000 || maxBodyBytes < 1 || maxBodyBytes > 1_048_576
                 || retries < 0 || retries > 3 || !validNames(exchanges, 255, true)
                 || !validNames(routingKeys, 255, false) || !validHeaders(headers)
-                || !validNames(replyTo, 255, false) || !tls && !loopback(host)) {
+                || !validNames(replyTo, 255, false)
+                || !tls && !loopback(host) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("amqp091", tenant + "/" + name, host, port))) {
             throw new IllegalArgumentException("invalid AMQP operator profile");
         }
     }
@@ -91,7 +106,7 @@ public record AmqpProfile(
                 && value.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}") && AmqpWireLimits.isShortstr(value));
     }
 
-    private static boolean loopback(String host) {
+    static boolean loopback(String host) {
         return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
                 || "::1".equals(host) || "[::1]".equals(host);
     }

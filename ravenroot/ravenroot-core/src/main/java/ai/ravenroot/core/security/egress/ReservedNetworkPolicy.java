@@ -1,6 +1,7 @@
 package ai.ravenroot.core.security.egress;
 
 import java.net.InetAddress;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -44,6 +45,12 @@ public final class ReservedNetworkPolicy {
     /** The shipped default: {@code localhost} may reach loopback, nothing else is exempt. */
     public static ReservedNetworkPolicy shippedDefault() {
         return new ReservedNetworkPolicy(ai.ravenroot.api.security.egress.ReservedNetworkPolicy.shippedDefault());
+    }
+
+    /** Captures legacy and scoped administrator policy from one immutable environment snapshot. */
+    public static ReservedNetworkPolicy fromEnvironment(Map<String, String> environment) {
+        return new ReservedNetworkPolicy(
+                ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(environment));
     }
 
     /**

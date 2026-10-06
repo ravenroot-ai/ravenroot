@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.github;
 import ai.ravenroot.api.ingress.IngressAuthorityDeclaration;
 import ai.ravenroot.api.ingress.IngressRequestProjectionPolicy;
 import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -62,10 +63,11 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
             IngressAuthorityDeclaration authority = authority(GithubValues.object(root.get("authority")));
             IngressRequestProjectionPolicy projection = projection(GithubValues.object(root.get("projection")));
             StorePolicy store = store(GithubValues.object(root.get("store")));
+            ReservedNetworkPolicy destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
             Map<String, Object> rawProfiles = GithubValues.object(root.get("profiles"));
             Map<String, GithubProfile> profiles = new LinkedHashMap<>();
             rawProfiles.forEach((name, raw) -> {
-                GithubProfile profile = profile(name, GithubValues.object(raw));
+                GithubProfile profile = profile(name, GithubValues.object(raw), destinationPolicy);
                 profiles.put(profile.tenantId() + "\u0000" + name, profile);
             });
             return new GithubConfiguration(authority, projection, store, profiles);
@@ -110,7 +112,8 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
                 (int) GithubValues.number(value.get("leaseMs"), 1_000, 300_000));
     }
 
-    private static GithubProfile profile(String name, Map<String, Object> value) {
+    private static GithubProfile profile(String name, Map<String, Object> value,
+                                         ReservedNetworkPolicy destinationPolicy) {
         GithubValues.exact(value, Set.of("tenantId", "apiOrigin", "owner", "repository", "repositoryId",
                 "installationId", "reviewerLogin", "credentialBindingId", "credentialReference", "webhookSecretReference",
                 "route", "events", "project", "workflowIds", "release", "limits"));
@@ -128,8 +131,14 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
         Map<String, Object> limits = GithubValues.object(value.get("limits"));
         GithubValues.exact(limits, Set.of("timeoutMs", "maxRequestBytes", "maxResponseBytes", "maxConcurrency",
                 "maxPolls", "pollIntervalMs"));
-        return new GithubProfile(name, GithubValues.string(value.get("tenantId"), 160),
-                URI.create(GithubValues.string(value.get("apiOrigin"), 512)),
+        URI apiOrigin = URI.create(GithubValues.string(value.get("apiOrigin"), 512));
+        int apiPort = apiOrigin.getPort() == -1 ? "https".equalsIgnoreCase(apiOrigin.getScheme()) ? 443 : 80
+                : apiOrigin.getPort();
+        ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization =
+                "http".equalsIgnoreCase(apiOrigin.getScheme())
+                        ? destinationPolicy.authorizePlaintext("http", PACKAGE_ID, apiOrigin.getHost(), apiPort)
+                        : null;
+        return new GithubProfile(name, GithubValues.string(value.get("tenantId"), 160), apiOrigin,
                 GithubValues.string(value.get("owner"), 100), GithubValues.string(value.get("repository"), 100),
                 GithubValues.number(value.get("repositoryId"), 1, Long.MAX_VALUE),
                 GithubValues.number(value.get("installationId"), 1, Long.MAX_VALUE),
@@ -155,7 +164,8 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
                 (int) GithubValues.number(limits.get("maxResponseBytes"), 1, 2 * 1024 * 1024),
                 (int) GithubValues.number(limits.get("maxConcurrency"), 1, 128),
                 (int) GithubValues.number(limits.get("maxPolls"), 1, 1_000),
-                (int) GithubValues.number(limits.get("pollIntervalMs"), 1, 60_000));
+                (int) GithubValues.number(limits.get("pollIntervalMs"), 1, 60_000),
+                plaintextAuthorization);
     }
 
     private static GithubException invalid() { return new GithubException(GithubException.Code.CONFIGURATION); }

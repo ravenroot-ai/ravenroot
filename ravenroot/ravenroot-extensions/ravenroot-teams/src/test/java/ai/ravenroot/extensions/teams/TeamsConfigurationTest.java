@@ -80,4 +80,44 @@ class TeamsConfigurationTest {
         assertThrows(TeamsException.class, () -> TeamsTestSupport.configuration(directory.resolve("wide.db"),
                 1024, 512));
     }
+
+    @Test void administratorRuleAuthorizesOnlyConfigurationBuiltHttpProfile() {
+        Map<String, Object> profile = new LinkedHashMap<>();
+        profile.put("tenantId", TeamsTestSupport.TENANT);
+        profile.put("workflowEndpoint", "http://127.0.0.1/workflows/operations");
+        profile.put("microsoftTenantId", TeamsTestSupport.MICROSOFT_TENANT);
+        profile.put("teamId", TeamsTestSupport.TEAM);
+        profile.put("channels", List.of(TeamsTestSupport.CHANNEL));
+        profile.put("credentialBindingId", "teams-workflow");
+        profile.put("credentialReference", "teams-workflow-token");
+        profile.put("signingSecretReference", "teams-signing-secret");
+        profile.put("webhookRoute", "/outgoing");
+        profile.put("limits", Map.of("requestTimeoutMs", 2500L, "maxRequestBytes", 1048576L,
+                "maxResponseBytes", 65536L, "maxTextChars", 4000L, "maxConcurrency", 2L,
+                "maxPerSecond", 20L, "ackTimeoutMs", 4000L, "signatureMaxAgeSeconds", 300L));
+        Map<String, Object> root = Map.of(
+                "authority", Map.of("listenerId", "main", "pathPrefix", "/managed/teams",
+                        "requiredScopes", List.of("teams:callbacks"), "maxRoutes", 8L,
+                        "maxConcurrentRequests", 32L, "maxRequestBytes", 1048576L,
+                        "maxResponseBytes", 65536L, "requestTimeoutMs", 4500L),
+                "projection", Map.of("maxRelativePathBytes", 256L, "maxQueryParameters", 1L,
+                        "maxQueryBytes", 256L, "maxHeaderCount", 2L, "maxHeaderBytes", 1024L,
+                        "maxHeaderValueBytes", 512L),
+                "store", Map.of("path", directory.resolve("http.db").toString(),
+                        "maxDeliveries", 100L, "retentionHours", 24L),
+                "profiles", Map.of(TeamsTestSupport.PROFILE, profile));
+        String policy = """
+                {"version":1,"rules":[{"name":"teams-mesh","protocols":["http"],"ports":[80],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.teams"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        TeamsConfiguration configuration = TeamsConfiguration.fromEnvironment(Map.of(
+                TeamsConfiguration.ENVIRONMENT,
+                Base64.getEncoder().encodeToString(TeamsValues.jsonBytes(root)),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8))));
+        assertEquals(java.net.URI.create("http://127.0.0.1/workflows/operations"),
+                configuration.profile(TeamsTestSupport.TENANT, TeamsTestSupport.PROFILE)
+                        .orElseThrow().workflowEndpoint());
+    }
 }

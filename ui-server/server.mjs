@@ -14,7 +14,11 @@ export function configuration(env = process.env) {
   if (env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw new Error('TLS verification cannot be disabled');
   // Unconfigured standalone UI is a static authoring surface, never a proxy to itself.
   const configured = env.RAVENROOT_UI_BACKEND_URL?.trim();
-  const upstream = configured ? new URL(configured) : null;
+  let upstream = null;
+  if (configured) {
+    try { upstream = new URL(configured); }
+    catch { throw new Error('UI_BACKEND_CONFIGURATION_REFUSED: backend URL is invalid'); }
+  }
   if (upstream && (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password
       || upstream.search || upstream.hash || /%|\/\//.test(upstream.pathname))) {
     throw new Error('Backend URL must be HTTP(S), without credentials, query, fragment or encoded path');

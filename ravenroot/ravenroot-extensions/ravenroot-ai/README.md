@@ -67,7 +67,8 @@ Set `RAVENROOT_LLM_PROFILE_<PROFILE_UTF8_HEX>` to strict canonical Base64 of JSO
 Only `endpoint` and `model` are required. The other defaults are empty credential binding, 60,000 ms,
 8 MiB request and response bounds, four concurrent calls per tenant/profile, and an empty preamble.
 Their upper bounds come from the `RAVENROOT_AI_*` startup policy below; model identifiers retain the
-provider wire-format limit of 256 characters. A credential binding requires HTTPS. The package also requires an operator service
+provider wire-format limit of 256 characters. A credential binding uses HTTPS by default; HTTP also
+requires an exact administrator trusted-network plaintext rule and matching service grant. The package also requires an operator service
 grant for `outbound-http`; `agent` additionally requires `tool-authorization` and `agent-resources`.
 
 For each MCP server named by an `agent`, set
@@ -88,7 +89,8 @@ For each MCP server named by an `agent`, set
 ```
 
 `endpoint` and the nonempty `allowedTools` list are required. Credential binding ID and reference
-default to empty and must be supplied together; a credential requires HTTPS. Timeout defaults to
+default to empty and must be supplied together; a credential uses HTTPS by default, while HTTP also
+requires an exact administrator trusted-network plaintext rule and matching service grant. Timeout defaults to
 30,000 ms. Request and response bytes default to 1 MiB. Concurrency defaults to four per
 tenant/profile. A profile permits 64 distinct tools and reads at most 1,024 advertised tools by
 default; both limits, and the timeout, byte, and concurrency ceilings, come from the

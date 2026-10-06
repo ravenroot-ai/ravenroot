@@ -363,11 +363,24 @@ public final class MailSendNodeBehavior implements NodeBehavior {
             if (!safeId(profileName)) throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile is invalid");
             MailProfile profile = profiles.resolve(tenant, profileName).orElseThrow(() -> new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile is unavailable"));
             if (!profile.tenant().equals(tenant) || !profile.name().equals(profileName)) throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile binding is invalid");
-            try { destinationPolicy.requireAllowedLiteral(profile.host()); }
-            catch (SecurityException refused) { throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile is unavailable"); }
-            if (profile.securityMode().equals("SMTP") && (!profile.allowPlaintext() || !profile.authUsername().isBlank()
-                    || !Set.of("localhost", "127.0.0.1", "::1").contains(profile.host())))
-                throw new MailSendException(MailSendException.Code.CONFIGURATION, "Plain SMTP is restricted to an unauthenticated local profile");
+            try { destinationPolicy.requireAllowedDestination(
+                    "smtp", tenant + "/" + profileName, profile.host(), profile.port()); }
+            catch (SecurityException refused) { throw new MailSendException(
+                    MailSendException.Code.CONFIGURATION, "OUTBOUND_DESTINATION_POLICY_REFUSED"); }
+            if (profile.securityMode().equals("SMTP")) {
+                if (!profile.allowPlaintext())
+                    throw new MailSendException(MailSendException.Code.CONFIGURATION,
+                            "OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED");
+                boolean legacyLocal = profile.authUsername().isBlank()
+                        && Set.of("localhost", "127.0.0.1", "::1", "[::1]").contains(profile.host());
+                if (!legacyLocal) try {
+                    destinationPolicy.requirePlaintext(
+                            "smtp", tenant + "/" + profileName, profile.host(), profile.port());
+                } catch (SecurityException refused) {
+                    throw new MailSendException(MailSendException.Code.CONFIGURATION,
+                            "OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED");
+                }
+            }
             // Legacy fields are advisory compatibility fields: each must match the profile or be a tighter numeric limit.
             exact(c, "host", profile.host()); exact(c, "port", Integer.toString(profile.port())); exact(c, "securityMode", profile.securityMode());
             exact(c, "authUsername", profile.authUsername()); exact(c, "credentialRef", profile.credentialRef()); exact(c, "defaultFrom", profile.defaultFrom());

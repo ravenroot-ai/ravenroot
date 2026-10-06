@@ -1,9 +1,12 @@
 package ai.ravenroot.api.security.egress;
 
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -24,9 +27,12 @@ public final class ReservedNetworkPolicy {
     public static final String DEFAULT_EXCEPTIONS = "localhost:LOOPBACK";
 
     private final Map<String, Set<ReservedNetwork>> exceptions;
+    private final TrustedNetworkPolicy trustedNetworks;
 
-    private ReservedNetworkPolicy(Map<String, Set<ReservedNetwork>> exceptions) {
+    private ReservedNetworkPolicy(Map<String, Set<ReservedNetwork>> exceptions,
+                                  TrustedNetworkPolicy trustedNetworks) {
         this.exceptions = Map.copyOf(exceptions);
+        this.trustedNetworks = trustedNetworks;
     }
 
     /**
@@ -35,7 +41,7 @@ public final class ReservedNetworkPolicy {
      * @return deny-all-reserved policy
      */
     public static ReservedNetworkPolicy denyAllReserved() {
-        return new ReservedNetworkPolicy(Map.of());
+        return new ReservedNetworkPolicy(Map.of(), TrustedNetworkPolicy.empty());
     }
 
     /**
@@ -55,8 +61,9 @@ public final class ReservedNetworkPolicy {
      * @return immutable policy
      */
     public static ReservedNetworkPolicy fromEnvironment(Map<String, String> environment) {
-        return fromCommaSeparatedExceptions(environment == null
+        ReservedNetworkPolicy legacy = fromCommaSeparatedExceptions(environment == null
                 ? null : environment.get(EXCEPTIONS_ENVIRONMENT_VARIABLE));
+        return new ReservedNetworkPolicy(legacy.exceptions, TrustedNetworkPolicy.fromEnvironment(environment));
     }
 
     /**
@@ -81,7 +88,7 @@ public final class ReservedNetworkPolicy {
                 return Set.copyOf(merged);
             });
         }
-        return new ReservedNetworkPolicy(parsed);
+        return new ReservedNetworkPolicy(parsed, TrustedNetworkPolicy.empty());
     }
 
     /**
@@ -93,27 +100,84 @@ public final class ReservedNetworkPolicy {
      * @return whether the address is permitted
      */
     public boolean permits(String name, InetAddress address) {
+        if (trustedNetworks.constrainsHost(name))
+            return trustedNetworks.permitsReservedAddress(name, address);
         ReservedNetwork network = ReservedNetwork.of(address);
         if (!network.isReserved()) return true;
-        Set<ReservedNetwork> allowed = exceptions.get(normalizeDestination(name));
-        return allowed != null && allowed.contains(network);
+        return legacyPermits(name, address)
+                || trustedNetworks.permitsReservedAddress(name, address);
     }
 
     /**
-     * Checks a connector host without resolving it. Hostnames pass to the JVM resolver guard;
-     * numeric literals are classified here. Malformed numeric-looking values fail closed.
+     * Resolves and validates a complete connector destination under one protocol/profile scope.
+     * When any answer is reserved, one scoped rule must admit every answer; separate partial rules
+     * cannot be combined. The legacy exception remains an admission-only compatibility path.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @throws SecurityException when the destination is unresolved or is not admitted
+     */
+    public void requireAllowedDestination(String protocol, String profile, String host, int port) {
+        if (!trustedNetworks.hasScope(protocol, profile, host, port)) {
+            if (trustedNetworks.constrainsHost(host))
+                throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+            Literal literal = Literal.parse(host);
+            if (literal.kind() == LiteralKind.LITERAL && literal.normalized().contains("%")) {
+                resolveAllowedDestination(protocol, profile, host, port);
+                return;
+            }
+            if (!legacyPermitsLiteral(host))
+                throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+            return;
+        }
+        resolveAllowedDestination(protocol, profile, host, port);
+    }
+
+    /**
+     * Resolves and returns one admitted address set for a native transport that cannot use the JVM
+     * resolver guard. Callers must pin the returned set into that transport before connecting.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return immutable, non-empty set of resolved addresses admitted by one scoped rule
+     * @throws SecurityException when the destination is unresolved or is not admitted
+     */
+    public List<InetAddress> resolveAllowedDestination(String protocol, String profile, String host, int port) {
+        List<InetAddress> addresses = resolve(host);
+        boolean scoped = trustedNetworks.hasScope(protocol, profile, host, port);
+        boolean admitted = scoped
+                ? trustedNetworks.permitsAll(protocol, profile, host, port, addresses)
+                : !trustedNetworks.constrainsHost(host)
+                        && addresses.stream().allMatch(address -> legacyPermits(host, address));
+        if (!admitted) throw new SecurityException("OUTBOUND_DESTINATION_POLICY_REFUSED");
+        return List.copyOf(addresses);
+    }
+
+    /**
+     * Checks a connector host without DNS. Hostnames pass to the JVM resolver guard; unscoped
+     * numeric literals are classified directly. A scoped IPv6 literal is parsed by the JDK so its
+     * raw zone is bound to the physical scope that the connection will use. Malformed or
+     * unresolvable numeric-looking values fail closed.
      *
      * @param host destination host, with optional IPv6 brackets and zone identifier
      * @return true for a hostname, public literal, or exact operator exception
      */
     public boolean permitsLiteral(String host) {
         Literal literal = Literal.parse(host);
-        if (literal.kind() == LiteralKind.HOSTNAME) return true;
-        if (literal.kind() == LiteralKind.MALFORMED) return false;
-        ReservedNetwork network = ReservedNetwork.of(literal.address());
-        if (!network.isReserved()) return true;
-        Set<ReservedNetwork> allowed = exceptions.get(literal.normalized());
-        return allowed != null && allowed.contains(network);
+        if (isZonedIpv6Literal(literal)) {
+            try {
+                return resolve(host).stream().allMatch(address -> permits(host, address));
+            } catch (SecurityException refused) {
+                return false;
+            }
+        }
+        if (legacyPermitsLiteral(host)) return true;
+        return literal.kind() == LiteralKind.LITERAL
+                && trustedNetworks.permitsReservedAddress(host, literal.address());
     }
 
     /**
@@ -128,12 +192,160 @@ public final class ReservedNetworkPolicy {
     }
 
     /**
+     * Requires an explicit administrator rule for an unencrypted connector transport.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @throws SecurityException when no single matching rule admits every resolved address and
+     *         grants plaintext
+     */
+    public void requirePlaintext(String protocol, String profile, String host, int port) {
+        resolveAllowedPlaintextDestination(protocol, profile, host, port);
+    }
+
+    /**
+     * Returns an opaque, exact-scope proof after validating an administrator plaintext rule.
+     * Profile constructors use this proof to keep their ordinary public construction fail-closed;
+     * only trusted configuration resolvers that possess this policy can construct plaintext
+     * profiles, and a proof for one protocol/profile/host/port cannot authorize another.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return opaque authorization bound to the normalized exact scope
+     * @throws SecurityException when no single matching rule admits every resolved address and
+     *         grants plaintext
+     */
+    public PlaintextAuthorization authorizePlaintext(String protocol, String profile, String host, int port) {
+        resolveAllowedPlaintextDestination(protocol, profile, host, port);
+        return new PlaintextAuthorization(protocol, profile, host, port);
+    }
+
+    /**
+     * Resolves one address set admitted by the same scoped plaintext rule.
+     *
+     * @param protocol finite protocol name declared by the connector
+     * @param profile exact administrator-controlled connector profile or package identifier
+     * @param host destination hostname or numeric address
+     * @param port destination TCP port
+     * @return immutable, non-empty set of resolved addresses admitted for plaintext by one rule
+     * @throws SecurityException when the destination is unresolved or no single matching rule
+     *         admits every resolved address and grants plaintext
+     */
+    public List<InetAddress> resolveAllowedPlaintextDestination(
+            String protocol, String profile, String host, int port) {
+        List<InetAddress> addresses = resolve(host);
+        if (!trustedNetworks.permitsAllPlaintext(protocol, profile, host, port, addresses))
+            throw new SecurityException("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED");
+        return List.copyOf(addresses);
+    }
+
+    /**
      * Returns normalized exception destination keys for diagnostics, never for authorization.
      *
      * @return immutable normalized exception keys
      */
     public Set<String> exemptNames() {
         return exceptions.keySet();
+    }
+
+    /** Opaque exact-scope proof issued only after {@link #authorizePlaintext} succeeds. */
+    public static final class PlaintextAuthorization {
+        private final String protocol;
+        private final String profile;
+        private final String host;
+        private final int port;
+
+        private PlaintextAuthorization(String protocol, String profile, String host, int port) {
+            this.protocol = protocol == null ? "" : protocol.trim().toLowerCase(Locale.ROOT);
+            this.profile = profile == null ? "" : profile.trim();
+            this.host = normalizeAuthorizationHost(host);
+            this.port = port;
+        }
+
+        /**
+         * Tests whether this proof was issued for an exact connector scope.
+         *
+         * @param protocol finite protocol name declared by the connector
+         * @param profile exact administrator-controlled connector profile or package identifier
+         * @param host destination hostname or numeric address
+         * @param port destination TCP port
+         * @return {@code true} only when every scope component matches the issuing scope
+         */
+        public boolean matches(String protocol, String profile, String host, int port) {
+            return this.protocol.equals(protocol == null ? "" : protocol.trim().toLowerCase(Locale.ROOT))
+                    && this.profile.equals(profile == null ? "" : profile.trim())
+                    && this.host.equals(normalizeAuthorizationHost(host))
+                    && this.port == port;
+        }
+
+        private static String normalizeAuthorizationHost(String value) {
+            return TrustedNetworkPolicy.normalizeHost(value);
+        }
+
+        @Override public String toString() { return "PlaintextAuthorization[redacted]"; }
+    }
+
+    private boolean legacyPermits(String name, InetAddress address) {
+        ReservedNetwork network = ReservedNetwork.of(address);
+        if (!network.isReserved()) return true;
+        String destination = resolvedLegacyDestination(name, address);
+        if (destination == null) return false;
+        Set<ReservedNetwork> allowed = exceptions.get(destination);
+        return allowed != null && allowed.contains(network);
+    }
+
+    private static String resolvedLegacyDestination(String name, InetAddress address) {
+        Literal literal = Literal.parse(name);
+        if (!(address instanceof Inet6Address ipv6) || literal.kind() != LiteralKind.LITERAL)
+            return normalizeDestination(name);
+        String host = TrustedNetworkPolicy.normalizeHost(name);
+        int delimiter = host.indexOf('%');
+        if (delimiter < 0) return normalizeDestination(name);
+        String requestedZone = host.substring(delimiter + 1);
+        String resolvedZone;
+        if (requestedZone.chars().allMatch(Character::isDigit)) {
+            resolvedZone = Integer.toString(ipv6.getScopeId());
+        } else if (ipv6.getScopedInterface() != null) {
+            resolvedZone = ipv6.getScopedInterface().getName();
+        } else {
+            return null;
+        }
+        if (!requestedZone.equals(resolvedZone)) return null;
+        String normalized = literal.normalized();
+        int normalizedDelimiter = normalized.indexOf('%');
+        String addressKey = normalizedDelimiter < 0
+                ? normalized : normalized.substring(0, normalizedDelimiter);
+        return addressKey + "%" + requestedZone;
+    }
+
+    private static boolean isZonedIpv6Literal(Literal literal) {
+        return literal.kind() == LiteralKind.LITERAL && literal.normalized().contains("%");
+    }
+
+    private boolean legacyPermitsLiteral(String host) {
+        Literal literal = Literal.parse(host);
+        if (literal.kind() == LiteralKind.HOSTNAME) return true;
+        if (literal.kind() == LiteralKind.MALFORMED) return false;
+        ReservedNetwork network = ReservedNetwork.of(literal.address());
+        if (!network.isReserved()) return true;
+        Set<ReservedNetwork> allowed = exceptions.get(literal.normalized());
+        return allowed != null && allowed.contains(network);
+    }
+
+    private static List<InetAddress> resolve(String host) {
+        try {
+            String lookup = host != null && host.startsWith("[") && host.endsWith("]")
+                    ? host.substring(1, host.length() - 1) : host;
+            List<InetAddress> addresses = Arrays.asList(InetAddress.getAllByName(lookup));
+            if (addresses.isEmpty()) throw new UnknownHostException();
+            return addresses;
+        } catch (UnknownHostException unavailable) {
+            throw new SecurityException("OUTBOUND_DESTINATION_UNRESOLVED");
+        }
     }
 
     private static ParsedException parseException(String entry) {

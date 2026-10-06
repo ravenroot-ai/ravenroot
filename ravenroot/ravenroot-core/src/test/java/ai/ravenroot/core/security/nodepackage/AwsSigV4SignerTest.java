@@ -88,6 +88,14 @@ class AwsSigV4SignerTest {
                 .contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-security-token"));
     }
 
+    @Test
+    void canonicalHostNormalizesIpv6AddressButPreservesNamedZoneCase() {
+        AwsSigV4Signer.Signed signed = sign(
+                URI.create("https://[FE80::A%LO0]/bucket/object"), Map.of(), new byte[0]);
+
+        assertTrue(signed.canonicalRequest().contains("\nhost:[fe80::a%LO0]\n"));
+    }
+
     private static AwsSigV4Signer.Signed sign(URI uri, Map<String, List<String>> headers, byte[] body) {
         return AwsSigV4Signer.sign("GET", uri, headers, body, AWS_S3_EXAMPLE_TIME,
                 AWS_S3_EXAMPLE_CREDENTIAL.clone(), "us-east-1", "s3");

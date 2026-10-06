@@ -2,6 +2,7 @@ package ai.ravenroot.server.plugin;
 
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.security.egress.TrustedNetworkPolicy;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.security.nodepackage.TenantCredentialResolver;
 import org.junit.jupiter.api.Test;
@@ -94,6 +95,45 @@ class EnvironmentNodePackageServiceGrantsTest {
                 registry.capabilitiesFor(STORAGE_PACKAGE_ID));
         assertTrue(registry.capabilitiesFor("some.other.package").isEmpty(),
                 "a grant is keyed to one exact package id and reaches no other");
+    }
+
+    @Test
+    void cidrOnlyRuleAdmitsNumericPlaintextCredentialOriginWithoutWideningGrant() {
+        Map<String, String> environment = Map.of(
+                STORAGE_VARIABLE, encode("""
+                        {"capabilities":["outbound-http"],
+                         "origins":[{"scheme":"http","host":"10.42.1.9","port":8080}],
+                         "awsSigV4Bindings":[{"bindingId":"mesh","origin":{"scheme":"http",
+                         "host":"10.42.1.9","port":8080},"credentialReference":"storage-key",
+                         "region":"us-east-1","service":"s3"}]}
+                        """),
+                TrustedNetworkPolicy.ENVIRONMENT_VARIABLE, encode("""
+                        {"version":1,"rules":[{"name":"mesh","protocols":["http"],"ports":[8080],
+                         "hosts":[],"addresses":["10.42.0.0/16"],
+                         "profiles":["ai.ravenroot.extensions.storage"],"allowPlaintext":true}]}
+                        """));
+        NodePackageServiceRegistry registry =
+                EnvironmentNodePackageServiceGrants.fromEnvironment(environment, NO_CREDENTIALS);
+        assertEquals(EGRESS_ONLY, registry.capabilitiesFor(STORAGE_PACKAGE_ID));
+    }
+
+    @Test
+    void explicitDnsHostAndAddressEnvelopeAdmitsRepresentativePlaintextGrant() {
+        Map<String, String> environment = Map.of(
+                STORAGE_VARIABLE, encode("""
+                        {"capabilities":["outbound-http"],
+                         "origins":[{"scheme":"http","host":"localhost","port":8080}],
+                         "credentialBindings":[{"bindingId":"sidecar","origin":{"scheme":"http",
+                         "host":"localhost","port":8080},"headerName":"Authorization","prefix":"Bearer "}]}
+                        """),
+                TrustedNetworkPolicy.ENVIRONMENT_VARIABLE, encode("""
+                        {"version":1,"rules":[{"name":"sidecar","protocols":["http"],"ports":[8080],
+                         "hosts":["localhost"],"addresses":["127.0.0.0/8","::1/128"],
+                         "profiles":["ai.ravenroot.extensions.storage"],"allowPlaintext":true}]}
+                        """));
+        NodePackageServiceRegistry registry =
+                EnvironmentNodePackageServiceGrants.fromEnvironment(environment, NO_CREDENTIALS);
+        assertEquals(EGRESS_ONLY, registry.capabilitiesFor(STORAGE_PACKAGE_ID));
     }
 
     @Test

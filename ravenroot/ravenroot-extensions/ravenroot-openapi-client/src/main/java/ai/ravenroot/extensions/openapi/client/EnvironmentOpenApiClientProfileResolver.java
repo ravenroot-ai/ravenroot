@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.openapi.client;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -23,10 +24,12 @@ public final class EnvironmentOpenApiClientProfileResolver implements OpenApiCli
             "fixedHeaders", "inputHeaders", "responseHeaders", "credentialBindingId", "credentialReference",
             "maxRequestBytes", "maxResponseBytes", "timeoutMs", "maxConcurrency");
     private final Map<String, String> environment;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public EnvironmentOpenApiClientProfileResolver() { this(System.getenv()); }
     EnvironmentOpenApiClientProfileResolver(Map<String, String> environment) {
         this.environment = Map.copyOf(environment);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
     }
 
     @Override public Optional<OpenApiClientProfile> resolve(String profileName) {
@@ -40,8 +43,14 @@ public final class EnvironmentOpenApiClientProfileResolver implements OpenApiCli
             OpenApiValues.exactKeys(root, FIELDS, "profile");
             byte[] spec = strictBase64(OpenApiValues.string(root.get("specBase64"), "specBase64",
                     OpenApiClientProfile.HARD_MAX_SPEC_BYTES * 2));
+            URI origin = URI.create(OpenApiValues.string(root.get("origin"), "origin", 512));
+            int port = origin.getPort() == -1 ? "https".equals(origin.getScheme()) ? 443 : 80 : origin.getPort();
+            ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = "http".equals(origin.getScheme())
+                    ? destinationPolicy.authorizePlaintext(
+                            "http", OpenApiClientProfile.PACKAGE_ID, origin.getHost(), port)
+                    : null;
             return Optional.of(new OpenApiClientProfile(profileName,
-                    URI.create(OpenApiValues.string(root.get("origin"), "origin", 512)), spec,
+                    origin, spec,
                     OpenApiValues.string(root.get("specSha256"), "specSha256", 64),
                     strings(root.get("operations"), "operations", 128, false), headers(root.get("fixedHeaders")),
                     strings(root.get("inputHeaders"), "inputHeaders", 32, true),
@@ -53,7 +62,8 @@ public final class EnvironmentOpenApiClientProfileResolver implements OpenApiCli
                     OpenApiValues.integer(root.get("maxResponseBytes"), "maxResponseBytes", 1,
                             OpenApiClientProfile.HARD_MAX_BODY_BYTES),
                     OpenApiValues.integer(root.get("timeoutMs"), "timeoutMs", 1, 300_000),
-                    OpenApiValues.integer(root.get("maxConcurrency"), "maxConcurrency", 1, 256)));
+                    OpenApiValues.integer(root.get("maxConcurrency"), "maxConcurrency", 1, 256),
+                    plaintextAuthorization));
         } catch (RuntimeException invalid) {
             return Optional.empty();
         }

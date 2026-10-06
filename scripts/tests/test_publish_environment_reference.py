@@ -91,6 +91,25 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertEqual("bundle", group("RAVENROOT_JDBC_PROFILE_"))
         self.assertEqual("human-task", group("RAVENROOT_HUMAN_TASK_"))
 
+    def test_trusted_network_policy_is_scoped_egress_configuration(self):
+        name = "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY"
+        self.assertIn(name, variables())
+        self.assertEqual("credential", group(name))
+
+        description = boundary(name)
+        self.assertIn("administrator-owned canonical padded Base64", description)
+        self.assertIn("exact finite protocol, port, profile and destination scopes", description)
+        self.assertIn("legacy exceptions remain admission-only", description)
+        self.assertIn(
+            "../operator-guide/credentials-egress.md#trusted-networks-and-plaintext-transports",
+            description,
+        )
+
+        published = render()
+        section = published.split("## Credentials and egress", 1)[1].split("## ", 1)[0]
+        self.assertIn(f"`{name}`", section)
+        self.assertIn("schema and precedence contract", section)
+
     def test_execution_runtime_group_is_exact_and_links_its_dedicated_contract(self):
         names = (
             "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",

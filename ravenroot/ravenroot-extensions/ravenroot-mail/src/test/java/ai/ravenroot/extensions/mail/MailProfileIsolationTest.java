@@ -2,10 +2,15 @@ package ai.ravenroot.extensions.mail;
 
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
+import ai.ravenroot.api.security.egress.TrustedNetworkPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -58,6 +63,36 @@ class MailProfileIsolationTest {
                     MailTestSupport.profile(tenant, name, "127.0.0.1", smtp.port(), "STARTTLS", "smtp-user", "mail-primary", 0)));
             assertCode(MailSendException.Code.CONFIGURATION, () -> secure.create(MailTestSupport.configuration(Map.of("tlsVerify", "false"))).handle(message()).toCompletableFuture().join());
             assertEquals(0, secrets.get());
+            assertEquals(0, smtp.connections());
+        }
+    }
+
+    @Test void exactAdministratorRuleAdmitsAuthenticatedPlaintextBeforeCredentialResolution() throws Exception {
+        try (var smtp = DeterministicSmtpFixture.start(DeterministicSmtpFixture.Mode.PLAIN, false, null, false)) {
+            AtomicInteger secrets = new AtomicInteger();
+            var credentials = (ai.ravenroot.api.security.CredentialResolver) ref -> {
+                secrets.incrementAndGet();
+                return Optional.empty();
+            };
+            MailProfile profile = new MailProfile("tenant-a", MailTestSupport.PROFILE, "127.0.0.1",
+                    smtp.port(), "SMTP", true, "smtp-user", "mail-primary", MailTestSupport.FROM,
+                    Set.of(MailTestSupport.FROM), Set.of(), Set.of("*"), Set.of(), 100, 40, 8192,
+                    1_048_576, 10, 5_242_880, 10_485_760, 13_981_016, 2_000, 2_000, 2_000, 0, 16);
+            String json = """
+                    {"version":1,"rules":[{"name":"smtp-mesh","protocols":["smtp"],"ports":[%d],
+                     "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                     "profiles":["tenant-a/test-profile"],"allowPlaintext":true}]}
+                    """.formatted(smtp.port());
+            ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(Map.of(
+                    TrustedNetworkPolicy.ENVIRONMENT_VARIABLE,
+                    Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8))));
+            var behavior = new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(profile),
+                    SecretValue::copy, String::new, policy);
+
+            assertCode(MailSendException.Code.CREDENTIAL_UNAVAILABLE,
+                    () -> behavior.create(MailTestSupport.configuration(Map.of()))
+                            .handle(message()).toCompletableFuture().join());
+            assertEquals(1, secrets.get());
             assertEquals(0, smtp.connections());
         }
     }

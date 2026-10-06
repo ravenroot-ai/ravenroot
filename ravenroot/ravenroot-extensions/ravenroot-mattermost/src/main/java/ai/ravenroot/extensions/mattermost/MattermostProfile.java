@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.mattermost;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.Set;
@@ -9,15 +10,29 @@ import java.util.Set;
 record MattermostProfile(String tenantId, String name, URI origin, String teamId, Set<String> publicChannelIds,
                          String credentialBindingId, String credentialReference, String webhookTokenReference,
                          String outgoingWebhookRoute, int maxTextChars, int maxRequestBytes, int maxResponseBytes,
-                         int maxConcurrency, int maxPerSecond, int requestTimeoutMs, int retries) {
+                         int maxConcurrency, int maxPerSecond, int requestTimeoutMs, int retries,
+                         PlaintextAuthorization plaintextAuthorization) {
     /** Leaves transport and serialization time inside Mattermost's three-second acknowledgement window. */
     static final int MAX_ACK_TIMEOUT_MS = 2_800;
 
+    MattermostProfile(String tenantId, String name, URI origin, String teamId, Set<String> publicChannelIds,
+                      String credentialBindingId, String credentialReference, String webhookTokenReference,
+                      String outgoingWebhookRoute, int maxTextChars, int maxRequestBytes, int maxResponseBytes,
+                      int maxConcurrency, int maxPerSecond, int requestTimeoutMs, int retries) {
+        this(tenantId, name, origin, teamId, publicChannelIds, credentialBindingId, credentialReference,
+                webhookTokenReference, outgoingWebhookRoute, maxTextChars, maxRequestBytes, maxResponseBytes,
+                maxConcurrency, maxPerSecond, requestTimeoutMs, retries, null);
+    }
+
     MattermostProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
-        if (origin == null || !"https".equals(origin.getScheme()) || origin.getHost() == null
+        if (origin == null || !Set.of("http", "https").contains(origin.getScheme()) || origin.getHost() == null
                 || origin.getUserInfo() != null || origin.getQuery() != null || origin.getFragment() != null
                 || !(origin.getPath().isEmpty() || "/".equals(origin.getPath()))) throw configuration();
+        int originPort = origin.getPort() == -1 ? "https".equals(origin.getScheme()) ? 443 : 80 : origin.getPort();
+        if ("http".equals(origin.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", MattermostConfiguration.PACKAGE_ID,
+                        origin.getHost(), originPort))) throw configuration();
         teamId = id(teamId); publicChannelIds = ids(publicChannelIds);
         credentialBindingId = token(credentialBindingId, 256);
         credentialReference = token(credentialReference, 256);

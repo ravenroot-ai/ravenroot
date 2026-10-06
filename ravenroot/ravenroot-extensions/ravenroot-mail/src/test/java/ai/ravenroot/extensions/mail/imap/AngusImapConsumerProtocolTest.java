@@ -26,7 +26,10 @@ class AngusImapConsumerProtocolTest {
         assertEquals("30000", imaps.getProperty("mail.imaps.timeout"));
         assertEquals("30000", imaps.getProperty("mail.imaps.writetimeout"));
 
-        var startTls = AngusImapConsumerProtocol.properties(huge, "imap");
+        var startTlsProfile = new ImapProfile("tenant", "reader", "mail.example.test", 143,
+                "STARTTLS", "reader", "credential", Set.of("INBOX"), Integer.MAX_VALUE,
+                Integer.MAX_VALUE, 1, 1, 0);
+        var startTls = AngusImapConsumerProtocol.properties(startTlsProfile, "imap");
         assertEquals("true", startTls.getProperty("mail.imap.starttls.enable"));
         assertEquals("true", startTls.getProperty("mail.imap.starttls.required"));
         assertEquals("true", startTls.getProperty("mail.imap.ssl.checkserveridentity"));

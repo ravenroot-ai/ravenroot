@@ -2,6 +2,7 @@ package ai.ravenroot.extensions.teams;
 
 import ai.ravenroot.api.ingress.IngressAuthorityDeclaration;
 import ai.ravenroot.api.ingress.IngressRequestProjectionPolicy;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -45,9 +46,10 @@ record TeamsConfiguration(IngressAuthorityDeclaration authority,
             IngressAuthorityDeclaration authority = authority(TeamsValues.object(root.get("authority")));
             IngressRequestProjectionPolicy projection = projection(TeamsValues.object(root.get("projection")));
             StorePolicy store = store(TeamsValues.object(root.get("store")));
+            ReservedNetworkPolicy destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
             Map<String, TeamsProfile> profiles = new LinkedHashMap<>();
             TeamsValues.object(root.get("profiles")).forEach((name, value) -> {
-                TeamsProfile profile = profile(name, TeamsValues.object(value));
+                TeamsProfile profile = profile(name, TeamsValues.object(value), destinationPolicy);
                 if (profiles.put(profile.tenantId() + "\u0000" + profile.name(), profile) != null) throw invalid();
             });
             return new TeamsConfiguration(authority, projection, store, profiles);
@@ -94,15 +96,19 @@ record TeamsConfiguration(IngressAuthorityDeclaration authority,
                 (int) TeamsValues.number(value.get("retentionHours"), 1, 24 * 365));
     }
 
-    private static TeamsProfile profile(String name, Map<String, Object> value) {
+    private static TeamsProfile profile(String name, Map<String, Object> value,
+                                        ReservedNetworkPolicy destinationPolicy) {
         TeamsValues.exact(value, Set.of("tenantId", "workflowEndpoint", "microsoftTenantId", "teamId",
                 "channels", "credentialBindingId", "credentialReference", "signingSecretReference",
                 "webhookRoute", "limits"));
         Map<String, Object> limits = TeamsValues.object(value.get("limits"));
         TeamsValues.exact(limits, Set.of("requestTimeoutMs", "maxRequestBytes", "maxResponseBytes",
                 "maxTextChars", "maxConcurrency", "maxPerSecond", "ackTimeoutMs", "signatureMaxAgeSeconds"));
-        return new TeamsProfile(TeamsValues.string(value.get("tenantId"), 160), name,
-                URI.create(TeamsValues.string(value.get("workflowEndpoint"), 2_048)),
+        URI endpoint = URI.create(TeamsValues.string(value.get("workflowEndpoint"), 2_048));
+        ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = "http".equals(endpoint.getScheme())
+                ? destinationPolicy.authorizePlaintext("http", PACKAGE_ID, endpoint.getHost(), 80)
+                : null;
+        return new TeamsProfile(TeamsValues.string(value.get("tenantId"), 160), name, endpoint,
                 TeamsValues.string(value.get("microsoftTenantId"), 64),
                 TeamsValues.string(value.get("teamId"), 160),
                 TeamsValues.strings(value.get("channels"), 256, 160),
@@ -118,7 +124,7 @@ record TeamsConfiguration(IngressAuthorityDeclaration authority,
                 (int) TeamsValues.number(limits.get("maxPerSecond"), 1, 50),
                 (int) TeamsValues.number(limits.get("ackTimeoutMs"), 100,
                         TeamsProfile.MAX_ACK_TIMEOUT_MS),
-                (int) TeamsValues.number(limits.get("signatureMaxAgeSeconds"), 1, 300));
+                (int) TeamsValues.number(limits.get("signatureMaxAgeSeconds"), 1, 300), plaintextAuthorization);
     }
 
     record StorePolicy(Path path, int maxDeliveries, int retentionHours) {

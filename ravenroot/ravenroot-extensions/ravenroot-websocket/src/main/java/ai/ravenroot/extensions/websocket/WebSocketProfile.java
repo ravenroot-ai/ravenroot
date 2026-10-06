@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.websocket;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -8,15 +9,29 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Immutable operator-owned authority for one WebSocket profile. */
-public record WebSocketProfile(String name, URI destination, Map<String, List<String>> headers, List<String> subprotocols, String credentialBindingId, String credentialReference, int maximumMessageBytes, int maximumFragments, int timeoutMs, int reconnectBackoffMs, int maxConcurrency, int maxBufferedEvents) {
+public record WebSocketProfile(String name, URI destination, Map<String, List<String>> headers, List<String> subprotocols, String credentialBindingId, String credentialReference, int maximumMessageBytes, int maximumFragments, int timeoutMs, int reconnectBackoffMs, int maxConcurrency, int maxBufferedEvents, PlaintextAuthorization plaintextAuthorization) {
+    static final String PACKAGE_ID = "ai.ravenroot.extensions.websocket";
     private static final java.util.Set<String> FORBIDDEN_HEADERS = java.util.Set.of(
             "authorization", "cookie", "proxy-authorization", "host", "content-length", "connection",
             "upgrade", "transfer-encoding", "te", "trailer", "sec-websocket-key", "sec-websocket-accept",
             "sec-websocket-version", "sec-websocket-protocol", "sec-websocket-extensions");
 
+    public WebSocketProfile(String name, URI destination, Map<String, List<String>> headers,
+                            List<String> subprotocols, String credentialBindingId, String credentialReference,
+                            int maximumMessageBytes, int maximumFragments, int timeoutMs,
+                            int reconnectBackoffMs, int maxConcurrency, int maxBufferedEvents) {
+        this(name, destination, headers, subprotocols, credentialBindingId, credentialReference,
+                maximumMessageBytes, maximumFragments, timeoutMs, reconnectBackoffMs, maxConcurrency,
+                maxBufferedEvents, null);
+    }
+
     public WebSocketProfile {
         if (name == null || !name.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) throw new IllegalArgumentException("name");
-        if (destination == null || !"wss".equals(destination.getScheme()) || destination.getHost() == null || destination.getUserInfo() != null || destination.getFragment() != null || destination.getQuery() != null || destination.toASCIIString().length() > 2048) throw new IllegalArgumentException("destination");
+        if (destination == null || !("wss".equals(destination.getScheme()) || "ws".equals(destination.getScheme())) || destination.getHost() == null || destination.getUserInfo() != null || destination.getFragment() != null || destination.getQuery() != null || destination.toASCIIString().length() > 2048) throw new IllegalArgumentException("destination");
+        int destinationPort = destination.getPort() == -1 ? "wss".equals(destination.getScheme()) ? 443 : 80 : destination.getPort();
+        if ("ws".equals(destination.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("websocket", PACKAGE_ID, destination.getHost(), destinationPort)))
+            throw new IllegalArgumentException("destination requires administrator plaintext authorization");
         Map<String, List<String>> copiedHeaders = new java.util.LinkedHashMap<>();
         if (headers != null) headers.forEach((key, values) -> {
             if (key == null || values == null || values.stream().anyMatch(java.util.Objects::isNull)) {

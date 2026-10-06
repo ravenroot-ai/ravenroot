@@ -1249,7 +1249,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "security-ceiling-or-default": 86,
         }, {partition["classification"]: len(partition["candidateIds"])
             for partition in expected["semanticPartitions"]})
-        self.assertEqual(325, len(expected["candidateIds"]))
+        self.assertEqual(327, len(expected["candidateIds"]))
         self.assertEqual(set(expected["candidateIds"]),
                          audit.external_io_policy_cohort_candidate_ids(discovered))
 

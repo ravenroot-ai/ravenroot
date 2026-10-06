@@ -4,11 +4,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -96,10 +99,27 @@ class ReservedNetworkPolicyTest {
         var constructor = ReservedNetworkPolicy.PlaintextAuthorization.class.getDeclaredConstructor(
                 String.class, String.class, String.class, int.class);
         constructor.setAccessible(true);
-        var proof = constructor.newInstance("http", "pkg", "[FE80::A%25ETH0]", 8080);
+        var proof = constructor.newInstance("http", "pkg", "[FE80::A%ETH0]", 8080);
 
         assertTrue(proof.matches("http", "pkg", "fe80::a%ETH0", 8080));
-        assertTrue(proof.matches("http", "pkg", "[fe80::A%25ETH0]", 8080));
+        assertTrue(proof.matches("http", "pkg", "[fe80::A%ETH0]", 8080));
         assertFalse(proof.matches("http", "pkg", "fe80::a%eth0", 8080));
+        assertFalse(proof.matches("http", "pkg", "fe80::a%25ETH0", 8080));
+    }
+
+    @Test
+    void resolvedNumericZonesRemainDistinctInPlaintextProofs() throws Exception {
+        Inet6Address scopeTwo = (Inet6Address) InetAddress.getByName("fe80::1%2");
+        Inet6Address scopeTwoHundredFiftyTwo = (Inet6Address) InetAddress.getByName("fe80::1%252");
+        assertEquals(2, scopeTwo.getScopeId());
+        assertEquals(252, scopeTwoHundredFiftyTwo.getScopeId());
+
+        var constructor = ReservedNetworkPolicy.PlaintextAuthorization.class.getDeclaredConstructor(
+                String.class, String.class, String.class, int.class);
+        constructor.setAccessible(true);
+        var proof = constructor.newInstance("http", "pkg", "[FE80::1%2]", 8080);
+
+        assertTrue(proof.matches("http", "pkg", "fe80::1%2", 8080));
+        assertFalse(proof.matches("http", "pkg", "fe80::1%252", 8080));
     }
 }

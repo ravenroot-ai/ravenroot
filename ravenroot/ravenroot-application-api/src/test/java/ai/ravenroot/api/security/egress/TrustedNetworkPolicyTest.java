@@ -33,25 +33,53 @@ class TrustedNetworkPolicyTest {
     }
 
     @Test
-    void ipv6ZoneCaseIsExactWhileAddressAndDelimiterSpellingsNormalize() throws Exception {
+    void ipv6ZoneIsExactWhileAddressAndBracketSpellingsNormalize() throws Exception {
         TrustedNetworkPolicy policy = policy("""
                 {"version":1,"rules":[{"name":"link-local-http","protocols":["http"],
-                "ports":[8080],"hosts":["[FE80::A%25ETH0]"],"addresses":["fe80::/10"],
+                "ports":[8080],"hosts":["[FE80::A%ETH0]"],"addresses":["fe80::/10"],
                 "profiles":["pkg"],"allowPlaintext":true}]}
                 """);
         List<InetAddress> linkLocal = List.of(InetAddress.getByName("fe80::a"));
 
         assertTrue(policy.permitsAll("http", "pkg", "fe80::a%ETH0", 8080, linkLocal));
         assertTrue(policy.permitsAllPlaintext(
-                "http", "pkg", "[fe80::A%25ETH0]", 8080, linkLocal));
+                "http", "pkg", "[fe80::A%ETH0]", 8080, linkLocal));
         assertFalse(policy.permitsAll("http", "pkg", "fe80::a%eth0", 8080, linkLocal));
         assertFalse(policy.permitsAllPlaintext(
-                "http", "pkg", "[FE80::A%25eth0]", 8080, linkLocal));
+                "http", "pkg", "[FE80::A%eth0]", 8080, linkLocal));
+        assertFalse(policy.permitsAllPlaintext(
+                "http", "pkg", "[FE80::A%25ETH0]", 8080, linkLocal));
         assertFalse(policy.permitsAllPlaintext("websocket", "pkg", "fe80::a%ETH0", 8080, linkLocal));
         assertFalse(policy.permitsAllPlaintext("http", "other", "fe80::a%ETH0", 8080, linkLocal));
         assertFalse(policy.permitsAllPlaintext("http", "pkg", "fe80::a%ETH0", 8081, linkLocal));
         assertFalse(policy.permitsAllPlaintext("http", "pkg", "fe80::a%ETH0", 8080,
                 List.of(InetAddress.getByName("fd00::a"))));
+    }
+
+    @Test
+    void encodedLookingAndNumericZoneSuffixesRemainDistinct() throws Exception {
+        TrustedNetworkPolicy named = policy("""
+                {"version":1,"rules":[{"name":"encoded-zone","protocols":["http"],
+                "ports":[8080],"hosts":["[FE80::A%25ETH0]"],"addresses":["fe80::/10"],
+                "profiles":["pkg"],"allowPlaintext":true}]}
+                """);
+        TrustedNetworkPolicy numeric = policy("""
+                {"version":1,"rules":[{"name":"numeric-zone","protocols":["http"],
+                "ports":[8080],"hosts":["fe80::1%2"],"addresses":["fe80::/10"],
+                "profiles":["pkg"],"allowPlaintext":true}]}
+                """);
+        List<InetAddress> linkLocal = List.of(InetAddress.getByName("fe80::1"));
+
+        assertTrue(named.permitsAllPlaintext(
+                "http", "pkg", "fe80::a%25ETH0", 8080, linkLocal));
+        assertTrue(named.permitsAllPlaintext(
+                "http", "pkg", "[fe80::A%25ETH0]", 8080, linkLocal));
+        assertFalse(named.permitsAllPlaintext(
+                "http", "pkg", "fe80::a%ETH0", 8080, linkLocal));
+        assertTrue(numeric.permitsAll("http", "pkg", "fe80::1%2", 8080, linkLocal));
+        assertFalse(numeric.permitsAll("http", "pkg", "fe80::1%252", 8080, linkLocal));
+        assertFalse(numeric.permitsAllPlaintext(
+                "http", "pkg", "[fe80::1%252]", 8080, linkLocal));
     }
 
     @Test
@@ -70,7 +98,7 @@ class TrustedNetworkPolicyTest {
 
     @Test
     void zoneGrammarDoesNotBroadenDnsOrMalformedIpv6Hosts() {
-        for (String host : List.of("service.example%ETH0", "fe80::1%ETH:0", "fe80::1%25")) {
+        for (String host : List.of("service.example%ETH0", "fe80::1%ETH:0", "fe80::1%")) {
             assertThrows(IllegalArgumentException.class, () -> policy("""
                     {"version":1,"rules":[{"name":"invalid-zone","protocols":["http"],
                     "ports":[8080],"hosts":["%s"],"addresses":["fe80::/10"],

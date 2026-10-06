@@ -349,9 +349,7 @@ public final class TrustedNetworkPolicy {
         if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
         int zone = host.indexOf('%');
         if (zone < 0) return host.toLowerCase(Locale.ROOT);
-        int separatorLength = host.regionMatches(true, zone, "%25", 0, 3) ? 3 : 1;
-        return host.substring(0, zone).toLowerCase(Locale.ROOT)
-                + "%" + host.substring(zone + separatorLength);
+        return host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     private static boolean numericShape(String value) {

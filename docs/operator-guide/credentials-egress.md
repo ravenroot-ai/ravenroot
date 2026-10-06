@@ -30,7 +30,11 @@ and the DNS guard receive the same policy.
 
 HTTP allowlists and fixed HTTP origins apply the same identity rule. DNS names and IPv6 address
 digits are case-normalized, while every byte after the first `%` remains exact through admission,
-plaintext proof matching, the stored transport URI, and request signing.
+plaintext proof matching, the stored transport URI, and request signing. The same rule applies to
+node-package origin, credential-placement and signing grants, and Telegram URL-host profiles
+(including environment configuration). Telegram button and callback URLs must satisfy both their
+profile and the reserved-address policy; passing one never widens the other. The original URL is
+forwarded to Telegram, without Ravenroot fetching that button or callback destination.
 
 Unset or blank configuration preserves the shipped localhost-only exception
 `localhost:LOOPBACK`; it does not authorize other loopback names or addresses. The development

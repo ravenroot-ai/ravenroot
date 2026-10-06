@@ -133,7 +133,7 @@ public final class NodePackageEgressPolicy {
     public record Origin(String scheme, String host, int port) {
         public Origin {
             scheme = safeLower(scheme, "scheme");
-            host = safeLower(host, "host");
+            host = normalizedHost(host);
             if (!Set.of("http", "https", "ws", "wss").contains(scheme)) {
                 throw new IllegalArgumentException("Unsupported egress scheme");
             }
@@ -145,7 +145,7 @@ public final class NodePackageEgressPolicy {
         static Origin from(URI uri) {
             Objects.requireNonNull(uri, "destination");
             String scheme = safeLower(uri.getScheme(), "scheme");
-            String host = safeLower(uri.getHost(), "host");
+            String host = uri.getHost();
             int port = uri.getPort();
             if (port == -1) {
                 port = switch (scheme) {
@@ -298,6 +298,13 @@ public final class NodePackageEgressPolicy {
         }
 
         public NodePackageEgressPolicy build() { return new NodePackageEgressPolicy(this); }
+    }
+
+    private static String normalizedHost(String value) {
+        String host = safeToken(value, "host", 253);
+        int zone = host.indexOf('%');
+        return zone < 0 ? host.toLowerCase(Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     private static String safeLower(String value, String name) {

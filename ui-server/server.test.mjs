@@ -18,6 +18,13 @@ test('validates runtime configuration, refuses credentials and insecure TLS', ()
   for (const value of ['http://user:secret@backend', 'ftp://backend', 'https://backend/a%2fb', 'https://backend?a=b']) {
     assert.throws(() => configuration({ RAVENROOT_UI_BACKEND_URL: value }));
   }
+  const sentinel = 'diagnostic-sentinel';
+  let failure;
+  try { configuration({ RAVENROOT_UI_BACKEND_URL: `http://user:${sentinel}@` }); }
+  catch (error) { failure = error; }
+  assert.match(failure?.message, /UI_BACKEND_CONFIGURATION_REFUSED/);
+  const diagnostic = JSON.stringify({ message: failure.message, stack: failure.stack, ...failure });
+  assert.ok(!diagnostic.includes(sentinel));
   for (const value of ['/a/', '/a/../b', '/a"', '//a']) assert.throws(() => configuration({ RAVENROOT_UI_PREFIX: value }));
   assert.throws(() => configuration({ NODE_TLS_REJECT_UNAUTHORIZED: '0' }));
 });

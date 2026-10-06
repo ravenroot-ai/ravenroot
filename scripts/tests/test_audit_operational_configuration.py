@@ -8118,11 +8118,16 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
             source_version = str(latest_release(source))
             unrelated_version = str(expected_next(parse_tag(f"v{source_version}"), "patch"))
             unrelated_tag = f"v{unrelated_version}"
-            unrelated_revision = fixture_git(
-                source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                "commit-tree", "HEAD^{tree}", "-m", "unrelated future release")
-            fixture_git(source, "tag", unrelated_tag, unrelated_revision)
+            if not fixture_git(source, "tag", "--list", unrelated_tag).splitlines():
+                unrelated_revision = fixture_git(
+                    source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit-tree", "HEAD^{tree}", "-m", "unrelated future release")
+                fixture_git(source, "tag", unrelated_tag, unrelated_revision)
             unrelated_tag_oid = fixture_git(source, "rev-parse", unrelated_tag)
+            self.assertIn(
+                unrelated_tag,
+                fixture_git(source, "tag", "--no-merged", "HEAD", "--list", "v*").splitlines(),
+            )
             reachable_tags = fixture_git(
                 source, "tag", "--merged", "HEAD", "--list", "v*").splitlines()
             reachable_tag_oids = {

@@ -158,15 +158,24 @@ public final class ReservedNetworkPolicy {
     }
 
     /**
-     * Checks a connector host without resolving it. Hostnames pass to the JVM resolver guard;
-     * numeric literals are classified here. Malformed numeric-looking values fail closed.
+     * Checks a connector host without DNS. Hostnames pass to the JVM resolver guard; unscoped
+     * numeric literals are classified directly. A scoped IPv6 literal is parsed by the JDK so its
+     * raw zone is bound to the physical scope that the connection will use. Malformed or
+     * unresolvable numeric-looking values fail closed.
      *
      * @param host destination host, with optional IPv6 brackets and zone identifier
      * @return true for a hostname, public literal, or exact operator exception
      */
     public boolean permitsLiteral(String host) {
-        if (legacyPermitsLiteral(host)) return true;
         Literal literal = Literal.parse(host);
+        if (isZonedIpv6Literal(literal)) {
+            try {
+                return resolve(host).stream().allMatch(address -> permits(host, address));
+            } catch (SecurityException refused) {
+                return false;
+            }
+        }
+        if (legacyPermitsLiteral(host)) return true;
         return literal.kind() == LiteralKind.LITERAL
                 && trustedNetworks.permitsReservedAddress(host, literal.address());
     }
@@ -311,6 +320,10 @@ public final class ReservedNetworkPolicy {
         String addressKey = normalizedDelimiter < 0
                 ? normalized : normalized.substring(0, normalizedDelimiter);
         return addressKey + "%" + requestedZone;
+    }
+
+    private static boolean isZonedIpv6Literal(Literal literal) {
+        return literal.kind() == LiteralKind.LITERAL && literal.normalized().contains("%");
     }
 
     private boolean legacyPermitsLiteral(String host) {

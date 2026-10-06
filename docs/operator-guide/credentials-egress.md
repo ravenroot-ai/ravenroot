@@ -23,8 +23,10 @@ classifier. Graph properties and payloads cannot add exceptions. Entries are com
 `[::1]:LOOPBACK` or `[fe80::1%eth0]:LINK_LOCAL`. Native IPv4 aliases and native, mapped, or compatible
 IPv6 forms are distinct authorization keys; a grant for one spelling or address family does not
 grant another. Zone identifiers are exact and case-sensitive, while URI `%25` is accepted as the
-zone delimiter. Restart the process after changing the environment so every immutable connector
-snapshot and the DNS guard receive the same policy.
+zone delimiter in the exception declaration. A connector host keeps its raw zone identity and is
+bound to the scope selected by the resolver: raw `%2` and `%252` therefore remain distinct physical
+scopes. Restart the process after changing the environment so every immutable connector snapshot
+and the DNS guard receive the same policy.
 
 Unset or blank configuration preserves the shipped localhost-only exception
 `localhost:LOOPBACK`; it does not authorize other loopback names or addresses. The development

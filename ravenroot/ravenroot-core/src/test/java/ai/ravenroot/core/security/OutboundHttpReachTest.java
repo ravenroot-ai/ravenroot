@@ -7,8 +7,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -141,6 +144,38 @@ class OutboundHttpReachTest {
         assertDoesNotThrow(() -> allowing("127.0.0.1").requireAllowed(URI.create("http://127.0.0.1/")));
         assertThrows(SecurityException.class,
                 () -> allowing("10.0.0.1").requireAllowed(URI.create("http://10.0.0.1/")));
+    }
+
+    @Test
+    @DisplayName("a scoped IPv6 exception authorizes only the physical scope the HTTP URI uses")
+    void scopedIpv6ExceptionCannotAliasAnotherHttpUriScope() {
+        URI scopeTwo = URI.create("http://[fe80::1%2]/");
+        URI scopeTwoHundredFiftyTwo = URI.create("http://[fe80::1%252]/");
+        OutboundHttpPolicy policy = allowing(scopeTwo.getHost(), scopeTwoHundredFiftyTwo.getHost());
+
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[fe80::1%252]:LINK_LOCAL"));
+        assertDoesNotThrow(() -> policy.requireAllowed(scopeTwo));
+        SecurityException refused = assertThrows(SecurityException.class,
+                () -> policy.requireAllowed(scopeTwoHundredFiftyTwo));
+        assertTrue(refused.getMessage().contains("reserved address"));
+
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[fe80::1%25252]:LINK_LOCAL"));
+        assertDoesNotThrow(() -> policy.requireAllowed(scopeTwoHundredFiftyTwo));
+
+        String nonAdmittingTrustedJson = """
+                {"version":1,"rules":[{"name":"numeric-zone","protocols":["http"],
+                "ports":[80],"hosts":["fe80::1%2"],"addresses":["fd00::/8"],
+                "profiles":[],"allowPlaintext":false}]}
+                """.replaceAll("\\s+", "");
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromEnvironment(Map.of(
+                ai.ravenroot.api.security.egress.ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE,
+                "[fe80::1%252]:LINK_LOCAL",
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(
+                        nonAdmittingTrustedJson.getBytes(StandardCharsets.UTF_8)))));
+        assertThrows(SecurityException.class, () -> policy.requireAllowed(scopeTwo));
     }
 
     // ---- controls that already existed, pinned so they cannot regress ----

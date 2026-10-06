@@ -13,6 +13,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,13 +44,15 @@ class ReservedNetworkPolicyTest {
         ReservedNetworkPolicy direct = ReservedNetworkPolicy.fromCommaSeparatedExceptions(exceptions);
         ReservedNetworkPolicy environment = ReservedNetworkPolicy.fromEnvironment(
                 Map.of(ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE, exceptions));
+        ReservedNetworkPolicy encodedDelimiter = ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[::1]:LOOPBACK,[fe80::1%25eth0]:LINK_LOCAL");
+        ReservedNetworkPolicy differentCase = ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[::1]:LOOPBACK,[fe80::1%25ETH0]:LINK_LOCAL");
 
-        for (ReservedNetworkPolicy policy : java.util.List.of(direct, environment)) {
-            assertTrue(policy.permitsLiteral("[::1]"));
-            assertTrue(policy.permitsLiteral("[fe80::1%25eth0]"));
-            assertFalse(policy.permitsLiteral("[fe80::1%25ETH0]"));
-            assertFalse(policy.permitsLiteral("[fe80::1%25other]"));
-        }
+        assertTrue(direct.permitsLiteral("[::1]"));
+        assertEquals(direct.exemptNames(), environment.exemptNames());
+        assertEquals(direct.exemptNames(), encodedDelimiter.exemptNames());
+        assertNotEquals(direct.exemptNames(), differentCase.exemptNames());
         assertThrows(IllegalArgumentException.class,
                 () -> ReservedNetworkPolicy.fromCommaSeparatedExceptions("::1:LOOPBACK"));
     }
@@ -57,15 +60,22 @@ class ReservedNetworkPolicyTest {
     @Test
     void resolvedLegacyZonesCannotAliasAnotherPhysicalScope() throws Exception {
         ReservedNetworkPolicy scopeTwoPolicy = ReservedNetworkPolicy.fromCommaSeparatedExceptions(
-                "[fe80::1%2]:LINK_LOCAL");
+                "[fe80::1%252]:LINK_LOCAL");
         Inet6Address scopeTwo = (Inet6Address) InetAddress.getByName("fe80::1%2");
         Inet6Address scopeTwoHundredFiftyTwo =
                 (Inet6Address) InetAddress.getByName("fe80::1%252");
+        assertEquals(2, scopeTwo.getScopeId());
+        assertEquals(252, scopeTwoHundredFiftyTwo.getScopeId());
 
         assertTrue(scopeTwoPolicy.permits("fe80::1%2", scopeTwo));
+        assertTrue(scopeTwoPolicy.permitsLiteral("[fe80::1%2]"));
+        assertDoesNotThrow(() -> scopeTwoPolicy.requireAllowedLiteral("fe80::1%2"));
         assertDoesNotThrow(() -> scopeTwoPolicy.requireAllowedDestination(
                 "http", "pkg", "fe80::1%2", 8080));
         assertFalse(scopeTwoPolicy.permits("fe80::1%252", scopeTwoHundredFiftyTwo));
+        assertFalse(scopeTwoPolicy.permitsLiteral("[fe80::1%252]"));
+        assertThrows(SecurityException.class,
+                () -> scopeTwoPolicy.requireAllowedLiteral("fe80::1%252"));
         assertThrows(SecurityException.class, () -> scopeTwoPolicy.requireAllowedDestination(
                 "http", "pkg", "fe80::1%252", 8080));
 
@@ -76,18 +86,38 @@ class ReservedNetworkPolicyTest {
                 """.replaceAll("\\s+", "");
         ReservedNetworkPolicy combinedPolicy = ReservedNetworkPolicy.fromEnvironment(Map.of(
                 ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE,
-                "[fe80::1%2]:LINK_LOCAL",
+                "[fe80::1%252]:LINK_LOCAL",
                 TrustedNetworkPolicy.ENVIRONMENT_VARIABLE,
                 Base64.getEncoder().encodeToString(trustedJson.getBytes(StandardCharsets.UTF_8))));
         assertFalse(combinedPolicy.permits("fe80::1%252", scopeTwoHundredFiftyTwo));
+        assertFalse(combinedPolicy.permitsLiteral("fe80::1%252"));
         assertThrows(SecurityException.class, () -> combinedPolicy.requireAllowedDestination(
                 "http", "pkg", "fe80::1%252", 8080));
+
+        String nonAdmittingTrustedJson = """
+                {"version":1,"rules":[{"name":"numeric-zone","protocols":["http"],
+                "ports":[80],"hosts":["fe80::1%2"],"addresses":["fd00::/8"],
+                "profiles":[],"allowPlaintext":false}]}
+                """.replaceAll("\\s+", "");
+        ReservedNetworkPolicy constrainedPolicy = ReservedNetworkPolicy.fromEnvironment(Map.of(
+                ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE,
+                "[fe80::1%252]:LINK_LOCAL",
+                TrustedNetworkPolicy.ENVIRONMENT_VARIABLE,
+                Base64.getEncoder().encodeToString(
+                        nonAdmittingTrustedJson.getBytes(StandardCharsets.UTF_8))));
+        assertFalse(constrainedPolicy.permits("fe80::1%2", scopeTwo));
+        assertFalse(constrainedPolicy.permitsLiteral("fe80::1%2"));
+        assertThrows(SecurityException.class,
+                () -> constrainedPolicy.requireAllowedLiteral("fe80::1%2"));
 
         ReservedNetworkPolicy scopeTwoHundredFiftyTwoPolicy =
                 ReservedNetworkPolicy.fromCommaSeparatedExceptions(
                         "[fe80::1%25252]:LINK_LOCAL");
         assertTrue(scopeTwoHundredFiftyTwoPolicy.permits(
                 "fe80::1%252", scopeTwoHundredFiftyTwo));
+        assertTrue(scopeTwoHundredFiftyTwoPolicy.permitsLiteral("[fe80::1%252]"));
+        assertDoesNotThrow(() -> scopeTwoHundredFiftyTwoPolicy.requireAllowedLiteral(
+                "fe80::1%252"));
         assertDoesNotThrow(() -> scopeTwoHundredFiftyTwoPolicy.requireAllowedDestination(
                 "http", "pkg", "fe80::1%252", 8080));
     }

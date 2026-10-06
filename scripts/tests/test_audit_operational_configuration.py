@@ -1244,7 +1244,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                  for contract in expected["contracts"]))
         self.assertEqual({
             "derived": 11, "presentation-text": 38,
-            "protocol-or-format-invariant": 104,
+            "protocol-or-format-invariant": 106,
             "published-contract-description": 2,
             "security-ceiling-or-default": 86,
         }, {partition["classification"]: len(partition["candidateIds"])

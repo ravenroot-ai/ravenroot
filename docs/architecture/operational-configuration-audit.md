@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 140.
+Checked source reconciliations: 141.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 25202 candidates.
@@ -6182,7 +6182,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-6e63b93a68ec52b3ae12` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java:184` `if` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-b15855ce09072c5ff57f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java:184` `if` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-f204fd56af4db4ce4df2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java:184` `if` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
-| `oc-a9a220e1100854479b64` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java:203` `timeout` | java | retained | derived | The closed external-I/O source proof assigns this exact candidate to the derived-runtime-value partition. |
+| `oc-a9a220e1100854479b64` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java:210` `timeout` | java | retained | derived | The closed external-I/O source proof assigns this exact candidate to the derived-runtime-value partition. |
 | `oc-1d535af115d5f4737042` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java:26` `ResponseTooLargeException` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-68dcb5ced589ea6cdc0d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java:39` `ResponseMediaTypeException` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-6f62b6f844024fd4c0f2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java:45` `ResponseEncodingException` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |

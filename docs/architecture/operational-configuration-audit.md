@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 136.
+Checked source reconciliations: 137.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 25200 candidates.
@@ -5164,7 +5164,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-d238be815f6fd3c0e239` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:24` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-e5d375ef0a55321bd5ca` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:24` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-fe8ad35a5a95da6a3e53` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:26` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
-| `oc-fad38befb3e4c14b5180` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:465` `parseIpv6` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
+| `oc-fad38befb3e4c14b5180` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:460` `parseIpv6` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-77c459ccaf6c25571550` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java:29` `TrustedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-c88fc8aff66e40d87194` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java:29` `TrustedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-a1c6917cccf35d88c435` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java:31` `TrustedNetworkPolicy` | java | retained | security-ceiling-or-default | The closed external-I/O source proof assigns this exact candidate to the fixed-security-and-parser-safety partition. |

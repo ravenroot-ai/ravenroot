@@ -7524,7 +7524,7 @@ def external_io_policy_authority_from_source(
         return None
     trusted_source = sources[EXTERNAL_IO_TRUSTED_POLICY_PATH]
     if _source_digest(trusted_source) != \
-            "bee4bff52c729a06e027c380bd3b9247f207688eccc891e086a2e3ea17a2a085" \
+            "3efb8a8010b8100f7a21cb301d93ce528f2f24ef3a2d67928520d1fc13464f25" \
             or java_record_components(trusted_source, "Rule") != (
                 "name", "protocols", "ports", "hosts", "addresses", "profiles", "allowPlaintext"):
         return None

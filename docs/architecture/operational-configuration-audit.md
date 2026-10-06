@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 25200 |
+| Atomic operational candidates discovered | 25202 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 25200 |
+| Reviewed | 25202 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 326 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2020 |
-| Retained protocol or format invariants | 10267 |
+| Retained protocol or format invariants | 10269 |
 | Retained published contract descriptions | 556 |
 | Retained presentation text | 748 |
 | Retained derived values | 1103 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 137.
+Checked source reconciliations: 138.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 25200 candidates.
+zero-count or unclassified rows as needed and sums to 25202 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 25200 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 23367 |
+| retained | 23369 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 25200 candidates.
 | derived | 1103 |
 | operator-configurable | 1833 |
 | presentation-text | 748 |
-| protocol-or-format-invariant | 10267 |
+| protocol-or-format-invariant | 10269 |
 | published-contract-description | 556 |
 | security-ceiling-or-default | 2020 |
 | test-fixture | 8673 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 25200 candidates.
 |---|---:|
 | deployment | 3012 |
 | deployment-example | 20 |
-| java | 7508 |
+| java | 7510 |
 | script | 2530 |
 | test-fixture | 8673 |
 | ui | 3457 |
@@ -115,7 +115,7 @@ assigned to an issue retroactively.
 | #316 | 1 |
 | #317 | 149 |
 | #318 | 107 |
-| #319 | 332 |
+| #319 | 334 |
 | #320 | 1481 |
 | #321 | 8511 |
 | Retained; no remediation required | 14614 |
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 25200 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 25200 |
+| Semantically classified additions | 2 |
+| Current candidates | 25202 |
 
 ## Final semantic review
 
@@ -716,7 +716,7 @@ Retained external-I/O evidence is closed by semantic role:
 |---|---|---:|
 | derived-runtime-value | derived | 11 |
 | diagnostic-presentation | presentation-text | 38 |
-| protocol-and-structural-format | protocol-or-format-invariant | 104 |
+| protocol-and-structural-format | protocol-or-format-invariant | 106 |
 | generated-public-contract | published-contract-description | 2 |
 | fixed-security-and-parser-safety | security-ceiling-or-default | 86 |
 
@@ -5161,10 +5161,12 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-fda8c9beaed9facd626b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/AuthorizationAction.java:96` `AuthorizationAction` | java | retained | protocol-or-format-invariant | This atom is an exact environment key, authorization scope, route/method/status/query name, policy revision label, or bounded-loop grammar consumed as compatibility vocabulary. |
 | `oc-04ea38360638202793a3` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/SecurityContext.java:50` `SecurityContext` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-9d55f93465fe8fa5669b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/SecurityContext.java:50` `SecurityContext` | java | retained | protocol-or-format-invariant | These literals are exact Java property keys; values and defaults are reviewed at their typed consumers. |
-| `oc-d238be815f6fd3c0e239` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:24` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
-| `oc-e5d375ef0a55321bd5ca` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:24` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
-| `oc-fe8ad35a5a95da6a3e53` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:26` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
-| `oc-fad38befb3e4c14b5180` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:460` `parseIpv6` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
+| `oc-d238be815f6fd3c0e239` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:25` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
+| `oc-e5d375ef0a55321bd5ca` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:25` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
+| `oc-fe8ad35a5a95da6a3e53` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:27` `ReservedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
+| `oc-fa6d56edf7e3e8b68537` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:297` `resolvedLegacyDestination` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
+| `oc-41ca5eb91c423fae2cf7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:310` `if` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
+| `oc-fad38befb3e4c14b5180` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java:492` `parseIpv6` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-77c459ccaf6c25571550` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java:29` `TrustedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-c88fc8aff66e40d87194` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java:29` `TrustedNetworkPolicy` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-a1c6917cccf35d88c435` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/TrustedNetworkPolicy.java:31` `TrustedNetworkPolicy` | java | retained | security-ceiling-or-default | The closed external-I/O source proof assigns this exact candidate to the fixed-security-and-parser-safety partition. |

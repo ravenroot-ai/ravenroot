@@ -5845,7 +5845,8 @@ EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS: dict[str, tuple[str, ...]] = {
         "oc-254c32f25a1e19cc2321", "oc-2a4f6ed2039a3b143e65", "oc-40034849492d3d5c2b6c",
         "oc-4d1f497966dc949d8571", "oc-7e1a3469d9a397bf7aca", "oc-9d080d2b6cad5a14427b",
         "oc-b204fc45e73c92382d1f", "oc-b2b324da0ad7ed8c1c1d", "oc-b57e0ec28d1bf40ac9e6",
-        "oc-ef40b49868837c862724", "oc-f829fd6985ae223a52b3"),
+        "oc-ef40b49868837c862724", "oc-f829fd6985ae223a52b3",
+        "oc-41ca5eb91c423fae2cf7", "oc-fa6d56edf7e3e8b68537"),
     "security-ceiling-or-default": (
         "oc-8b95f2348c416ec92e84", "oc-19d6cb049c59ad45f369",
         "oc-b8d9052b4652a6a79b2b", "oc-33335576c3b015d33f3f",

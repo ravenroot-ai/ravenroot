@@ -37,15 +37,30 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
         try {
             int port = integer(p[1]);
             boolean tls = strictBoolean(p[2]);
+            Set<String> exchanges = csv(p[7]);
+            Set<String> routingKeys = csv(p[9]);
+            Set<String> headers = csv(p[10]);
+            Set<String> replyTo = csv(p[11]);
+            boolean allowPersistent = strictBoolean(p[12]);
+            int maxPriority = integer(p[13]);
+            long maxExpirationMs = Long.parseLong(p[14]);
+            int maxConcurrency = integer(p[15]);
+            int maxPerSecond = integer(p[16]);
+            int timeoutMs = integer(p[17]);
+            int maxBodyBytes = integer(p[18]);
+            int retries = integer(p[19]);
+            AmqpProfile.requireValidShape(tenant, profile, p[0], port, p[3], p[4], p[5], p[6],
+                    exchanges, p[8], routingKeys, headers, replyTo, maxPriority, maxExpirationMs,
+                    maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries);
             destinationPolicy.requireAllowedDestination(
                     "amqp091", tenant + "/" + profile, p[0], port);
             ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = null;
             if (!tls && !AmqpProfile.loopback(p[0])) plaintextAuthorization = destinationPolicy
                     .authorizePlaintext("amqp091", tenant + "/" + profile, p[0], port);
             return Optional.of(new AmqpProfile(tenant, profile, p[0], port, tls, p[3],
-                    p[4], p[5], p[6], csv(p[7]), p[8], csv(p[9]), csv(p[10]), csv(p[11]),
-                    strictBoolean(p[12]), integer(p[13]), Long.parseLong(p[14]), integer(p[15]), integer(p[16]),
-                    integer(p[17]), integer(p[18]), integer(p[19]), plaintextAuthorization));
+                    p[4], p[5], p[6], exchanges, p[8], routingKeys, headers, replyTo,
+                    allowPersistent, maxPriority, maxExpirationMs, maxConcurrency, maxPerSecond,
+                    timeoutMs, maxBodyBytes, retries, plaintextAuthorization));
         } catch (SecurityException refused) {
             throw refused;
         } catch (RuntimeException invalid) {

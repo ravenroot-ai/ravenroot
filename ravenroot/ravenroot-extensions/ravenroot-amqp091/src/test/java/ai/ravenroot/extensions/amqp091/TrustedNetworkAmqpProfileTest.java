@@ -13,6 +13,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TrustedNetworkAmqpProfileTest {
     @Test
+    void malformedProfileIsRejectedBeforeDestinationAuthorization() {
+        String key = EnvironmentAmqpProfileResolver.environmentVariableName("t", "p");
+        String emptyHost = ";5672;false;/;user;secret;orders;audit;created;updated;trace;responses;"
+                + "true;5;60000;2;10;1000;4096;2";
+        String invalidPort = "localhost;0;false;/;user;secret;orders;audit;created;updated;trace;responses;"
+                + "true;5;60000;2;10;1000;4096;2";
+
+        assertTrue(new EnvironmentAmqpProfileResolver(Map.of(key, emptyHost)).resolve("t", "p").isEmpty());
+        assertTrue(new EnvironmentAmqpProfileResolver(Map.of(key, invalidPort)).resolve("t", "p").isEmpty());
+    }
+
+    @Test
     void authenticatedNonLoopbackPlaintextRequiresExactAdministratorRule() {
         String key = EnvironmentAmqpProfileResolver.environmentVariableName("t", "p");
         String value = "10.20.1.7;5672;false;/;user;secret;orders;audit;created;updated;trace;responses;"

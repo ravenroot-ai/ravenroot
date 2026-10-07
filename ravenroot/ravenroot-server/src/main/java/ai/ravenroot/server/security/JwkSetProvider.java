@@ -37,7 +37,8 @@ public final class JwkSetProvider {
     }
 
     JwkSetProvider(URI uri, Duration ttl, TransportPolicy transportPolicy, Clock clock) {
-        this.uri = validateUri(uri);
+        this.uri = validateUri(uri,
+                ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(System.getenv()));
         this.ttl = requireRange(ttl, Duration.ofSeconds(30), Duration.ofHours(1), "JWKS cache TTL");
         this.requestTimeout = transportPolicy.requestTimeout();
         this.clock = clock;
@@ -89,17 +90,27 @@ public final class JwkSetProvider {
         }
     }
 
-    private static URI validateUri(URI uri) {
+    private static URI validateUri(URI uri,
+                                   ai.ravenroot.api.security.egress.ReservedNetworkPolicy destinationPolicy) {
         if (uri == null || uri.getUserInfo() != null || uri.getFragment() != null || uri.getHost() == null) {
             throw new IllegalArgumentException("JWKS URI must be an absolute URI without credentials or fragment");
         }
         if ("https".equalsIgnoreCase(uri.getScheme())) {
+            destinationPolicy.requireAllowedDestination("jwks", "authentication", uri.getHost(),
+                    uri.getPort() == -1 ? 443 : uri.getPort());
             return uri;
         }
         if ("http".equalsIgnoreCase(uri.getScheme()) && isLoopbackLiteral(uri.getHost())) {
             return uri;
         }
-        throw new IllegalArgumentException("JWKS URI must use HTTPS (HTTP is restricted to loopback literals)");
+        if ("http".equalsIgnoreCase(uri.getScheme())) {
+            int port = uri.getPort() == -1 ? 80 : uri.getPort();
+            destinationPolicy.requireAllowedDestination(
+                    "jwks", "authentication", uri.getHost(), port);
+            destinationPolicy.requirePlaintext("jwks", "authentication", uri.getHost(), port);
+            return uri;
+        }
+        throw new IllegalArgumentException("JWKS URI must use HTTP or HTTPS");
     }
 
     private static boolean isLoopbackLiteral(String host) {

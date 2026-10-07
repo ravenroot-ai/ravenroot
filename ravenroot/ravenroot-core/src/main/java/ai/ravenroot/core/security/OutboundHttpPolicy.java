@@ -1,5 +1,6 @@
 package ai.ravenroot.core.security;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.core.security.egress.EgressAddressGuard;
 
 import java.net.URI;
@@ -85,7 +86,7 @@ public final class OutboundHttpPolicy {
                               Collection<Integer> allowedPorts, long maximumResponseBytes,
                               long maximumRequestBytes) {
         this.allowedHosts = allowedHosts == null ? Set.of() : allowedHosts.stream()
-                .map(String::trim).filter(value -> !value.isEmpty()).map(value -> value.toLowerCase(Locale.ROOT))
+                .map(String::trim).filter(value -> !value.isEmpty()).map(OutboundHttpPolicy::normalizeHost)
                 .collect(Collectors.toUnmodifiableSet());
         this.maximumTimeout = maximumTimeout == null ? Duration.ofSeconds(30) : maximumTimeout;
         this.allowedPorts = allowedPorts == null || allowedPorts.isEmpty()
@@ -161,8 +162,19 @@ public final class OutboundHttpPolicy {
      * never allowlisted is refused without any resolution attempt at all.
      */
     public void requireAllowed(URI uri) {
+        requireAllowed(uri, null, null, null);
+    }
+
+    /**
+     * Applies the ordinary host and port grant while accepting only an exact administrator proof
+     * for a reserved plaintext literal. The transport resolver still revalidates the address when
+     * the socket is opened; this overload only prevents the context-free literal precheck from
+     * discarding scope already established by the trusted configuration resolver.
+     */
+    public void requireAllowed(URI uri, ReservedNetworkPolicy.PlaintextAuthorization authorization,
+                               String protocol, String profile) {
         String scheme = uri == null ? "" : String.valueOf(uri.getScheme()).toLowerCase(Locale.ROOT);
-        String host = uri == null || uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        String host = uri == null || uri.getHost() == null ? "" : normalizeHost(uri.getHost());
         if (!("http".equals(scheme) || "https".equals(scheme)) || !allowedHosts.contains(host)) {
             throw new SecurityException("Outbound HTTP destination is not allowlisted: " + host);
         }
@@ -173,7 +185,9 @@ public final class OutboundHttpPolicy {
         if (!allowedPorts.contains(port)) {
             throw new SecurityException("Outbound HTTP port is not allowlisted: " + host + ":" + port);
         }
-        requireLiteralNotReserved(host);
+        if (authorization == null || !authorization.matches(protocol, profile, host, port)) {
+            requireLiteralNotReserved(host);
+        }
     }
 
     /**
@@ -183,6 +197,13 @@ public final class OutboundHttpPolicy {
      */
     private void requireLiteralNotReserved(String host) {
         EgressAddressGuard.requireAllowedLiteral(host);
+    }
+
+    private static String normalizeHost(String host) {
+        int zone = host.indexOf('%');
+        return zone < 0
+                ? host.toLowerCase(Locale.ROOT)
+                : host.substring(0, zone).toLowerCase(Locale.ROOT) + host.substring(zone);
     }
 
     public Duration timeout(long requestedMillis) {

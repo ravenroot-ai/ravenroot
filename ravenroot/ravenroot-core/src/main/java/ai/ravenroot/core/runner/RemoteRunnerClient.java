@@ -19,13 +19,23 @@ public final class RemoteRunnerClient implements RunnerControlClient {
         this(endpoint, token, RunnerWorkerConfiguration.defaults());
     }
     public RemoteRunnerClient(URI endpoint, Supplier<String> token, RunnerWorkerConfiguration configuration) {
+        this(endpoint, token, configuration,
+                ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+    RemoteRunnerClient(URI endpoint, Supplier<String> token, RunnerWorkerConfiguration configuration,
+                       ai.ravenroot.api.security.egress.ReservedNetworkPolicy destinationPolicy) {
         this.configuration = Objects.requireNonNull(configuration);
-        if ((!endpoint.getScheme().equals("https") && !(endpoint.getScheme().equals("http")
-                && Set.of("127.0.0.1", "[::1]", "localhost").contains(endpoint.getHost())))
+        if ((!endpoint.getScheme().equals("https") && !endpoint.getScheme().equals("http"))
                 || endpoint.getRawUserInfo() != null || endpoint.getRawQuery() != null || endpoint.getRawFragment() != null
                 || !(endpoint.getPath().isEmpty() || endpoint.getPath().equals("/"))) {
-            throw new IllegalArgumentException("runner endpoint must be an HTTPS origin or explicit loopback origin");
+            throw new IllegalArgumentException("runner endpoint must be an HTTP origin");
         }
+        int port = endpoint.getPort() == -1 ? ("https".equals(endpoint.getScheme()) ? 443 : 80) : endpoint.getPort();
+        boolean legacyLocal = Set.of("127.0.0.1", "[::1]", "::1", "localhost").contains(endpoint.getHost());
+        if (!legacyLocal) destinationPolicy.requireAllowedDestination(
+                "runner", "control-plane", endpoint.getHost(), port);
+        if ("http".equals(endpoint.getScheme()) && !legacyLocal)
+            destinationPolicy.requirePlaintext("runner", "control-plane", endpoint.getHost(), port);
         this.endpoint = endpoint.resolve("/v1/runner-plane/"); this.token = Objects.requireNonNull(token);
         this.http = HttpClient.newBuilder().connectTimeout(configuration.httpConnectTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER).build();

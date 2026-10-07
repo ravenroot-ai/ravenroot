@@ -7,8 +7,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -143,6 +146,64 @@ class OutboundHttpReachTest {
                 () -> allowing("10.0.0.1").requireAllowed(URI.create("http://10.0.0.1/")));
     }
 
+    @Test
+    @DisplayName("a scoped IPv6 exception authorizes only the physical scope the HTTP URI uses")
+    void scopedIpv6ExceptionCannotAliasAnotherHttpUriScope() {
+        URI scopeTwo = URI.create("http://[fe80::1%2]/");
+        URI scopeTwoHundredFiftyTwo = URI.create("http://[fe80::1%252]/");
+        OutboundHttpPolicy policy = allowing(scopeTwo.getHost(), scopeTwoHundredFiftyTwo.getHost());
+
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[fe80::1%252]:LINK_LOCAL"));
+        assertDoesNotThrow(() -> policy.requireAllowed(scopeTwo));
+        SecurityException refused = assertThrows(SecurityException.class,
+                () -> policy.requireAllowed(scopeTwoHundredFiftyTwo));
+        assertTrue(refused.getMessage().contains("reserved address"));
+
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
+                "[fe80::1%25252]:LINK_LOCAL"));
+        assertDoesNotThrow(() -> policy.requireAllowed(scopeTwoHundredFiftyTwo));
+
+        String nonAdmittingTrustedJson = """
+                {"version":1,"rules":[{"name":"numeric-zone","protocols":["http"],
+                "ports":[80],"hosts":["fe80::1%2"],"addresses":["fd00::/8"],
+                "profiles":[],"allowPlaintext":false}]}
+                """.replaceAll("\\s+", "");
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromEnvironment(Map.of(
+                ai.ravenroot.api.security.egress.ReservedNetworkPolicy.EXCEPTIONS_ENVIRONMENT_VARIABLE,
+                "[fe80::1%252]:LINK_LOCAL",
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(
+                        nonAdmittingTrustedJson.getBytes(StandardCharsets.UTF_8)))));
+        assertThrows(SecurityException.class, () -> policy.requireAllowed(scopeTwo));
+    }
+
+    @Test
+    @DisplayName("HTTP authority normalization preserves the exact named IPv6 zone")
+    void namedIpv6ZoneRemainsExactAcrossAllowlistAdmissionAndProof() throws Exception {
+        URI uppercaseZone = URI.create("http://[fe80::a%LO0]/");
+        OutboundHttpPolicy exact = allowing("[FE80::A%LO0]");
+        var exactProof = plaintextProof("http", "pkg", "[FE80::A%LO0]", 80);
+
+        assertDoesNotThrow(() -> exact.requireAllowed(uppercaseZone, exactProof, "http", "pkg"));
+        SecurityException exactOrdinary = assertThrows(SecurityException.class,
+                () -> exact.requireAllowed(uppercaseZone));
+        assertTrue(exactOrdinary.getMessage().contains("reserved address"));
+
+        var lowercaseProof = plaintextProof("http", "pkg", "fe80::a%lo0", 80);
+        SecurityException proofMismatch = assertThrows(SecurityException.class,
+                () -> exact.requireAllowed(uppercaseZone, lowercaseProof, "http", "pkg"));
+        assertTrue(proofMismatch.getMessage().contains("reserved address"));
+
+        OutboundHttpPolicy lowercaseZone = allowing("[fe80::a%lo0]");
+        SecurityException allowlistMismatch = assertThrows(SecurityException.class,
+                () -> lowercaseZone.requireAllowed(uppercaseZone, lowercaseProof, "http", "pkg"));
+        assertTrue(allowlistMismatch.getMessage().contains("not allowlisted"));
+
+        assertDoesNotThrow(() -> allowing("EXAMPLE.COM")
+                .requireAllowed(URI.create("https://example.com/")));
+    }
+
     // ---- controls that already existed, pinned so they cannot regress ----
 
     @Test
@@ -164,5 +225,14 @@ class OutboundHttpReachTest {
                 () -> allowing("example.com").requireAllowed(URI.create("gopher://example.com/")));
         assertThrows(SecurityException.class,
                 () -> allowing("example.com").requireAllowed(URI.create("https://user:pw@example.com/")));
+    }
+
+    private static ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization
+            plaintextProof(String protocol, String profile, String host, int port) throws Exception {
+        var type = ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization.class;
+        var constructor = type.getDeclaredConstructor(
+                String.class, String.class, String.class, int.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(protocol, profile, host, port);
     }
 }

@@ -1,11 +1,22 @@
 package ai.ravenroot.extensions.mail.imap;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
+
 import java.util.Set;
 
 public record ImapProfile(String tenant, String id, String host, int port, String securityMode,
                           String username, String credentialRef, Set<String> folders,
                           int connectTimeoutMs, int readTimeoutMs, int maxConcurrency,
-                          int maxResults, int maxPreviewChars) {
+                          int maxResults, int maxPreviewChars,
+                          PlaintextAuthorization plaintextAuthorization) {
+    public ImapProfile(String tenant, String id, String host, int port, String securityMode,
+                       String username, String credentialRef, Set<String> folders,
+                       int connectTimeoutMs, int readTimeoutMs, int maxConcurrency,
+                       int maxResults, int maxPreviewChars) {
+        this(tenant, id, host, port, securityMode, username, credentialRef, folders,
+                connectTimeoutMs, readTimeoutMs, maxConcurrency, maxResults, maxPreviewChars, null);
+    }
+
     /**
      * {@code folders} is a set of names, and "empty" used to be tested on that set before any
      * name in it was normalised. {@code "".split(",")} yields one element -- the empty string, not
@@ -27,11 +38,14 @@ public record ImapProfile(String tenant, String id, String host, int port, Strin
      */
     public ImapProfile {
         if (tenant == null || tenant.isBlank() || id == null || id.isBlank() || host == null || host.isBlank()
-                || !Set.of("IMAPS", "STARTTLS").contains(securityMode) || port < 1 || port > 65535
+                || !Set.of("IMAPS", "STARTTLS", "PLAIN").contains(securityMode) || port < 1 || port > 65535
                 || username == null || username.isBlank() || credentialRef == null || credentialRef.isBlank()
                 || folders == null || connectTimeoutMs < 1 || readTimeoutMs < 1
                 || maxConcurrency < 1 || maxConcurrency > 16 || maxResults < 1 || maxResults > 500
-                || maxPreviewChars < 0 || maxPreviewChars > 65536) throw new IllegalArgumentException("Invalid IMAP profile");
+                || maxPreviewChars < 0 || maxPreviewChars > 65536
+                || "PLAIN".equals(securityMode) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("imap", tenant + "/" + id, host, port)))
+            throw new IllegalArgumentException("Invalid IMAP profile");
         folders = folders.stream().map(String::strip).filter(name -> !name.isEmpty())
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         if (folders.isEmpty()) throw new IllegalArgumentException("Invalid IMAP profile");

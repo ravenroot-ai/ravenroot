@@ -49,8 +49,10 @@ object:
 }
 ```
 
-`credentialRef` and `credentialUsername` must either both be present or both be absent. HTTPS and
-credentialless absolute `file:` remotes are supported. URL user-info, query strings and fragments
+`credentialRef` and `credentialUsername` must either both be present or both be absent. HTTPS,
+administrator-authorized HTTP, and credentialless absolute `file:` remotes are supported. HTTP
+requires an exact `git` trusted-network plaintext rule for the remote port, `tenant/profile`, host,
+and complete resolved address set. URL user-info, query strings and fragments
 are refused. The root and both executables must already exist as ordinary absolute paths. The root must be
 dedicated to this package and writable only by the Ravenroot operator identity. Object format is
 `sha1` or `sha256`; deadlines are 100 ms through five minutes; concurrency is 1 through 64; output is
@@ -106,8 +108,11 @@ identities, the exact linked-worktree administrative directory and its reciproca
 Every repository command names an explicit `--git-dir`; workspace commands also name an explicit
 `--work-tree`. The child environment is rebuilt from a minimal allowlist. System/global config,
 terminal prompts, ambient credential helpers, hooks, fsmonitor, external diff/merge drivers,
-submodules, maintenance, signing, redirects and protocols other than the configured HTTPS or file
-transport are disabled. The repository config has a small allowlist, preventing URL rewrites,
+submodules, maintenance, signing, and redirects are disabled. Protocols other than the configured
+HTTP, HTTPS, or file transport are disabled. Immediately before an HTTP(S) fetch, Ravenroot resolves
+and validates every address and passes the admitted set to Git/libcurl through
+`http.curloptResolve`; the original hostname remains the HTTP Host/TLS identity. The repository
+config has a small allowlist, preventing URL rewrites,
 filters, helpers, hooks, and arbitrary commands from becoming durable ambient behavior.
 Each fetch is followed by strict object-graph validation. Ravenroot refuses to continue when its
 private repository exceeds 250,000 filesystem entries or 2 GiB. Operators must additionally place

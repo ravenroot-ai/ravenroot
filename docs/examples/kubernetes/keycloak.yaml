@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: keycloak}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: keycloak}
+  template:
+    metadata:
+      labels: {app: keycloak}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: keycloak
+          image: registry.example.test/iam/keycloak@sha256:REPLACE_WITH_OPTIMIZED_IMAGE_DIGEST
+          args: [start, --optimized]
+          env:
+            - {name: KC_DB, value: postgres}
+            - {name: KC_HOSTNAME, value: "https://identity.example.test"}
+            - {name: KC_HTTP_ENABLED, value: "true"}
+            - {name: KC_PROXY_HEADERS, value: xforwarded}
+            - {name: KC_DB_URL, value: "jdbc:postgresql://postgres.ravenroot.svc.cluster.local:5432/keycloak?sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt"}
+            - {name: KC_DB_USERNAME, value: keycloak_app}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: keycloak-secrets, key: database-password}
+            - {name: KC_BOOTSTRAP_ADMIN_USERNAME, value: bootstrap-admin}
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: keycloak-secrets, key: bootstrap-password}
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: management, containerPort: 9000}
+          startupProbe:
+            httpGet: {path: /health/started, port: management}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health/ready, port: management}
+          livenessProbe:
+            httpGet: {path: /health/live, port: management}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: ca, mountPath: /etc/postgres-ca, readOnly: true}
+      volumes:
+        - name: ca
+          configMap: {name: postgres-ca}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: keycloak}
+spec:
+  selector: {app: keycloak}
+  ports: [{name: http, port: 8080, targetPort: http}]

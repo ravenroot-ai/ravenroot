@@ -4,6 +4,7 @@ import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -51,7 +52,8 @@ public final class EnvironmentGitWorkspaceProfileResolver implements GitWorkspac
                     credentialled ? text(values, "credentialRef") : null,
                     credentialled ? text(values, "credentialUsername") : null,
                     Duration.ofMillis(integer(values, "deadlineMs")), integer(values, "maxConcurrency"),
-                    integer(values, "maxOutputBytes"), integer(values, "historyScanLimit")));
+                    integer(values, "maxOutputBytes"), integer(values, "historyScanLimit"),
+                    ReservedNetworkPolicy.fromEnvironment(environment)));
         } catch (RuntimeException invalid) {
             return Optional.empty();
         }

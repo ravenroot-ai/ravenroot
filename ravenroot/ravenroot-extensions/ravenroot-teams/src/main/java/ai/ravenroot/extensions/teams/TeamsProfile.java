@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.teams;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.Set;
@@ -10,13 +11,25 @@ record TeamsProfile(String tenantId, String name, URI workflowEndpoint, String m
                     String teamId, Set<String> channelIds, String credentialBindingId,
                     String credentialReference, String signingSecretReference, String webhookRoute,
                     int requestTimeoutMs, int maxRequestBytes, int maxResponseBytes, int maxTextChars,
-                    int maxConcurrency, int maxPerSecond, int ackTimeoutMs, int signatureMaxAgeSeconds) {
+                    int maxConcurrency, int maxPerSecond, int ackTimeoutMs, int signatureMaxAgeSeconds,
+                    PlaintextAuthorization plaintextAuthorization) {
     /** Leaves transport and serialization time inside Teams' five-second acknowledgement window. */
     static final int MAX_ACK_TIMEOUT_MS = 4_500;
 
+    TeamsProfile(String tenantId, String name, URI workflowEndpoint, String microsoftTenantId,
+                 String teamId, Set<String> channelIds, String credentialBindingId,
+                 String credentialReference, String signingSecretReference, String webhookRoute,
+                 int requestTimeoutMs, int maxRequestBytes, int maxResponseBytes, int maxTextChars,
+                 int maxConcurrency, int maxPerSecond, int ackTimeoutMs, int signatureMaxAgeSeconds) {
+        this(tenantId, name, workflowEndpoint, microsoftTenantId, teamId, channelIds,
+                credentialBindingId, credentialReference, signingSecretReference, webhookRoute,
+                requestTimeoutMs, maxRequestBytes, maxResponseBytes, maxTextChars, maxConcurrency,
+                maxPerSecond, ackTimeoutMs, signatureMaxAgeSeconds, null);
+    }
+
     TeamsProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
-        workflowEndpoint = endpoint(workflowEndpoint);
+        workflowEndpoint = endpoint(workflowEndpoint, plaintextAuthorization);
         microsoftTenantId = guid(microsoftTenantId); teamId = providerId(teamId, 160);
         channelIds = boundedIds(channelIds);
         credentialBindingId = token(credentialBindingId, 256);
@@ -39,11 +52,14 @@ record TeamsProfile(String tenantId, String name, URI workflowEndpoint, String m
         return new OutboundCredentialBinding(credentialBindingId, credentialReference);
     }
 
-    private static URI endpoint(URI value) {
-        if (value == null || !"https".equals(value.getScheme()) || value.getHost() == null
+    private static URI endpoint(URI value, PlaintextAuthorization plaintextAuthorization) {
+        if (value == null || !Set.of("http", "https").contains(value.getScheme()) || value.getHost() == null
                 || value.getUserInfo() != null || value.getFragment() != null || value.getPort() != -1
                 || value.getRawQuery() != null || value.getRawPath() == null || value.getRawPath().isBlank()
                 || value.getRawPath().contains("..")) throw configuration();
+        if ("http".equals(value.getScheme()) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", TeamsConfiguration.PACKAGE_ID,
+                        value.getHost(), 80))) throw configuration();
         return value.normalize();
     }
 

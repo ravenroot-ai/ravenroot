@@ -29,8 +29,10 @@ sets `RAVENROOT_OBJECT_STORAGE_PROFILE_<HEX_PROFILE>` to canonical Base64 of str
 }
 ```
 
-The managed HTTP-signing composition must bind `assets-s3` to this exact HTTPS origin, region, service
-`s3`, and an operator-owned tenant credential reference. The extension sees neither access key,
+The managed HTTP-signing composition must bind `assets-s3` to this exact HTTP or HTTPS origin,
+region, service `s3`, and an operator-owned tenant credential reference. HTTPS is the default;
+signed HTTP also requires an exact administrator trusted-network plaintext rule for that origin and
+package grant. The extension sees neither access key,
 secret key nor session token: it submits final method, percent-encoded request target, headers and
 body with `OutboundHttpSigning("assets-s3")`; core resolves the credential once per invocation,
 signs the exact outgoing bytes and clears it. Path style adds the fixed bucket segment. For virtual
@@ -54,7 +56,7 @@ ceiling before returning a node result.
 Keys and prefixes are strict UTF-8 relative paths. Empty/dot segments, controls, backslashes,
 literal `%`, query/fragment syntax and paths over 1024 UTF-8 bytes are refused before managed HTTP,
 which prevents traversal and single/double-decoding ambiguity. The core independently enforces the
-operator origin, DNS and reserved-network policy, TLS, no redirects, signed header authority, byte
+operator origin, DNS and reserved-network policy, transport policy, no redirects, signed header authority, byte
 ceilings, deadline and admission.
 
 ### Exact node properties

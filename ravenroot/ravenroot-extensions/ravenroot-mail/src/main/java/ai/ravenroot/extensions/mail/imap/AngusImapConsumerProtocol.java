@@ -23,7 +23,7 @@ import javax.net.SocketFactory;
 import javax.net.ssl.SSLSocketFactory;
 import java.util.function.UnaryOperator;
 
-/** Angus Mail IMAPS/required-STARTTLS polling owner with read-only, peeked folders. */
+/** Angus Mail polling owner with read-only, peeked folders and profile-selected transport policy. */
 final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
     static final int MAX_IO_TIMEOUT_MS = 30_000;
     private final UnaryOperator<Properties> propertyCustomizer;
@@ -101,7 +101,7 @@ final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
         properties.setProperty(prefix + ".writetimeout",
                 Integer.toString(Math.min(MAX_IO_TIMEOUT_MS, profile.readTimeoutMs())));
         properties.setProperty(prefix + ".peek", "true");
-        if (protocol.equals("imap")) {
+        if (profile.securityMode().equals("STARTTLS")) {
             properties.setProperty("mail.imap.starttls.enable", "true");
             properties.setProperty("mail.imap.starttls.required", "true");
         }

@@ -81,8 +81,7 @@ public final class RavenrootServerMain {
         // at the composition root, with the same shape and the same authority as the host allowlist
         // above it. No graph, plugin, payload or request can widen it. Installed before anything
         // resolves a name, because the JVM-wide resolver filters from its first lookup onward.
-        EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
-                System.getenv("RAVENROOT_EGRESS_RESERVED_EXCEPTIONS")));
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromEnvironment(System.getenv()));
         var authentication = AuthenticationConfiguration.fromEnvironment(System.getenv(), port);
         if (!System.getenv().getOrDefault("RAVENROOT_LOCAL_RUNNER_CONFIG", "").isBlank())
             LocalRunnerSupervisor.validateExposure(System.getenv(), authentication, java.nio.file.Files.exists(Path.of("/.dockerenv")));

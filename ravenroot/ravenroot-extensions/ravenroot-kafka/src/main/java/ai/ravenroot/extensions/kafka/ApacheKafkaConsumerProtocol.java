@@ -68,6 +68,30 @@ final class ApacheKafkaConsumerProtocol implements KafkaConsumerProtocol {
         }
     }
 
+    @Override public Owner open(KafkaConsumerProfile profile, char[] password,
+                                ai.ravenroot.api.security.egress.ReservedNetworkPolicy policy) {
+        Password jaas = jaasCredential(profile, password);
+        Consumer<byte[], byte[]> consumer = KafkaClientFactory.consumer(consumerProperties(profile, jaas), profile, policy);
+        Producer<byte[], byte[]> dlq = null;
+        try {
+            if (profile.deadLetters()) dlq = KafkaClientFactory.producer(
+                    producerProperties(profile, jaas), producerProfile(profile), policy);
+            return new Client(consumer, dlq, profile.deadLetterTopic());
+        } catch (RuntimeException failure) {
+            try { consumer.close(Duration.ZERO); } catch (RuntimeException ignored) { }
+            if (dlq != null) try { dlq.close(Duration.ZERO); } catch (RuntimeException ignored) { }
+            throw failure;
+        }
+    }
+
+    private static KafkaProfile producerProfile(KafkaConsumerProfile p) {
+        return new KafkaProfile(p.tenant(), p.name(), p.bootstrapServers(), p.clientDnsLookup(), p.tls(),
+                p.saslMechanism(), p.username(), p.credentialRef(), p.clientId(), p.deadLetterTopic(),
+                Set.of(p.deadLetterTopic()), Set.of(), false, 1, false, "none", "all", true,
+                1, 1, false, 1, 1, p.maxRetryBackoffMs(), p.maxRecordBytes(), p.maxRecordBytes(),
+                p.plaintextAuthorizations());
+    }
+
     static Map<String, Object> consumerProperties(KafkaConsumerProfile p, char[] password) {
         return consumerProperties(p, jaasCredential(p, password));
     }

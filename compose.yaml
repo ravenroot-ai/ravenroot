@@ -211,6 +211,7 @@ services:
       # a Kubernetes service DNS name. A literal IP address is unaffected: the JVM never resolves a
       # literal, which is why the container healthcheck (http://127.0.0.1) needs no entry here.
       RAVENROOT_EGRESS_RESERVED_EXCEPTIONS: ${RAVENROOT_EGRESS_RESERVED_EXCEPTIONS:-}
+      RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY: ${RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY:-}
       # Which tools nodes may invoke. The product default is EMPTY, so it denies everything;
       # that is the correct posture for a real installation, where each tool is enabled deliberately.
       # In development, however, that default makes the product impossible to test: a valid `program`

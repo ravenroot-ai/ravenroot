@@ -305,6 +305,7 @@ jobs:
           version=$(docker buildx inspect --bootstrap | awk '$1 == "BuildKit" && $2 == "version:" {print $3}')
           test "$version" = v0.32.2
           python3 scripts/verify_oci_release_builder.py
+          python3 scripts/verify_oci_release_builder.py --repository ghcr.io/ravenroot-ai/ravenroot-ui
       - name: Verify Python tooling contracts
         run: |
           python3 -m unittest scripts.tests.test_check_argline
@@ -320,6 +321,9 @@ jobs:
           python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
+          python3 -m unittest scripts.tests.test_prepare_release
+          python3 -m unittest scripts.tests.test_package_ui
+          python3 -m unittest scripts.tests.test_oidc_device_example
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_github_release
           python3 -m unittest scripts.tests.test_verify_api_docs
@@ -456,6 +460,14 @@ jobs:
       - name: Build the UI
         working-directory: ravenroot/ravenroot-ui
         run: npm run build
+      - name: Verify independent UI runtime and package
+        run: |
+          node --test ui-server/server.test.mjs
+          python3 scripts/package_ui.py --output ci-artifacts/ravenroot-ui.zip
+          mkdir -p ci-artifacts/ui
+          cp -R ravenroot/ravenroot-ui/dist/. ci-artifacts/ui/
+          docker build --file Dockerfile.ui --tag ravenroot-ui:test .
+          python3 scripts/verify_ui_container.py --image ravenroot-ui:test
       - name: Archive the verified UI
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

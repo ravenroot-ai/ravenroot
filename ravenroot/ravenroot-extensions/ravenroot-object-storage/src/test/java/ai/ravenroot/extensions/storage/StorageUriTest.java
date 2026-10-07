@@ -26,6 +26,22 @@ class StorageUriTest {
                 Set.of(), false, false, 100, 1000, 1, 1));
     }
 
+    @Test void directProfileConstructionCannotAuthorizePlaintext() {
+        assertThrows(IllegalArgumentException.class, () -> new StorageProfile("assets",
+                URI.create("http://10.42.1.9:9000"), "us-east-1", "bucket-a", "",
+                StorageProfile.AddressingStyle.PATH, "sign", Set.of(StorageProfile.Operation.GET),
+                Set.of(), false, false, 100, 1000, 1, 1));
+    }
+
+    @Test void httpsOriginNormalizationPreservesNamedIpv6ZoneCase() {
+        StorageProfile profile = new StorageProfile("assets", URI.create("https://[FE80::A%LO0]"),
+                "eu-west-1", "bucket-a", "", StorageProfile.AddressingStyle.PATH, "sign",
+                Set.of(StorageProfile.Operation.GET), Set.of(), false, false, 100, 1000, 1, 1);
+
+        assertEquals("[fe80::a%LO0]", profile.origin().getHost());
+        assertEquals("[fe80::a%LO0]", StorageUri.destination(profile, "object").getHost());
+    }
+
     @Test void traversalAndEncodedSeparatorFamiliesAreRejectedBeforeTransport() {
         StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 2, 10);
         for (String key : Set.of("/absolute", "trailing/", "a//b", ".", "..", "a/../b", "a\\b",

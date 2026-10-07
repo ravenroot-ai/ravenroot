@@ -136,7 +136,7 @@ final class KafkaConsumerSource implements InboundSource {
             Optional<SecretValue> resolved = credentials.resolve(settings.profile.credentialRef());
             if (resolved == null || resolved.isEmpty()) throw sourceFailure(KafkaSourceStartFailure.CREDENTIAL_UNAVAILABLE);
             secret = resolved.get(); password = secret.copy();
-            client = protocol.open(settings.profile, password);
+            client = protocol.open(settings.profile, password, destinationAdmission.connectionPolicy());
             owner = client;
             runtime = new RuntimeState(settings, context, client);
             RuntimeState active = runtime;
@@ -436,6 +436,11 @@ final class KafkaConsumerSource implements InboundSource {
             String name = c.property("clusterProfile").orElseThrow(() -> sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_REQUIRED));
             KafkaConsumerProfile profile;
             try { profile = profiles.resolve(context.identity().tenantId(), name).orElse(null); }
+            catch (SecurityException refused) {
+                throw sourceFailure("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED".equals(refused.getMessage())
+                        ? KafkaSourceStartFailure.OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED
+                        : KafkaSourceStartFailure.OUTBOUND_DESTINATION_POLICY_REFUSED, refused);
+            }
             catch (RuntimeException invalid) {
                 throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE, invalid);
             }
@@ -444,7 +449,7 @@ final class KafkaConsumerSource implements InboundSource {
             }
             try { destinationAdmission.requireAllowed(profile); }
             catch (SecurityException refused) {
-                throw sourceFailure(KafkaSourceStartFailure.CLUSTER_PROFILE_UNAVAILABLE, refused);
+                throw sourceFailure(KafkaSourceStartFailure.OUTBOUND_DESTINATION_POLICY_REFUSED, refused);
             }
             String group = c.property("group", profile.groupLogicalName());
             if (!group.equals(profile.groupLogicalName())) throw sourceFailure(KafkaSourceStartFailure.GROUP_FORBIDDEN);
@@ -517,7 +522,8 @@ final class KafkaConsumerSource implements InboundSource {
                     p.isolationLevel(), p.startupTimeoutMs(), p.pollTimeoutMs(), p.maxPollIntervalMs(), p.sessionTimeoutMs(),
                     p.heartbeatIntervalMs(), p.maxInFlight(), p.maxFetchBytes(), p.maxPartitionFetchBytes(),
                     p.maxRecordBytes(), p.maxKeyBytes(), p.maxValueBytes(), p.maxHeaderBytes(), p.drainTimeoutMs(),
-                    p.retryBackoffMs(), p.maxRetryBackoffMs(), p.poisonAttempts(), p.poisonPolicy(), p.deadLetterTopic());
+                    p.retryBackoffMs(), p.maxRetryBackoffMs(), p.poisonAttempts(), p.poisonPolicy(), p.deadLetterTopic(),
+                    p.plaintextAuthorizations());
         }
         private static KafkaConsumerProfile tightened(KafkaConsumerProfile p, int maxInFlight, int pollTimeout,
                 int drainTimeout, int retryBackoff, int maxRetryBackoff, int poisonAttempts) {
@@ -528,7 +534,7 @@ final class KafkaConsumerSource implements InboundSource {
                     p.sessionTimeoutMs(), p.heartbeatIntervalMs(), maxInFlight, p.maxFetchBytes(),
                     p.maxPartitionFetchBytes(), p.maxRecordBytes(), p.maxKeyBytes(), p.maxValueBytes(),
                     p.maxHeaderBytes(), drainTimeout, retryBackoff, maxRetryBackoff, poisonAttempts,
-                    p.poisonPolicy(), p.deadLetterTopic());
+                    p.poisonPolicy(), p.deadLetterTopic(), p.plaintextAuthorizations());
         }
     }
 
@@ -542,12 +548,21 @@ final class KafkaConsumerSource implements InboundSource {
 
     static DestinationAdmission defaultDestinationAdmission() {
         ReservedNetworkPolicy policy = ReservedNetworkPolicy.fromEnvironment(System.getenv());
-        return profile -> EnvironmentKafkaProfileResolver.requireDestinations(
-                String.join(",", profile.bootstrapServers()), policy);
+        return new DestinationAdmission() {
+            @Override public void requireAllowed(KafkaConsumerProfile profile) {
+                EnvironmentKafkaProfileResolver.requireDestinations(
+                        String.join(",", profile.bootstrapServers()), policy,
+                        profile.tenant() + "/" + profile.name(), profile.tls());
+            }
+            @Override public ReservedNetworkPolicy connectionPolicy() { return policy; }
+        };
     }
 
     @FunctionalInterface
     interface DestinationAdmission {
         void requireAllowed(KafkaConsumerProfile profile);
+        default ReservedNetworkPolicy connectionPolicy() {
+            return ReservedNetworkPolicy.denyAllReserved();
+        }
     }
 }

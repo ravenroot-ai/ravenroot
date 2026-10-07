@@ -4,6 +4,7 @@ import ai.ravenroot.api.node.service.OutboundCredentialBinding;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.util.Base64;
@@ -57,6 +58,7 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
 
     private final Map<String, String> environment;
     private final AgentOperationalConfiguration policy;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public EnvironmentMcpProfileResolver() {
         this(System.getenv(), AgentOperationalConfiguration.fromEnvironment(System.getenv()));
@@ -70,6 +72,7 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
                                   AgentOperationalConfiguration policy) {
         this.environment = Map.copyOf(environment);
         this.policy = java.util.Objects.requireNonNull(policy, "policy");
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
     }
 
     /** The exact variable an operator must set to declare {@code profileName}. */
@@ -129,11 +132,18 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
             atMost("maxDiscoveredTools", maxDiscoveredTools,
                     policy.maxDiscoveredMcpToolsPerServer());
             atMost("allowedTools", allowedTools.size(), policy.maxMcpToolsPerServer());
-            return Optional.of(new McpProfile(profileName,
-                    new URI(text(root.get("endpoint"), null)),
+            URI endpoint = new URI(text(root.get("endpoint"), null));
+            int endpointPort = endpoint.getPort() == -1 ? "https".equals(endpoint.getScheme()) ? 443 : 80
+                    : endpoint.getPort();
+            ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization =
+                    credential.isPresent() && "http".equals(endpoint.getScheme())
+                            ? destinationPolicy.authorizePlaintext(
+                                    "http", AiNodePackage.ID, endpoint.getHost(), endpointPort)
+                            : null;
+            return Optional.of(new McpProfile(profileName, endpoint,
                     credential,
                     timeoutMs, maxRequestBytes, maxResponseBytes, maxConcurrency,
-                    maxDiscoveredTools, allowedTools));
+                    maxDiscoveredTools, allowedTools, plaintextAuthorization));
         } catch (RuntimeException | java.net.URISyntaxException invalid) {
             return Optional.empty();
         }

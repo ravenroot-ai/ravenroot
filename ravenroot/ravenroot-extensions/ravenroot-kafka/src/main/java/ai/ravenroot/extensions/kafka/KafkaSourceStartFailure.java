@@ -23,6 +23,8 @@ enum KafkaSourceStartFailure implements SourceStartFailureCode {
     GROUP_FORBIDDEN("group-forbidden"),
     INVALID_TIGHTENING("invalid-tightening"),
     MEMBERSHIP_INVALID("membership-invalid"),
+    OUTBOUND_DESTINATION_POLICY_REFUSED("outbound-destination-policy-refused"),
+    OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED("outbound-transport-encryption-required"),
     PARTITION_ORDER_VIOLATION("partition-order-violation"),
     POISON_POLICY_FORBIDDEN("poison-policy-forbidden"),
     POISON_RECORD_HALTED("poison-record-halted"),

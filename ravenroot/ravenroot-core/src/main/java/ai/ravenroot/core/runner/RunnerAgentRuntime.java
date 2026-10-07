@@ -44,12 +44,25 @@ public record RunnerAgentRuntime(int modelTurns, int toolCalls, long modelTokens
     public static RunnerAgentRuntime fromConfiguration(Map<String, Object> value,
                                                         ai.ravenroot.api.security.SecretProvider secrets) {
         var profiles = new LinkedHashMap<String, RunnerModelGateway.Profile>();
+        var destinationPolicy = ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(System.getenv());
         RunnerJson.map(value.get("models")).forEach((name, raw) -> {
             var profile = RunnerJson.map(raw);
-            profiles.put(name, new RunnerModelGateway.Profile(java.net.URI.create(RunnerJson.text(profile, "endpoint")),
+            java.net.URI endpoint = java.net.URI.create(RunnerJson.text(profile, "endpoint"));
+            boolean trustedPlaintext = false;
+            if ("http".equals(endpoint.getScheme())) {
+                int port = endpoint.getPort() == -1 ? 80 : endpoint.getPort();
+                try {
+                    destinationPolicy.requireAllowedDestination("runner", name, endpoint.getHost(), port);
+                    destinationPolicy.requirePlaintext("runner", name, endpoint.getHost(), port);
+                    trustedPlaintext = true;
+                } catch (SecurityException refused) {
+                    // The compatibility constructor below retains credential-free loopback only.
+                }
+            }
+            profiles.put(name, new RunnerModelGateway.Profile(endpoint,
                     RunnerJson.text(profile, "model"), profile.containsKey("credentialReference") ? RunnerJson.text(profile, "credentialReference") : null,
                     Math.toIntExact(RunnerJson.number(profile, "maxConcurrency")), Math.toIntExact(RunnerJson.number(profile, "maxRequestBytes")),
-                    Math.toIntExact(RunnerJson.number(profile, "maxResponseBytes"))));
+                    Math.toIntExact(RunnerJson.number(profile, "maxResponseBytes")), trustedPlaintext));
         });
         var skills = new LinkedHashMap<String, String>();
         RunnerJson.map(value.get("skills")).forEach((name, body) -> {

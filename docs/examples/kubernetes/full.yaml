@@ -1,0 +1,97 @@
+# Release target 0.6.1-alpha.1: resolve its published digest before applying.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ravenroot-data}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: REPLACE_WITH_STORAGE_CLASS
+  resources:
+    requests: {storage: 10Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: ravenroot}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: ravenroot}
+  template:
+    metadata:
+      labels: {app: ravenroot}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/arch: amd64}
+      # Budget for eight long-lived deployments plus concurrent execution shutdown; tune to load.
+      terminationGracePeriodSeconds: 360
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: ravenroot
+          image: ghcr.io/ravenroot-ai/ravenroot:0.6.1-alpha.1
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: RAVENROOT_PORT, value: "8080"}
+            - {name: RAVENROOT_BIND_ADDRESS, value: "0.0.0.0"}
+            - {name: RAVENROOT_REPLICAS, value: "1"}
+            - {name: RAVENROOT_AUTH_MODE, value: oidc}
+            - {name: RAVENROOT_AUTH_ISSUER, value: "https://identity.example.test/realms/ravenroot"}
+            - {name: RAVENROOT_AUTH_AUDIENCE, value: ravenroot-api}
+            - {name: RAVENROOT_AUTH_JWKS_URI, value: "https://identity.example.test/realms/ravenroot/protocol/openid-connect/certs"}
+            - {name: RAVENROOT_BROWSER_ALLOWED_ORIGINS, value: "https://ravenroot.example.test"}
+            - {name: RAVENROOT_TRUSTED_TLS_TERMINATOR, value: "true"}
+            - {name: RAVENROOT_PUBLIC_ORIGIN, value: "https://ravenroot.example.test"}
+            - {name: RAVENROOT_EXECUTION_STORE_ENABLED, value: "true"}
+            - {name: RAVENROOT_EXECUTION_STORE, value: postgresql}
+            - {name: RAVENROOT_EXECUTION_STORE_URL, value: "jdbc:postgresql://postgres.ravenroot.svc.cluster.local:5432/ravenroot?currentSchema=ravenroot&sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt"}
+            - {name: RAVENROOT_EXECUTION_STORE_USER, value: ravenroot_app}
+            - name: RAVENROOT_EXECUTION_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: ravenroot-database, key: password}
+            - name: RAVENROOT_WORKER_ID
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - {name: RAVENROOT_AUDIT_DIR, value: /opt/ravenroot/data/audit}
+            - {name: RAVENROOT_ARTIFACT_STORE_DIR, value: /opt/ravenroot/data/artifact-store}
+            - {name: RAVENROOT_CREDENTIAL_DIR, value: /opt/ravenroot/data/credentials}
+            - {name: RAVENROOT_ASSISTANT_CONSENT_DIR, value: /opt/ravenroot/data/assistant-consent}
+            - {name: RAVENROOT_PROGRAM_RUNTIME, value: disabled}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /opt/ravenroot/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: ca, mountPath: /etc/postgres-ca, readOnly: true}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: ravenroot-data}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 128Mi}}
+        - name: ca
+          configMap: {name: postgres-ca}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ravenroot}
+spec:
+  selector: {app: ravenroot}
+  ports: [{name: http, port: 8080, targetPort: http}]

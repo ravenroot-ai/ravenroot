@@ -4,7 +4,9 @@ import ai.ravenroot.core.security.OutboundHttpPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -82,6 +84,27 @@ class AssistantConfigurationTest {
             assertNull(failure.getCause());
             assertFalse(failure.getMessage().contains(invalid));
         }
+    }
+
+    @Test
+    void administratorRuleAuthorizesOnlyTheExactConfiguredPlaintextEndpoint() {
+        String policy = """
+                {"version":1,"rules":[{"name":"assistant-mesh","protocols":["assistant"],
+                "ports":[8080],"hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["openai-compatible"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        Map<String, String> environment = Map.of(
+                AssistantConfiguration.PROVIDER_VARIABLE, "openai-compatible",
+                AssistantConfiguration.MODEL_VARIABLE, "model",
+                AssistantConfiguration.API_KEY_VARIABLE, "key",
+                AssistantConfiguration.ENDPOINT_VARIABLE, "http://127.0.0.1:8080/v1/chat/completions",
+                AssistantConfiguration.ALLOWED_HOSTS_VARIABLE, "127.0.0.1",
+                AssistantConfiguration.ALLOWED_PORTS_VARIABLE, "8080",
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8)));
+        AssistantConfiguration configuration = AssistantConfiguration.fromEnvironment(environment);
+        assertTrue(configuration.allowTrustedHttp());
+        assertTrue(configuration.reachReady());
     }
 
     @Test

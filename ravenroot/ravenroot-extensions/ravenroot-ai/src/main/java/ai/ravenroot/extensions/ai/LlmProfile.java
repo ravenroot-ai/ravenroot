@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 
 import java.net.URI;
 import java.util.Locale;
@@ -35,7 +36,15 @@ import java.util.Optional;
 public record LlmProfile(String name, URI endpoint, String model,
                          Optional<OutboundCredentialBinding> credentialBinding,
                          int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
-                         String systemPreamble) {
+                         String systemPreamble, PlaintextAuthorization plaintextAuthorization) {
+
+    public LlmProfile(String name, URI endpoint, String model,
+                      Optional<OutboundCredentialBinding> credentialBinding,
+                      int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
+                      String systemPreamble) {
+        this(name, endpoint, model, credentialBinding, timeoutMs, maxRequestBytes, maxResponseBytes,
+                maxConcurrency, systemPreamble, null);
+    }
 
     public LlmProfile {
         Objects.requireNonNull(name, "name");
@@ -50,14 +59,10 @@ public record LlmProfile(String name, URI endpoint, String model,
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw new IllegalArgumentException("endpoint");
         }
-        // A credential may only be placed on an encrypted origin. The managed channel already refuses
-        // to place one on a plaintext origin -- EnvironmentNodePackageServiceGrants requires an
-        // https/wss origin for every credential binding it accepts -- and repeating the rule here
-        // turns the refusal from "your call failed" into "your profile is wrong", at the point where
-        // the operator can still see which profile they wrote.
-        if (credentialBinding.isPresent() && !scheme.equals("https")) {
-            throw new IllegalArgumentException("credentialBinding");
-        }
+        int endpointPort = endpoint.getPort() == -1 ? scheme.equals("https") ? 443 : 80 : endpoint.getPort();
+        if (credentialBinding.isPresent() && scheme.equals("http") && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("http", AiNodePackage.ID,
+                        endpoint.getHost(), endpointPort))) throw new IllegalArgumentException("endpoint");
         if (model.isBlank() || model.length() > 256) {
             throw new IllegalArgumentException("model");
         }

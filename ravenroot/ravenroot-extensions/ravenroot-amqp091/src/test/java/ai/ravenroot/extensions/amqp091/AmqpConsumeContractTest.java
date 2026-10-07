@@ -63,7 +63,8 @@ class AmqpConsumeContractTest {
                 "invalid-checkpoint-policy", "invalid-dead-letter-mode", "invalid-drain-timeout",
                 "invalid-max-in-flight", "invalid-max-retry-backoff", "invalid-poison-attempts",
                 "invalid-poison-policy", "invalid-prefetch", "invalid-retry-backoff",
-                "invalid-resource-mode",
+                "invalid-resource-mode", "outbound-destination-policy-refused",
+                "outbound-transport-encryption-required",
                 "poison-policy-forbidden", "queue-not-authorized", "startup-cancelled",
                 "unknown-graph-property");
         assertEquals(expected, AmqpSourceStartFailure.codes());

@@ -162,6 +162,7 @@ Detailed contract: [Credentials and egress](configuration.md#secret-handling).
 |---|---|
 | `RAVENROOT_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY` | administrator-owned canonical padded Base64 of strict version-1 JSON; unset grants no scoped reserved-network admission or plaintext; rules bind exact finite protocol, port, profile and destination scopes, while legacy exceptions remain admission-only and never widen plaintext; see the [schema and precedence contract](../operator-guide/credentials-egress.md#trusted-networks-and-plaintext-transports) |
 | `RAVENROOT_HTTP_ALLOWED_HOSTS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HTTP_ALLOWED_PORTS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
@@ -491,3 +492,17 @@ Detailed contract: [Tool and approval policy](configuration.md#tool-and-approval
 from production Java, refuses any unclassified name, and compares this page byte-for-byte.
 Dynamic suffixes and settings assembled outside Java literals remain covered by their
 maintained parser or command-help checks rather than being invented here.
+
+## Independent UI web server
+
+These variables configure the optional UI-only static server, not the Java backend.
+
+| Variable | Contract |
+|---|---|
+| `RAVENROOT_UI_BACKEND_URL` | Server-side HTTP(S) upstream; unset selects static-only mode with backend routes returning `503`; optional backend path prefix, no credentials/query/fragment |
+| `RAVENROOT_UI_PREFIX` | Empty (root) or public slash-prefixed path without trailing slash |
+| `RAVENROOT_UI_PORT` | Integer TCP port, default `8080` |
+| `RAVENROOT_UI_ROOT` | Asset directory, default `/opt/ravenroot/ui` |
+| `NODE_EXTRA_CA_CERTS` | Optional read-only PEM trust bundle for the HTTPS upstream; consumed by Node.js itself |
+
+See [UI-only installation](../operator-guide/kubernetes-ui-only.md) for routing, probes and TLS.

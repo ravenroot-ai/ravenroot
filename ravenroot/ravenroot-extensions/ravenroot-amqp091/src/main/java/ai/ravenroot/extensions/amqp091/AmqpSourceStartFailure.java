@@ -26,6 +26,8 @@ enum AmqpSourceStartFailure implements SourceStartFailureCode {
     INVALID_PREFETCH("invalid-prefetch"),
     INVALID_RETRY_BACKOFF("invalid-retry-backoff"),
     INVALID_RESOURCE_MODE("invalid-resource-mode"),
+    OUTBOUND_DESTINATION_POLICY_REFUSED("outbound-destination-policy-refused"),
+    OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED("outbound-transport-encryption-required"),
     POISON_POLICY_FORBIDDEN("poison-policy-forbidden"),
     QUEUE_NOT_AUTHORIZED("queue-not-authorized"),
     STARTUP_CANCELLED("startup-cancelled"),

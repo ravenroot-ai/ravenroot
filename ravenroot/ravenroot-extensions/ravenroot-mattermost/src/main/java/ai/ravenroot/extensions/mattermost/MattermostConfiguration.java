@@ -2,6 +2,7 @@ package ai.ravenroot.extensions.mattermost;
 
 import ai.ravenroot.api.ingress.IngressAuthorityDeclaration;
 import ai.ravenroot.api.ingress.IngressRequestProjectionPolicy;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -43,9 +44,10 @@ record MattermostConfiguration(IngressAuthorityDeclaration authority,
             IngressAuthorityDeclaration authority = authority(MattermostValues.object(root.get("authority")));
             IngressRequestProjectionPolicy projection = projection(MattermostValues.object(root.get("projection")));
             StorePolicy store = store(MattermostValues.object(root.get("store")));
+            ReservedNetworkPolicy destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
             Map<String, MattermostProfile> profiles = new LinkedHashMap<>();
             MattermostValues.object(root.get("profiles")).forEach((name, value) -> {
-                MattermostProfile profile = profile(name, MattermostValues.object(value));
+                MattermostProfile profile = profile(name, MattermostValues.object(value), destinationPolicy);
                 if (profiles.put(profile.tenantId() + "\u0000" + profile.name(), profile) != null) throw invalid();
             });
             return new MattermostConfiguration(authority, projection, store, profiles);
@@ -87,15 +89,20 @@ record MattermostConfiguration(IngressAuthorityDeclaration authority,
                 (int) MattermostValues.number(value.get("maxDeliveries"), 1, 1_000_000),
                 (int) MattermostValues.number(value.get("retentionHours"), 1, 24 * 365));
     }
-    private static MattermostProfile profile(String name, Map<String, Object> value) {
+    private static MattermostProfile profile(String name, Map<String, Object> value,
+                                             ReservedNetworkPolicy destinationPolicy) {
         MattermostValues.exact(value, Set.of("tenantId", "origin", "teamId", "publicChannels",
                 "credentialBindingId", "credentialReference", "webhookTokenReference",
                 "outgoingWebhookRoute", "limits"));
         Map<String, Object> limits = MattermostValues.object(value.get("limits"));
         MattermostValues.exact(limits, Set.of("maxTextChars", "maxRequestBytes", "maxResponseBytes",
                 "maxConcurrency", "maxPerSecond", "requestTimeoutMs", "retries"));
-        return new MattermostProfile(MattermostValues.string(value.get("tenantId"), 160), name,
-                URI.create(MattermostValues.string(value.get("origin"), 512)),
+        URI origin = URI.create(MattermostValues.string(value.get("origin"), 512));
+        int originPort = origin.getPort() == -1 ? "https".equals(origin.getScheme()) ? 443 : 80 : origin.getPort();
+        ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = "http".equals(origin.getScheme())
+                ? destinationPolicy.authorizePlaintext("http", PACKAGE_ID, origin.getHost(), originPort)
+                : null;
+        return new MattermostProfile(MattermostValues.string(value.get("tenantId"), 160), name, origin,
                 MattermostValues.string(value.get("teamId"), 32),
                 MattermostValues.strings(value.get("publicChannels"), 256, 32),
                 MattermostValues.string(value.get("credentialBindingId"), 256),
@@ -109,7 +116,7 @@ record MattermostConfiguration(IngressAuthorityDeclaration authority,
                 (int) MattermostValues.number(limits.get("maxPerSecond"), 1, 100),
                 (int) MattermostValues.number(limits.get("requestTimeoutMs"), 100,
                         MattermostProfile.MAX_ACK_TIMEOUT_MS),
-                (int) MattermostValues.number(limits.get("retries"), 0, 3));
+                (int) MattermostValues.number(limits.get("retries"), 0, 3), plaintextAuthorization);
     }
     record StorePolicy(Path path, int maxDeliveries, int retentionHours) {
         StorePolicy { path = java.util.Objects.requireNonNull(path).toAbsolutePath().normalize(); }

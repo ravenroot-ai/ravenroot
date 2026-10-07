@@ -79,20 +79,47 @@ class PrepareReleaseTest(unittest.TestCase):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 version = PREVIOUS if index % 2 else "0.2.0-alpha.1"
-                path.write_text(f"image: ravenroot-ui:{version}\narchive: ravenroot-ui-{version}.zip\n")
+                path.write_text(
+                    f"image: ravenroot-ui:{version}\n"
+                    f"archive: ravenroot-ui-{version}.zip\n"
+                    f"tag: v{version}\n"
+                )
             updates = bump_ui_examples(root, PREVIOUS, "0.2.0-alpha.1")
             self.assertEqual(len(updates), 4)
             for contents in updates.values():
                 self.assertNotIn(PREVIOUS, contents)
-                self.assertEqual(contents.count("0.2.0-alpha.1"), 2)
+                self.assertEqual(contents.count("0.2.0-alpha.1"), 3)
+                self.assertIn("tag: v0.2.0-alpha.1", contents)
             # A patch preparation must rewrite the initially anticipated minor coordinates too.
             patch_updates = bump_ui_examples(root, PREVIOUS, "0.1.1-alpha.1")
             for contents in patch_updates.values():
-                self.assertEqual(contents.count("0.1.1-alpha.1"), 2)
+                self.assertEqual(contents.count("0.1.1-alpha.1"), 3)
+                self.assertIn("tag: v0.1.1-alpha.1", contents)
                 self.assertNotIn("0.2.0-alpha.1", contents)
             (root / UI_RELEASE_EXAMPLES[0]).write_text("version 9.9.9-alpha.1")
             with self.assertRaises(ReleaseContractError):
                 bump_ui_examples(root, PREVIOUS, "0.2.0-alpha.1")
+
+    def test_ui_examples_do_not_rewrite_versions_embedded_in_alphanumeric_tokens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in UI_RELEASE_EXAMPLES:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    f"bare: {PREVIOUS}\n"
+                    f"tag: v{PREVIOUS}\n"
+                    f"embedded: x{PREVIOUS} {PREVIOUS}x xv{PREVIOUS} v{PREVIOUS}x\n"
+                )
+
+            updates = bump_ui_examples(root, PREVIOUS, "0.1.1-alpha.1")
+            for contents in updates.values():
+                self.assertIn("bare: 0.1.1-alpha.1", contents)
+                self.assertIn("tag: v0.1.1-alpha.1", contents)
+                self.assertIn(
+                    f"embedded: x{PREVIOUS} {PREVIOUS}x xv{PREVIOUS} v{PREVIOUS}x",
+                    contents,
+                )
 
     def test_a_minor_label_moves_every_surface_to_the_authorized_version(self) -> None:
         root = fixture(FRAGMENTS)

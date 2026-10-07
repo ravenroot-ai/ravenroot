@@ -19,7 +19,7 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import audit_operational_configuration as audit  # noqa: E402
-from scripts.prepare_release import latest_release, prepare, product_version  # noqa: E402
+from scripts.prepare_release import bump_ui_examples, latest_release, prepare, product_version  # noqa: E402
 from scripts.release_contract import expected_next, parse_tag  # noqa: E402
 
 
@@ -268,6 +268,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 if preparation_revision is None:
                     self.fail("no exact release-preparation revision is reachable from the prepared tree")
                 reverse_release_preparation_delta(source_fixture, preparation_revision, current_version)
+                for path, contents in bump_ui_examples(
+                        source_fixture, current_version, source_version).items():
+                    path.write_bytes(contents.encode())
                 self.assertEqual(source_version, product_version(source_fixture))
                 self.assertEqual(
                     [],

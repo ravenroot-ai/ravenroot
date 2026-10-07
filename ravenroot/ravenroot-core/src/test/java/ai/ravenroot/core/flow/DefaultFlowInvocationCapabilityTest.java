@@ -18,6 +18,7 @@ import ai.ravenroot.core.flow.FlowTargetAuthorizer;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
+import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
 import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -26,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,6 +42,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -197,6 +201,16 @@ class DefaultFlowInvocationCapabilityTest {
                 application.close();
             }
         }
+    }
+
+    @Test
+    void settlementBeforeParkCreationClaimsAndResolvesExactlyOneContinuationAcrossRestart() throws Exception {
+        assertSettlementRaceAcrossStores(SettlementRace.BEFORE_PARK, "flow-before-park.db");
+    }
+
+    @Test
+    void settlementAfterParkCreationClaimsAndResolvesExactlyOneContinuationAcrossRestart() throws Exception {
+        assertSettlementRaceAcrossStores(SettlementRace.AFTER_PARK_BEFORE_CLAIM, "flow-after-park.db");
     }
 
     @Test
@@ -432,6 +446,137 @@ class DefaultFlowInvocationCapabilityTest {
                 ai.ravenroot.api.execution.NodeCommand.PROCESS));
     }
 
+    private void assertSettlementRaceAcrossStores(SettlementRace race, String databaseName) throws Exception {
+        RaceOutcome durable;
+        Path database = directory.resolve(databaseName);
+        try (var store = new SqliteExecutionStore(database, CLOCK)) {
+            durable = assertSettlementRace(store, race);
+        }
+        try (var reopened = new SqliteExecutionStore(database, CLOCK);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(reopened, CLOCK);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), reopened);
+            try (var flows = new DefaultFlowInvocationCapability(reopened,
+                    new InMemoryDeploymentRegistry(CLOCK), application, tasks,
+                    FlowTargetAuthorizer.creatorOwnedTargets(), FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                flows.recoverTenant(TENANT).toCompletableFuture().join();
+                assertRaceOutcome(reopened, durable);
+            } finally {
+                application.close();
+            }
+        }
+    }
+
+    private RaceOutcome assertSettlementRace(ExecutionStore delegate, SettlementRace race) throws Exception {
+        CallerFixture fixture = caller(delegate, CALLER);
+        var registry = new InMemoryDeploymentRegistry(CLOCK);
+        GraphVersion target = create(registry, "race-" + race.name().toLowerCase(), graph(null, "settled"),
+                CALLER.qualifiedIdentity());
+        FlowInvocationRecord intent = flowRecord(target, FlowInvocationStatus.INTENT,
+                fixture.key().processInstanceId(), fixture.message().invocationId(), UUID.randomUUID());
+        FlowInvocationRecord created = delegate.createFlowInvocation(intent).toCompletableFuture().join();
+        FlowInvocationRecord launched = delegate.mutateFlowInvocation(TENANT,
+                new FlowInvocationMutation(created.handle(), created.revision(), FlowInvocationStatus.LAUNCHED,
+                        created.childProcessInstanceId(), created.childTraversalId(), null,
+                        "", "", null, CLOCK.instant())).toCompletableFuture().join();
+        byte[] output = PayloadJson.writeJava(Map.of("race", race.name()), PayloadLimits.DEFAULTS);
+        RaceStore raced = racingStore(delegate, launched.handle(), race, output);
+
+        try (var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(raced.store(), CLOCK);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), raced.store());
+            try (var recorder = ExecutionRecorder.open(raced.store(), fixture.key(), "race-worker",
+                    Duration.ofSeconds(30), fixture.revision());
+                 var binding = tasks.bindLive(fixture.key(), recorder);
+                 var flows = new DefaultFlowInvocationCapability(raced.store(), registry, application, tasks,
+                         FlowTargetAuthorizer.creatorOwnedTargets(), FlowInvocationPolicy.DEFAULTS, CLOCK)) {
+                assertInstanceOf(DurableHumanTaskSuspension.class, failure(() ->
+                        flows.await(fixture.message(), launched.handle()).toCompletableFuture().join()));
+                assertTrue(raced.fired().get(), "the requested settlement interleaving must execute");
+
+                FlowInvocationRecord claimed = delegate.loadFlowInvocation(TENANT, launched.handle())
+                        .toCompletableFuture().join().orElseThrow();
+                RaceOutcome outcome = new RaceOutcome(launched.handle(), fixture.message().invocationId(), output,
+                        claimed.revision());
+                assertRaceOutcome(delegate, outcome);
+                FlowInvocationResult retry = flows.await(fixture.message(), launched.handle())
+                        .toCompletableFuture().join();
+                assertEquals(FlowInvocationStatus.COMPLETED, retry.status());
+                assertEquals(Map.of("race", race.name()), retry.output());
+                assertEquals(claimed.revision(), delegate.loadFlowInvocation(TENANT, launched.handle())
+                        .toCompletableFuture().join().orElseThrow().revision(),
+                        "the accepted caller retry must not install a second continuation claim");
+
+                NodeMessage competing = new NodeMessage(CALLER, fixture.key().processInstanceId(),
+                        fixture.message().traversalId(), UUID.randomUUID(), UUID.randomUUID(), Set.of(),
+                        "competing-await", null, Map.of(), ai.ravenroot.api.execution.NodeCommand.PROCESS);
+                assertInstanceOf(IllegalStateException.class, failure(() ->
+                        flows.await(competing, launched.handle()).toCompletableFuture().join()));
+                assertEquals(claimed.revision(), delegate.loadFlowInvocation(TENANT, launched.handle())
+                        .toCompletableFuture().join().orElseThrow().revision(),
+                        "a competing caller must not rewrite the stable claim");
+                return outcome;
+            } finally {
+                application.close();
+            }
+        }
+    }
+
+    private static RaceStore racingStore(ExecutionStore delegate, FlowHandle handle,
+                                         SettlementRace race, byte[] output) {
+        AtomicBoolean fired = new AtomicBoolean();
+        ExecutionStore proxy = (ExecutionStore) Proxy.newProxyInstance(
+                ExecutionStore.class.getClassLoader(), new Class<?>[] { ExecutionStore.class },
+                (ignored, method, arguments) -> {
+                    boolean beforePark = race == SettlementRace.BEFORE_PARK
+                            && method.getName().equals("loadHumanTask")
+                            && arguments != null && arguments.length == 2
+                            && handle.value().equals(arguments[1]);
+                    boolean afterPark = race == SettlementRace.AFTER_PARK_BEFORE_CLAIM
+                            && method.getName().equals("mutateFlowInvocation")
+                            && arguments != null && arguments.length == 2
+                            && arguments[1] instanceof FlowInvocationMutation mutation
+                            && handle.equals(mutation.handle()) && mutation.continuationClaim() != null;
+                    if ((beforePark || afterPark) && fired.compareAndSet(false, true)) {
+                        settleFlow(delegate, handle, output);
+                    }
+                    try {
+                        return method.invoke(delegate, arguments);
+                    } catch (InvocationTargetException wrapped) {
+                        throw wrapped.getCause();
+                    }
+                });
+        return new RaceStore(proxy, fired);
+    }
+
+    private static void settleFlow(ExecutionStore store, FlowHandle handle, byte[] output) {
+        FlowInvocationRecord current = store.loadFlowInvocation(TENANT, handle)
+                .toCompletableFuture().join().orElseThrow();
+        store.mutateFlowInvocation(TENANT, new FlowInvocationMutation(handle, current.revision(),
+                FlowInvocationStatus.COMPLETED, current.childProcessInstanceId(), current.childTraversalId(),
+                output, "", "", current.continuationClaim(), CLOCK.instant())).toCompletableFuture().join();
+    }
+
+    private static void assertRaceOutcome(ExecutionStore store, RaceOutcome outcome) {
+        FlowInvocationRecord retained = store.loadFlowInvocation(TENANT, outcome.handle())
+                .toCompletableFuture().join().orElseThrow();
+        assertEquals(FlowInvocationStatus.COMPLETED, retained.status());
+        assertArrayEquals(outcome.output(), retained.result(), "claim installation must preserve settlement");
+        assertEquals(outcome.claimant(), retained.continuationClaim());
+        assertEquals(outcome.revision(), retained.revision(),
+                "recovery and accepted retries must not rewrite the stable continuation claim");
+        DurableHumanTask task = store.loadHumanTask(TENANT, outcome.handle().value())
+                .toCompletableFuture().join().orElseThrow();
+        assertEquals(HumanTaskStatus.RESOLVED, task.status(),
+                "the terminal child must not leave its internal continuation task stranded");
+    }
+
     private static FlowInvocationRecord terminal(ExecutionStore store, FlowHandle handle) throws Exception {
         final FlowInvocationRecord[] result = new FlowInvocationRecord[1];
         waitUntil(() -> {
@@ -502,5 +647,8 @@ class DefaultFlowInvocationCapabilityTest {
                 """).formatted(value, middle, edges).getBytes(StandardCharsets.UTF_8);
     }
 
+    private enum SettlementRace { BEFORE_PARK, AFTER_PARK_BEFORE_CLAIM }
+    private record RaceStore(ExecutionStore store, AtomicBoolean fired) { }
+    private record RaceOutcome(FlowHandle handle, UUID claimant, byte[] output, long revision) { }
     private record CallerFixture(ExecutionKey key, long revision, NodeMessage message) {}
 }

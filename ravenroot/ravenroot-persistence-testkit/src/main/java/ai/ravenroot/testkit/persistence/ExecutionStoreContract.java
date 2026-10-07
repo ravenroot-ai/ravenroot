@@ -6640,6 +6640,41 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void terminalFlowInvocationAcceptsAClaimAfterAStaleSettlementRaceAndPreservesItOnReopen() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        FlowInvocationRecord intent = flowIntent(DEFAULT_TENANT, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID());
+        FlowInvocationRecord created = await(store().createFlowInvocation(intent));
+        FlowInvocationRecord launched = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(created, FlowInvocationStatus.LAUNCHED, null, null)));
+        byte[] output = "{\"settled\":true}".getBytes(StandardCharsets.UTF_8);
+        FlowInvocationRecord completed = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(launched, FlowInvocationStatus.COMPLETED, output, null)));
+        UUID claimant = UUID.randomUUID();
+
+        assertThrows(CompletionException.class, () -> await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(launched, launched.status(), null, claimant))),
+                "the pre-settlement revision must lose its compare-and-set");
+        FlowInvocationRecord latest = await(store().loadFlowInvocation(DEFAULT_TENANT,
+                completed.handle())).orElseThrow();
+        FlowInvocationRecord claimed = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(latest, latest.status(), latest.result(), claimant)));
+        assertEquals(FlowInvocationStatus.COMPLETED, claimed.status());
+        assertArrayEquals(output, claimed.result(), "claim installation must preserve the terminal result");
+        assertEquals(claimant, claimed.continuationClaim());
+
+        ExecutionStore reopened = store().supports(StoreCapability.DURABLE) ? reopen() : store();
+        FlowInvocationRecord retained = await(reopened.loadFlowInvocation(DEFAULT_TENANT,
+                completed.handle())).orElseThrow();
+        assertEquals(FlowInvocationStatus.COMPLETED, retained.status());
+        assertArrayEquals(output, retained.result());
+        assertEquals(claimant, retained.continuationClaim());
+        assertThrows(CompletionException.class, () -> await(reopened.mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(retained, retained.status(), retained.result(), UUID.randomUUID()))),
+                "a different caller cannot replace the durable continuation claimant");
+    }
+
+    @Test
     final void oneCallerInvocationCreatesOneFlowIntentAndTerminalRetentionIsExplicit() {
         assumeCapability(StoreCapability.FLOW_INVOCATIONS);
         UUID callerProcess = UUID.randomUUID();

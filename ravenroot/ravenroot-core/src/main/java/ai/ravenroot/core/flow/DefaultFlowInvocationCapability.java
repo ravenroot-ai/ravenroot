@@ -221,11 +221,11 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
             }
             // Completion may have committed between the relation read and the atomic caller park.
             // Re-read after the park so either ordering resolves the same durable task.
-            return recordContinuationClaim(record, caller.invocationId()).thenComposeAsync(claimed -> {
-                store.loadFlowInvocation(tenant, handle).thenAcceptAsync(latest ->
-                        latest.filter(FlowInvocationRecord::terminal).ifPresent(this::settleContinuation));
-                return CompletableFuture.failedFuture(new DurableHumanTaskSuspension(handle.value()));
-            });
+            return recordContinuationClaim(record, caller.invocationId()).thenComposeAsync(claimed ->
+                    store.loadFlowInvocation(tenant, handle).thenComposeAsync(latest -> {
+                        latest.filter(FlowInvocationRecord::terminal).ifPresent(this::settleContinuation);
+                        return CompletableFuture.failedFuture(new DurableHumanTaskSuspension(handle.value()));
+                    }));
         });
     }
 
@@ -483,6 +483,11 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
 
     private CompletionStage<FlowInvocationRecord> recordContinuationClaim(
             FlowInvocationRecord record, UUID claimant) {
+        return recordContinuationClaim(record, claimant, SETTLEMENT_CAS_RETRIES);
+    }
+
+    private CompletionStage<FlowInvocationRecord> recordContinuationClaim(
+            FlowInvocationRecord record, UUID claimant, int retries) {
         if (record.continuationClaim() != null) {
             if (!record.continuationClaim().equals(claimant)) {
                 return CompletableFuture.failedFuture(
@@ -493,12 +498,21 @@ public final class DefaultFlowInvocationCapability implements FlowInvocationCapa
         return store.mutateFlowInvocation(record.tenantId(), mutation(record, record.status(), record.result(),
                 record.failureCode(), record.failureMessage(), claimant)).handle((claimed, failure) -> {
             if (failure == null) return CompletableFuture.completedFuture(claimed);
-            return store.loadFlowInvocation(record.tenantId(), record.handle()).thenApply(latest -> {
+            Throwable cause = unwrap(failure);
+            if (!(cause instanceof FlowInvocationConflictException)) {
+                return CompletableFuture.<FlowInvocationRecord>failedFuture(cause);
+            }
+            return store.loadFlowInvocation(record.tenantId(), record.handle()).thenCompose(latest -> {
                 FlowInvocationRecord current = latest.orElseThrow();
-                if (!claimant.equals(current.continuationClaim())) {
-                    throw new IllegalStateException("flow invocation already has a continuation claimant");
+                if (current.continuationClaim() != null) {
+                    if (!claimant.equals(current.continuationClaim())) {
+                        return CompletableFuture.failedFuture(
+                                new IllegalStateException("flow invocation already has a continuation claimant"));
+                    }
+                    return CompletableFuture.completedFuture(current);
                 }
-                return current;
+                if (retries == 0) return CompletableFuture.failedFuture(cause);
+                return recordContinuationClaim(current, claimant, retries - 1);
             });
         }).thenCompose(stage -> stage);
     }

@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 135.
+Checked source reconciliations: 136.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 25899 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 25542 |
-| Unchanged identities | 25468 |
-| Approved identity migrations | 62 |
-| Approved retirements | 12 |
-| Semantically classified additions | 369 |
+| Source inventory candidates | 25899 |
+| Unchanged identities | 25899 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 25899 |
 
 ## Final semantic review
@@ -6850,7 +6850,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-94b66c416b48c2c8316f` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpPublishNodeBehavior.java:405` `backoff` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-bf0864a27e0709bec9d5` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpPublishNodeBehavior.java:405` `backoff` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-ca401f7d587ef5d08787` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpPublishNodeBehavior.java:405` `backoff` | java | retained | derived | These numeric atoms initialize counters, offsets, masks, or indexes whose meaning is derived from surrounding representation logic. |
-| `oc-859635fb5b4cd78c463b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpPublishNodeBehavior.java:592` `if` | java | retained | protocol-or-format-invariant | Exact trusted saga adapter identifier required by the concrete participant behavior before governed effect dispatch. |
+| `oc-859635fb5b4cd78c463b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpPublishNodeBehavior.java:596` `if` | java | retained | protocol-or-format-invariant | Exact trusted saga adapter identifier required by the concrete participant behavior before governed effect dispatch. |
 | `oc-620ee9542ac4261c9c51` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpRuntimeControls.java:15` `AmqpRuntimeControls` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-a05daf81808548fd4a46` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpRuntimeControls.java:15` `AmqpRuntimeControls` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-c550ebaceabfd2ae7200` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpRuntimeControls.java:15` `AmqpRuntimeControls` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

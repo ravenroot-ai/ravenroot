@@ -561,6 +561,10 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             return new Refusal("REJECTED", reason, null, false);
         }
 
+        static Refusal permanent(String reason) {
+            return new Refusal("PERMANENT_FAILURE", reason, null, false);
+        }
+
         static Refusal unavailableReference(String reason) {
             return new Refusal("PERMANENT_FAILURE", reason, null, true);
         }

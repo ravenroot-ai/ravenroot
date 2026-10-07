@@ -42,7 +42,7 @@ The release workflow adds these immutable deliverables while preserving the full
 | Full server image | `ghcr.io/ravenroot-ai/ravenroot:0.6.1-alpha.1` |
 
 The UI OCI runtime is Linux amd64, non-root UID/GID 10001. Tags have the product version without `v`;
-the GitHub release/tag uses `v0.6.0-alpha.1`. There is no moving `latest` tag. Use the verified OCI
+the GitHub release/tag uses `v0.6.1-alpha.1`. There is no moving `latest` tag. Use the verified OCI
 index digest in Kubernetes. Both images retain SBOM and SLSA provenance predicates in their OCI
 indexes and receive digest-bound GitHub build-provenance attestations. The ZIP is covered by
 `SHA256SUMS` and GitHub release-file provenance; it is not a Maven/JAR artifact or a GPG-signed Maven

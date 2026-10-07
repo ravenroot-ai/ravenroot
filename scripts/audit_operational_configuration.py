@@ -13830,7 +13830,7 @@ SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS = {
         "931877ccbb659cee1fb90ddd42f1e4486814e2b880678c243b982f995c358ad1",
     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
     "ExecutionStoreContract.java":
-        "c5d8e1edfbe311de0ae1afc41f978628003264c9f429c76bef13597f2d4b384e",
+        "5ee3bc4bd46a9aad8f11c59071c5004f5b21469dfb3dceefe03e171b85a0a5c0",
 }
 SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST = \
     "c17f55d2e2a2d57536718dbfa1a65122e22bce5644254b487a3156f80a4a726b"

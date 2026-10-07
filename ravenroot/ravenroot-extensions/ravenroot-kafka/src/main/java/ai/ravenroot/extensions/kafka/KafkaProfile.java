@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.kafka;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy.PlaintextAuthorization;
 import java.util.List;
 import java.util.Set;
 
@@ -11,14 +12,31 @@ public record KafkaProfile(
         boolean allowPartition, int maxPartition, boolean allowTimestamp, String compression,
         String acks, boolean idempotence, int retries, int maxInFlight,
         boolean allowAutoCreate, int maxConcurrency, int maxPerSecond, int timeoutMs,
-        int maxRecordBytes, long bufferMemoryBytes) {
+        int maxRecordBytes, long bufferMemoryBytes, List<PlaintextAuthorization> plaintextAuthorizations) {
 
     private static final Set<String> DNS = Set.of("use_all_dns_ips", "resolve_canonical_bootstrap_servers_only");
     private static final Set<String> SASL = Set.of("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512");
     private static final Set<String> COMPRESSION = Set.of("none", "gzip", "snappy", "lz4", "zstd");
 
+    public KafkaProfile(
+            String tenant, String name, List<String> bootstrapServers, String clientDnsLookup, boolean tls,
+            String saslMechanism, String username, String credentialRef, String clientId,
+            String defaultTopic, Set<String> topics, Set<String> headers,
+            boolean allowPartition, int maxPartition, boolean allowTimestamp, String compression,
+            String acks, boolean idempotence, int retries, int maxInFlight,
+            boolean allowAutoCreate, int maxConcurrency, int maxPerSecond, int timeoutMs,
+            int maxRecordBytes, long bufferMemoryBytes) {
+        this(tenant, name, bootstrapServers, clientDnsLookup, tls, saslMechanism, username, credentialRef,
+                clientId, defaultTopic, topics, headers, allowPartition, maxPartition, allowTimestamp,
+                compression, acks, idempotence, retries, maxInFlight, allowAutoCreate, maxConcurrency,
+                maxPerSecond, timeoutMs, maxRecordBytes, bufferMemoryBytes, List.of());
+    }
+
     public KafkaProfile {
         bootstrapServers = List.copyOf(bootstrapServers == null ? List.of() : bootstrapServers);
+        List<PlaintextAuthorization> authorizations = List.copyOf(
+                plaintextAuthorizations == null ? List.of() : plaintextAuthorizations);
+        plaintextAuthorizations = authorizations;
         topics = Set.copyOf(topics == null ? Set.of() : topics);
         headers = Set.copyOf(headers == null ? Set.of() : headers);
         if (!identifier(tenant) || !identifier(name) || bootstrapServers.isEmpty() || bootstrapServers.size() > 16
@@ -35,7 +53,9 @@ public record KafkaProfile(
                 || maxPerSecond < 1 || maxPerSecond > 1_000 || timeoutMs < 100 || timeoutMs > 30_000
                 || maxRecordBytes < 1 || maxRecordBytes > 1_048_576
                 || bufferMemoryBytes < maxRecordBytes || bufferMemoryBytes > 16_777_216L
-                || !tls && bootstrapServers.stream().anyMatch(server -> !loopback(server))) {
+                || !tls && bootstrapServers.stream()
+                .anyMatch(server -> authorizations.stream().noneMatch(authorization ->
+                        authorization.matches("kafka", tenant + "/" + name, host(server), port(server))))) {
             throw new IllegalArgumentException("invalid Kafka operator profile");
         }
     }
@@ -63,7 +83,16 @@ public record KafkaProfile(
         catch (NumberFormatException invalid) { return false; }
     }
 
-    private static boolean loopback(String value) {
+    static boolean loopback(String value) {
         return value.matches("(?i)localhost:[0-9]+|127\\.0\\.0\\.1:[0-9]+|\\[::1]:[0-9]+");
+    }
+
+    private static String host(String value) {
+        return value.startsWith("[") ? value.substring(1, value.indexOf(']'))
+                : value.substring(0, value.lastIndexOf(':'));
+    }
+
+    private static int port(String value) {
+        return Integer.parseInt(value.substring(value.lastIndexOf(':') + 1));
     }
 }

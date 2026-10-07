@@ -4,7 +4,7 @@ Use this procedure when a Ravenroot backend already runs, including inside your 
 UI pod serves compiled assets and proxies HTTP APIs/SSE to that backend. It starts only a Node.js
 static web server; there is no Java backend, database migration, artifact store or security audit
 store in this image. The [complete installation](kubernetes-installation.md) provides those backend
-concerns separately. This guide targets current `dev` and the planned `0.6.0-alpha.1`; resolve new
+concerns separately. This guide targets current `dev` and the planned `0.6.1-alpha.1`; resolve new
 artifacts only after protected publication has completed.
 
 ## 1. Confirm the existing backend contract
@@ -37,12 +37,12 @@ The release workflow adds these immutable deliverables while preserving the full
 
 | Deliverable | Name/reference |
 |---|---|
-| Compiled static archive plus optional proxy server | `ravenroot-ui-0.6.0-alpha.1.zip` in GitHub Releases |
-| UI-only image | `ghcr.io/ravenroot-ai/ravenroot-ui:0.6.0-alpha.1` |
-| Full server image | `ghcr.io/ravenroot-ai/ravenroot:0.6.0-alpha.1` |
+| Compiled static archive plus optional proxy server | `ravenroot-ui-0.6.1-alpha.1.zip` in GitHub Releases |
+| UI-only image | `ghcr.io/ravenroot-ai/ravenroot-ui:0.6.1-alpha.1` |
+| Full server image | `ghcr.io/ravenroot-ai/ravenroot:0.6.1-alpha.1` |
 
 The UI OCI runtime is Linux amd64, non-root UID/GID 10001. Tags have the product version without `v`;
-the GitHub release/tag uses `v0.6.0-alpha.1`. There is no moving `latest` tag. Use the verified OCI
+the GitHub release/tag uses `v0.6.1-alpha.1`. There is no moving `latest` tag. Use the verified OCI
 index digest in Kubernetes. Both images retain SBOM and SLSA provenance predicates in their OCI
 indexes and receive digest-bound GitHub build-provenance attestations. The ZIP is covered by
 `SHA256SUMS` and GitHub release-file provenance; it is not a Maven/JAR artifact or a GPG-signed Maven
@@ -50,7 +50,7 @@ payload. See [release verification](../governance/releasing.md).
 
 ```sh
 # Run after publication, not while the release is still awaiting approval.
-docker buildx imagetools inspect ghcr.io/ravenroot-ai/ravenroot-ui:0.6.0-alpha.1
+docker buildx imagetools inspect ghcr.io/ravenroot-ai/ravenroot-ui:0.6.1-alpha.1
 gh attestation verify oci://ghcr.io/ravenroot-ai/ravenroot-ui@sha256:INDEX_DIGEST \
   --repo ravenroot-ai/ravenroot
 ```
@@ -59,7 +59,7 @@ For an archive installation, download the ZIP and SHA256SUMS from the same relea
 checksum entry and file attestation, extract, then run:
 
 ```sh
-unzip ravenroot-ui-0.6.0-alpha.1.zip
+unzip ravenroot-ui-0.6.1-alpha.1.zip
 cd ravenroot-ui
 RAVENROOT_UI_ROOT="$PWD/ui" RAVENROOT_UI_BACKEND_URL=https://backend.example.test/automation \
   RAVENROOT_UI_PREFIX=/ravenroot node server.mjs
@@ -117,6 +117,17 @@ UI panel. Never place a credential in that URL, an image layer or browser asset.
 HTTP methods, bodies, query strings, authorization and browser Origin are forwarded; hop-by-hop
 headers and untrusted forwarded-authority headers are removed. The optional interaction WebSocket
 is not supported by this proxy. UI REST and fetch-based SSE require no WebSocket route.
+`RAVENROOT_UI_BACKEND_URL` is the administrator-owned outbound authority for this standalone
+Node.js proxy: its scheme, hostname, finite port and optional path prefix are fixed at process
+startup. A browser request can add only the documented API path and query below that prefix; it
+cannot replace the upstream scheme, authority or port. Node's HTTP client does not follow upstream
+redirects, so a backend redirect is returned to the browser rather than becoming a second
+server-side outbound request. `http://` therefore explicitly authorizes a plaintext hop that may
+forward the browser's authorization header; use it only inside the operator-controlled network or
+authenticated mesh. `https://` uses Node's normal certificate-chain and hostname verification,
+with private roots supplied through `NODE_EXTRA_CA_CERTS`; disabling verification is refused.
+DNS resolution and connection reuse remain Node transport behavior, so enforce the configured
+backend name/address boundary with namespace egress policy or a controlled mesh endpoint.
 For root deployment, remove `RAVENROOT_UI_PREFIX`, set HTTPRoute PathPrefix to `/`, and use a
 **dedicated hostname** so you do not replace another application's routes. The backend prefix can
 remain `/automation`. Requests to `/ravenroot` redirect to `/ravenroot/`; unknown paths return 404.

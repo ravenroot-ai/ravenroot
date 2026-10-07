@@ -12,8 +12,9 @@ GraphML contains an opaque `brokerProfile` and optional values that can only nar
 that profile. The operator profile owns the broker host and port, TLS requirement, virtual host,
 username, opaque credential reference, exact exchange/routing/header/reply-to authority and every
 resource ceiling. Graph content cannot supply an endpoint, username, credential reference, password,
-TLS downgrade or topology declaration. Plaintext profiles are accepted only for an exact loopback
-host.
+TLS downgrade or topology declaration. Plaintext profiles require either the legacy exact-loopback
+case or an exact administrator trusted-network rule for the protocol, port, tenant/profile, host,
+and complete resolved address set.
 
 The default profile resolver reads:
 

@@ -323,10 +323,16 @@ final class AmqpConsumerSource implements InboundSource {
                     .orElseThrow(() -> sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE));
             if (!profile.tenant().equals(tenant) || !profile.name().equals(name))
                 throw sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE);
-            destinationPolicy.requireAllowedLiteral(profile.host());
+            destinationPolicy.requireAllowedDestination(
+                    "amqp091", tenant + "/" + name, profile.host(), profile.port());
             return profile;
         }
         catch (SourceStartException failure) { throw failure; }
+        catch (SecurityException refused) {
+            throw sourceFailure("OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED".equals(refused.getMessage())
+                    ? AmqpSourceStartFailure.OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED
+                    : AmqpSourceStartFailure.OUTBOUND_DESTINATION_POLICY_REFUSED, refused);
+        }
         catch (RuntimeException failure) {
             throw sourceFailure(AmqpSourceStartFailure.AMQP_PROFILE_UNAVAILABLE, failure);
         }

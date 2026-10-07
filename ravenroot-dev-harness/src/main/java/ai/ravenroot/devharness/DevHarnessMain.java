@@ -117,8 +117,7 @@ public final class DevHarnessMain {
         // JVM-wide and installed before anything resolves a name, exactly as RavenrootServerMain
         // does. Copied rather than skipped: this bench must not be a place where an egress control
         // quietly does not apply.
-        EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
-                environment.get("RAVENROOT_EGRESS_RESERVED_EXCEPTIONS")));
+        EgressAddressGuard.configure(ReservedNetworkPolicy.fromEnvironment(environment));
 
         CredentialResolver credentials =
                 new ProviderCredentialResolver(new EnvironmentCredentialResolver());

@@ -85,7 +85,7 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
      *   <li><b>Security mode is compared case-sensitively here.</b> {@code MailProfile}'s constructor
      *       upper-cases {@code securityMode} before testing membership, so the SMTP pre-check must
      *       upper-case too in order to stay equivalent. {@link ImapProfile} does <em>not</em>
-     *       normalise: it tests the raw string against {@code Set.of("IMAPS", "STARTTLS")}. Copying
+     *       normalise: it tests the raw string against {@code Set.of("IMAPS", "STARTTLS", "PLAIN")}. Copying
      *       the SMTP line with its {@code toUpperCase} would make this pre-check <em>looser</em> than
      *       the constraint it stands in for -- {@code imaps} would pass the pre-check and then be
      *       refused by the record -- the permissive counterpart to a pre-check that is too strict.
@@ -139,11 +139,11 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
         CREDENTIAL_REF_BLANK, DUPLICATE_FOLDER, FOLDERS_EMPTY, CONNECT_TIMEOUT_FORMAT,
         CONNECT_TIMEOUT_RANGE, READ_TIMEOUT_FORMAT, READ_TIMEOUT_RANGE, CONCURRENCY_FORMAT,
         CONCURRENCY_RANGE, MAX_RESULTS_FORMAT, MAX_RESULTS_RANGE, PREVIEW_CHARS_FORMAT,
-        PREVIEW_CHARS_RANGE, RESERVED_DESTINATION, RECORD_POLICY
+        PREVIEW_CHARS_RANGE, RESERVED_DESTINATION, PLAINTEXT_REFUSED, RECORD_POLICY
     }
 
     /** Mirrors {@link ImapProfile}'s own membership test exactly, including its case sensitivity. */
-    private static final Set<String> SECURITY_MODES = Set.of("IMAPS", "STARTTLS");
+    private static final Set<String> SECURITY_MODES = Set.of("IMAPS", "STARTTLS", "PLAIN");
     private static final int FIELDS = 11;
     private static final System.Logger LOGGER = System.getLogger("ai.ravenroot.mail.imap.profile.rejected");
 
@@ -170,12 +170,13 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
         if (p.length != FIELDS) return rejected(tenant, profile, Rejection.FIELD_COUNT);
 
         if (p[0].isBlank()) return rejected(tenant, profile, Rejection.HOST_BLANK);
-        try { destinationPolicy.requireAllowedLiteral(p[0]); }
-        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         int port;
         try { port = Integer.parseInt(p[1]); }
         catch (NumberFormatException notNumeric) { return rejected(tenant, profile, Rejection.PORT_FORMAT); }
         if (port < 1 || port > 65535) return rejected(tenant, profile, Rejection.PORT_RANGE);
+        try { destinationPolicy.requireAllowedDestination(
+                "imap", tenant + "/" + profile, p[0], port); }
+        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         // Deliberately not upper-cased: ImapProfile compares the raw string. See this enum's comment.
         if (!SECURITY_MODES.contains(p[2])) return rejected(tenant, profile, Rejection.UNKNOWN_SECURITY_MODE);
         if (p[3].isBlank()) return rejected(tenant, profile, Rejection.USERNAME_BLANK);
@@ -218,8 +219,16 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
         catch (NumberFormatException notNumeric) { return rejected(tenant, profile, Rejection.PREVIEW_CHARS_FORMAT); }
         if (maxPreviewChars < 0 || maxPreviewChars > 65536) return rejected(tenant, profile, Rejection.PREVIEW_CHARS_RANGE);
 
+        ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = null;
+        if ("PLAIN".equals(p[2])) try {
+            plaintextAuthorization = destinationPolicy.authorizePlaintext(
+                    "imap", tenant + "/" + profile, p[0], port);
+        } catch (SecurityException refused) {
+            return rejected(tenant, profile, Rejection.PLAINTEXT_REFUSED);
+        }
         try { return Optional.of(new ImapProfile(tenant, profile, p[0], port, p[2], p[3], p[4], folders,
-                connectTimeoutMs, readTimeoutMs, maxConcurrency, maxResults, maxPreviewChars)); }
+                connectTimeoutMs, readTimeoutMs, maxConcurrency, maxResults, maxPreviewChars,
+                plaintextAuthorization)); }
         catch (RuntimeException invalid) { return rejected(tenant, profile, Rejection.RECORD_POLICY); }
     }
 

@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.matrix;
 
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -28,9 +29,10 @@ record MatrixConfiguration(StorePolicy store, Map<String, MatrixProfile> profile
                     MatrixValues.canonicalBase64(environment.get(ENVIRONMENT), 4 * 1024 * 1024));
             MatrixValues.exact(root, Set.of("store", "profiles"));
             StorePolicy store = store(MatrixValues.object(root.get("store")));
+            ReservedNetworkPolicy destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
             Map<String, MatrixProfile> profiles = new LinkedHashMap<>();
             MatrixValues.object(root.get("profiles")).forEach((name, value) -> {
-                MatrixProfile profile = profile(name, MatrixValues.object(value));
+                MatrixProfile profile = profile(name, MatrixValues.object(value), destinationPolicy);
                 if (profiles.put(profile.tenantId() + "\u0000" + profile.name(), profile) != null) throw invalid();
             });
             return new MatrixConfiguration(store, profiles);
@@ -51,7 +53,8 @@ record MatrixConfiguration(StorePolicy store, Map<String, MatrixProfile> profile
                 (int) MatrixValues.number(value.get("maxSources"), 1, 10_000));
     }
 
-    private static MatrixProfile profile(String name, Map<String, Object> value) {
+    private static MatrixProfile profile(String name, Map<String, Object> value,
+                                         ReservedNetworkPolicy destinationPolicy) {
         MatrixValues.exact(value, Set.of("tenantId", "homeserverOrigin", "userId", "rooms", "eventTypes",
                 "credentialBindingId", "credentialReference", "initialSyncMode", "initialSince", "limits"));
         Map<String, Object> limits = MatrixValues.object(value.get("limits"));
@@ -64,8 +67,11 @@ record MatrixConfiguration(StorePolicy store, Map<String, MatrixProfile> profile
             case "deliver-bounded" -> MatrixProfile.InitialSyncMode.DELIVER_BOUNDED;
             default -> throw invalid();
         };
-        return new MatrixProfile(MatrixValues.string(value.get("tenantId"), 160), name,
-                URI.create(MatrixValues.string(value.get("homeserverOrigin"), 512)),
+        URI homeserver = URI.create(MatrixValues.string(value.get("homeserverOrigin"), 512));
+        ReservedNetworkPolicy.PlaintextAuthorization plaintextAuthorization = "http".equals(homeserver.getScheme())
+                ? destinationPolicy.authorizePlaintext("http", PACKAGE_ID, homeserver.getHost(), 80)
+                : null;
+        return new MatrixProfile(MatrixValues.string(value.get("tenantId"), 160), name, homeserver,
                 MatrixValues.string(value.get("userId"), 255),
                 MatrixValues.strings(value.get("rooms"), 256, 255),
                 MatrixValues.strings(value.get("eventTypes"), 64, 128),
@@ -80,7 +86,7 @@ record MatrixConfiguration(StorePolicy store, Map<String, MatrixProfile> profile
                 (int) MatrixValues.number(limits.get("pollTimeoutMs"), 0, 30_000),
                 (int) MatrixValues.number(limits.get("retryBackoffMs"), 100, 60_000),
                 (int) MatrixValues.number(limits.get("maxEventsPerSync"), 1, 1_000), mode,
-                MatrixValues.optionalString(value.get("initialSince"), 2_048));
+                MatrixValues.optionalString(value.get("initialSince"), 2_048), plaintextAuthorization);
     }
 
     record StorePolicy(Path path, int maxDeliveries, int retentionHours, int maxSources) {

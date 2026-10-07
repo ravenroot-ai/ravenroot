@@ -458,6 +458,7 @@ API keys and tokens never belong in GraphML. Credential POST writes secret mater
 | `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | request-body byte ceiling; unset or blank selects 1 MiB (`1048576`); an explicit value must be a positive whole number of bytes |
 | `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | response-body byte ceiling; unset or blank selects 8 MiB (`8388608`); an explicit value must be a positive whole number of bytes |
 | `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | comma-separated reviewed reserved-network exceptions; unset or blank preserves `localhost:LOOPBACK` |
+| `RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY` | administrator-owned canonical padded Base64 of strict version-1 JSON with exact finite protocol, port, profile and destination scopes; unset or blank grants no scoped reserved-network admission or plaintext; matching rules do not turn legacy admission exceptions into plaintext authority; restart or recreate the process to change it |
 | `RAVENROOT_TOKEN` | remote CLI bearer token when `--token-file` is absent; no default |
 
 Environment credentials are startup configuration. User credentials stored through the governed API

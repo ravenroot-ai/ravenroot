@@ -4,6 +4,8 @@ import ai.ravenroot.api.security.EnvironmentKeyCodec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 
@@ -49,6 +51,28 @@ class EnvironmentLlmProfileResolverTest {
 
         assertEquals(Optional.empty(),
                 resolve("hosted", withKey.formatted("http://api.example.test/v1/chat/completions")));
+    }
+
+    @Test
+    void administratorRuleAuthorizesCredentialedPlaintextOnlyThroughTheResolver() {
+        String profileName = "hosted";
+        String json = """
+                {"endpoint":"http://127.0.0.1:8080/v1/chat/completions","model":"m",
+                "credentialBindingId":"llm","credentialReference":"llm-key"}
+                """;
+        String policy = """
+                {"version":1,"rules":[{"name":"llm-mesh","protocols":["http"],"ports":[8080],
+                "hosts":["127.0.0.1"],"addresses":["127.0.0.0/8"],
+                "profiles":["ai.ravenroot.extensions.ai"],"allowPlaintext":true}]}
+                """.replaceAll("\\s+", "");
+        Map<String, String> environment = Map.of(
+                EnvironmentLlmProfileResolver.environmentVariableName(profileName),
+                AiTestSupport.encodedProfile(json),
+                "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
+                Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8)));
+        assertEquals("http://127.0.0.1:8080/v1/chat/completions",
+                new EnvironmentLlmProfileResolver(environment).resolve(profileName).orElseThrow()
+                        .endpoint().toString());
     }
 
     @Test

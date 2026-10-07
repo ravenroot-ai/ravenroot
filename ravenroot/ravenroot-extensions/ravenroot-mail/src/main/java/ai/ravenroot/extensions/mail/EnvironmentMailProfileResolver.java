@@ -133,13 +133,14 @@ public final class EnvironmentMailProfileResolver implements MailProfileResolver
         String[] p = raw.split(";", -1);
         if (p.length != 10 && p.length != 11) return rejected(tenant, profile, Rejection.FIELD_COUNT);
         if (p[0].isBlank()) return rejected(tenant, profile, Rejection.HOST_BLANK);
-        try { destinationPolicy.requireAllowedLiteral(p[0]); }
-        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         if (!SECURITY_MODES.contains(p[2].toUpperCase(Locale.ROOT))) return rejected(tenant, profile, Rejection.UNKNOWN_SECURITY_MODE);
         int port;
         try { port = Integer.parseInt(p[1]); }
         catch (NumberFormatException notNumeric) { return rejected(tenant, profile, Rejection.PORT_FORMAT); }
         if (port < 1 || port > 65535) return rejected(tenant, profile, Rejection.PORT_RANGE);
+        try { destinationPolicy.requireAllowedDestination(
+                "smtp", tenant + "/" + profile, p[0], port); }
+        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         int maxConcurrency;
         try { maxConcurrency = Integer.parseInt(p[9]); }
         catch (NumberFormatException notNumeric) { return rejected(tenant, profile, Rejection.CONCURRENCY_FORMAT); }

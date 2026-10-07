@@ -161,6 +161,7 @@ Detailed contract: [Credentials and egress](configuration.md#secret-handling).
 |---|---|
 | `RAVENROOT_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY` | administrator-owned canonical padded Base64 of strict version-1 JSON; unset grants no scoped reserved-network admission or plaintext; rules bind exact finite protocol, port, profile and destination scopes, while legacy exceptions remain admission-only and never widen plaintext; see the [schema and precedence contract](../operator-guide/credentials-egress.md#trusted-networks-and-plaintext-transports) |
 | `RAVENROOT_HTTP_ALLOWED_HOSTS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HTTP_ALLOWED_PORTS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |

@@ -2,6 +2,8 @@ package ai.ravenroot.extensions.gitworkspace;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -155,7 +157,8 @@ final class GitCommandRunner {
         environment.put("GIT_TERMINAL_PROMPT", "0");
         environment.put("GCM_INTERACTIVE", "never");
         environment.put("GIT_OPTIONAL_LOCKS", "0");
-        List<Map.Entry<String, String>> configuration = configuration(credentialHelper);
+        List<Map.Entry<String, String>> configuration = configuration(
+                credentialHelper, arguments.contains(profile.remote()));
         environment.put("GIT_CONFIG_COUNT", Integer.toString(configuration.size()));
         int index = 0;
         for (Map.Entry<String, String> entry : configuration) {
@@ -210,7 +213,7 @@ final class GitCommandRunner {
         if (drain.isAlive()) throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
     }
 
-    private List<Map.Entry<String, String>> configuration(String credentialHelper) {
+    List<Map.Entry<String, String>> configuration(String credentialHelper, boolean usesRemote) {
         List<Map.Entry<String, String>> values = new ArrayList<>();
         values.add(Map.entry("core.hooksPath", hooks.toString()));
         values.add(Map.entry("core.fsmonitor", "false"));
@@ -227,6 +230,7 @@ final class GitCommandRunner {
         values.add(Map.entry("submodule.recurse", "false"));
         values.add(Map.entry("protocol.allow", "never"));
         values.add(Map.entry("protocol.https.allow", "always"));
+        if (usesRemote) values.addAll(remoteTransportConfiguration());
         if (profile.remote().startsWith("file:")) values.add(Map.entry("protocol.file.allow", "always"));
         values.add(Map.entry("diff.external", ""));
         values.add(Map.entry("diff.trustExitCode", "false"));
@@ -236,6 +240,39 @@ final class GitCommandRunner {
         values.add(Map.entry("rerere.enabled", "false"));
         values.add(Map.entry("http.followRedirects", "false"));
         return values;
+    }
+
+    /**
+     * Authorizes the exact configured remote immediately before a native Git network operation and
+     * pins every approved DNS answer into libcurl. Redirects remain disabled by the adjacent Git
+     * setting, so neither DNS rebinding nor an HTTP redirect can escape this authority envelope.
+     */
+    private List<Map.Entry<String, String>> remoteTransportConfiguration() {
+        URI remote = URI.create(profile.remote());
+        if ("file".equals(remote.getScheme())) return List.of();
+        int port = remote.getPort() >= 0 ? remote.getPort() : "https".equals(remote.getScheme()) ? 443 : 80;
+        String scope = profile.tenant() + "/" + profile.name();
+        List<InetAddress> addresses = "http".equals(remote.getScheme())
+                ? profile.egressPolicy().resolveAllowedPlaintextDestination(
+                        "git", scope, remote.getHost(), port)
+                : profile.egressPolicy().resolveAllowedDestination(
+                        "git", scope, remote.getHost(), port);
+        List<Map.Entry<String, String>> values = new ArrayList<>();
+        if ("http".equals(remote.getScheme())) values.add(Map.entry("protocol.http.allow", "always"));
+        if (!numericLiteral(remote.getHost())) {
+            for (InetAddress address : addresses) {
+                String literal = address.getHostAddress();
+                if (literal.indexOf(':') >= 0) literal = "[" + literal + "]";
+                values.add(Map.entry("http.curloptResolve", remote.getHost() + ":" + port + ":" + literal));
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    private static boolean numericLiteral(String host) {
+        return host != null && (host.indexOf(':') >= 0
+                || host.chars().allMatch(character -> character == '.'
+                        || character >= '0' && character <= '9'));
     }
 
     private static String decode(byte[] value) {

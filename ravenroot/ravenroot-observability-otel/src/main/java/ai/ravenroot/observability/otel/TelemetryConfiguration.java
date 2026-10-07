@@ -3,6 +3,8 @@ package ai.ravenroot.observability.otel;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.net.URI;
 
 /**
  * Runtime configuration for the OpenTelemetry bridge (PLAT-01), read from environment
@@ -82,6 +84,19 @@ public record TelemetryConfiguration(boolean enabled, TelemetryExporterKind expo
                 ? TelemetryExporterKind.LOGGING
                 : parseExporterKind(exporterValue);
         String endpoint = trimmed(environment.get(ENDPOINT_VARIABLE));
+        if (kind == TelemetryExporterKind.OTLP && endpoint != null) {
+            URI uri;
+            try { uri = URI.create(endpoint); }
+            catch (IllegalArgumentException malformed) { throw new IllegalArgumentException("Invalid OTLP endpoint"); }
+            if (uri.getHost() == null || !("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())))
+                throw new IllegalArgumentException("Invalid OTLP endpoint");
+            int port = uri.getPort() == -1 ? ("https".equals(uri.getScheme()) ? 443 : 80) : uri.getPort();
+            var destinationPolicy = ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromEnvironment(environment);
+            destinationPolicy.requireAllowedDestination("otlp", "telemetry", uri.getHost(), port);
+            boolean legacyLocal = Set.of("127.0.0.1", "localhost", "::1", "[::1]").contains(uri.getHost());
+            if ("http".equals(uri.getScheme()) && !legacyLocal)
+                destinationPolicy.requirePlaintext("otlp", "telemetry", uri.getHost(), port);
+        }
         return new TelemetryConfiguration(true, kind, endpoint, serviceName);
     }
 

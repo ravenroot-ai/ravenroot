@@ -49,6 +49,12 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
     public OpenAiCompatibleAssistantProvider(HttpClient httpClient, URI endpoint, String model,
                                               AssistantCredential credential, Duration timeout,
                                               boolean allowLocalHttp) {
+        this(httpClient, endpoint, model, credential, timeout, allowLocalHttp, false);
+    }
+
+    public OpenAiCompatibleAssistantProvider(HttpClient httpClient, URI endpoint, String model,
+                                              AssistantCredential credential, Duration timeout,
+                                              boolean allowLocalHttp, boolean allowTrustedHttp) {
         this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.model = Objects.requireNonNull(model, "model");
@@ -62,6 +68,7 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
         }
         String scheme = String.valueOf(endpoint.getScheme()).toLowerCase(java.util.Locale.ROOT);
         if ("http".equals(scheme)
+                && !allowTrustedHttp
                 && (!allowLocalHttp || credential != null || !isLocalHttpHost(endpoint.getHost()))) {
             throw new IllegalArgumentException("credential-free local HTTP was not explicitly permitted");
         }

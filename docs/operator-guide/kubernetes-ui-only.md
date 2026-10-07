@@ -4,7 +4,7 @@ Use this procedure when a Ravenroot backend already runs, including inside your 
 UI pod serves compiled assets and proxies HTTP APIs/SSE to that backend. It starts only a Node.js
 static web server; there is no Java backend, database migration, artifact store or security audit
 store in this image. The [complete installation](kubernetes-installation.md) provides those backend
-concerns separately. This guide targets current `dev` and the planned `0.6.1-alpha.1`; resolve new
+concerns separately. This guide targets current `dev` and the planned `0.7.0-alpha.1`; resolve new
 artifacts only after protected publication has completed.
 
 ## 1. Confirm the existing backend contract
@@ -37,12 +37,12 @@ The release workflow adds these immutable deliverables while preserving the full
 
 | Deliverable | Name/reference |
 |---|---|
-| Compiled static archive plus optional proxy server | `ravenroot-ui-0.6.1-alpha.1.zip` in GitHub Releases |
-| UI-only image | `ghcr.io/ravenroot-ai/ravenroot-ui:0.6.1-alpha.1` |
-| Full server image | `ghcr.io/ravenroot-ai/ravenroot:0.6.1-alpha.1` |
+| Compiled static archive plus optional proxy server | `ravenroot-ui-0.7.0-alpha.1.zip` in GitHub Releases |
+| UI-only image | `ghcr.io/ravenroot-ai/ravenroot-ui:0.7.0-alpha.1` |
+| Full server image | `ghcr.io/ravenroot-ai/ravenroot:0.7.0-alpha.1` |
 
 The UI OCI runtime is Linux amd64, non-root UID/GID 10001. Tags have the product version without `v`;
-the GitHub release/tag uses `v0.6.1-alpha.1`. There is no moving `latest` tag. Use the verified OCI
+the GitHub release/tag uses `v0.7.0-alpha.1`. There is no moving `latest` tag. Use the verified OCI
 index digest in Kubernetes. Both images retain SBOM and SLSA provenance predicates in their OCI
 indexes and receive digest-bound GitHub build-provenance attestations. The ZIP is covered by
 `SHA256SUMS` and GitHub release-file provenance; it is not a Maven/JAR artifact or a GPG-signed Maven
@@ -50,7 +50,7 @@ payload. See [release verification](../governance/releasing.md).
 
 ```sh
 # Run after publication, not while the release is still awaiting approval.
-docker buildx imagetools inspect ghcr.io/ravenroot-ai/ravenroot-ui:0.6.1-alpha.1
+docker buildx imagetools inspect ghcr.io/ravenroot-ai/ravenroot-ui:0.7.0-alpha.1
 gh attestation verify oci://ghcr.io/ravenroot-ai/ravenroot-ui@sha256:INDEX_DIGEST \
   --repo ravenroot-ai/ravenroot
 ```
@@ -59,7 +59,7 @@ For an archive installation, download the ZIP and SHA256SUMS from the same relea
 checksum entry and file attestation, extract, then run:
 
 ```sh
-unzip ravenroot-ui-0.6.1-alpha.1.zip
+unzip ravenroot-ui-0.7.0-alpha.1.zip
 cd ravenroot-ui
 RAVENROOT_UI_ROOT="$PWD/ui" RAVENROOT_UI_BACKEND_URL=https://backend.example.test/automation \
   RAVENROOT_UI_PREFIX=/ravenroot node server.mjs

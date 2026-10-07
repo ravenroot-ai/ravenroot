@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 25899 |
+| Atomic operational candidates discovered | 25905 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 25899 |
+| Reviewed | 25905 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 328 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2094 |
-| Retained protocol or format invariants | 10561 |
+| Retained protocol or format invariants | 10567 |
 | Retained published contract descriptions | 575 |
 | Retained presentation text | 798 |
 | Retained derived values | 1137 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 137.
+Checked source reconciliations: 138.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 25899 candidates.
+zero-count or unclassified rows as needed and sums to 25905 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 25899 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 24056 |
+| retained | 24062 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 25899 candidates.
 | derived | 1137 |
 | operator-configurable | 1843 |
 | presentation-text | 798 |
-| protocol-or-format-invariant | 10561 |
+| protocol-or-format-invariant | 10567 |
 | published-contract-description | 575 |
 | security-ceiling-or-default | 2094 |
 | test-fixture | 8891 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 25899 candidates.
 |---|---:|
 | deployment | 3012 |
 | deployment-example | 20 |
-| java | 7759 |
+| java | 7765 |
 | script | 2535 |
 | test-fixture | 8891 |
 | ui | 3682 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1481 |
 | #321 | 8517 |
-| Retained; no remediation required | 15305 |
+| Retained; no remediation required | 15311 |
 
 ## Latest reconciliation
 
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 25899 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 25899 |
+| Semantically classified additions | 6 |
+| Current candidates | 25905 |
 
 ## Final semantic review
 
@@ -6862,7 +6862,13 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-7185874e17681906275e` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpConsumerPolicyResolver.java:44` `variableName` | java | retained | protocol-or-format-invariant | These are exact extension and provider environment names, not their values or fallback choices. |
 | `oc-852b20781faf49f65524` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpCredentialResolver.java:38` `environmentVariableName` | java | retained | protocol-or-format-invariant | These are exact extension and provider environment names, not their values or fallback choices. |
 | `oc-d0258a6740717f141d54` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:38` `catch` | java | retained | security-ceiling-or-default | This finite lower bound or sentinel keeps the administrator destination port/profile parser fail-closed. |
-| `oc-2b6164aa32bf710e83da` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:68` `environmentVariableName` | java | retained | protocol-or-format-invariant | These are exact extension and provider environment names, not their values or fallback choices. |
+| `oc-c86c4c826b9c7dd8a17d` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:45` `catch` | java | retained | protocol-or-format-invariant | The fixed delimited-field index 13 decodes maxPriority from the AMQP profile wire format before policy evaluation; it is serialization structure rather than an operator-selected limit. |
+| `oc-df46585464257576ac26` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:46` `catch` | java | retained | protocol-or-format-invariant | The fixed delimited-field index 14 decodes maxExpirationMs from the AMQP profile wire format before policy evaluation; it is serialization structure rather than an operator-selected limit. |
+| `oc-7b9c8227077154e2dd22` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:47` `catch` | java | retained | protocol-or-format-invariant | The fixed delimited-field index 15 decodes maxConcurrency from the AMQP profile wire format before policy evaluation; it is serialization structure rather than an operator-selected limit. |
+| `oc-671ef34d918c0536d276` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:48` `catch` | java | retained | protocol-or-format-invariant | The fixed delimited-field index 16 decodes maxPerSecond from the AMQP profile wire format before policy evaluation; it is serialization structure rather than an operator-selected limit. |
+| `oc-bc1a752515a705123e87` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:49` `catch` | java | retained | protocol-or-format-invariant | The fixed delimited-field index 17 decodes timeoutMs from the AMQP profile wire format before policy evaluation; it is serialization structure rather than an operator-selected limit. |
+| `oc-36d255d43f56ea987ecb` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:50` `catch` | java | retained | protocol-or-format-invariant | The fixed delimited-field index 18 decodes maxBodyBytes from the AMQP profile wire format before policy evaluation; it is serialization structure rather than an operator-selected limit. |
+| `oc-2b6164aa32bf710e83da` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/EnvironmentAmqpProfileResolver.java:83` `environmentVariableName` | java | retained | protocol-or-format-invariant | These are exact extension and provider environment names, not their values or fallback choices. |
 | `oc-b07300a2045c3da45788` | `ravenroot/ravenroot-extensions/ravenroot-discord/src/main/java/ai/ravenroot/extensions/discord/DiscordBehaviorDescriptors.java:13` `DiscordBehaviorDescriptors` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-97495db063b4539ebe30` | `ravenroot/ravenroot-extensions/ravenroot-discord/src/main/java/ai/ravenroot/extensions/discord/DiscordBehaviorDescriptors.java:14` `DiscordBehaviorDescriptors` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-b4cf2a005bfec23d5142` | `ravenroot/ravenroot-extensions/ravenroot-discord/src/main/java/ai/ravenroot/extensions/discord/DiscordConfiguration.java:18` `DiscordConfiguration` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

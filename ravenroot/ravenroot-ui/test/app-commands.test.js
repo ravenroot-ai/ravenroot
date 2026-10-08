@@ -309,6 +309,31 @@ describe('application command catalog', () => {
     byId['view.closeAllDocuments'].execute();
     expect(closeAllDocuments).toHaveBeenCalledOnce();
   });
+
+  it('gates repository and rollback commands on Git mode, identity and save flight', () => {
+    const byId = Object.fromEntries(commands.map(command => [command.id, command]));
+    const git = { gitAuthoring: true, documentEditable: true, repositoryDocument: true,
+      authoringSaveFlight: false };
+    expect(byId['file.repositoryOpen'].isEnabled(git)).toBe(true);
+    expect(byId['file.repositorySave'].isEnabled(git)).toBe(true);
+    expect(byId['file.repositoryHistory'].isEnabled(git)).toBe(true);
+    expect(byId['file.repositoryRelease'].isEnabled({ ...git, authoringSaveFlight: true })).toBe(false);
+    expect(byId['file.publishedArtifacts'].isEnabled(git)).toBe(true);
+    expect(byId['file.repositoryOpen'].isEnabled({ ...git, gitAuthoring: false })).toBe(false);
+    expect(byId['file.repositoryHistory'].isEnabled({ ...git, repositoryDocument: false })).toBe(false);
+    expect(byId['file.open'].placements).toContain('toolbar.file');
+    expect(byId['file.save'].isEnabled({ ...git, editable: true, layoutBusy: false })).toBe(true);
+    expect(byId['file.save'].isEnabled({ ...git, editable: true, layoutBusy: false,
+      authoringSaveFlight: true })).toBe(false);
+    expect(byId['file.save'].isEnabled({ ...git, editable: true, layoutBusy: false,
+      documentEditable: false })).toBe(false);
+    expect(byId['file.localOpen'].isVisible(git)).toBe(true);
+    expect(byId['file.localSave'].isVisible({ ...git, editable: true, layoutBusy: false })).toBe(true);
+    expect(byId['file.repositoryOpen'].placements).toEqual([]);
+    expect(byId['file.repositorySave'].placements).toEqual([]);
+    expect(byId['file.fork'].isEnabled({ ...git, hasDocument: true, repositoryDraftAvailable: true,
+      documentMode: 'draft', documentFormat: 'graphml' })).toBe(true);
+  });
 });
 
 describe('canonical node action catalog', () => {

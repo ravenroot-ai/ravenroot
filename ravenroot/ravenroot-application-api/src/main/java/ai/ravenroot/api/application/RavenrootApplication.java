@@ -376,6 +376,26 @@ public interface RavenrootApplication extends AutoCloseable {
         throw new UnsupportedOperationException("process-local deployments are not supported");
     }
 
+    /** Imports CI-verified bytes into the tenant's immutable definition store without deploying or running them. */
+    default ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(
+            SecurityContext security, ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            InputStream graphMl) {
+        throw new UnsupportedOperationException("published graph imports are not supported");
+    }
+
+    /** Registers a deployment from an already imported and verified authored identity; it does not run it. */
+    default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
+        throw new UnsupportedOperationException("pinned graph deployments are not supported");
+    }
+
+    /** Imports and registers a CI-verified publication for compatibility with trusted embedders. */
+    default LocalDeploymentStatus registerPublishedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        importPublishedGraphDefinition(security, identity, graphMl);
+        return registerPinnedLocalDeployment(security, deploymentId, identity);
+    }
+
     /**
  * Every deployment registered by {@code tenantId} in this process, in id order.
  *

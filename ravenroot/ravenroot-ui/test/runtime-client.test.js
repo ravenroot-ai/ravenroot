@@ -22,6 +22,27 @@ import {
   validateStartupFailure,
 } from '../src/runtime-client.js';
 
+describe('graph authoring runtime capability', () => {
+  const configuration = {
+    schemaVersion: 2, graphDocumentMaxBytes: 1024,
+    programAuthoring: { maxSourceBytes: 1024 * 1024, maxBuildRequestBytes: 10 * 1024 * 1024,
+      maxProgramsPerBuild: 256 },
+  };
+
+  it('keeps local file authoring when older servers omit the capability', () => {
+    expect(validateRuntimeConfiguration(configuration)).not.toHaveProperty('graphAuthoring');
+  });
+
+  it('accepts the server-owned Git repository display without provider coordinates', () => {
+    const value = validateRuntimeConfiguration({ ...configuration, graphAuthoring: {
+      mode: 'git', provider: 'github', operations: ['SAVE'], repositoryDisplay: 'platform/graphs',
+      releaseBranch: 'main', maxDocumentBytes: 1024,
+    } }).graphAuthoring;
+    expect(value).toMatchObject({ mode: 'git', repositoryDisplay: 'platform/graphs' });
+    expect(value).not.toHaveProperty('apiBase');
+  });
+});
+
 describe('bounded startup diagnostics', () => {
   const incidentId = 'incident:0123456789abcdef';
   const nodeRef = 'sha256:0123456789abcdef0123456789abcdef';

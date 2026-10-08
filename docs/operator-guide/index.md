@@ -16,6 +16,7 @@ Run Ravenroot as a controlled service with explicit identity, storage, deploymen
 - [Human Task operations](human-tasks.md) — Select responder enforcement, register sandbox/external providers, rotate secrets, and reconcile durable tasks.
 - [Durable sagas and application-command outbox](saga-outbox.md) — Author governed participant contracts and operate fenced saga and delivery recovery.
 - [Configuration packager](configuration-packager.md) — Build, inspect, apply, verify, and roll back portable profile and prebuilt-bundle packages.
+- [Graph source control and published deployments](graph-source-control.md) — Configure tenant-confined Git authoring, reviewed releases, immutable publication, deployment, rollback, and recovery.
 
 ## Authority boundary
 

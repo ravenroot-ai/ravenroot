@@ -3308,6 +3308,53 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return localDeploymentStatus(key.deploymentId(), registration.record());
     }
 
+    @Override
+    public ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(
+            SecurityContext security, ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            InputStream graphMl) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(identity, "identity");
+        byte[] graphBytes = readGraphMlBytes(java.util.Objects.requireNonNull(graphMl, "graphMl"));
+        inspectEffectiveSources(graphBytes,
+                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
+        if (graphDefinitionStore == null) {
+            throw new UnsupportedOperationException("published graph imports require an immutable definition store");
+        }
+        var canonical = ai.ravenroot.api.persistence.CanonicalGraphMl.of(graphBytes);
+        var stored = awaitDefinition(graphDefinitionStore.put(security.tenantId(), identity, canonical));
+        var verified = awaitDefinition(graphDefinitionStore.resolve(security.tenantId(), identity));
+        if (!stored.canonical().contentId().equals(verified.canonical().contentId())
+                || !canonical.contentId().equals(verified.canonical().contentId())) {
+            throw new IllegalStateException("published graph identity did not verify");
+        }
+        return verified;
+    }
+
+    @Override
+    public LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(identity, "identity");
+        if (graphDefinitionStore == null) {
+            throw new UnsupportedOperationException("pinned graph deployments require an immutable definition store");
+        }
+        var verified = awaitDefinition(graphDefinitionStore.resolve(security.tenantId(), identity));
+        byte[] graphBytes = verified.canonical().bytes();
+        int sourceCount = inspectEffectiveSources(graphBytes,
+                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        Registration registration = register(key, graphBytes, sourceCount, DeploymentId.of(key.deploymentId()));
+        bindLifecycleIdentity(registration.record(), security);
+        return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    @Override
+    public LocalDeploymentStatus registerPublishedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        importPublishedGraphDefinition(security, identity, graphMl);
+        return registerPinnedLocalDeployment(security, deploymentId, identity);
+    }
+
     /**
      * Registers the caller-facing local alias against a separately minted durable lifecycle id.
      *

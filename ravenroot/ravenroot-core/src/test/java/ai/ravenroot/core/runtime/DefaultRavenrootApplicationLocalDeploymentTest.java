@@ -19,13 +19,20 @@ import ai.ravenroot.api.node.NodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
+import ai.ravenroot.api.persistence.GraphDefinitionReferences;
+import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
+import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -56,6 +63,88 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DefaultRavenrootApplicationLocalDeploymentTest {
     private static final SecurityContext TENANT_A = identity("tenant-a");
     private static final SecurityContext TENANT_B = identity("tenant-b");
+
+    @Test
+    void publishedVersionsKeepAuthoredIdentityAndCanRegisterAnOlderRollback(@TempDir Path directory) throws Exception {
+        var engine = new SameThreadExecutionEngine();
+        var definitions = new SqliteGraphDefinitionStore(directory.resolve("published.db"),
+                Clock.systemUTC(), GraphDefinitionReferences.NONE);
+        var application = application(engine, new ExecutionMonitor(), new RecordingSourceBehavior(),
+                8, definitions);
+        try {
+            var versionTwo = new GraphDefinitionIdentity("orders", "2");
+            var versionOne = new GraphDefinitionIdentity("orders", "1");
+            var importedTwo = application.importPublishedGraphDefinition(TENANT_A, versionTwo,
+                    graph(NO_SOURCE_GRAPH));
+            assertEquals(versionTwo, importedTwo.identity());
+            assertTrue(application.localDeployments(TENANT_A.tenantId()).isEmpty(),
+                    "import pins bytes but must neither deploy nor run them");
+            assertEquals(LocalDeploymentState.REGISTERED,
+                    application.registerPinnedLocalDeployment(TENANT_A, "orders-current", versionTwo).state());
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "orders-current")));
+            application.importPublishedGraphDefinition(TENANT_A, versionOne, graph(NO_SOURCE_GRAPH));
+            assertEquals(LocalDeploymentState.REGISTERED,
+                    application.registerPinnedLocalDeployment(TENANT_A, "orders-rollback", versionOne).state(),
+                    "deploy registration remains distinct from the later start command");
+
+            assertEquals(versionTwo,
+                    definitions.resolve(TENANT_A.tenantId(), versionTwo).toCompletableFuture().join().identity());
+            assertEquals(versionOne,
+                    definitions.resolve(TENANT_A.tenantId(), versionOne).toCompletableFuture().join().identity());
+            assertEquals("orders-rollback", application.localDeployment(TENANT_A.tenantId(),
+                    "orders-rollback").orElseThrow().deploymentId());
+            assertEquals(LocalDeploymentState.READY, application.localDeployment(TENANT_A.tenantId(),
+                    "orders-current").orElseThrow().state(),
+                    "importing and registering a rollback must not stop the existing deployment");
+
+            var conflict = assertThrows(ai.ravenroot.api.persistence.GraphDefinitionStoreException.class,
+                    () -> application.importPublishedGraphDefinition(TENANT_A, versionOne,
+                            graph(NO_SOURCE_GRAPH.replace("<graph id=\"g\"", "<graph id=\"changed\""))));
+            assertTrue(conflict.failure() instanceof ai.ravenroot.api.persistence.GraphDefinitionStoreFailure.IdentityConflict);
+        } finally {
+            application.close();
+            definitions.close();
+        }
+    }
+
+    @Test
+    void publishedImportRequiresAStoreAndCorruptionCannotReachDeployment(@TempDir Path directory) throws Exception {
+        var withoutStore = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+                new RecordingSourceBehavior());
+        try {
+            assertThrows(UnsupportedOperationException.class,
+                    () -> withoutStore.importPublishedGraphDefinition(TENANT_A,
+                            new GraphDefinitionIdentity("orders", "1"), graph(NO_SOURCE_GRAPH)));
+            assertTrue(withoutStore.localDeployments(TENANT_A.tenantId()).isEmpty());
+        } finally {
+            withoutStore.close();
+        }
+
+        Path database = directory.resolve("corrupt-published.db");
+        var definitions = new SqliteGraphDefinitionStore(database, Clock.systemUTC(), GraphDefinitionReferences.NONE);
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+                new RecordingSourceBehavior(), 8, definitions);
+        var identity = new GraphDefinitionIdentity("orders", "1");
+        try {
+            application.importPublishedGraphDefinition(TENANT_A, identity, graph(NO_SOURCE_GRAPH));
+            try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+                 var statement = connection.prepareStatement(
+                         "UPDATE graph_definition SET definition_bytes = ?, byte_length = ?")) {
+                byte[] tampered = NO_SOURCE_GRAPH.replace("id=\"end\"", "id=\"tampered\"")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                statement.setBytes(1, tampered); statement.setLong(2, tampered.length);
+                assertEquals(1, statement.executeUpdate());
+            }
+            var refusal = assertThrows(ai.ravenroot.api.persistence.GraphDefinitionStoreException.class,
+                    () -> application.registerPinnedLocalDeployment(TENANT_A, "must-not-register", identity));
+            assertTrue(refusal.failure() instanceof ai.ravenroot.api.persistence.GraphDefinitionStoreFailure.DigestMismatch);
+            assertTrue(application.localDeployments(TENANT_A.tenantId()).isEmpty(),
+                    "unverified stored bytes must never become a deployment");
+        } finally {
+            application.close(); definitions.close();
+        }
+    }
     private static final String HUMAN_TASK_GRAPH = """
             <?xml version="1.0" encoding="UTF-8"?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
@@ -803,6 +892,13 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
     private static DefaultRavenrootApplication application(SameThreadExecutionEngine engine,
                                                            ExecutionMonitor monitor, NodeBehavior behavior,
                                                            int maxActiveDeployments) {
+        return application(engine, monitor, behavior, maxActiveDeployments, null);
+    }
+
+    private static DefaultRavenrootApplication application(SameThreadExecutionEngine engine,
+                                                           ExecutionMonitor monitor, NodeBehavior behavior,
+                                                           int maxActiveDeployments,
+                                                           GraphDefinitionStore definitions) {
         NodePackage nodePackage = new NodePackage() {
             @Override public String id() { return "test.deployment.package"; }
             @Override public String version() { return "1.0.0"; }
@@ -812,7 +908,7 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
         BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage);
         return new DefaultRavenrootApplication(engine, monitor, registry, new InMemoryArtifactRegistry(),
                 new DisabledProgramRuntime(), ExecutionIdentitySource.randomUuids(), null,
-                maxActiveDeployments, UnknownBehaviorPolicy.passThrough());
+                maxActiveDeployments, UnknownBehaviorPolicy.passThrough(), definitions);
     }
 
     private static ByteArrayInputStream graph(String value) {

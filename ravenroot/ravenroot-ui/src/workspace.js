@@ -76,6 +76,17 @@ export function createDocumentRecord({
       sourceGraphVersion: provenance?.sourceGraphVersion || null,
       deploymentId: provenance?.deploymentId || null,
     },
+    authoring: {
+      providerDocumentId: null,
+      revision: null,
+      graphId: null,
+      releaseVersion: null,
+      released: false,
+      published: false,
+      draftDeleted: false,
+      saveFlight: null,
+      saveError: null,
+    },
     // Owned by app.js, one per document. Held here so the record is the single home of the state.
     cy: null,
     visualGroupState: {},
@@ -214,7 +225,8 @@ export function createDocumentRecord({
 }
 
 export function documentIsEditable(document_) {
-  return document_?.mode === DOCUMENT_MODES.DRAFT && document_?.graph?.format !== 'graphify';
+  return document_?.mode === DOCUMENT_MODES.DRAFT && document_?.graph?.format !== 'graphify'
+    && !document_?.authoring?.draftDeleted;
 }
 
 export function forkDocumentRecord(source, { documentId = createDocumentIncarnation(), tenantId = source?.tenantId,

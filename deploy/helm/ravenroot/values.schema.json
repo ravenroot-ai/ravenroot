@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["replicaCount", "runnerPlane", "image", "service", "auth", "engine", "executionRuntime", "activityCapture", "graph", "ai", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
+  "required": ["replicaCount", "runnerPlane", "image", "service", "auth", "engine", "graphAuthoring", "executionRuntime", "activityCapture", "graph", "ai", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "programTimeoutMs": {
@@ -40,6 +40,43 @@
       }
     },
     "engine": { "type": "string", "enum": ["pekko"] },
+    "graphAuthoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "provider", "repositoryOwner", "repositoryName", "graphDirectory", "draftBranch", "releaseBranch", "githubApiBase", "credentialMode", "credentialSecretName", "credentialSecretKey", "githubAppId", "githubInstallationId", "tenantNamespaces", "artifactBaseUrl", "artifactCatalogPath"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "provider": { "type": "string", "enum": ["github"] },
+        "repositoryOwner": { "type": "string" },
+        "repositoryName": { "type": "string" },
+        "graphDirectory": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$" },
+        "draftBranch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$" },
+        "releaseBranch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$" },
+        "githubApiBase": { "type": "string", "pattern": "^https://" },
+        "credentialMode": { "type": "string", "enum": ["PAT", "APP"] },
+        "credentialSecretName": { "type": "string" },
+        "credentialSecretKey": { "type": "string", "minLength": 1 },
+        "githubAppId": { "type": "string" },
+        "githubInstallationId": { "type": "string" },
+        "tenantNamespaces": { "type": "string" },
+        "artifactBaseUrl": { "type": "string" },
+        "artifactCatalogPath": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [{
+        "if": { "properties": { "enabled": { "const": true } } },
+        "then": { "properties": {
+          "repositoryOwner": { "minLength": 1 }, "repositoryName": { "minLength": 1 },
+          "credentialSecretName": { "minLength": 1 }, "tenantNamespaces": { "minLength": 3 },
+          "artifactBaseUrl": { "pattern": "^https://" }
+        } }
+      }, {
+        "if": { "properties": { "enabled": { "const": true }, "credentialMode": { "const": "APP" } } },
+        "then": { "properties": {
+          "githubAppId": { "pattern": "^[1-9][0-9]{0,19}$" },
+          "githubInstallationId": { "pattern": "^[1-9][0-9]{0,19}$" }
+        } }
+      }]
+    },
     "executionRuntime": {
       "type": "object",
       "additionalProperties": false,

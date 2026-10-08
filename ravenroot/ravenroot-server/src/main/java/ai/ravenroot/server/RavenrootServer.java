@@ -377,6 +377,9 @@ public final class RavenrootServer implements AutoCloseable {
      * check is here, on the request path, rather than inside the resolver.
      */
     private final ai.ravenroot.server.credential.CredentialAdmission credentialAdmission;
+    /** Optional Git-backed graph authoring archive, installed by the packaged composition before start. */
+    private ai.ravenroot.server.authoring.GraphAuthoringHttpApi graphAuthoring;
+    private ai.ravenroot.server.authoring.PublishedGraphArtifactHttpApi publishedGraphArtifacts;
 
     public RavenrootServer(RavenrootApplication application, int port) {
         this(application, new InetSocketAddress(InetAddress.getLoopbackAddress(), port), null,
@@ -787,6 +790,8 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
+        apiContext("/v1/graph-authoring", this::graphAuthoring);
+        apiContext("/v1/graph-artifacts", this::publishedGraphArtifacts);
         apiContext("/v1/executions", this::startExecution);
         apiContext("/v1/processes", this::processLifecycle);
         apiContext("/v1/source-sessions", this::sourceSessions);
@@ -1089,6 +1094,36 @@ public final class RavenrootServer implements AutoCloseable {
             throw new IllegalStateException("deployment control is already installed");
         }
         durableDeploymentControl = java.util.Objects.requireNonNull(control, "control");
+    }
+
+    synchronized void installGraphAuthoring(ai.ravenroot.server.authoring.GraphAuthoringHttpApi authoring) {
+        if (started.get()) throw new IllegalStateException("graph authoring must be installed before start");
+        if (graphAuthoring != null) throw new IllegalStateException("graph authoring is already installed");
+        graphAuthoring = java.util.Objects.requireNonNull(authoring, "authoring");
+    }
+
+    private void graphAuthoring(HttpExchange exchange, HttpRequestContext context) throws IOException {
+        if (graphAuthoring == null) {
+            json(exchange, 404, "{\"error\":\"GRAPH_AUTHORING_DISABLED\"}");
+            return;
+        }
+        graphAuthoring.handle(exchange, context);
+    }
+
+    synchronized void installPublishedGraphArtifacts(
+            ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog catalog) {
+        if (started.get()) throw new IllegalStateException("published graph artifacts must be installed before start");
+        if (publishedGraphArtifacts != null) throw new IllegalStateException("published graph artifacts are already installed");
+        publishedGraphArtifacts = new ai.ravenroot.server.authoring.PublishedGraphArtifactHttpApi(
+                java.util.Objects.requireNonNull(catalog, "catalog"), authorizedApplication, authorization);
+    }
+
+    private void publishedGraphArtifacts(HttpExchange exchange, HttpRequestContext context) throws IOException {
+        if (publishedGraphArtifacts == null) {
+            json(exchange, 404, "{\"error\":\"GRAPH_ARTIFACTS_DISABLED\"}");
+            return;
+        }
+        publishedGraphArtifacts.handle(exchange, context);
     }
 
     synchronized void installProcessLifecycle(ai.ravenroot.core.process.ProcessLifecycleService control) {
@@ -1505,9 +1540,17 @@ public final class RavenrootServer implements AutoCloseable {
         }
         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
         String tenantId = httpContext.requirePrincipal().tenantId();
-        json(exchange, 200, humanTasks != null && humanTasks.supportsConfirmations()
+        String configured = humanTasks != null && humanTasks.supportsConfirmations()
                 ? servedConfiguration.json(humanTaskPolicy, tenantId, humanTaskInteractions != null)
-                : servedConfiguration.json(tenantId));
+                : servedConfiguration.json(tenantId);
+        if (graphAuthoring != null) {
+            configured = configured.substring(0, configured.length() - 1)
+                    + ",\"graphAuthoring\":" + graphAuthoring.capabilitiesJson() + "}";
+        } else {
+            configured = configured.substring(0, configured.length() - 1)
+                    + ",\"graphAuthoring\":{\"mode\":\"local\",\"provider\":\"none\",\"operations\":[]}}";
+        }
+        json(exchange, 200, configured);
     }
 
     /**
@@ -6908,6 +6951,7 @@ public final class RavenrootServer implements AutoCloseable {
         }
         if (interactionWebSockets != null) interactionWebSockets.close();
         if (durableDeploymentControl != null) durableDeploymentControl.close();
+        if (graphAuthoring != null) graphAuthoring.close();
         server.stop((int) httpStopDelay.toSeconds());
         executor.close();
         try {

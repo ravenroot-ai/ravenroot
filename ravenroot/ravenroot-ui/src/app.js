@@ -209,6 +209,7 @@ import {
 } from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
+import { applyAcceptedGraphMl, GraphAuthoringClient, decodeGraphMl } from './graph-authoring-client.js';
 import {
   applyAssistantGraphProposal,
   catalogProposalDigest,
@@ -958,6 +959,7 @@ async function switchWorkspacePersistence(configuration, client) {
           name: stored.name, displayName: stored.displayName, graph: stored.graph,
           documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
           provenance: stored.provenance, presentation: stored.presentation,
+          authoring: stored.authoring,
         });
       }
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
@@ -1007,6 +1009,9 @@ let fontSize = DEFAULT_FONT_SIZE;
 let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
+let graphAuthoringClient = null;
+let activeAuthoring = null;
+let graphAuthoringUnavailable = false;
 let runtimeDisconnect = null;
 let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
@@ -2508,6 +2513,7 @@ function captureActiveDocument() {
   document_.graph = graphData;
   document_.incarnation = activeDocumentIncarnation;
   document_.history = editHistory;
+  document_.authoring = activeAuthoring;
   document_.name = graphName;
   document_.displayName = graphDisplayName;
   document_.renderMode = renderMode;
@@ -2593,6 +2599,7 @@ function applyActiveDocument() {
   graphData = document_?.graph ?? null;
   activeDocumentIncarnation = document_?.incarnation ?? null;
   editHistory = document_?.history ?? createCommandHistory();
+  activeAuthoring = document_?.authoring ?? null;
   graphName = document_?.name ?? 'untitled.graphml';
   graphDisplayName = document_?.displayName ?? graphName;
   const presentation = documentPresentationState(document_);
@@ -2790,9 +2797,37 @@ function paneIsDirty(document_) {
 
 function documentModeLabel(document_) {
   if (!document_) return 'No document';
+  const authoring = document_.authoring;
+  if (authoring?.providerDocumentId) {
+    const version = Number.isSafeInteger(authoring.releaseVersion) && authoring.releaseVersion > 0
+      ? `v${authoring.releaseVersion}` : 'version pending';
+    const revision = authoring.draftDeleted ? authoring.revision?.release
+      : authoring.revision?.draft !== 'absent' ? authoring.revision?.draft : authoring.revision?.release;
+    const sourceRevision = typeof revision === 'string' && revision !== 'absent'
+      ? revision.split(':', 1)[0].slice(0, 12) : 'revision pending';
+    const sourceState = authoring.draftDeleted ? 'Released source' : 'Repository draft';
+    const releaseState = authoring.published ? 'Published' : authoring.released ? 'Released' : 'Not released';
+    const editState = authoring.saveFlight ? 'Saving…' : authoring.saveError ? 'Save failed'
+      : graphAuthoringUnavailable ? 'Repository unavailable'
+        : paneIsDirty(document_) ? 'Unsaved edits' : null;
+    return [sourceState, version, sourceRevision, releaseState, editState].filter(Boolean).join(' · ');
+  }
   const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
     : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
-  return document_.tenantId === null ? `${label} · session only` : label;
+  const local = document_.tenantId === null ? `${label} · session only` : label;
+  return graphAuthoringUnavailable ? `${local} · Repository unavailable` : local;
+}
+
+function syncGraphModeLabel() {
+  const mode = window.document.getElementById('graph-mode-label');
+  if (!mode) return;
+  const active = workspace.active;
+  mode.textContent = active
+    ? `${documentModeLabel(active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  if (active?.authoring?.providerDocumentId) {
+    const revision = active.authoring.revision || {};
+    mode.title = `Draft revision: ${revision.draft || 'absent'}; release revision: ${revision.release || 'absent'}; publication revision: ${revision.publication || 'absent'}`;
+  } else mode.removeAttribute('title');
 }
 
 let maximizedDocumentId = null;
@@ -3511,12 +3546,13 @@ function initLoadedGraph(graph, currentStyle) {
 }
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
-  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null } = {}) {
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null } = {}) {
   const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
     documentId, tenantId, mode, provenance,
     presentation: presentation || graphPresentation,
   });
+  if (authoring) Object.assign(document_.authoring, structuredClone(authoring));
   if (graph) {
     graphName = name;
     graphDisplayName = document_.displayName;
@@ -3887,9 +3923,7 @@ function syncActiveDocumentChrome() {
   const hasDocument = Boolean(workspace.active);
   window.document.getElementById('graph-title').textContent = hasDocument ? graphDisplayName : 'No graph loaded';
   window.document.title = hasDocument ? `${graphDisplayName} — Ravenroot UI` : 'Ravenroot UI';
-  const modeLabel = window.document.getElementById('graph-mode-label');
-  if (modeLabel) modeLabel.textContent = hasDocument
-    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  syncGraphModeLabel();
   // Play is shared chrome and has to describe the document in front of the user: with one button and
   // several documents, a run still in flight in one of them must not lock the others out.
   //
@@ -10339,6 +10373,7 @@ function updateHistoryUi() {
   if (exportButton) {
     exportButton.classList.toggle('primary', dirty && graphData?.format !== 'graphify');
   }
+  syncGraphModeLabel();
   // The pane strip carries the same `*` this indicator carries, for the document it names. Hooked
   // here because this already runs on every edit, undo, redo and save: a modified marker that
   // updated on document switch alone would be wrong for as long as the user kept editing.
@@ -10385,9 +10420,7 @@ function setModifyMode(enabled) {
     button.classList.toggle('active', modifyEnabled);
     button.setAttribute('aria-label', modifyEnabled ? 'Editing mode active' : 'Switch to Editing mode');
   }
-  const mode = document.getElementById('graph-mode-label');
-  if (mode) mode.textContent = workspace.active
-    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  syncGraphModeLabel();
   document.getElementById('cy-wrap')?.classList.toggle('modify-on', modifyEnabled);
   applyCanvasInteraction();
   updateConnectButton();
@@ -11690,6 +11723,7 @@ async function connectRuntime(atBoot = false) {
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
   });
+  graphAuthoringClient = new GraphAuthoringClient(baseUrl, { tokenProvider: runtimeTokenProvider });
   namedAgentCatalog = [];
   nodePaletteState = { pending: true, error: '', palettes: [], templates: [] };
   renderPersonalPalettes();
@@ -15170,6 +15204,176 @@ function proceedToCloseDocument(id, origin) {
 
 let pendingActiveDeploymentClose = null;
 
+function gitAuthoringEnabled() {
+  return runtimeConfiguration?.configuration?.graphAuthoring?.mode === 'git' && graphAuthoringClient;
+}
+
+function setGraphAuthoringAvailability(available) {
+  graphAuthoringUnavailable = !available;
+  syncGraphModeLabel();
+  refreshCommands();
+}
+
+function applyAuthoringDocument(target, result, providerDocumentId = result.documentId) {
+  target.authoring.providerDocumentId = providerDocumentId;
+  target.authoring.revision = structuredClone(result.revision);
+  target.authoring.graphId = result.graphId;
+  target.authoring.releaseVersion = result.releaseVersion;
+  target.authoring.released = Boolean(result.released);
+  target.authoring.published = Boolean(result.published);
+  target.authoring.draftDeleted = Boolean(result.draftDeleted);
+  target.authoring.saveError = null;
+  graphAuthoringUnavailable = false;
+  if (target === workspace.active) {
+    updateModifyAvailability();
+    syncGraphModeLabel();
+  }
+}
+
+async function openRepositoryGraph(requested = null) {
+  if (!gitAuthoringEnabled()) return false;
+  try {
+    let documentId = requested?.documentId;
+    let source = requested?.source;
+    if (!documentId || !['draft', 'release'].includes(source)) {
+      const page = await graphAuthoringClient.list();
+      setGraphAuthoringAvailability(true);
+      if (!page.items.length) return showInspectorMessage('This repository has no graphs in your workspace.') || false;
+      const choices = page.items.flatMap(item => [
+        ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
+          source: 'draft', label: `${item.documentId} [draft] · v${item.releaseVersion}` }] : []),
+        ...(item.released ? [{ key: `${item.documentId} [released]`, documentId: item.documentId,
+          source: 'release', label: `${item.documentId} [released] · reviewed source${item.published ? ' · published' : ''}` }] : []),
+      ]);
+      const selected = globalThis.prompt(`Open a repository graph:\n\n${choices.map(item => item.label).join('\n')}`,
+        choices[0].key)?.trim();
+      const choice = choices.find(item => item.key === selected);
+      if (!choice) return false;
+      ({ documentId, source } = choice);
+    }
+    const result = await graphAuthoringClient.open(documentId, source);
+    const graph = parsePreparedGraph(decodeGraphMl(result), result.documentId,
+      { maxBytes: currentGraphDocumentByteLimit() });
+    const id = openDocument({ name: result.documentId, graph,
+      documentId: `repository:${result.documentId}:${source}` });
+    const target = workspace.find(id);
+    applyAuthoringDocument(target, result, result.documentId);
+    target.history.markSaved();
+    updateHistoryUi();
+    addActivityMessage('editor', `Opened ${result.documentId} from ${runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay}.`, 'completed');
+    return true;
+  } catch (error) {
+    setGraphAuthoringAvailability(false);
+    showInspectorMessage(error.message || 'The repository graph could not be opened.'); return false;
+  }
+}
+
+async function saveRepositoryGraph() {
+  const target = workspace.active;
+  if (!gitAuthoringEnabled() || !target || target.authoring.saveFlight) return false;
+  const providerDocumentId = target.authoring.providerDocumentId
+    || globalThis.prompt('Repository filename', target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
+  if (!providerDocumentId) return false;
+  const prepared = prepareDocumentDownload(target.id);
+  if (!prepared) return false;
+  const history = target.history;
+  const submittedRevision = history.revision();
+  const expected = target.authoring.revision || { draft: 'absent', release: 'absent', publication: 'absent' };
+  const flight = crypto.randomUUID();
+  target.authoring.saveError = null;
+  target.authoring.saveFlight = flight;
+  updateHistoryUi();
+  try {
+    const result = await graphAuthoringClient.save(providerDocumentId, prepared.xml, expected, flight);
+    if (target.authoring.saveFlight !== flight) return false;
+    applyAcceptedGraphMl(target.graph, result, xml => parsePreparedGraph(xml, providerDocumentId,
+      { maxBytes: currentGraphDocumentByteLimit() }));
+    applyAuthoringDocument(target, result, providerDocumentId);
+    // Edits made while the request was in flight remain dirty. Only the exact submitted history
+    // position becomes the save point.
+    if (target.history === history && history.revision() === submittedRevision) {
+      history.markSaved(); target.visualGroupPresentationDirty = false;
+    }
+    addActivityMessage('editor', `Saved ${providerDocumentId} as authored version ${result.releaseVersion}.`, 'completed');
+    updateHistoryUi(); return true;
+  } catch (error) {
+    target.authoring.saveError = error.message || 'The repository save failed.';
+    setGraphAuthoringAvailability(false);
+    showInspectorMessage(error.message || 'The repository save failed. Refresh and retry.'); return false;
+  } finally {
+    if (target.authoring.saveFlight === flight) target.authoring.saveFlight = null;
+    updateHistoryUi();
+  }
+}
+
+async function repositoryHistory() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id) return false;
+  try {
+    const page = await graphAuthoringClient.history(id);
+    const lines = page.items.map(item => `${item.revision.slice(0, 12)} · ${item.summary} · ${item.author}`);
+    const revision = globalThis.prompt(`History for ${id}:\n\n${lines.join('\n')}\n\nEnter a full revision to restore, or leave blank to close:`, '')?.trim();
+    if (!revision) return true;
+    if (!globalThis.confirm('Restore this revision as a new draft commit?')) return false;
+    const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
+    const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
+    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    target.history.markSaved(); updateHistoryUi(); return true;
+  } catch (error) { showInspectorMessage(error.message || 'Repository history is unavailable.'); return false; }
+}
+
+async function repositoryDiscard() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id || !globalThis.confirm('Discard draft changes and restore the reviewed release?')) return false;
+  try {
+    const result = await graphAuthoringClient.discard(id, target.authoring.revision);
+    const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
+    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    target.history.markSaved(); updateHistoryUi(); return true;
+  } catch (error) { showInspectorMessage(error.message || 'Draft changes could not be discarded.'); return false; }
+}
+
+async function repositoryDelete() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(`Delete the draft ${id}? Git history is retained.`)) return false;
+  try { await graphAuthoringClient.delete(id, target.authoring.revision);
+    if (target.authoring.released) {
+      const result = await graphAuthoringClient.open(id, 'release');
+      const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
+      completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+      target.history.markSaved();
+    } else target.authoring.providerDocumentId = null;
+    addActivityMessage('editor', `Deleted the ${id} draft; Git history remains available.`, 'completed');
+    updateHistoryUi(); refreshCommands(); return true;
+  } catch (error) { showInspectorMessage(error.message || 'The draft could not be deleted.'); return false; }
+}
+
+async function repositoryRelease() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id) return false;
+  try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
+    addActivityMessage('editor', `${result.reused ? 'Existing' : 'New'} graph review: ${result.url}`, 'completed'); return true;
+  } catch (error) { showInspectorMessage(error.message || 'A release review could not be proposed.'); return false; }
+}
+
+async function publishedArtifacts() {
+  if (!gitAuthoringEnabled()) return false;
+  try {
+    const page = await graphAuthoringClient.artifacts();
+    if (!page.items.length) return showInspectorMessage('No verified published graph versions are available.') || false;
+    const choices = page.items.map(item => `${item.graphId}@${item.releaseVersion} · ${item.sha256.slice(0, 12)}`);
+    const selection = globalThis.prompt(`Published versions (selecting an older version performs rollback):\n\n${choices.join('\n')}\n\nEnter graphId@version to pin and register:`, '')?.trim();
+    if (!selection) return false;
+    const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})@(\d+)$/.exec(selection);
+    if (!match) throw new Error('Use graphId@version.');
+    const deploymentId = globalThis.prompt('Deployment name', `${match[1]}-${match[2]}`)?.trim();
+    if (!deploymentId) return false;
+    await graphAuthoringClient.importArtifact(match[1], Number(match[2]));
+    const result = await graphAuthoringClient.deploy(match[1], Number(match[2]), deploymentId);
+    addActivityMessage('deployment', `Pinned ${result.graphId} v${result.releaseVersion} and registered it as ${result.deploymentId}. It is not running.`, 'completed'); return true;
+  } catch (error) { showInspectorMessage(error.message || 'The published version could not be deployed.'); return false; }
+}
+
 function openActiveDeploymentCloseDialog({ documentId, origin }) {
   const target = workspace.find(documentId);
   if (!target) return false;
@@ -15215,10 +15419,23 @@ function closeActiveDeploymentDialog(outcome) {
 
 const commandRegistry = createCommandRegistry(createAppCommands({
   newDocument: () => runAfterInspectorDraft(() => openDocument()),
-  openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
+  openFile: context => runAfterInspectorDraft(() => context.gitAuthoring
+    ? openRepositoryGraph() : document.getElementById('file-inp').click()),
+  localOpen: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
   replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
-  forkDocument: () => runAfterInspectorDraft(() => forkActiveDocument()),
-  save: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
+  forkDocument: context => runAfterInspectorDraft(() => context.repositoryReleasedSource
+    ? openRepositoryGraph({ documentId: activeAuthoring.providerDocumentId, source: 'draft' })
+    : forkActiveDocument()),
+  save: context => runAfterInspectorDraft(() => context.gitAuthoring
+    ? saveRepositoryGraph() : exportGraphML(), { preserveDraft: true }),
+  localSave: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
+  repositoryOpen: () => runAfterInspectorDraft(() => openRepositoryGraph()),
+  repositorySave: () => runAfterInspectorDraft(() => saveRepositoryGraph(), { preserveDraft: true }),
+  repositoryHistory: () => runAfterInspectorDraft(() => repositoryHistory()),
+  repositoryDiscard: () => runAfterInspectorDraft(() => repositoryDiscard()),
+  repositoryDelete: () => runAfterInspectorDraft(() => repositoryDelete()),
+  repositoryRelease: () => runAfterInspectorDraft(() => repositoryRelease()),
+  publishedArtifacts: () => runAfterInspectorDraft(() => publishedArtifacts()),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),
@@ -15290,6 +15507,12 @@ function commandContext() {
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
+    gitAuthoring: Boolean(runtimeConfiguration?.configuration?.graphAuthoring?.mode === 'git'),
+    repositoryDocument: Boolean(activeAuthoring?.providerDocumentId),
+    repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
+    repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
+      && activeAuthoring?.revision?.draft !== 'absent'),
+    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight),
     hasOpenDocuments: workspace.size > 0,
     // Preserve every existing public format's command behavior. Only the new safe deployment
     // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
@@ -15341,6 +15564,23 @@ function executeCommand(id, invocation = {}) {
   return commandRegistry.execute(id, commandContext(), invocation);
 }
 
+function commandDisplayLabel(command, context) {
+  if (context.gitAuthoring && command.id === 'file.open') return 'Open from repository…';
+  if (context.gitAuthoring && command.id === 'file.save') return 'Save draft to repository';
+  if (context.repositoryReleasedSource && command.id === 'file.fork') return 'Open repository draft';
+  return command.label;
+}
+
+function commandDisplayDescription(command, state, context) {
+  if (context.gitAuthoring && command.id === 'file.open') {
+    return 'Open a tenant graph from the configured Git repository';
+  }
+  if (context.gitAuthoring && command.id === 'file.save') {
+    return 'Save this GraphML draft to the configured Git repository with conflict protection';
+  }
+  return state.description;
+}
+
 function refreshCommands({ menu = true } = {}) {
   const context = commandContext();
   const focusedMenuCommand = document.activeElement?.closest('#application-menu [data-command-id]')?.dataset.commandId;
@@ -15354,14 +15594,18 @@ function refreshCommands({ menu = true } = {}) {
     control.classList.toggle('active', state.checked === true);
     if (command.kind === 'checkbox') control.setAttribute('aria-pressed', String(state.checked === true));
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
-    if (control.hasAttribute('data-command-label')) control.textContent = command.label;
+    const displayLabel = commandDisplayLabel(command, context);
+    if (control.hasAttribute('data-command-label')) control.textContent = displayLabel;
+    if (control.id === 'btn-open') control.textContent = `📂 ${displayLabel.replace(/…$/, '')}`;
+    if (control.id === 'btn-export') control.textContent = `${context.gitAuthoring ? '↑' : '⇩'} ${displayLabel}`;
     // This runs after every edit, undo, redo and save, so whatever it writes here is the last
     // word: a title applied elsewhere before the refresh does not survive it. Writing the state's
     // description rather than the static help is what lets the history controls keep naming the
     // step they would reverse, while every other control still shows its help -- including the
     // lifecycle controls, which need it here because they carry no `data-command-label`.
-    if (state.description) {
-      control.title = state.description;
+    const description = commandDisplayDescription(command, state, context);
+    if (description) {
+      control.title = description;
       if (command.group === 'unavailable-lifecycle') {
         control.setAttribute('aria-label', `${command.label}. ${command.help}`);
       }
@@ -15405,6 +15649,8 @@ function renderApplicationMenu(name) {
   let lastGroup = null;
   popup.innerHTML = commands.map(command => {
     const state = commandRegistry.state(command.id, context);
+    const displayLabel = commandDisplayLabel(command, context);
+    const description = commandDisplayDescription(command, state, context);
     const separator = lastGroup !== null && lastGroup !== command.group
       ? '<div class="application-menu-separator" role="separator"></div>' : '';
     lastGroup = command.group;
@@ -15414,12 +15660,12 @@ function renderApplicationMenu(name) {
     const shortcut = shortcuts.length ? shortcuts.map(item => commandRegistry.shortcutLabel(item)).join(' / ') : '';
     const ariaShortcut = shortcuts[0] ? ` aria-keyshortcuts="${escapeAttribute(commandRegistry.ariaShortcut(shortcuts[0]))}"` : '';
     const checked = command.kind ? ` aria-checked="${state.checked === true}"` : '';
-    const help = state.description ? ` title="${escapeAttribute(state.description)}"` : '';
+    const help = description ? ` title="${escapeAttribute(description)}"` : '';
     const unavailableLabel = command.group === 'unavailable-lifecycle' && command.help
       ? ` aria-label="${escapeAttribute(`${command.label}. ${command.help}`)}"` : '';
     return `${separator}<button type="button" class="application-menu-item" role="${role}"
       data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}${help}${unavailableLabel}>
-      <span>${escapeHtml(command.label)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
+      <span>${escapeHtml(displayLabel)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
     </button>`;
   }).join('');
   popup.setAttribute('aria-labelledby', menuTrigger(name)?.id || '');

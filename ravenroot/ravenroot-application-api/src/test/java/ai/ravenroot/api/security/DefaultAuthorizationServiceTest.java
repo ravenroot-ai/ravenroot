@@ -187,9 +187,9 @@ class DefaultAuthorizationServiceTest {
             // EMBED_REGISTRATION_ADMIN is deliberately not in the VIEWER arm above, unlike the
             // two embed actions beside it. Deciding which snapshot an embed may expose is operations.
             case RUNNER_CONTROL, RUNNER_DISPATCH, GRAPH_READ, EXECUTION_START, EXECUTION_READ, EXECUTION_CONTROL,
-                    EMBED_REGISTRATION_ADMIN -> Role.OPERATOR;
-            case PALETTE_MANAGE, ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
-            case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE -> Role.APPROVER;
+                    EMBED_REGISTRATION_ADMIN, GRAPH_ARTIFACT_DEPLOY -> Role.OPERATOR;
+            case PALETTE_MANAGE, ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST, GRAPH_WRITE -> Role.DEVELOPER;
+            case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE, GRAPH_RELEASE -> Role.APPROVER;
             case RUNTIME_OBSERVE, AGENT_AUTHORITY_CONTROL, AUDIT_ADMIN -> Role.PLATFORM_ADMIN;
             case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN,
                     HUMAN_TASK_OVERRIDE -> Role.TENANT_ADMIN;
@@ -197,8 +197,8 @@ class DefaultAuthorizationServiceTest {
             // available -- see enforcesTheCompleteRoleAndScopeMatrix, which now exercises it through
             // the positive branch above (allowed with role+scope, denied with wrong role, denied with
             // missing scope) exactly like every other available action. Do not add it back here: the
-            // other three reserved actions (GRAPH_WRITE, TOOL_INVOKE, ADMIN) stay refused, unchanged.
-            case GRAPH_WRITE, TOOL_INVOKE, ADMIN ->
+            // The remaining reserved actions stay refused.
+            case TOOL_INVOKE, ADMIN ->
                     throw new IllegalArgumentException("unavailable action");
         };
     }

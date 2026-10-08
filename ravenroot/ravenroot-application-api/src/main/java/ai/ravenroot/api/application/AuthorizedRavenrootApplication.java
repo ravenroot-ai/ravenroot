@@ -687,6 +687,27 @@ public final class AuthorizedRavenrootApplication {
         return delegate.registerLocalDeployment(SecurityContext.of(context), deploymentId, graphMl);
     }
 
+    /** Registers only caller-tenant published bytes under the supplied authored identity. */
+    public LocalDeploymentStatus registerPublishedLocalDeployment(RequestContext context, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        require(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY, collection("published-graphs", context));
+        return delegate.registerPublishedLocalDeployment(SecurityContext.of(context), deploymentId, identity, graphMl);
+    }
+
+    /** Imports verified publication bytes without creating or starting a deployment. */
+    public ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(RequestContext context,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        require(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY, collection("published-graphs", context));
+        return delegate.importPublishedGraphDefinition(SecurityContext.of(context), identity, graphMl);
+    }
+
+    /** Registers an already pinned publication without starting it. */
+    public LocalDeploymentStatus registerPinnedLocalDeployment(RequestContext context, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
+        require(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY, collection("published-graphs", context));
+        return delegate.registerPinnedLocalDeployment(SecurityContext.of(context), deploymentId, identity);
+    }
+
     /**
  * Lists only the caller tenant's process-local deployments.
  * @param context authenticated request context supplying the owning tenant

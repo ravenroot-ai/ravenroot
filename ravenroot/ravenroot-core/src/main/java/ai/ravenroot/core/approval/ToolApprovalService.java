@@ -40,6 +40,7 @@ import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
 import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
+import ai.ravenroot.core.runtime.GraphRunner;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -93,7 +94,8 @@ public final class ToolApprovalService {
      * The returned scope must be closed when the in-memory run tears down.
      */
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
-        return bindLive(key, recorder, null);
+        return bindLive(key, recorder,
+                (java.util.function.Function<NodeMessage, GraphExecutionBudgetSnapshot>) null);
     }
 
     /** Binds the recorder plus the trusted graph-budget snapshot source used by production recovery. */
@@ -106,7 +108,23 @@ public final class ToolApprovalService {
                 || !key.processInstanceId().equals(recorder.processInstanceId())) {
             throw new IllegalArgumentException("recorder belongs to a different execution");
         }
-        var binding = new LiveBinding(recorder, budgetSnapshot);
+        var binding = new LiveBinding(recorder, budgetSnapshot, null);
+        if (liveRecorders.putIfAbsent(key, binding) != null) {
+            throw new IllegalStateException("a live recorder is already bound for this execution");
+        }
+        return () -> liveRecorders.remove(key, binding);
+    }
+
+    /** Binds the runner that owns both graph budget and called-execution aggregation state. */
+    public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder, GraphRunner runner) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(recorder, "recorder");
+        Objects.requireNonNull(runner, "runner");
+        if (!key.tenantId().equals(recorder.tenantId())
+                || !key.processInstanceId().equals(recorder.processInstanceId())) {
+            throw new IllegalArgumentException("recorder belongs to a different execution");
+        }
+        var binding = new LiveBinding(recorder, runner::continuationBudget, runner);
         if (liveRecorders.putIfAbsent(key, binding) != null) {
             throw new IllegalStateException("a live recorder is already bound for this execution");
         }
@@ -144,7 +162,10 @@ public final class ToolApprovalService {
         ExecutionRecorder recorder = binding.recorder();
         int storedVersion = continuationVersion;
         byte[] storedContinuation = continuation;
-        if (binding.budgetSnapshot() != null) {
+        if (binding.runner() != null) {
+            storedContinuation = binding.runner().humanTaskContinuation(message, continuationVersion, continuation);
+            storedVersion = GraphExecutionContinuationCheckpoint.VERSION;
+        } else if (binding.budgetSnapshot() != null) {
             storedContinuation = GraphExecutionContinuationCheckpoint.write(continuationVersion, continuation,
                     binding.budgetSnapshot().apply(message));
             storedVersion = GraphExecutionContinuationCheckpoint.VERSION;
@@ -173,7 +194,8 @@ public final class ToolApprovalService {
 
     private record LiveBinding(ExecutionRecorder recorder,
                                java.util.function.Function<NodeMessage,
-                                       GraphExecutionBudgetSnapshot> budgetSnapshot) { }
+                                       GraphExecutionBudgetSnapshot> budgetSnapshot,
+                               GraphRunner runner) { }
 
     /** Atomically suspends the exact running invocation and records its approval, timer and handler. */
     ToolApprovalResult request(ExecutionKey key, ToolApprovalRegistration request,

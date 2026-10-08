@@ -1,0 +1,17 @@
+{
+  "schema": "ravenroot.presentation-mapping/v1",
+  "states": [
+    { "id": "qEven", "label": "qEven", "nodeId": "state-q-even", "initial": true, "accepting": true },
+    { "id": "qOdd", "label": "qOdd", "nodeId": "state-q-odd", "initial": false, "accepting": false }
+  ],
+  "transitions": [
+    { "id": "qEven-0", "source": "qEven", "target": "qEven", "label": "0", "edgePath": ["e10", "e11", "e13", "e14", "e15", "e16", "e18", "e19", "e21"] },
+    { "id": "qEven-1", "source": "qEven", "target": "qOdd", "label": "1", "edgePath": ["e10", "e11", "e13", "e14", "e15", "e16", "e18", "e20", "e22"] },
+    { "id": "qOdd-0", "source": "qOdd", "target": "qOdd", "label": "0", "edgePath": ["e30", "e31", "e33", "e34", "e35", "e36", "e38", "e39", "e41"] },
+    { "id": "qOdd-1", "source": "qOdd", "target": "qEven", "label": "1", "edgePath": ["e30", "e31", "e33", "e34", "e35", "e36", "e38", "e40", "e42"] }
+  ],
+  "positions": {
+    "qEven": { "x": 220, "y": 250 },
+    "qOdd": { "x": 570, "y": 250 }
+  }
+}

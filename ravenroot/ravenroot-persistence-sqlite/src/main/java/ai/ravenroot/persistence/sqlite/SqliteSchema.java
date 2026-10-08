@@ -1164,7 +1164,82 @@ final class SqliteSchema {
                                 + "process_instance_id, timer_id)",
                         "CREATE INDEX managed_recovery_handler_candidate ON execution_handler "
                                 + "(tenant_id, process_instance_id, handler_id) "
-                                + "WHERE status IN ('RESOLVED', 'DENIED', 'EXPIRED')")));
+                                + "WHERE status IN ('RESOLVED', 'DENIED', 'EXPIRED')")),
+                new SchemaMigration(36, "durable saga coordination and command outbox", List.of(
+                        "CREATE TABLE saga_instance (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, saga_id TEXT NOT NULL, traversal_id TEXT NOT NULL, revision INTEGER NOT NULL, disposition TEXT NOT NULL, graph_completed INTEGER NOT NULL CHECK (graph_completed IN (0,1)), snapshot BLOB NOT NULL, PRIMARY KEY (tenant_id, process_instance_id, saga_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
+                        "CREATE TABLE saga_command_outbox (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, message_id TEXT NOT NULL, saga_id TEXT NOT NULL, operation_id TEXT NOT NULL, identity_fingerprint TEXT NOT NULL, intent BLOB NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL, owner TEXT, fencing_token INTEGER NOT NULL, lease_expires_at_epoch_second INTEGER, lease_expires_at_nano INTEGER, next_attempt_at_epoch_second INTEGER NOT NULL, next_attempt_at_nano INTEGER NOT NULL, created_at_epoch_second INTEGER NOT NULL, created_at_nano INTEGER NOT NULL, broker_accepted_at_epoch_second INTEGER, broker_accepted_at_nano INTEGER, business_completed_at_epoch_second INTEGER, business_completed_at_nano INTEGER, last_failure TEXT NOT NULL, PRIMARY KEY (tenant_id, message_id), UNIQUE (tenant_id, operation_id), FOREIGN KEY (tenant_id, process_instance_id, saga_id) REFERENCES saga_instance (tenant_id, process_instance_id, saga_id) ON DELETE CASCADE)",
+                        "CREATE INDEX idx_saga_completion ON saga_instance (tenant_id, graph_completed, disposition, process_instance_id, traversal_id, saga_id)",
+                        "CREATE INDEX idx_saga_outbox_claim ON saga_command_outbox (tenant_id, status, next_attempt_at_epoch_second, next_attempt_at_nano)")),
+                new SchemaMigration(37, "personal node palettes", List.of(
+                        """
+                        CREATE TABLE node_palette (
+                            tenant_id TEXT NOT NULL,
+                            issuer TEXT NOT NULL,
+                            subject TEXT NOT NULL,
+                            palette_id TEXT NOT NULL,
+                            name TEXT NOT NULL,
+                            version INTEGER NOT NULL,
+                            created_at_epoch_second INTEGER NOT NULL,
+                            created_at_nano INTEGER NOT NULL,
+                            updated_at_epoch_second INTEGER NOT NULL,
+                            updated_at_nano INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, issuer, subject, palette_id),
+                            UNIQUE (tenant_id, issuer, subject, name)
+                        ) WITHOUT ROWID
+                        """,
+                        """
+                        CREATE TABLE node_template (
+                            tenant_id TEXT NOT NULL,
+                            issuer TEXT NOT NULL,
+                            subject TEXT NOT NULL,
+                            template_id TEXT NOT NULL,
+                            palette_id TEXT NOT NULL,
+                            name TEXT NOT NULL,
+                            kind TEXT NOT NULL,
+                            payload TEXT NOT NULL,
+                            version INTEGER NOT NULL,
+                            created_at_epoch_second INTEGER NOT NULL,
+                            created_at_nano INTEGER NOT NULL,
+                            updated_at_epoch_second INTEGER NOT NULL,
+                            updated_at_nano INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, issuer, subject, template_id),
+                            UNIQUE (tenant_id, issuer, subject, palette_id, name),
+                            FOREIGN KEY (tenant_id, issuer, subject, palette_id)
+                              REFERENCES node_palette (tenant_id, issuer, subject, palette_id)
+                              ON DELETE CASCADE
+                        ) WITHOUT ROWID
+                        """,
+                        "CREATE INDEX node_template_palette ON node_template "
+                                + "(tenant_id, issuer, subject, palette_id, created_at_epoch_second, "
+                                + "created_at_nano, template_id)")),
+                new SchemaMigration(38, "selective derived execution evidence", List.of(
+                        "CREATE TABLE replay_invocation_evidence (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, traversal_id TEXT NOT NULL, invocation_id TEXT NOT NULL, attempt_id TEXT NOT NULL, node_id TEXT NOT NULL, parent_ids TEXT NOT NULL, command TEXT NOT NULL, outcome TEXT NOT NULL, iteration_identity TEXT NOT NULL, output_content_type TEXT NOT NULL, output_bytes BLOB NOT NULL, attributes_content_type TEXT NOT NULL, attributes_bytes BLOB NOT NULL, recorded_at_epoch_second INTEGER NOT NULL, recorded_at_nano INTEGER NOT NULL, retained_until_epoch_second INTEGER NOT NULL, retained_until_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, process_instance_id, invocation_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
+                        "CREATE TABLE replay_source_settlement (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, source_revision INTEGER NOT NULL, fencing_token INTEGER NOT NULL, manifest_digest TEXT NOT NULL, settled_at_epoch_second INTEGER NOT NULL, settled_at_nano INTEGER NOT NULL, retained_until_epoch_second INTEGER NOT NULL, retained_until_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
+                        "CREATE TABLE derived_execution_ancestry (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, source_process_instance_id TEXT NOT NULL, boundary_seeds TEXT NOT NULL, work_traversal_id TEXT NOT NULL, work_invocation_id TEXT NOT NULL, work_attempt_id TEXT NOT NULL, work_boundary_node_id TEXT NOT NULL, work_predecessor_ids TEXT NOT NULL, work_source_node_id TEXT NOT NULL, work_command TEXT NOT NULL, work_payload_content_type TEXT NOT NULL, work_payload_bytes BLOB NOT NULL, work_attributes_content_type TEXT NOT NULL, work_attributes_bytes BLOB NOT NULL, request_id TEXT NOT NULL, request_subject TEXT NOT NULL, request_principal_type TEXT NOT NULL, request_issuer TEXT NOT NULL, request_fingerprint TEXT NOT NULL, requester TEXT NOT NULL, reason TEXT NOT NULL, repeatability_decision TEXT NOT NULL, admitted_at_epoch_second INTEGER NOT NULL, admitted_at_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)")),
+                new SchemaMigration(39, "selective replay source outcome ambiguity", List.of(
+                        "ALTER TABLE replay_source_settlement ADD COLUMN source_outcome_ambiguous INTEGER NOT NULL DEFAULT 1 CHECK (source_outcome_ambiguous IN (0, 1))")),
+                new SchemaMigration(40, "durable intergraph invocation relations", List.of(
+                        """
+                        CREATE TABLE IF NOT EXISTS flow_invocation (
+                            tenant_id TEXT NOT NULL, handle TEXT NOT NULL,
+                            caller_process_instance_id TEXT NOT NULL, caller_traversal_id TEXT NOT NULL,
+                            caller_invocation_id TEXT NOT NULL, caller_subject TEXT NOT NULL,
+                            caller_principal_type TEXT NOT NULL, caller_issuer TEXT NOT NULL,
+                            target_deployment_id TEXT NOT NULL, target_version INTEGER NOT NULL,
+                            target_digest TEXT NOT NULL, child_process_instance_id TEXT NOT NULL,
+                            child_traversal_id TEXT NOT NULL, status TEXT NOT NULL,
+                            input BLOB NOT NULL, result BLOB, failure_code TEXT NOT NULL,
+                            failure_message TEXT NOT NULL, continuation_claim TEXT, revision INTEGER NOT NULL,
+                            created_at_epoch_second INTEGER NOT NULL, created_at_nano INTEGER NOT NULL,
+                            updated_at_epoch_second INTEGER NOT NULL, updated_at_nano INTEGER NOT NULL,
+                            deadline_at_epoch_second INTEGER NOT NULL, deadline_at_nano INTEGER NOT NULL,
+                            retained_until_epoch_second INTEGER NOT NULL, retained_until_nano INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, handle),
+                            UNIQUE (tenant_id, caller_process_instance_id, caller_invocation_id)
+                        )
+                        """,
+                        "CREATE INDEX IF NOT EXISTS flow_invocation_recovery ON flow_invocation (tenant_id, status, created_at_epoch_second, created_at_nano)",
+                        "CREATE INDEX IF NOT EXISTS flow_invocation_retention ON flow_invocation (tenant_id, retained_until_epoch_second, retained_until_nano)")));
     }
 
     static int currentVersion() {

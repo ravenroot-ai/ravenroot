@@ -150,6 +150,35 @@ public final class RouteTable {
                     + "instance counts.", true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/node-types", "The trusted node-type catalog.", true, true,
                     200, STANDARD_ERRORS, READ, true),
+            new RouteDescriptor(Set.of("GET", "POST"), "/v1/node-palettes",
+                    "Lists or creates durable personal node palettes for the exact authenticated tenant, issuer, and subject. "
+                            + "Palette content is never assistant-visible and responses are private and non-cacheable.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("PATCH", "DELETE"), "/v1/node-palettes/{paletteId}",
+                    "Renames or deletes one caller-owned palette under a required If-Match version fence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/node-palettes/templates",
+                    "Saves one fail-closed, catalog-sanitized node template in a caller-owned palette. "
+                            + "Source ids, edges, coordinates, runtime data, adapter bindings, secret references, "
+                            + "and undeclared properties are excluded.",
+                    true, false, 201, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.NODE_TEMPLATE_REFERENCE_UNAVAILABLE.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("PATCH", "DELETE"), "/v1/node-palettes/templates/{templateId}",
+                    "Moves, renames, or deletes one caller-owned template under a required If-Match version fence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/node-palettes/templates/{templateId}/validate",
+                    "Revalidates a saved template's current operator-owned references in the authenticated destination tenant before insertion.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.NODE_TEMPLATE_REFERENCE_UNAVAILABLE.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
             // The program-language counterpart of /v1/node-types: a static, tenant-independent
             // capability catalog an editor reads to populate a selector, rather than a route bolted
             // onto /v1/runtime (a live execution snapshot) or /v1/status (a flat set of capability
@@ -521,13 +550,14 @@ public final class RouteTable {
                             + "bare FAILED would tell a caller its cancellation was an incident, from "
                             + "the one answer it has no live record left to check it against. A distinct "
                             + "410 EXECUTION_RESULT_REDACTED: it ran, but its payload was never retained "
-                            + "in the first place -- refused for exceeding a configured payload budget, or for "
-                            + "not projecting onto the closed payload model at all -- rather than having "
+                            + "in the first place -- refused for exceeding a configured payload budget, for "
+                            + "not projecting onto the closed payload model, or unavailable because recovery "
+                            + "proved the terminal boundary after the original runtime ended -- rather than having "
                             + "aged out after being retained. The body carries the same status, "
                             + "terminationReason and cancelled as the 200 and the EXPIRED bodies, plus a "
-                            + "payloadState field naming which of the two refusals applies (WITHHELD or "
-                            + "UNCONVERTIBLE), so a caller can tell a size limit an operator may raise "
-                            + "from a node returning a value no remote adapter could ever persist. "
+                            + "payloadState field naming the absence (WITHHELD, UNCONVERTIBLE or UNAVAILABLE), "
+                            + "so a caller can distinguish a configurable limit, an unrepresentable value and "
+                            + "output evidence lost with its original runtime. "
                             + "visitedNodes, "
                             + "defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array "
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
@@ -693,6 +723,21 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
                             ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/sagas",
+                    "Lists payload-free durable saga, step, compensation, and actionable recovery status for "
+                            + "one tenant-owned process instance. Requires execution-read authority.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/executions/{id}/sagas/{sagaId}/{action}",
+                    "Requests reconcile, retry-compensation, or compensate under execution-control authority "
+                            + "and an exact X-Ravenroot-Expected-Saga-Revision fence. Actions reopen work or "
+                            + "request compensation; they cannot assert participant success.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/cancel",
                     "Cancels a traversal (#37). 200 with a CancelResult body distinguishing CANCELLED, "
                             + "ALREADY_CANCELLED and ALREADY_COMPLETED; unknown ownership fails closed as "
@@ -998,7 +1043,19 @@ public final class RouteTable {
                             + "to /v1/executions naming a stored "
                             + "credential the submitter does not own is refused with access denied.",
                     true, true, 200,
-                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false));
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived/preview",
+                    "Previews a bounded selective derived execution from retained source evidence. Scope nodes are possible downstream routes; inherited invocation ids are the exact retained causal closure. sourceOutcomeAmbiguous separately reports begun source attempts with unresolved external outcome, including parallel siblings outside that scope.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code()), NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/derived/boundaries",
+                    "Lists payload-free retained downstream boundary choices for one positively settled source execution.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/derived",
+                    "Idempotently admits a fresh execution from a proven retained boundary. Completed predecessor effects remain historical; selected downstream effects require explicit authorization.",
+                    true, false, Set.of(200, 202), concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), NEVER, false));
 
     private static List<String> concat(List<String> base, String... extra) {
         var combined = new java.util.ArrayList<>(base);

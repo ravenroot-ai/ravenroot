@@ -65,6 +65,47 @@ import java.util.concurrent.CompletionStage;
  */
 public interface ExecutionStore extends AutoCloseable {
     /**
+     * Lists at most {@code limit} retained evidence records for one exact tenant-scoped source.
+     *
+     * @param source exact source execution
+     * @param limit positive hard result bound
+     * @return retained evidence in stable capture order
+     */
+    default CompletionStage<List<ReplayInvocationEvidence>> replayEvidence(ExecutionKey source, int limit) {
+        return unsupportedReplayOperation();
+    }
+
+    /** Records positive source quiescence after every in-flight invocation has returned.
+     * @param settlement proposed source proof; store time and fence remain authoritative
+     * @param lease current source owner lease
+     * @return stored authoritative proof
+     */
+    default CompletionStage<ReplaySourceSettlement> recordReplaySettlement(
+            ReplaySourceSettlement settlement, LeaseHandle lease) {
+        return unsupportedReplayOperation();
+    }
+
+    /** Reads positive source quiescence, empty for legacy, expired or unsettled sources.
+     * @param source exact source execution
+     * @return retained positive proof, if available
+     */
+    default CompletionStage<Optional<ReplaySourceSettlement>> replaySettlement(ExecutionKey source) {
+        return unsupportedReplayOperation();
+    }
+
+    /** Reads immutable ancestry for one derived process.
+     * @param derived exact derived execution
+     * @return admitted ancestry, if this is a derived execution
+     */
+    default CompletionStage<Optional<DerivedExecutionAncestry>> derivedAncestry(ExecutionKey derived) {
+        return unsupportedReplayOperation();
+    }
+
+    private static <T> CompletionStage<T> unsupportedReplayOperation() {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)));
+    }
+    /**
      * Store-clock fenced worker incarnation renewal; must serialize with fleet admission.
      * @param proposed authenticated advertisement; client timestamps are replaced by store time
      * @param ttl positive operator-configured liveness duration
@@ -1424,6 +1465,215 @@ public interface ExecutionStore extends AutoCloseable {
         var refused = new java.util.concurrent.CompletableFuture<T>();
         refused.completeExceptionally(new ExecutionStoreException(
                 new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_RESULTS)));
+        return refused;
+    }
+
+    /**
+     * Loads one tenant-scoped saga aggregate.
+     * @param key execution scope
+     * @param sagaId saga identity
+     * @return optional snapshot
+     */
+    default CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists saga aggregates owned by one execution.
+     * @param key execution scope
+     * @return immutable snapshots
+     */
+    default CompletionStage<java.util.List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists application-command outbox records owned by one execution for diagnostics.
+     * @param key execution scope
+     * @return immutable outbox records without dispatch authority
+     */
+    default CompletionStage<java.util.List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists a bounded tenant page of terminal sagas whose graph boundary was durably reached while
+     * the owning traversal still needs its terminal execution projection.
+     *
+     * <p>This recovery inventory exists so an outbox worker restarted after both the participant
+     * and Ravenroot crashed can finish the owning execution. It is diagnostic/recovery authority,
+     * not a cross-tenant enumeration. Implementations filter already-terminal processes and
+     * traversals, and executions with a live runner lease, before applying {@code limit}; historical
+     * terminal work therefore cannot starve a newer actionable completion.</p>
+     * @param tenantId tenant physical partition
+     * @param limit maximum snapshots returned
+     * @return actionable terminal graph-completion candidates
+     */
+    default CompletionStage<java.util.List<SagaSnapshot>> listSagaCompletionCandidates(
+            String tenantId, int limit) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Lists a bounded tenant page whose frozen participant work may require post-lease recovery.
+     * This is worker authority and managed request-scoped stores should keep it fail-closed.
+     * @param tenantId tenant physical partition
+     * @param limit maximum snapshots returned
+     * @return non-terminal saga recovery candidates
+     */
+    default CompletionStage<java.util.List<SagaSnapshot>> listSagaRecoveryCandidates(
+            String tenantId, int limit) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Claims due commands.
+     * @param tenantId tenant
+     * @param workerId claimant
+     * @param limit page bound
+     * @param ttl lease duration
+     * @return claimed commands
+     */
+    default CompletionStage<java.util.List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        return sagasUnsupported();
+    }
+
+    /**
+     * Settles a claim.
+     * @param tenantId tenant
+     * @param messageId message
+     * @param workerId claimant
+     * @param fencingToken claim fence
+     * @param settlement result
+     * @return durable record
+     */
+    default CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        return sagasUnsupported();
+    }
+
+    private static <T> CompletionStage<T> sagasUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.DURABLE_SAGAS)));
+        return refused;
+    }
+
+    /**
+     * Records one invocation intent before a child execution may be launched.
+     * @param intent complete durable invocation intent
+     * @return the created relation
+     */
+    default CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Atomically records one invocation intent only while the tenant remains below its unfinished
+     * relation quota. A retry by the same caller invocation returns its existing relation without
+     * consuming another quota slot.
+     *
+     * <p>The count and insert are one persistence transaction. Implementations must not emulate this
+     * method with a separate {@link #unfinishedFlowInvocations(String, int)} read followed by
+     * {@link #createFlowInvocation(ai.ravenroot.api.flow.FlowInvocationRecord)}.</p>
+     *
+     * @param intent complete durable invocation intent
+     * @param maximumUnfinishedPerTenant positive tenant quota
+     * @return the created relation, or the caller invocation's existing relation on retry
+     */
+    default CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Reads one invocation by tenant-scoped opaque handle.
+     * @param tenantId tenant boundary for the lookup
+     * @param handle opaque relation reference
+     * @return the tenant's relation when present
+     */
+    default CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Finds the relation created by one caller-node invocation, making node retry idempotent.
+     * @param tenantId tenant boundary for the lookup
+     * @param callerProcessInstanceId caller process identity
+     * @param callerInvocationId caller node invocation identity
+     * @return the caller's relation when present
+     */
+    default CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> findFlowInvocationByCaller(
+            String tenantId, UUID callerProcessInstanceId, UUID callerInvocationId) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Applies one compare-and-set lifecycle transition. Implementations must reject a stale revision,
+     * a status regression, changed child identity, or a second distinct continuation claimant.
+     * @param tenantId tenant that owns the relation
+     * @param mutation validated compare-and-set mutation
+     * @return the updated relation
+     */
+    default CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Lists unfinished invocation relations for bounded startup recovery.
+     * @param tenantId tenant boundary for the scan
+     * @param limit positive maximum row count
+     * @return at most {@code limit} unfinished relations
+     */
+    default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
+            unfinishedFlowInvocations(String tenantId, int limit) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Lists retained relations, including terminal records awaiting caller re-entry.
+     * @param tenantId tenant boundary for the scan
+     * @param limit positive maximum row count
+     * @return at most {@code limit} retained relations
+     */
+    default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
+            retainedFlowInvocations(String tenantId, int limit) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Reads a stable handle-ordered page of retained relations for bounded fair reconciliation.
+     * Passing an empty cursor starts at the beginning; an empty page signals the caller to wrap.
+     *
+     * @param tenantId tenant boundary for the scan
+     * @param afterExclusive opaque handle after which the page starts, or empty to start
+     * @param limit positive maximum row count
+     * @return at most {@code limit} retained relations in ascending handle order
+     */
+    default CompletionStage<java.util.List<ai.ravenroot.api.flow.FlowInvocationRecord>>
+            retainedFlowInvocationsAfter(String tenantId,
+                    Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return flowInvocationsUnsupported();
+    }
+
+    /**
+     * Explicitly purges terminal relations whose retention deadline elapsed.
+     * @param tenantId tenant boundary for the purge
+     * @return number of expired relations removed
+     */
+    default CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
+        return flowInvocationsUnsupported();
+    }
+
+    private static <T> CompletionStage<T> flowInvocationsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.FLOW_INVOCATIONS)));
         return refused;
     }
 

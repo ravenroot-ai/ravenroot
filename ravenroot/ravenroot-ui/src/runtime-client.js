@@ -1050,6 +1050,60 @@ export class RavenrootRuntimeClient {
     });
   }
 
+  /** Reads the bounded, payload-free saga and participant status for one process instance. */
+  async processInstanceSagas(processInstanceId, { signal } = {}) {
+    const id = String(processInstanceId || '');
+    if (!id) throw new Error('Process instance sagas require an id');
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/sagas`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    if (!result || !Array.isArray(result.sagas) || !Array.isArray(result.outbox)) {
+      throw new Error('Process saga response is invalid');
+    }
+    return result;
+  }
+
+  async previewDerivedExecution(sourceProcessInstanceId, request, { signal } = {}) {
+    return this.#derivedExecution(sourceProcessInstanceId, request, true, signal);
+  }
+
+  async derivedExecutionBoundaries(sourceProcessInstanceId, { signal } = {}) {
+    const id = String(sourceProcessInstanceId || '');
+    if (!id) throw new Error('Derived boundary discovery requires a source process');
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived/boundaries`, {
+      method: 'GET', signal, headers: { Accept: 'application/json' },
+    });
+    if (!Array.isArray(result?.boundaries)) throw new Error('Derived boundary response is invalid');
+    return result.boundaries;
+  }
+
+  async startDerivedExecution(sourceProcessInstanceId, request, { signal } = {}) {
+    return this.#derivedExecution(sourceProcessInstanceId, request, false, signal);
+  }
+
+  async #derivedExecution(sourceProcessInstanceId, request, preview, signal) {
+    const id = String(sourceProcessInstanceId || '');
+    if (!id || !request || !Array.isArray(request.boundaries) || request.boundaries.length === 0) {
+      throw new Error('Selective derived execution requires a source and boundary');
+    }
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived${preview ? '/preview' : ''}`, {
+      method: 'POST', signal, headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schemaVersion: 1, ...request }),
+    });
+    if (preview && (typeof result?.admissible !== 'boolean' || !Array.isArray(result.refusalCodes)
+        || !Array.isArray(result.inheritedInvocationIds) || !Array.isArray(result.possibleScopeNodeIds)
+        || !Array.isArray(result.missingInputs) || !Array.isArray(result.externalEffectNodes)
+        || typeof result.sourceOutcomeAmbiguous !== 'boolean')) {
+      throw new Error('Selective replay preview response is invalid');
+    }
+    if (!preview && (!result?.processInstanceId || !result?.traversalId || !result?.graphVersion)) {
+      throw new Error('Derived execution response is invalid');
+    }
+    return result;
+  }
+
   /** Reads the bounded, tenant-authorized actionable Human Task projection for one exact graph
    * context. The runtime configuration supplies page and polling limits; this method supplies no
    * browser-owned defaults. */
@@ -1227,6 +1281,49 @@ export class RavenrootRuntimeClient {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
     if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');
     return result;
+  }
+
+  nodePalettes() {
+    return this.#json('/v1/node-palettes', { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+
+  createNodePalette(name) {
+    return this.#json('/v1/node-palettes', { method: 'POST', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  }
+
+  renameNodePalette(id, version, name) {
+    return this.#json('/v1/node-palettes/' + encodeURIComponent(id), { method: 'PATCH', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ name }) });
+  }
+
+  deleteNodePalette(id, version) {
+    return this.#json('/v1/node-palettes/' + encodeURIComponent(id), { method: 'DELETE', headers: {
+      Accept: 'application/json', 'If-Match': String(version) } });
+  }
+
+  createNodeTemplate(paletteId, name, node) {
+    return this.#json('/v1/node-palettes/templates', { method: 'POST', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paletteId, name, node }) });
+  }
+
+  updateNodeTemplate(id, version, paletteId, name) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id), { method: 'PATCH', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ paletteId, name }) });
+  }
+
+  deleteNodeTemplate(id, version) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id), { method: 'DELETE', headers: {
+      Accept: 'application/json', 'If-Match': String(version) } });
+  }
+
+  validateNodeTemplate(id) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id) + '/validate', {
+      method: 'POST', headers: { Accept: 'application/json' },
+    });
   }
 
   /** The connected runtime's effective, operator-owned browser ingestion configuration. */

@@ -45,6 +45,21 @@ public record AmqpProfile(
         routingKeys = copy(routingKeys);
         headers = copy(headers);
         replyTo = copy(replyTo);
+        requireValidShape(tenant, name, host, port, vhost, username, credentialRef,
+                defaultExchange, exchanges, defaultRoutingKey, routingKeys, headers, replyTo,
+                maxPriority, maxExpirationMs, maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries);
+        if (!tls && !loopback(host) && (plaintextAuthorization == null
+                || !plaintextAuthorization.matches("amqp091", tenant + "/" + name, host, port))) {
+            throw new IllegalArgumentException("invalid AMQP operator profile");
+        }
+    }
+
+    static void requireValidShape(
+            String tenant, String name, String host, int port, String vhost,
+            String username, String credentialRef, String defaultExchange, Set<String> exchanges,
+            String defaultRoutingKey, Set<String> routingKeys, Set<String> headers, Set<String> replyTo,
+            int maxPriority, long maxExpirationMs, int maxConcurrency, int maxPerSecond,
+            int timeoutMs, int maxBodyBytes, int retries) {
         if (!identifier(tenant) || !identifier(name) || host == null || host.isBlank()
                 || vhost == null || !AmqpWireLimits.isShortstr(vhost)
                 || vhost.codePoints().anyMatch(Character::isISOControl)
@@ -58,9 +73,7 @@ public record AmqpProfile(
                 || timeoutMs < 100 || timeoutMs > 30_000 || maxBodyBytes < 1 || maxBodyBytes > 1_048_576
                 || retries < 0 || retries > 3 || !validNames(exchanges, 255, true)
                 || !validNames(routingKeys, 255, false) || !validHeaders(headers)
-                || !validNames(replyTo, 255, false)
-                || !tls && !loopback(host) && (plaintextAuthorization == null
-                || !plaintextAuthorization.matches("amqp091", tenant + "/" + name, host, port))) {
+                || !validNames(replyTo, 255, false)) {
             throw new IllegalArgumentException("invalid AMQP operator profile");
         }
     }

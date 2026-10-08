@@ -76,7 +76,15 @@ import ai.ravenroot.api.persistence.ProcessInventoryPage;
 import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
+import ai.ravenroot.api.persistence.DerivedExecutionWork;
+import ai.ravenroot.api.persistence.ReplayMetadataCodec;
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.SagaSnapshot;
+import ai.ravenroot.api.persistence.SagaOutboxRecord;
+import ai.ravenroot.api.persistence.SagaOutboxSettlement;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
@@ -237,7 +245,9 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoreCapability.HUMAN_TASKS,
             StoreCapability.HUMAN_TASK_CONFIRMATIONS,
             StoreCapability.EXECUTION_PAUSES,
-            StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.RUNNER_JOBS);
+            StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.RUNNER_JOBS,
+            StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
+            StoreCapability.FLOW_INVOCATIONS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -397,6 +407,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private final Clock clock;
     private final PostgresStoreConfig config;
     private final HumanTaskPolicy humanTaskPolicy;
+    private final ai.ravenroot.api.persistence.SagaOutboxCapacity sagaOutboxCapacity;
     private final Transactions transactions;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -430,6 +441,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
         this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        this.sagaOutboxCapacity = ai.ravenroot.api.persistence.SagaOutboxCapacity.configured();
         this.transactions = new Transactions(dataSource, config,
                 Objects.requireNonNull(commitBoundary, "commitBoundary"));
         // Named and daemon so a thread dump says which store is blocked and a forgotten close cannot
@@ -569,6 +581,13 @@ public final class PostgresExecutionStore implements ExecutionStore {
             requireWithinPayloadLimit(OpaquePayload.of(registration.continuation(),
                     "application/vnd.ravenroot.tool-continuation"));
         });
+        batch.replayEvidence().forEach(evidence -> {
+            requireWithinPayloadLimit(evidence.output());
+            requireWithinPayloadLimit(evidence.attributes());
+            if (!batch.key().equals(evidence.source())) {
+                throw failure(ExecutionStoreFailure.invalid("replay evidence source does not match batch"));
+            }
+        });
     }
 
     /**
@@ -670,10 +689,14 @@ public final class PostgresExecutionStore implements ExecutionStore {
         writeExecutionPauses(connection, key, batch, folded, pin, revision);
         writeRunnerWorkspace(connection, key, batch, folded, now);
         writeHumanTasks(connection, key, batch, folded, pin, revision, now);
+        writeReplayEvidence(connection, key, batch, folded);
+        verifyReplaySourceExpectation(connection, batch);
+        writeDerivedAncestry(connection, key, batch, folded);
         IdempotencyWrite idempotency = batch.idempotency().orElse(null);
         if (idempotency != null) {
             writeIdempotencyRecord(connection, key, idempotency, revision, now);
         }
+        PostgresSagaStorage.write(connection, key, batch, now, sagaOutboxCapacity);
         // Inside the same transaction as the transition above, which is the entirety of the shared
         // transactional boundary the event journal promises. There is no publish step to crash between,
         // because there is no publish step: delivery reads the committed journal afterwards.
@@ -735,6 +758,80 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         key.tenantId(), meta.updatedAt());
             });
         });
+    }
+
+    @Override
+    public CompletionStage<List<ReplayInvocationEvidence>> replayEvidence(ExecutionKey source, int limit) {
+        return async(() -> readFolded(source, connection -> {
+            requireLimit(limit);
+            InstanceMeta meta = readMeta(connection, source, false);
+            if (meta == null || !meta.status().terminal()
+                    || !clock.instant().isBefore(retentionDueAt(meta.retainedUntil(), meta.updatedAt()))) return List.of();
+            Instant retainedUntil = retentionDueAt(meta.retainedUntil(), meta.updatedAt());
+            var values = new ArrayList<ReplayInvocationEvidence>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM replay_invocation_evidence WHERE tenant_id = ? AND process_instance_id = ? ORDER BY recorded_at_epoch_second, recorded_at_nano, invocation_id LIMIT ?")) {
+                statement.setString(1, source.tenantId()); statement.setObject(2, source.processInstanceId());
+                statement.setInt(3, limit);
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) values.add(new ReplayInvocationEvidence(source,
+                            rows.getObject("traversal_id", UUID.class), rows.getObject("invocation_id", UUID.class),
+                            rows.getObject("attempt_id", UUID.class), rows.getString("node_id"),
+                            ReplayMetadataCodec.parents(rows.getString("parent_ids")),
+                            NodeCommand.parse(rows.getString("command")), rows.getString("outcome"),
+                            ReplayMetadataCodec.iteration(rows.getString("iteration_identity")),
+                            OpaquePayload.of(rows.getBytes("output_bytes"), rows.getString("output_content_type")),
+                            OpaquePayload.of(rows.getBytes("attributes_bytes"), rows.getString("attributes_content_type")),
+                            StoredInstant.read(rows, "recorded_at"), retainedUntil));
+                }
+            }
+            return List.copyOf(values);
+        }));
+    }
+
+    @Override
+    public CompletionStage<ReplaySourceSettlement> recordReplaySettlement(
+            ReplaySourceSettlement proposed, LeaseHandle lease) {
+        return async(() -> write(proposed.source(), connection -> {
+            InstanceMeta meta = requireReplayLease(connection, proposed.source(), lease);
+            if (!meta.status().terminal()) throw failure(ExecutionStoreFailure.invalid("replay source is not terminal"));
+            Instant now = clock.instant();
+            var value = new ReplaySourceSettlement(proposed.source(), meta.revision(), meta.fencingToken(),
+                    proposed.manifestDigest(), proposed.sourceOutcomeAmbiguous(), now,
+                    retentionDueAt(meta.retainedUntil(), meta.updatedAt()));
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO replay_source_settlement (tenant_id, process_instance_id, source_revision, "
+                            + "fencing_token, manifest_digest, settled_at_epoch_second, settled_at_nano, "
+                            + "retained_until_epoch_second, retained_until_nano, source_outcome_ambiguous) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
+                int index = 1; insert.setString(index++, proposed.source().tenantId());
+                insert.setObject(index++, proposed.source().processInstanceId());
+                insert.setLong(index++, value.sourceRevision()); insert.setLong(index++, value.fencingToken());
+                insert.setString(index++, value.manifestDigest().value());
+                index = StoredInstant.bindValue(insert, index, value.settledAt());
+                index = StoredInstant.bindValue(insert, index, value.retainedUntil());
+                insert.setBoolean(index, value.sourceOutcomeAmbiguous()); insert.executeUpdate();
+            }
+            ReplaySourceSettlement stored = readReplaySettlement(connection, proposed.source());
+            if (!stored.equals(value)) throw failure(ExecutionStoreFailure.invalid("replay source settlement already differs"));
+            return stored;
+        }));
+    }
+
+    @Override
+    public CompletionStage<Optional<ReplaySourceSettlement>> replaySettlement(ExecutionKey source) {
+        return async(() -> readFolded(source, connection -> {
+            ReplaySourceSettlement value = readReplaySettlement(connection, source);
+            InstanceMeta meta = readMeta(connection, source, false);
+            return value == null || meta == null || meta.fencingToken() != value.fencingToken()
+                    || !clock.instant().isBefore(value.retainedUntil()) ? Optional.empty() : Optional.of(value);
+        }));
+    }
+
+    @Override
+    public CompletionStage<Optional<DerivedExecutionAncestry>> derivedAncestry(ExecutionKey derived) {
+        return async(() -> readFolded(derived, connection -> Optional.ofNullable(
+                readDerivedAncestry(connection, derived))));
     }
 
     // ---------------------------------------------------------------- leases
@@ -1697,6 +1794,160 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 }
             });
         });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return async(() -> write(null, connection -> insertFlowInvocation(connection, intent, null)));
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        if (maximumUnfinishedPerTenant < 1) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("maximumUnfinishedPerTenant must be positive"));
+        }
+        return async(() -> write(null, connection ->
+                insertFlowInvocation(connection, intent, maximumUnfinishedPerTenant)));
+    }
+
+    @Override public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+        return async(() -> readFolded(null, connection -> Optional.ofNullable(readFlow(connection, tenantId,
+                Objects.requireNonNull(handle).value()))));
+    }
+
+    @Override public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> findFlowInvocationByCaller(
+            String tenantId, UUID processId, UUID invocationId) {
+        return async(() -> readFolded(null, connection -> Optional.ofNullable(readFlowByCaller(connection,
+                tenantId, Objects.requireNonNull(processId), Objects.requireNonNull(invocationId)))));
+    }
+
+    @Override public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        return async(() -> write(null, connection -> {
+            var current = readFlow(connection, tenantId, mutation.handle().value());
+            if (current == null) throw new IllegalArgumentException("unknown flow handle");
+            if (current.revision() != mutation.expectedRevision()) throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
+                    mutation.expectedRevision(), current.revision());
+            if (current.terminal() && current.status() != mutation.status())
+                throw new IllegalStateException("a terminal flow invocation cannot change outcome");
+            if (current.continuationClaim() != null && !Objects.equals(current.continuationClaim(), mutation.continuationClaim()))
+                throw new IllegalStateException("flow continuation was already claimed");
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE flow_invocation SET status=?, result=?, failure_code=?, failure_message=?, continuation_claim=?, revision=revision+1, updated_at_epoch_second=?, updated_at_nano=? WHERE tenant_id=? AND handle=? AND revision=?")) {
+                int i=1; statement.setString(i++, mutation.status().name()); statement.setBytes(i++, mutation.result());
+                statement.setString(i++, mutation.failureCode()); statement.setString(i++, mutation.failureMessage());
+                statement.setObject(i++, mutation.continuationClaim()); i=StoredInstant.bindValue(statement,i,mutation.updatedAt());
+                statement.setString(i++,tenantId); statement.setObject(i++,mutation.handle().value()); statement.setLong(i,current.revision());
+                if (statement.executeUpdate()!=1) throw new ai.ravenroot.api.flow.FlowInvocationConflictException(current.revision(), current.revision()+1);
+            }
+            return readFlow(connection, tenantId, mutation.handle().value());
+        }));
+    }
+
+    @Override public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> unfinishedFlowInvocations(
+            String tenantId, int limit) {
+        return async(() -> readFolded(null, connection -> {
+            if(limit<1||limit>1000) throw new IllegalArgumentException("limit");
+            var found=new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();
+            try(PreparedStatement s=connection.prepareStatement("SELECT * FROM flow_invocation WHERE tenant_id=? AND status IN ('INTENT','LAUNCHED') ORDER BY created_at_epoch_second,created_at_nano,handle LIMIT ?")){
+                s.setString(1,tenantId);s.setInt(2,limit);try(ResultSet rows=s.executeQuery()){while(rows.next())found.add(readFlow(rows));}
+            } return List.copyOf(found);
+        }));
+    }
+
+    @Override public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocations(String tenantId,int limit){
+        return async(() -> readFolded(null,c->{if(limit<1||limit>1000)throw new IllegalArgumentException("limit");var found=new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();try(PreparedStatement s=c.prepareStatement("SELECT * FROM flow_invocation WHERE tenant_id=? ORDER BY created_at_epoch_second,created_at_nano,handle LIMIT ?")){s.setString(1,tenantId);s.setInt(2,limit);try(ResultSet rows=s.executeQuery()){while(rows.next())found.add(readFlow(rows));}}return List.copyOf(found);}));
+    }
+
+    @Override public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocationsAfter(
+            String tenantId, Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return async(() -> readFolded(null, connection -> {
+            Objects.requireNonNull(afterExclusive, "afterExclusive");
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit");
+            var found = new ArrayList<ai.ravenroot.api.flow.FlowInvocationRecord>();
+            String cursor = afterExclusive.isPresent() ? " AND handle>?" : "";
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT * FROM flow_invocation WHERE tenant_id=?" + cursor + " ORDER BY handle LIMIT ?")) {
+                statement.setString(1, tenantId);
+                int index = 2;
+                if (afterExclusive.isPresent()) {
+                    statement.setObject(index++, afterExclusive.orElseThrow().value());
+                }
+                statement.setInt(index, limit);
+                try (ResultSet rows = statement.executeQuery()) { while (rows.next()) found.add(readFlow(rows)); }
+            }
+            return List.copyOf(found);
+        }));
+    }
+
+    @Override public CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
+        return async(() -> write(null, connection -> { try(PreparedStatement s=connection.prepareStatement(
+                "DELETE FROM flow_invocation WHERE tenant_id=? AND status NOT IN ('INTENT','LAUNCHED') AND "+StoredInstant.atOrBefore("retained_until"))){
+            s.setString(1,tenantId);StoredInstant.bindComparison(s,2,clock.instant());return (long)s.executeUpdate();} }));
+    }
+
+    private static void bindFlow(PreparedStatement s, ai.ravenroot.api.flow.FlowInvocationRecord r) throws SQLException {
+        int i=1;s.setString(i++,r.tenantId());s.setObject(i++,r.handle().value());s.setObject(i++,r.callerProcessInstanceId());
+        s.setObject(i++,r.callerTraversalId());s.setObject(i++,r.callerInvocationId());s.setString(i++,r.callerSubject());
+        s.setString(i++,r.callerPrincipalType().name());s.setString(i++,r.callerIssuer());s.setString(i++,r.targetDeploymentId().value());
+        s.setLong(i++,r.targetVersion());s.setString(i++,r.targetDigest());s.setObject(i++,r.childProcessInstanceId());
+        s.setObject(i++,r.childTraversalId());s.setString(i++,r.status().name());s.setBytes(i++,r.input());s.setBytes(i++,r.result());
+        s.setString(i++,r.failureCode());s.setString(i++,r.failureMessage());s.setObject(i++,r.continuationClaim());s.setLong(i++,r.revision());
+        i=StoredInstant.bindValue(s,i,r.createdAt());i=StoredInstant.bindValue(s,i,r.updatedAt());
+        i=StoredInstant.bindValue(s,i,r.deadlineAt());StoredInstant.bindValue(s,i,r.retainedUntil());
+    }
+
+    private static ai.ravenroot.api.flow.FlowInvocationRecord insertFlowInvocation(
+            Connection connection, ai.ravenroot.api.flow.FlowInvocationRecord intent,
+            Integer maximumUnfinishedPerTenant) throws SQLException {
+        Objects.requireNonNull(intent, "intent");
+        if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT || intent.revision() != 1) {
+            throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
+        }
+        if (maximumUnfinishedPerTenant != null) {
+            try (PreparedStatement lock = connection.prepareStatement(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+                lock.setString(1, intent.tenantId());
+                lock.executeQuery().close();
+            }
+        }
+        var existing = readFlowByCaller(connection, intent.tenantId(), intent.callerProcessInstanceId(),
+                intent.callerInvocationId());
+        if (existing != null) return existing;
+        if (maximumUnfinishedPerTenant != null) {
+            try (PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM flow_invocation WHERE tenant_id=? AND status IN ('INTENT','LAUNCHED')")) {
+                count.setString(1, intent.tenantId());
+                try (ResultSet row = count.executeQuery()) {
+                    if (!row.next()) throw new SQLException("flow invocation quota count returned no row");
+                    if (row.getLong(1) >= maximumUnfinishedPerTenant) {
+                        throw new IllegalStateException("tenant flow invocation quota is exhausted");
+                    }
+                }
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO flow_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING")) {
+            bindFlow(statement, intent);
+            if (statement.executeUpdate() == 1) return intent;
+        }
+        existing = readFlowByCaller(connection, intent.tenantId(), intent.callerProcessInstanceId(),
+                intent.callerInvocationId());
+        if (existing == null) throw new IllegalStateException("flow invocation insert conflict was unreadable");
+        return existing;
+    }
+    private static ai.ravenroot.api.flow.FlowInvocationRecord readFlow(Connection c,String tenant,UUID handle)throws SQLException{
+        try(PreparedStatement s=c.prepareStatement("SELECT * FROM flow_invocation WHERE tenant_id=? AND handle=?")){s.setString(1,tenant);s.setObject(2,handle);try(ResultSet r=s.executeQuery()){return r.next()?readFlow(r):null;}}
+    }
+    private static ai.ravenroot.api.flow.FlowInvocationRecord readFlowByCaller(Connection c,String tenant,UUID process,UUID invocation)throws SQLException{
+        try(PreparedStatement s=c.prepareStatement("SELECT * FROM flow_invocation WHERE tenant_id=? AND caller_process_instance_id=? AND caller_invocation_id=?")){s.setString(1,tenant);s.setObject(2,process);s.setObject(3,invocation);try(ResultSet r=s.executeQuery()){return r.next()?readFlow(r):null;}}
+    }
+    private static ai.ravenroot.api.flow.FlowInvocationRecord readFlow(ResultSet r)throws SQLException{
+        return new ai.ravenroot.api.flow.FlowInvocationRecord(r.getString("tenant_id"),new ai.ravenroot.api.flow.FlowHandle(r.getObject("handle",UUID.class)),r.getObject("caller_process_instance_id",UUID.class),r.getObject("caller_traversal_id",UUID.class),r.getObject("caller_invocation_id",UUID.class),r.getString("caller_subject"),ai.ravenroot.api.security.PrincipalType.valueOf(r.getString("caller_principal_type")),r.getString("caller_issuer"),ai.ravenroot.api.deployment.DeploymentId.of(r.getString("target_deployment_id")),r.getLong("target_version"),r.getString("target_digest"),r.getObject("child_process_instance_id",UUID.class),r.getObject("child_traversal_id",UUID.class),ai.ravenroot.api.flow.FlowInvocationStatus.valueOf(r.getString("status")),r.getBytes("input"),r.getBytes("result"),r.getString("failure_code"),r.getString("failure_message"),r.getObject("continuation_claim",UUID.class),r.getLong("revision"),StoredInstant.read(r,"created_at"),StoredInstant.read(r,"updated_at"),StoredInstant.read(r,"deadline_at"),StoredInstant.read(r,"retained_until"));
     }
 
     // ---------------------------------------------------------------- event journal and outbox
@@ -3035,7 +3286,9 @@ public final class PostgresExecutionStore implements ExecutionStore {
         String terminal = String.join(", ", terminalStatusNames().stream()
                 .map(name -> "'" + name + "'").toList());
         return "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? AND status IN ("
-                + terminal + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) AND ("
+                + terminal + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM saga_instance s WHERE s.tenant_id = process_instance.tenant_id AND s.process_instance_id = process_instance.process_instance_id "
+                + "AND (s.graph_completed=FALSE OR s.disposition NOT IN ('SUCCEEDED', 'COMPENSATED'))) AND ("
                 + "(retained_until_epoch_second IS NOT NULL AND "
                 + StoredInstant.atOrBefore("retained_until") + ") OR "
                 + "(retained_until_epoch_second IS NULL AND "
@@ -5959,6 +6212,56 @@ public final class PostgresExecutionStore implements ExecutionStore {
         }
     }
 
+    @Override
+    public CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        Objects.requireNonNull(key, "key"); Objects.requireNonNull(sagaId, "sagaId");
+        return async(() -> read(key, connection -> PostgresSagaStorage.load(connection, key, sagaId)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        Objects.requireNonNull(key, "key");
+        return async(() -> read(key, connection -> PostgresSagaStorage.list(connection, key)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        Objects.requireNonNull(key, "key");
+        return async(() -> read(key, connection -> PostgresSagaStorage.listCommands(connection, key)));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaCompletionCandidates(String tenantId, int limit) {
+        requireTenantId(tenantId); requireLimit(limit);
+        return async(() -> read(null, connection -> PostgresSagaStorage.completionCandidates(
+                connection, tenantId, limit, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaRecoveryCandidates(String tenantId, int limit) {
+        requireTenantId(tenantId); requireLimit(limit);
+        return async(() -> read(null, connection -> PostgresSagaStorage.recoveryCandidates(
+                connection, tenantId, limit, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        requireTenantId(tenantId); requireWorkerId(workerId); requireLimit(limit); requireLeaseTtl(ttl);
+        return async(() -> write(null, connection -> PostgresSagaStorage.claim(connection, tenantId,
+                workerId, limit, ttl, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        requireTenantId(tenantId); requireWorkerId(workerId); Objects.requireNonNull(messageId, "messageId");
+        Objects.requireNonNull(settlement, "settlement");
+        return async(() -> write(null, connection -> PostgresSagaStorage.settle(connection, tenantId,
+                messageId, workerId, fencingToken, settlement, clock.instant())));
+    }
+
     /**
      * A {@code NotPresent} expectation and a fencing token contradict each other within a single
      * request.
@@ -6017,6 +6320,193 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private static void requireDestination(String destination) {
         if (destination == null || destination.isBlank()) {
             throw failure(ExecutionStoreFailure.invalid("destination cannot be blank"));
+        }
+    }
+
+    private void writeReplayEvidence(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                     ProcessInstance folded) throws SQLException {
+        if (batch.replayEvidence().isEmpty()) return;
+        String sql = "INSERT INTO replay_invocation_evidence (tenant_id, process_instance_id, "
+                + "traversal_id, invocation_id, attempt_id, node_id, parent_ids, command, outcome, "
+                + "iteration_identity, output_content_type, output_bytes, attributes_content_type, "
+                + "attributes_bytes, recorded_at_epoch_second, recorded_at_nano, "
+                + "retained_until_epoch_second, retained_until_nano) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (ReplayInvocationEvidence evidence : batch.replayEvidence()) {
+                var traversal = folded.traversals().get(evidence.traversalId());
+                var invocation = traversal == null ? null : traversal.invocations().get(evidence.invocationId());
+                var attempt = invocation == null ? null : invocation.attempts().stream()
+                        .filter(value -> value.attemptId().equals(evidence.attemptId())).findFirst().orElse(null);
+                if (invocation == null || invocation.status() != ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED
+                        || attempt == null || attempt.status() != ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED
+                        || !invocation.nodeId().equals(evidence.nodeId())
+                        || !invocation.command().equals(evidence.command())
+                        || !invocation.parentInvocationIds().equals(evidence.parentInvocationIds())) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "replay evidence must name the completed post-fold invocation and attempt"));
+                }
+                int index = 1;
+                statement.setString(index++, key.tenantId());
+                statement.setObject(index++, key.processInstanceId());
+                statement.setObject(index++, evidence.traversalId());
+                statement.setObject(index++, evidence.invocationId());
+                statement.setObject(index++, evidence.attemptId());
+                statement.setString(index++, evidence.nodeId());
+                statement.setString(index++, ReplayMetadataCodec.parents(evidence.parentInvocationIds()));
+                statement.setString(index++, evidence.command().toString());
+                statement.setString(index++, evidence.outcome());
+                statement.setString(index++, ReplayMetadataCodec.iteration(evidence.iteration()));
+                statement.setString(index++, evidence.output().contentType());
+                statement.setBytes(index++, evidence.output().bytes());
+                statement.setString(index++, evidence.attributes().contentType());
+                statement.setBytes(index++, evidence.attributes().bytes());
+                index = StoredInstant.bindValue(statement, index, evidence.recordedAt());
+                StoredInstant.bindValue(statement, index, evidence.retainedUntil());
+                statement.executeUpdate();
+            }
+        }
+    }
+
+    private void writeDerivedAncestry(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                      ProcessInstance folded)
+            throws SQLException {
+        var optional = batch.derivedAncestry();
+        if (optional.isEmpty()) return;
+        var ancestry = optional.orElseThrow();
+        if (!ancestry.derived().equals(key)) throw failure(ExecutionStoreFailure.invalid(
+                "derived ancestry must address the batch execution"));
+        if (readMeta(connection, ancestry.source(), false) == null)
+            throw failure(new ExecutionStoreFailure.NotFound(ancestry.source()));
+        var work = ancestry.pendingWork();
+        var workTraversal = folded.traversals().get(work.traversalId());
+        var workInvocation = workTraversal == null ? null
+                : workTraversal.invocations().get(work.invocationId());
+        var workAttempt = workInvocation == null ? null : workInvocation.attempts().stream()
+                .filter(value -> value.attemptId().equals(work.attemptId())).findFirst().orElse(null);
+        if (workInvocation == null || workAttempt == null
+                || !workInvocation.nodeId().equals(work.boundary().nodeId())
+                || !workInvocation.command().equals(work.command())
+                || workAttempt.status() != ai.ravenroot.api.application.NodeAttemptStatus.SCHEDULED) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "derived work must match the scheduled post-fold boundary attempt"));
+        }
+        if (work.payload().size() > config.maxPayloadBytes()
+                || work.attributes().size() > config.maxPayloadBytes()) {
+            throw failure(ExecutionStoreFailure.invalid("derived work seed exceeds the payload limit"));
+        }
+        try (PreparedStatement insert = connection.prepareStatement(
+                "INSERT INTO derived_execution_ancestry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
+            int index = 1;
+            insert.setString(index++, key.tenantId());
+            insert.setObject(index++, key.processInstanceId());
+            insert.setObject(index++, ancestry.source().processInstanceId());
+            insert.setString(index++, ReplayMetadataCodec.seeds(ancestry.boundarySeeds()));
+            insert.setObject(index++, work.traversalId());
+            insert.setObject(index++, work.invocationId());
+            insert.setObject(index++, work.attemptId());
+            insert.setString(index++, work.boundary().nodeId());
+            insert.setString(index++, ReplayMetadataCodec.parents(work.boundary().predecessorInvocationIds()));
+            insert.setString(index++, work.sourceNodeId());
+            insert.setString(index++, work.command().name());
+            insert.setString(index++, work.payload().contentType());
+            insert.setBytes(index++, work.payload().bytes());
+            insert.setString(index++, work.attributes().contentType());
+            insert.setBytes(index++, work.attributes().bytes());
+            insert.setString(index++, work.requesterContext().requestId());
+            insert.setString(index++, work.requesterContext().subject());
+            insert.setString(index++, work.requesterContext().principalType().name());
+            insert.setString(index++, work.requesterContext().issuer());
+            insert.setString(index++, ancestry.requestFingerprint());
+            insert.setString(index++, ancestry.requester());
+            insert.setString(index++, ancestry.reason());
+            insert.setString(index++, ancestry.repeatabilityDecision());
+            StoredInstant.bindValue(insert, index, ancestry.admittedAt());
+            insert.executeUpdate();
+        }
+        if (!ancestry.equals(readDerivedAncestry(connection, key))) throw failure(
+                ExecutionStoreFailure.invalid("derived ancestry already differs"));
+    }
+
+    private void verifyReplaySourceExpectation(Connection connection, ExecutionBatch batch) throws SQLException {
+        var optional = batch.replaySourceExpectation();
+        if (optional.isEmpty()) return;
+        var expected = optional.orElseThrow();
+        var current = readReplaySettlement(connection, expected.source());
+        var meta = readMeta(connection, expected.source(), true);
+        if (!expected.equals(current) || meta == null || meta.revision() != expected.sourceRevision()
+                || meta.fencingToken() != expected.fencingToken()
+                || !clock.instant().isBefore(expected.retainedUntil())) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "replay source settlement changed before derived admission"));
+        }
+        batch.derivedAncestry().ifPresent(ancestry -> {
+            if (!ancestry.source().equals(expected.source())) throw failure(
+                    ExecutionStoreFailure.invalid("derived ancestry and source settlement differ"));
+        });
+    }
+
+    private InstanceMeta requireReplayLease(Connection connection, ExecutionKey key, LeaseHandle presented)
+            throws SQLException {
+        Objects.requireNonNull(presented, "lease");
+        InstanceMeta meta = readMeta(connection, key, true);
+        if (meta == null) throw failure(new ExecutionStoreFailure.NotFound(key));
+        LeaseHandle held = readLease(connection, key, meta.fencingToken());
+        if (!key.equals(presented.key()) || held == null || !held.workerId().equals(presented.workerId())
+                || meta.fencingToken() != presented.fencingToken()
+                || !clock.instant().isBefore(held.expiresAt())) {
+            throw failure(new ExecutionStoreFailure.LeaseLost(key, presented.workerId()));
+        }
+        return meta;
+    }
+
+    private ReplaySourceSettlement readReplaySettlement(Connection connection, ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM replay_source_settlement WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId()); statement.setObject(2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return null;
+                return new ReplaySourceSettlement(key, rows.getLong("source_revision"),
+                        rows.getLong("fencing_token"),
+                        new ai.ravenroot.api.persistence.ExecutionManifestDigest(rows.getString("manifest_digest")),
+                        rows.getBoolean("source_outcome_ambiguous"),
+                        StoredInstant.read(rows, "settled_at"), StoredInstant.read(rows, "retained_until"));
+            }
+        }
+    }
+
+    private DerivedExecutionAncestry readDerivedAncestry(Connection connection, ExecutionKey key)
+            throws SQLException {
+        if (readMeta(connection, key, false) == null) return null;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM derived_execution_ancestry WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId()); statement.setObject(2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return null;
+                var boundary = new ai.ravenroot.api.persistence.ReplayBoundarySeed(
+                        rows.getString("work_boundary_node_id"),
+                        ReplayMetadataCodec.parents(rows.getString("work_predecessor_ids")));
+                var work = new DerivedExecutionWork(key,
+                        rows.getObject("work_traversal_id", UUID.class),
+                        rows.getObject("work_invocation_id", UUID.class),
+                        rows.getObject("work_attempt_id", UUID.class), boundary,
+                        rows.getString("work_source_node_id"),
+                        NodeCommand.parse(rows.getString("work_command")),
+                        OpaquePayload.of(rows.getBytes("work_payload_bytes"),
+                                rows.getString("work_payload_content_type")),
+                        OpaquePayload.of(rows.getBytes("work_attributes_bytes"),
+                                rows.getString("work_attributes_content_type")),
+                        new SecurityContext(rows.getString("request_id"), key.tenantId(),
+                                rows.getString("request_subject"),
+                                PrincipalType.valueOf(rows.getString("request_principal_type")),
+                                rows.getString("request_issuer")));
+                return new DerivedExecutionAncestry(key,
+                        new ExecutionKey(key.tenantId(), rows.getObject("source_process_instance_id", UUID.class)),
+                        ReplayMetadataCodec.seeds(rows.getString("boundary_seeds")), work,
+                        rows.getString("request_fingerprint"), rows.getString("requester"),
+                        rows.getString("reason"), rows.getString("repeatability_decision"),
+                        StoredInstant.read(rows, "admitted_at"));
+            }
         }
     }
 

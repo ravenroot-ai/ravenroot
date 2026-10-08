@@ -4,6 +4,7 @@ import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty;
+import ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
@@ -130,7 +131,8 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                         + "discards a message id it has already handled."));
         return new NodeTypeDescriptor(BEHAVIOR, "Publish AMQP message", "AMQP 0-9-1",
                 "Publishes one bounded message with mandatory returns and publisher confirms.",
-                "actor", false, List.copyOf(properties), Set.of("network", "credential-reference", "side-effect"));
+                "actor", false, List.copyOf(properties), Set.of("network", "credential-reference", "side-effect",
+                        "saga-adapter:ravenroot.amqp-inbox.v1"));
     }
 
     private static NodePropertyDescriptor optional(String name, String displayName, NodePropertyType type,
@@ -177,6 +179,23 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                 return CompletableFuture.completedFuture(result("TEMPORARY_FAILURE", "LOCAL_CAPACITY", payload, 0, null));
             }
         };
+    }
+
+    @Override
+    public void validateTemplateReferences(NodeConfiguration configuration, String tenantId) {
+        try {
+            Settings.validateAuthored(configuration);
+        } catch (Refusal refused) {
+            throw new IllegalArgumentException("invalid authored AMQP publish settings", refused);
+        }
+        try {
+            Settings.fromValidated(configuration, profiles, destinationPolicy, tenantId);
+        } catch (Refusal refused) {
+            if (refused.referenceFailure) {
+                throw new NodeTemplateReferenceUnavailableException(refused);
+            }
+            throw new IllegalArgumentException("invalid authored AMQP publish settings", refused);
+        }
     }
 
     private NodeResult execute(Settings settings, Payload payload) {
@@ -528,20 +547,30 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         private final String status;
         private final String reason;
         private final Payload payload;
+        private final boolean referenceFailure;
 
-        private Refusal(String status, String reason, Payload payload) {
+        private Refusal(String status, String reason, Payload payload, boolean referenceFailure) {
             super(reason);
             this.status = status;
             this.reason = reason;
             this.payload = payload;
+            this.referenceFailure = referenceFailure;
         }
 
         static Refusal rejected(String reason) {
-            return new Refusal("REJECTED", reason, null);
+            return new Refusal("REJECTED", reason, null, false);
         }
 
         static Refusal permanent(String reason) {
-            return new Refusal("PERMANENT_FAILURE", reason, null);
+            return new Refusal("PERMANENT_FAILURE", reason, null, false);
+        }
+
+        static Refusal unavailableReference(String reason) {
+            return new Refusal("PERMANENT_FAILURE", reason, null, true);
+        }
+
+        static Refusal unauthorizedReference(String reason) {
+            return new Refusal("REJECTED", reason, null, true);
         }
     }
 
@@ -551,17 +580,67 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                             String messageId, String correlationId, String replyTo, String type, String appId,
                             Map<String, Object> headers, int timeoutMs, int maxConcurrency, int retries) {
 
-        static Settings from(NodeConfiguration configuration, AmqpProfileResolver resolver,
-                             ReservedNetworkPolicy destinationPolicy, String tenant) {
+        /** Validates graph-authored syntax and absolute bounds before consulting operator authority. */
+        static void validateAuthored(NodeConfiguration configuration) {
             for (var property : configuration.properties().entrySet()) {
                 String name = property.getKey();
                 if (CONFIGURATION_FIELDS.contains(name)) continue;
+                if (name.startsWith("saga.")) continue;
                 if (RecoveryRepeatabilityProperty.NAME.equals(name)) {
                     if (RecoveryRepeatabilityProperty.ALLOWED_VALUES.contains(property.getValue())) continue;
                     throw Refusal.rejected("INVALID_GRAPH_PROPERTY");
                 }
                 throw Refusal.rejected("UNKNOWN_GRAPH_PROPERTY");
             }
+            if ("amqp-inbox-v1".equals(configuration.property("saga.participant", ""))) {
+                if (!"ravenroot.amqp-inbox.v1".equals(configuration.property("saga.adapter", ""))) {
+                    throw Refusal.rejected("SAGA_ADAPTER_REQUIRED");
+                }
+                String binding = configuration.property("saga.inboxBinding", "");
+                if (!binding.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")) {
+                    throw Refusal.rejected("SAGA_INBOX_BINDING_REQUIRED");
+                }
+                if (!strictBoolean(configuration, "saga.businessCompletionRequired", false)) {
+                    throw Refusal.rejected("SAGA_BUSINESS_COMPLETION_REQUIRED");
+                }
+            }
+            String profileName = configuration.property("brokerProfile")
+                    .orElseThrow(() -> Refusal.rejected("BROKER_PROFILE_REQUIRED"));
+            if (!profileName.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
+                throw Refusal.rejected("INVALID_GRAPH_PROPERTY");
+            }
+            if (!strictBoolean(configuration, "mandatory", true)) {
+                throw Refusal.rejected("MANDATORY_REQUIRED");
+            }
+            strictBoolean(configuration, "persistent", false);
+            if (configuration.properties().containsKey("exchange")) {
+                configured(configuration, "exchange", "", 255, true);
+            }
+            if (configuration.properties().containsKey("routingKey")) {
+                configured(configuration, "routingKey", "", 255, false);
+            }
+            for (String name : List.of("contentType", "contentEncoding", "messageId", "correlationId",
+                    "type", "appId")) {
+                optional(configuration, name, 128);
+            }
+            optional(configuration, "replyTo", 255);
+            optionalInt(configuration, "priority", 9);
+            optionalLong(configuration, "expirationMs", 86_400_000L);
+            tighten(configuration, "confirmTimeoutMs", 30_000, 100);
+            tighten(configuration, "maxConcurrency", 16, 1);
+            tighten(configuration, "retries", 3, 0);
+            parseHeaders(configuration.property("headers", ""));
+        }
+
+        static Settings from(NodeConfiguration configuration, AmqpProfileResolver resolver,
+                             ReservedNetworkPolicy destinationPolicy, String tenant) {
+            validateAuthored(configuration);
+            return fromValidated(configuration, resolver, destinationPolicy, tenant);
+        }
+
+        /** Resolves only operator-owned authority after {@link #validateAuthored} has succeeded. */
+        static Settings fromValidated(NodeConfiguration configuration, AmqpProfileResolver resolver,
+                                      ReservedNetworkPolicy destinationPolicy, String tenant) {
             String profileName = configuration.property("brokerProfile")
                     .orElseThrow(() -> Refusal.rejected("BROKER_PROFILE_REQUIRED"));
             final AmqpProfile profile;
@@ -571,26 +650,29 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             } catch (SecurityException refused) {
                 throw Refusal.permanent(policyReason(refused));
             } catch (RuntimeException unavailable) {
-                throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE");
+                throw Refusal.unavailableReference("BROKER_PROFILE_UNAVAILABLE");
             }
-            if (profile == null) throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE");
+            if (profile == null) throw Refusal.unavailableReference("BROKER_PROFILE_UNAVAILABLE");
             if (!tenant.equals(profile.tenant()) || !profileName.equals(profile.name()))
-                throw Refusal.rejected("BROKER_PROFILE_FORBIDDEN");
+                throw Refusal.unauthorizedReference("BROKER_PROFILE_FORBIDDEN");
             try { destinationPolicy.requireAllowedDestination(
                     "amqp091", tenant + "/" + profileName, profile.host(), profile.port()); }
-            catch (SecurityException refused) { throw Refusal.permanent("OUTBOUND_DESTINATION_POLICY_REFUSED"); }
+            catch (SecurityException refused) { throw Refusal.permanent(policyReason(refused)); }
             if (!strictBoolean(configuration, "mandatory", true))
                 throw Refusal.rejected("MANDATORY_REQUIRED");
             String exchange = configured(configuration, "exchange", profile.defaultExchange(), 255, true);
             String routing = configured(configuration, "routingKey", profile.defaultRoutingKey(), 255, false);
             if (!profile.allowsExchange(exchange) || !profile.allowsRoutingKey(routing))
-                throw Refusal.rejected("PUBLICATION_FORBIDDEN");
+                throw Refusal.unauthorizedReference("PUBLICATION_FORBIDDEN");
             boolean persistent = strictBoolean(configuration, "persistent", false);
+            if ("amqp-inbox-v1".equals(configuration.property("saga.participant", "")) && !persistent) {
+                throw Refusal.rejected("SAGA_PERSISTENCE_REQUIRED");
+            }
             if (persistent && !profile.allowPersistent()) throw Refusal.rejected("PERSISTENCE_FORBIDDEN");
             Integer priority = optionalInt(configuration, "priority", profile.maxPriority());
             Long expiration = optionalLong(configuration, "expirationMs", profile.maxExpirationMs());
             String replyTo = optional(configuration, "replyTo", 255);
-            if (!profile.allowsReplyTo(replyTo)) throw Refusal.rejected("REPLY_TO_FORBIDDEN");
+            if (!profile.allowsReplyTo(replyTo)) throw Refusal.unauthorizedReference("REPLY_TO_FORBIDDEN");
             Map<String, Object> headers = parseHeaders(configuration.property("headers", ""), profile);
             return new Settings(profile, exchange, routing, optional(configuration, "contentType", 128),
                     optional(configuration, "contentEncoding", 128), persistent, priority,
@@ -663,6 +745,14 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         }
 
         private static Map<String, Object> parseHeaders(String raw, AmqpProfile profile) {
+            Map<String, Object> headers = parseHeaders(raw);
+            for (String key : headers.keySet()) {
+                if (!profile.allowsHeader(key)) throw Refusal.unauthorizedReference("INVALID_HEADER");
+            }
+            return headers;
+        }
+
+        private static Map<String, Object> parseHeaders(String raw) {
             if (raw.isEmpty()) return Map.of();
             Map<String, Object> headers = new LinkedHashMap<>();
             for (String field : raw.split(",", -1)) {
@@ -670,8 +760,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                 if (separator < 1) throw Refusal.rejected("INVALID_HEADER");
                 String key = field.substring(0, separator);
                 String value = field.substring(separator + 1);
-                if (!profile.allowsHeader(key) || !AmqpWireLimits.isShortstr(key)
-                        || value.length() > 256 || value.contains("\0")
+                if (!AmqpWireLimits.isShortstr(key) || value.length() > 256 || value.contains("\0")
                         || headers.putIfAbsent(key, value) != null) throw Refusal.rejected("INVALID_HEADER");
             }
             return Map.copyOf(headers);

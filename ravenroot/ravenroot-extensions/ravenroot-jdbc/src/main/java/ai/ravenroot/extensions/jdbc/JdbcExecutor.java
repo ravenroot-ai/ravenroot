@@ -31,6 +31,32 @@ final class JdbcExecutor {
         this.runtime = java.util.Objects.requireNonNull(runtime);
     }
 
+    java.util.concurrent.CompletableFuture<Void> verifySagaBinding(NodeMessage message, String profileName,
+                                                                   String statementId,
+                                                                   String receiptStatementId) {
+        try {
+            String tenant = message.security().tenantId();
+            JdbcProfile profile = profiles.resolve(tenant, profileName)
+                    .orElseThrow(() -> new JdbcFailure(JdbcFailure.Code.PROFILE_UNAVAILABLE));
+            if (!tenant.equals(profile.tenant()) || !profileName.equals(profile.name())) {
+                throw new JdbcFailure(JdbcFailure.Code.PROFILE_UNAVAILABLE);
+            }
+            JdbcStatementProfile effect = profile.statement(statementId, JdbcStatementProfile.Kind.INSERT);
+            JdbcStatementProfile receipt = profile.statement(receiptStatementId, JdbcStatementProfile.Kind.QUERY);
+            java.util.Set<String> identity = java.util.Set.of("sagaOperationId", "sagaPayloadFingerprint");
+            if (!effect.orderedParameters().containsAll(identity)
+                    || !receipt.orderedParameters().containsAll(identity)) {
+                throw new JdbcFailure(JdbcFailure.Code.PROFILE_UNAVAILABLE);
+            }
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        } catch (JdbcFailure failure) {
+            return java.util.concurrent.CompletableFuture.failedFuture(failure);
+        } catch (RuntimeException failure) {
+            return java.util.concurrent.CompletableFuture.failedFuture(
+                    new JdbcFailure(JdbcFailure.Code.PROFILE_UNAVAILABLE));
+        }
+    }
+
     java.util.concurrent.CompletableFuture<Object> execute(NodeMessage message, NodePackageServices services,
                                                             String profileName, String statementId,
                                                             JdbcStatementProfile.Kind kind) {

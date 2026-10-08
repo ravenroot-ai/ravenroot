@@ -11,6 +11,14 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
+import ai.ravenroot.api.persistence.DerivedExecutionWork;
+import ai.ravenroot.api.persistence.ExecutionManifestDigest;
+import ai.ravenroot.api.persistence.ReplayBoundarySeed;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
 import ai.ravenroot.api.persistence.DurableHumanTask;
@@ -82,6 +90,17 @@ import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.Retryability;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.SagaCommandIntent;
+import ai.ravenroot.api.persistence.SagaDefinition;
+import ai.ravenroot.api.persistence.SagaDisposition;
+import ai.ravenroot.api.persistence.SagaOutboxSettlement;
+import ai.ravenroot.api.persistence.SagaOutboxStatus;
+import ai.ravenroot.api.persistence.SagaOutboxCapacity;
+import ai.ravenroot.api.persistence.SagaSnapshot;
+import ai.ravenroot.api.persistence.SagaStepDefinition;
+import ai.ravenroot.api.persistence.SagaStepSnapshot;
+import ai.ravenroot.api.persistence.SagaStepStatus;
+import ai.ravenroot.api.persistence.SagaWrite;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
@@ -89,6 +108,11 @@ import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.flow.FlowHandle;
+import ai.ravenroot.api.flow.FlowInvocationMutation;
+import ai.ravenroot.api.flow.FlowInvocationRecord;
+import ai.ravenroot.api.flow.FlowInvocationStatus;
 import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.PrincipalType;
@@ -111,6 +135,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -226,6 +251,136 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tenant that lost no record.</p>
  */
 public abstract class ExecutionStoreContract {
+
+    @Test
+    final void selectiveReplayEvidenceSettlementAndDerivedAdmissionAreDurableAndAtomic() {
+        assumeCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+        ExecutionKey source = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(source, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        LeaseHandle lease = await(store().claim(source, "replay-source", TTL));
+        Instant recordedAt = clock().instant();
+        var evidence = new ReplayInvocationEvidence(source, traversalId, invocationId, attemptId,
+                "work", Set.of(), NodeCommand.PROCESS, "continue", Map.of(),
+                OpaquePayload.of("{\"answer\":42}".getBytes(StandardCharsets.UTF_8), "application/json"),
+                OpaquePayload.of("{}".getBytes(StandardCharsets.UTF_8), "application/json"),
+                recordedAt, recordedAt.plus(store().terminalRetention()));
+        StoredProcessInstance terminal = await(store().apply(ExecutionBatch.to(source)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .fencedBy(lease.fencingToken())
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.COMPLETED))
+                .apply(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                        NodeInvocationStatus.COMPLETED))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED))
+                .captureReplayEvidence(evidence).build()));
+        assertEquals(List.of(evidence), await(store().replayEvidence(source, 2)));
+
+        var digest = new ExecutionManifestDigest("00".repeat(32));
+        ReplaySourceSettlement settlement = await(store().recordReplaySettlement(
+                new ReplaySourceSettlement(source, terminal.revision(), lease.fencingToken(), digest,
+                        true, recordedAt, recordedAt.plus(store().terminalRetention())), lease));
+        assertEquals(settlement, await(store().replaySettlement(source)).orElseThrow());
+        assertTrue(settlement.sourceOutcomeAmbiguous(),
+                "source-wide ambiguity must survive authoritative settlement storage");
+        var falselyClear = new ReplaySourceSettlement(source, settlement.sourceRevision(),
+                settlement.fencingToken(), settlement.manifestDigest(), false,
+                settlement.settledAt(), settlement.retainedUntil());
+        ExecutionKey mismatch = newKey();
+        ExecutionStoreFailure mismatchFailure = failureOf(() -> await(store().apply(ExecutionBatch.to(mismatch)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(mismatch.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of()), new GraphVersionPin("graph-v1")))
+                .requiringReplaySourceSettlement(falselyClear).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, mismatchFailure);
+        assertThrows(CompletionException.class, () -> await(store().load(mismatch)),
+                "admission must compare the ambiguity bit in the atomic source proof");
+
+        ExecutionKey derived = newKey();
+        UUID derivedTraversal = UUID.randomUUID();
+        UUID derivedInvocation = UUID.randomUUID();
+        UUID derivedAttempt = UUID.randomUUID();
+        var seed = new ReplayBoundarySeed("next", Set.of(invocationId));
+        var work = new DerivedExecutionWork(derived, derivedTraversal, derivedInvocation, derivedAttempt,
+                seed, "work", NodeCommand.PROCESS, evidence.output(), evidence.attributes(),
+                new SecurityContext("request", derived.tenantId(), "operator", PrincipalType.USER, "test"));
+        var ancestry = new DerivedExecutionAncestry(derived, source, List.of(seed), work, "fingerprint",
+                "operator", "recover downstream work", "effects explicitly reviewed", clock().instant());
+        var acceptedTraversal = new Traversal(derivedTraversal, "next", TraversalStatus.ACCEPTED, Map.of());
+        await(store().apply(ExecutionBatch.to(derived).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(derived.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED, Map.of(derivedTraversal, acceptedTraversal)),
+                        new GraphVersionPin("graph-v1")))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(derivedTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(derivedTraversal,
+                        new NodeInvocation(derivedInvocation, "next", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.InvocationTransitioned(derivedTraversal, derivedInvocation,
+                        NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(derivedTraversal, derivedInvocation,
+                        new NodeAttempt(derivedAttempt, 1, NodeAttemptStatus.SCHEDULED)))
+                .recordDerivedAncestry(ancestry)
+                .requiringReplaySourceSettlement(settlement)
+                .build()));
+        assertEquals(ancestry, await(store().derivedAncestry(derived)).orElseThrow());
+        if (store().supports(StoreCapability.DURABLE)) {
+            reopen();
+            assertEquals(ancestry, await(store().derivedAncestry(derived)).orElseThrow(),
+                    "ancestry, copied seed, and admitted identities must survive a store reopen");
+            assertEquals(List.of(evidence), await(store().replayEvidence(source, 2)),
+                    "retained evidence must survive a store reopen");
+            assertEquals(settlement, await(store().replaySettlement(source)).orElseThrow(),
+                    "positive settlement must survive a store reopen");
+        }
+
+        ExecutionKey rejected = newKey();
+        var rejectedWork = new DerivedExecutionWork(rejected, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                seed, "work", NodeCommand.PROCESS, evidence.output(), evidence.attributes(),
+                new SecurityContext("request", rejected.tenantId(), "operator", PrincipalType.USER, "test"));
+        var rejectedAncestry = new DerivedExecutionAncestry(rejected, source, List.of(seed), rejectedWork, "other",
+                "operator", "stale source proof", "reviewed", clock().instant());
+        clock().advance(TTL.plusMillis(1));
+        await(store().claim(source, "replay-takeover", TTL));
+        var rejectedTraversal = new Traversal(rejectedWork.traversalId(), "next",
+                TraversalStatus.ACCEPTED, Map.of());
+        ExecutionStoreFailure stale = failureOf(() -> await(store().apply(ExecutionBatch.to(rejected)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(rejected.processInstanceId(),
+                        ProcessInstanceStatus.ACCEPTED,
+                        Map.of(rejectedWork.traversalId(), rejectedTraversal)), new GraphVersionPin("graph-v1")))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(rejectedWork.traversalId(),
+                        TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(rejectedWork.traversalId(),
+                        new NodeInvocation(rejectedWork.invocationId(), "next", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.InvocationTransitioned(rejectedWork.traversalId(),
+                        rejectedWork.invocationId(), NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(rejectedWork.traversalId(),
+                        rejectedWork.invocationId(), new NodeAttempt(rejectedWork.attemptId(), 1,
+                                NodeAttemptStatus.SCHEDULED)))
+                .recordDerivedAncestry(rejectedAncestry)
+                .requiringReplaySourceSettlement(settlement).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, stale);
+        assertThrows(CompletionException.class, () -> await(store().load(rejected)),
+                "a stale source proof must roll the entire derived admission back");
+
+        clock().advance(Duration.between(clock().instant(), settlement.retainedUntil()).plusMillis(1));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(source.tenantId())));
+        assertTrue(await(store().replayEvidence(source, 2)).isEmpty(),
+                "source evidence must be physically purged with its retained process");
+        assertTrue(await(store().replaySettlement(source)).isEmpty(),
+                "the source settlement must be physically purged with its retained process");
+        assertEquals(ancestry, await(store().derivedAncestry(derived)).orElseThrow(),
+                "immutable ancestry and copied pending work must survive source deletion");
+    }
 
     @Test
     final void humanTaskInteractionRevocationIsTenantScopedIdempotentAndExpires() {
@@ -6077,6 +6232,73 @@ public abstract class ExecutionStoreContract {
                 "with exactly one row removed, the floor must land exactly at that row's own deadline");
     }
 
+    @Test
+    final void purgeProtectsTerminalInstanceUntilEverySagaIsResolved() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey();
+        UUID traversal = UUID.randomUUID();
+        UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        var definition = new SagaDefinition(1, "retention", "a".repeat(64), "b".repeat(64), Map.of(
+                "effect", new SagaStepDefinition("effect", "participant", "jdbc-receipt-v1",
+                        "undo", List.of(), false, false)));
+        Instant createdAt = clock().instant();
+        var unresolved = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.UNRESOLVED,
+                false, Map.of(), null, createdAt, createdAt, "operator reconciliation required", true);
+        StoredProcessInstance terminal = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, unresolved)).build()));
+        Instant deadline = await(store().findProcessInstance(key)).orElseThrow().retainedUntil().orElseThrow();
+        clock().set(deadline);
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())),
+                "unresolved participant effects must outlive ordinary terminal instance retention");
+        assertTrue(await(store().findProcessInstance(key)).isPresent());
+
+        var compensated = new SagaSnapshot(key, sagaId, traversal, definition, 2, SagaDisposition.COMPENSATED,
+                false, Map.of(), null, createdAt, clock().instant(), "", true);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(terminal.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 1, compensated)).build()));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(key.tenantId())),
+                "resolved saga state releases the instance to its existing retention policy");
+        assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
+    }
+
+    @Test
+    final void purgeProtectsSucceededParticipantEffectsUntilTheGraphBoundaryIsDurable() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID(); UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        var definition = new SagaDefinition(1, "late-sibling-retention", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "participant", "http-idempotency-v1",
+                        "undo", List.of(), false, false)));
+        Instant createdAt = clock().instant();
+        var interruptedSuccess = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, createdAt, createdAt, "", false);
+        StoredProcessInstance terminal = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, interruptedSuccess)).build()));
+        Instant deadline = await(store().findProcessInstance(key)).orElseThrow().retainedUntil().orElseThrow();
+        clock().set(deadline);
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())),
+                "participant success cannot release retention before the graph failure boundary is recovered");
+
+        var completedSuccess = new SagaSnapshot(key, sagaId, traversal, definition, 2,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, createdAt, clock().instant(), "", true);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(terminal.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 1, completedSuccess)).build()));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(key.tenantId())),
+                "graph-complete success releases the instance to ordinary retention");
+        assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
+    }
+
     /**
      * {@code inventoryRetainedFrom}'s javadoc: the floor is the <strong>latest</strong> retention
      * deadline the tenant has actually crossed, not the earliest, and the boundary is exclusive --
@@ -6228,6 +6450,28 @@ public abstract class ExecutionStoreContract {
         assertEquals(recorded.retainedUntil(), read.retainedUntil());
     }
 
+    @Test
+    final void aRecoveryUnavailablePayloadRoundTripsWithoutBecomingNoOutput() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        DurableExecutionResult unavailable = DurableExecutionResult.of(key, traversalId,
+                new GraphVersionPin("graph-v1"), ProcessInstanceStatus.COMPLETED, null,
+                endedAt.minusSeconds(1), endedAt,
+                ai.ravenroot.api.persistence.ExecutionResultPayload.unavailable(),
+                ExecutionResultNodes.empty(), null);
+
+        DurableExecutionResult recorded = await(store().recordExecutionResult(unavailable));
+        DurableExecutionResult read = await(store().loadExecutionResult(DEFAULT_TENANT, traversalId))
+                .orElseThrow();
+
+        assertEquals(ResultPayloadState.UNAVAILABLE, recorded.payload().state());
+        assertEquals(recorded, read,
+                "an adapter must not decode recovery-unavailable output as ordinary no-output");
+    }
+
     // ---- duplicate terminal events ----
 
     @Test
@@ -6373,6 +6617,141 @@ public abstract class ExecutionStoreContract {
     // ---- tenant isolation ----
 
     @Test
+    final void flowInvocationRelationSurvivesReopenAndFencesItsContinuationClaim() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        UUID callerProcess = UUID.randomUUID();
+        UUID callerTraversal = UUID.randomUUID();
+        UUID callerInvocation = UUID.randomUUID();
+        FlowInvocationRecord intent = flowIntent(DEFAULT_TENANT, callerProcess, callerTraversal, callerInvocation);
+        FlowInvocationRecord created = await(store().createFlowInvocation(intent));
+        assertEquals(created.handle(), await(store().findFlowInvocationByCaller(DEFAULT_TENANT,
+                callerProcess, callerInvocation)).orElseThrow().handle());
+        assertTrue(await(store().loadFlowInvocation("other", created.handle())).isEmpty());
+
+        ExecutionStore reopened = store().supports(StoreCapability.DURABLE) ? reopen() : store();
+        FlowInvocationRecord retained = await(reopened.loadFlowInvocation(DEFAULT_TENANT,
+                created.handle())).orElseThrow();
+        UUID claimant = UUID.randomUUID();
+        FlowInvocationRecord claimed = await(reopened.mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(retained, retained.status(), null, claimant)));
+        assertEquals(claimant, claimed.continuationClaim());
+        assertThrows(CompletionException.class, () -> await(reopened.mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(claimed, claimed.status(), null, UUID.randomUUID()))));
+    }
+
+    @Test
+    final void terminalFlowInvocationAcceptsAClaimAfterAStaleSettlementRaceAndPreservesItOnReopen() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        FlowInvocationRecord intent = flowIntent(DEFAULT_TENANT, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID());
+        FlowInvocationRecord created = await(store().createFlowInvocation(intent));
+        FlowInvocationRecord launched = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(created, FlowInvocationStatus.LAUNCHED, null, null)));
+        byte[] output = "{\"settled\":true}".getBytes(StandardCharsets.UTF_8);
+        FlowInvocationRecord completed = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(launched, FlowInvocationStatus.COMPLETED, output, null)));
+        UUID claimant = UUID.randomUUID();
+
+        assertThrows(CompletionException.class, () -> await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(launched, launched.status(), null, claimant))),
+                "the pre-settlement revision must lose its compare-and-set");
+        FlowInvocationRecord latest = await(store().loadFlowInvocation(DEFAULT_TENANT,
+                completed.handle())).orElseThrow();
+        FlowInvocationRecord claimed = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(latest, latest.status(), latest.result(), claimant)));
+        assertEquals(FlowInvocationStatus.COMPLETED, claimed.status());
+        assertArrayEquals(output, claimed.result(), "claim installation must preserve the terminal result");
+        assertEquals(claimant, claimed.continuationClaim());
+
+        ExecutionStore reopened = store().supports(StoreCapability.DURABLE) ? reopen() : store();
+        FlowInvocationRecord retained = await(reopened.loadFlowInvocation(DEFAULT_TENANT,
+                completed.handle())).orElseThrow();
+        assertEquals(FlowInvocationStatus.COMPLETED, retained.status());
+        assertArrayEquals(output, retained.result());
+        assertEquals(claimant, retained.continuationClaim());
+        assertThrows(CompletionException.class, () -> await(reopened.mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(retained, retained.status(), retained.result(), UUID.randomUUID()))),
+                "a different caller cannot replace the durable continuation claimant");
+    }
+
+    @Test
+    final void oneCallerInvocationCreatesOneFlowIntentAndTerminalRetentionIsExplicit() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        UUID callerProcess = UUID.randomUUID();
+        UUID callerTraversal = UUID.randomUUID();
+        UUID callerInvocation = UUID.randomUUID();
+        FlowInvocationRecord first = await(store().createFlowInvocation(
+                flowIntent(DEFAULT_TENANT, callerProcess, callerTraversal, callerInvocation)));
+        FlowInvocationRecord replay = await(store().createFlowInvocation(
+                flowIntent(DEFAULT_TENANT, callerProcess, callerTraversal, callerInvocation)));
+        assertEquals(first.handle(), replay.handle(), "caller retry must reuse the first durable intent");
+        assertEquals(1, await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).size());
+
+        FlowInvocationRecord launched = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(first, FlowInvocationStatus.LAUNCHED, null, null)));
+        byte[] output = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+        FlowInvocationRecord completed = await(store().mutateFlowInvocation(DEFAULT_TENANT,
+                flowMutation(launched, FlowInvocationStatus.COMPLETED, output, null)));
+        assertArrayEquals(output, completed.result());
+        assertTrue(await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).isEmpty());
+        assertEquals(1, await(store().retainedFlowInvocations(DEFAULT_TENANT, 10)).size());
+        clock().set(completed.retainedUntil());
+        assertEquals(1L, await(store().purgeExpiredFlowInvocations(DEFAULT_TENANT)));
+        assertTrue(await(store().loadFlowInvocation(DEFAULT_TENANT, completed.handle())).isEmpty());
+    }
+
+    @Test
+    final void concurrentFlowAdmissionCannotExceedTheTenantQuota() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        var gate = new CountDownLatch(1);
+        var attempts = java.util.stream.IntStream.range(0, 16)
+                .mapToObj(index -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        assertTrue(gate.await(10, TimeUnit.SECONDS));
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(interrupted);
+                    }
+                    return await(store().admitFlowInvocation(flowIntent(DEFAULT_TENANT,
+                            UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()), 1));
+                })).toList();
+        gate.countDown();
+        var admitted = new java.util.ArrayList<FlowInvocationRecord>();
+        var refused = new java.util.ArrayList<Throwable>();
+        for (var attempt : attempts) {
+            try {
+                admitted.add(attempt.join());
+            } catch (CompletionException failure) {
+                Throwable cause = failure;
+                while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+                refused.add(cause);
+            }
+        }
+        assertEquals(1, admitted.size());
+        assertEquals(15, refused.size());
+        assertTrue(refused.stream().allMatch(IllegalStateException.class::isInstance));
+        assertEquals(1, await(store().unfinishedFlowInvocations(DEFAULT_TENANT, 10)).size());
+    }
+
+    @Test
+    final void retainedFlowPagesAdvanceByAStableExclusiveHandleCursor() {
+        assumeCapability(StoreCapability.FLOW_INVOCATIONS);
+        var created = java.util.stream.IntStream.range(0, 5)
+                .mapToObj(index -> await(store().createFlowInvocation(flowIntent(DEFAULT_TENANT,
+                        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))))
+                .sorted(java.util.Comparator.comparing(record -> record.handle().toString()))
+                .toList();
+        var first = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT, Optional.empty(), 2));
+        var second = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT,
+                Optional.of(first.getLast().handle()), 2));
+        var third = await(store().retainedFlowInvocationsAfter(DEFAULT_TENANT,
+                Optional.of(second.getLast().handle()), 2));
+        var paged = java.util.stream.Stream.of(first, second, third).flatMap(List::stream).toList();
+        assertEquals(created.stream().map(FlowInvocationRecord::handle).toList(),
+                paged.stream().map(FlowInvocationRecord::handle).toList());
+    }
+
+    @Test
     final void aCrossTenantResultReadIsIndistinguishableFromAMissingOne() {
         assumeCapability(StoreCapability.EXECUTION_RESULTS);
         String owner = "result-tenant-owner";
@@ -6510,6 +6889,441 @@ public abstract class ExecutionStoreContract {
                 "the fixture must actually exceed the projection's bound, or this proves nothing");
     }
 
+    @Test
+    final void sagaStateAndCommandAreAtomicFencedAndRecoverableWithStableIdentity() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        LeaseHandle lease = await(store().claim(key, "runner", TTL));
+        UUID sagaId = UUID.randomUUID(); UUID messageId = UUID.randomUUID();
+        var definition = new SagaDefinition(1, "order", "a".repeat(64), "b".repeat(64), Map.of(
+                "reserve", new SagaStepDefinition("reserve", "inventory", "jdbc-receipt-v1",
+                        "release", List.of(), false, false)));
+        Instant now = clock().instant();
+        OpaquePayload payload = OpaquePayload.of("reserve".getBytes(StandardCharsets.UTF_8), "application/json");
+        String payloadDigest;
+        try { payloadDigest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload.bytes())); }
+        catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        UUID occurrence = UUID.randomUUID();
+        var step = new SagaStepSnapshot(occurrence, "reserve", UUID.randomUUID(), "reserve-op",
+                "release-op", payloadDigest, SagaStepStatus.DISPATCHED,
+                OpaquePayload.empty("application/json"), "intent persisted", now);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, Map.of(occurrence, step), null, now, now, "", false);
+        var command = new SagaCommandIntent(messageId, sagaId, "reserve-op", "rabbit/orders",
+                "inventory.reserve", 1, payload, payloadDigest, null, now, 2);
+        StoredProcessInstance applied = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision())).fencedBy(lease)
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot)).enqueueSagaCommand(command).build()));
+        assertEquals(snapshot, await(store().loadSaga(key, sagaId)).orElseThrow());
+        var visible = await(store().listSagaCommands(key));
+        assertEquals(1, visible.size());
+        assertEquals(SagaOutboxStatus.PENDING, visible.getFirst().status());
+        assertEquals(messageId, visible.getFirst().intent().messageId());
+
+        var first = await(store().claimSagaCommands(key.tenantId(), "publisher-a", 1, TTL)).getFirst();
+        assertEquals(messageId, first.intent().messageId()); assertEquals(1, first.attempts());
+        assertTrue(await(store().claimSagaCommands(key.tenantId(), "publisher-a", 1, TTL)).isEmpty(),
+                "even the same worker must not overlap an unexpired claim");
+        clock().advance(TTL);
+        var recovered = await(store().claimSagaCommands(key.tenantId(), "publisher-b", 1, TTL)).getFirst();
+        assertEquals(messageId, recovered.intent().messageId()); assertEquals(2, recovered.attempts());
+        assertNotEquals(first.fencingToken(), recovered.fencingToken());
+        await(store().settleSagaCommand(key.tenantId(), messageId, "publisher-b", recovered.fencingToken(),
+                new SagaOutboxSettlement.Retry(Duration.ofSeconds(1), "broker unavailable")));
+        clock().advance(Duration.ofSeconds(1));
+        assertTrue(await(store().claimSagaCommands(key.tenantId(), "publisher-c", 1, TTL)).isEmpty(),
+                "a crash loop cannot exceed the command's bounded attempt count");
+        assertEquals(SagaDisposition.UNRESOLVED, await(store().loadSaga(key, sagaId)).orElseThrow().disposition(),
+                "exhausted command delivery remains actionable in the saga aggregate");
+
+        assertEquals(applied.revision(), await(store().load(key)).revision());
+        if (store().supports(StoreCapability.DURABLE)) {
+            reopen();
+            assertEquals(SagaDisposition.UNRESOLVED,
+                    await(store().loadSaga(key, sagaId)).orElseThrow().disposition());
+            assertEquals(SagaOutboxStatus.EXHAUSTED,
+                    await(store().listSagaCommands(key)).getFirst().status());
+            assertTrue(await(store().claimSagaCommands(key.tenantId(), "publisher-d", 1, TTL)).isEmpty());
+        }
+
+        var exhaustedSaga = await(store().loadSaga(key, sagaId)).orElseThrow();
+        long exhaustedFence = await(store().listSagaCommands(key)).getFirst().fencingToken();
+        var reconciledSaga = new SagaSnapshot(key, sagaId, traversal, definition,
+                exhaustedSaga.revision() + 1, SagaDisposition.RUNNING, false,
+                exhaustedSaga.occurrences(), exhaustedSaga.deadline(), exhaustedSaga.createdAt(),
+                clock().instant(), "operator requested reconciliation", exhaustedSaga.graphCompleted());
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), exhaustedSaga.revision(), reconciledSaga))
+                .rearmSagaCommand(messageId).build()));
+        var rearmed = await(store().listSagaCommands(key)).getFirst();
+        assertEquals(SagaOutboxStatus.PENDING, rearmed.status());
+        assertEquals(0, rearmed.attempts(), "an explicit operator action starts one new bounded attempt window");
+        assertTrue(rearmed.fencingToken() > exhaustedFence, "stale pre-rearm workers remain fenced out");
+        assertEquals(command, rearmed.intent(), "operator recovery cannot rewrite the stable command identity");
+
+        var acceptedClaim = await(store().claimSagaCommands(key.tenantId(), "publisher-e", 1, TTL)).getFirst();
+        await(store().settleSagaCommand(key.tenantId(), messageId, "publisher-e", acceptedClaim.fencingToken(),
+                new SagaOutboxSettlement.BrokerAccepted()));
+        clock().advance(Duration.ofSeconds(1));
+        var lookupClaim = await(store().claimSagaCommands(key.tenantId(), "publisher-f", 1, TTL)).getFirst();
+        await(store().settleSagaCommand(key.tenantId(), messageId, "publisher-f", lookupClaim.fencingToken(),
+                new SagaOutboxSettlement.Retry(Duration.ofSeconds(1), "business receipt still unavailable")));
+        assertEquals(SagaOutboxStatus.EXHAUSTED, await(store().listSagaCommands(key)).getFirst().status());
+
+        exhaustedSaga = await(store().loadSaga(key, sagaId)).orElseThrow();
+        var compensationRetry = new SagaSnapshot(key, sagaId, traversal, definition,
+                exhaustedSaga.revision() + 1, SagaDisposition.COMPENSATION_PENDING, true,
+                exhaustedSaga.occurrences(), exhaustedSaga.deadline(), exhaustedSaga.createdAt(),
+                clock().instant(), "operator requested compensation retry", exhaustedSaga.graphCompleted());
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), exhaustedSaga.revision(), compensationRetry))
+                .rearmSagaCommand(messageId).build()));
+        rearmed = await(store().listSagaCommands(key)).getFirst();
+        assertEquals(SagaOutboxStatus.BROKER_ACCEPTED, rearmed.status(),
+                "rearming an accepted command resumes outcome lookup without redelivering the effect");
+        assertEquals(0, rearmed.attempts());
+        assertEquals(command, rearmed.intent());
+    }
+
+    @Test
+    final void sagaCommandSettlementRequiresAnUnexpiredLeaseAtTheAtomicWriteBoundary() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        SagaCommandFixture before = sagaCommandFixture(3);
+        var beforeClaim = await(store().claimSagaCommands(DEFAULT_TENANT, "before", 1, TTL)).getFirst();
+        clock().set(beforeClaim.leaseExpiresAt().minusNanos(1));
+        await(store().settleSagaCommand(DEFAULT_TENANT, before.command().messageId(), "before",
+                beforeClaim.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()));
+
+        SagaCommandFixture exact = sagaCommandFixture(3);
+        var exactClaim = await(store().claimSagaCommands(DEFAULT_TENANT, "exact", 1, TTL)).getFirst();
+        clock().set(exactClaim.leaseExpiresAt());
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().settleSagaCommand(DEFAULT_TENANT, exact.command().messageId(), "exact",
+                        exactClaim.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()))));
+
+    }
+
+    @Test
+    final void sagaCommandSettlementAfterLeaseExpiryIsRejected() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        SagaCommandFixture fixture = sagaCommandFixture(3);
+        var claim = await(store().claimSagaCommands(DEFAULT_TENANT, "expired", 1, TTL)).getFirst();
+        clock().set(claim.leaseExpiresAt().plusNanos(1));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().settleSagaCommand(DEFAULT_TENANT, fixture.command().messageId(), "expired",
+                        claim.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()))));
+    }
+
+    @Test
+    final void anExpiredSagaCommandOwnerCannotSettleAcrossACompetingReclaim() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        SagaCommandFixture fixture = sagaCommandFixture(3);
+        var stale = await(store().claimSagaCommands(DEFAULT_TENANT, "stale", 1, TTL)).getFirst();
+        clock().set(stale.leaseExpiresAt());
+        var current = await(store().claimSagaCommands(DEFAULT_TENANT, "current", 1, TTL)).getFirst();
+
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().settleSagaCommand(DEFAULT_TENANT, fixture.command().messageId(), "stale",
+                        stale.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()))));
+        await(store().settleSagaCommand(DEFAULT_TENANT, fixture.command().messageId(), "current",
+                current.fencingToken(), new SagaOutboxSettlement.BrokerAccepted()));
+        assertEquals(SagaOutboxStatus.BROKER_ACCEPTED,
+                await(store().listSagaCommands(fixture.key())).getFirst().status());
+    }
+
+    @Test
+    final void sagaCommandCrashExhaustionHonorsTheIntentLimitAtOneIntermediateAndOneHundred() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        for (int maximum : List.of(1, 7, 100)) {
+            SagaCommandFixture fixture = sagaCommandFixture(maximum);
+            for (int attempt = 1; attempt <= maximum; attempt++) {
+                var claim = await(store().claimSagaCommands(DEFAULT_TENANT,
+                        "crashed-" + maximum + "-" + attempt, 1, TTL)).getFirst();
+                assertEquals(attempt, claim.attempts());
+                clock().set(claim.leaseExpiresAt());
+            }
+            assertTrue(await(store().claimSagaCommands(DEFAULT_TENANT,
+                    "after-final-crash-" + maximum, 1, TTL)).isEmpty());
+            var exhausted = await(store().listSagaCommands(fixture.key())).getFirst();
+            assertEquals(maximum, exhausted.attempts());
+            assertEquals(SagaOutboxStatus.EXHAUSTED, exhausted.status());
+            assertEquals(SagaDisposition.UNRESOLVED,
+                    await(store().loadSaga(fixture.key(), fixture.sagaId())).orElseThrow().disposition());
+        }
+    }
+
+    @Test
+    final void maximumReceiptAndTwoMaximumCommandsRoundTripThroughSagaPersistence() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID(); UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        Instant now = clock().instant();
+        byte[] body = new byte[256 * 1024];
+        java.util.Arrays.fill(body, (byte) 23);
+        OpaquePayload payload = OpaquePayload.of(body, "€".repeat(256));
+        String digest;
+        try { digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body)); }
+        catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        var forward = new SagaCommandIntent(UUID.randomUUID(), sagaId, "€".repeat(256), "文".repeat(256),
+                "€".repeat(128), Integer.MAX_VALUE, payload, digest, null, Instant.MAX, 100);
+        var compensation = new SagaCommandIntent(UUID.randomUUID(), sagaId, "文".repeat(256),
+                "€".repeat(256), "文".repeat(128), Integer.MAX_VALUE, payload, digest,
+                forward.messageId(), Instant.MAX, 100);
+        OpaquePayload receipt = new ai.ravenroot.api.persistence.SagaRecoveryEnvelope(
+                forward, compensation).encode();
+        UUID occurrence = UUID.randomUUID();
+        var definition = new SagaDefinition(1, "maximum-envelope", "a".repeat(64), "b".repeat(64), Map.of(
+                "effect", new SagaStepDefinition("effect", "effect", "jdbc-receipt-v1",
+                        "undo", List.of(), false, false)));
+        var step = new SagaStepSnapshot(occurrence, "effect", UUID.randomUUID(), forward.operationId(),
+                compensation.operationId(), digest, SagaStepStatus.CONFIRMED_SUCCESS, receipt, "", now);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, Map.of(occurrence, step), null, now, now, "", false);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot)).build()));
+
+        SagaSnapshot loaded = await(store().loadSaga(key, sagaId)).orElseThrow();
+        assertEquals(snapshot, loaded);
+        assertEquals(new ai.ravenroot.api.persistence.SagaRecoveryEnvelope(forward, compensation),
+                ai.ravenroot.api.persistence.SagaRecoveryEnvelope.decode(
+                        loaded.occurrences().get(occurrence).receipt()));
+    }
+
+    @Test
+    final void sagaRecoveryCandidatePageFiltersLiveRunnerLeasesBeforeApplyingItsBound() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        var liveKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        var recoverableKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000002"));
+        UUID liveTraversal = UUID.randomUUID(), recoverableTraversal = UUID.randomUUID();
+        var liveCreated = await(store().apply(creationBatch(liveKey, liveTraversal, "graph-v1")));
+        var recoverableCreated = await(store().apply(creationBatch(
+                recoverableKey, recoverableTraversal, "graph-v1")));
+        var liveLease = await(store().claim(liveKey, "live-runner", TTL));
+        var recoverableLease = await(store().claim(recoverableKey, "finished-runner", TTL));
+        var definition = new SagaDefinition(1, "bounded-recovery", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        Instant now = clock().instant();
+        var liveSaga = new SagaSnapshot(liveKey, UUID.randomUUID(), liveTraversal, definition, 1,
+                SagaDisposition.RUNNING, false, Map.of(), null, now, now, "", false);
+        var recoverableSaga = new SagaSnapshot(recoverableKey, UUID.randomUUID(), recoverableTraversal,
+                definition, 1, SagaDisposition.RUNNING, false, Map.of(), null, now, now, "", false);
+        await(store().apply(ExecutionBatch.to(liveKey)
+                .expecting(RevisionExpectation.exactly(liveCreated.revision())).fencedBy(liveLease)
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, liveSaga)).build()));
+        await(store().apply(ExecutionBatch.to(recoverableKey)
+                .expecting(RevisionExpectation.exactly(recoverableCreated.revision())).fencedBy(recoverableLease)
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, recoverableSaga)).build()));
+        await(store().release(recoverableLease));
+
+        assertEquals(List.of(recoverableSaga), await(store().listSagaRecoveryCandidates(DEFAULT_TENANT, 1)),
+                "an older live runner must not starve a recoverable saga behind a bounded page");
+    }
+
+    @Test
+    final void sagaCompletionCandidatePageFiltersSettledWorkAndLiveLeasesBeforeApplyingItsBound() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        var definition = new SagaDefinition(1, "bounded-completion", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        Instant now = clock().instant();
+        var terminalSuccessKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000011"));
+        var terminalCompensationKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000012"));
+        var liveKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000013"));
+        var actionableKey = new ExecutionKey(DEFAULT_TENANT,
+                UUID.fromString("00000000-0000-0000-0000-000000000014"));
+
+        UUID successTraversal = UUID.randomUUID(), compensationTraversal = UUID.randomUUID();
+        UUID liveTraversal = UUID.randomUUID(), actionableTraversal = UUID.randomUUID();
+        StoredProcessInstance successCreated = await(store().apply(
+                creationBatch(terminalSuccessKey, successTraversal, "graph-v1")));
+        StoredProcessInstance compensationCreated = await(store().apply(
+                creationBatch(terminalCompensationKey, compensationTraversal, "graph-v1")));
+        StoredProcessInstance liveCreated = await(store().apply(
+                creationBatch(liveKey, liveTraversal, "graph-v1")));
+        StoredProcessInstance actionableCreated = await(store().apply(
+                creationBatch(actionableKey, actionableTraversal, "graph-v1")));
+
+        var success = new SagaSnapshot(terminalSuccessKey, UUID.randomUUID(), successTraversal,
+                definition, 1, SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", true);
+        var compensated = new SagaSnapshot(terminalCompensationKey, UUID.randomUUID(), compensationTraversal,
+                definition, 1, SagaDisposition.COMPENSATED, true, Map.of(), null, now, now, "", true);
+        var live = new SagaSnapshot(liveKey, UUID.randomUUID(), liveTraversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", true);
+        var actionable = new SagaSnapshot(actionableKey, UUID.randomUUID(), actionableTraversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", true);
+
+        await(store().apply(ExecutionBatch.to(terminalSuccessKey)
+                .expecting(RevisionExpectation.exactly(successCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, success))
+                .apply(new ExecutionTransition.TraversalTransitioned(successTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(successTraversal, TraversalStatus.COMPLETED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED)).build()));
+        await(store().apply(ExecutionBatch.to(terminalCompensationKey)
+                .expecting(RevisionExpectation.exactly(compensationCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, compensated))
+                .apply(new ExecutionTransition.TraversalTransitioned(
+                        compensationTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(
+                        compensationTraversal, TraversalStatus.FAILED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED)).build()));
+        await(store().apply(ExecutionBatch.to(liveKey)
+                .expecting(RevisionExpectation.exactly(liveCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, live)).build()));
+        await(store().apply(ExecutionBatch.to(actionableKey)
+                .expecting(RevisionExpectation.exactly(actionableCreated.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, actionable)).build()));
+        await(store().claim(liveKey, "still-running", TTL));
+
+        assertEquals(List.of(actionable), await(store().listSagaCompletionCandidates(DEFAULT_TENANT, 1)),
+                "terminal success, compensated failure, and a live runner must be filtered before the "
+                        + "bounded page or historical work can starve a newly actionable completion");
+    }
+
+    @Test
+    final void sagaTraversalBindingCannotDivergeFromItsRelationalCompletionIndex() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey();
+        UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        var definition = new SagaDefinition(1, "indexed-traversal", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        Instant now = clock().instant();
+        UUID sagaId = UUID.randomUUID();
+        var original = new SagaSnapshot(key, sagaId, traversal, definition, 1,
+                SagaDisposition.RUNNING, false, Map.of(), null, now, now, "", false);
+        StoredProcessInstance written = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, original)).build()));
+        var altered = new SagaSnapshot(key, sagaId, UUID.randomUUID(), definition, 2,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, clock().instant(), "", true);
+
+        var refused = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(written.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 1, altered)).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(original, await(store().loadSaga(key, sagaId)).orElseThrow(),
+                "the serialized snapshot and the relational traversal index must keep one identity");
+    }
+
+    @Test
+    final void sagaRecoveryIncludesSucceededBusinessWorkUntilItsGraphBoundaryIsDurable() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        Instant now = clock().instant();
+        var definition = new SagaDefinition(1, "late-sibling", "a".repeat(64), "b".repeat(64),
+                Map.of("effect", new SagaStepDefinition("effect", "effect", "pure",
+                        null, List.of(), false, false)));
+        var interrupted = new SagaSnapshot(key, UUID.randomUUID(), traversal, definition, 1,
+                SagaDisposition.SUCCEEDED, false, Map.of(), null, now, now, "", false);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, interrupted)).build()));
+
+        assertEquals(List.of(interrupted), await(store().listSagaRecoveryCandidates(DEFAULT_TENANT, 10)),
+                "business success before the graph boundary must remain recoverable after a crash");
+    }
+
+    @Test
+    final void sagaCommandClaimsApplyTheirPageBoundBeforeOfferingMoreWork() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        UUID sagaId = UUID.randomUUID(); Instant now = clock().instant();
+        var definitions = new java.util.LinkedHashMap<String, SagaStepDefinition>();
+        var occurrences = new java.util.LinkedHashMap<UUID, SagaStepSnapshot>();
+        var commands = new java.util.ArrayList<SagaCommandIntent>();
+        for (int index = 0; index < 5; index++) {
+            String stepId = "step-" + index;
+            UUID occurrenceId = UUID.randomUUID();
+            OpaquePayload payload = fingerprint("bounded-command-" + index);
+            String digest;
+            try { digest = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(payload.bytes())); }
+            catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+            String forward = "forward-" + occurrenceId;
+            String compensation = "compensate-" + occurrenceId;
+            definitions.put(stepId, new SagaStepDefinition(stepId, "participant", "receipt-v1",
+                    "undo-" + index, List.of(), false, false));
+            occurrences.put(occurrenceId, new SagaStepSnapshot(occurrenceId, stepId, UUID.randomUUID(),
+                    forward, compensation, digest, SagaStepStatus.DISPATCHED,
+                    OpaquePayload.empty("application/json"), "", now));
+            commands.add(new SagaCommandIntent(UUID.randomUUID(), sagaId, forward, "participant",
+                    "bounded.command", 1, payload, digest, null, now, 3));
+        }
+        var definition = new SagaDefinition(1, "bounded", "a".repeat(64), "b".repeat(64), definitions);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, occurrences, null, now, now, "", false);
+        var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot));
+        commands.forEach(batch::enqueueSagaCommand);
+        await(store().apply(batch.build()));
+
+        var first = await(store().claimSagaCommands(key.tenantId(), "bounded-a", 2, TTL));
+        var second = await(store().claimSagaCommands(key.tenantId(), "bounded-b", 2, TTL));
+        var third = await(store().claimSagaCommands(key.tenantId(), "bounded-c", 2, TTL));
+        assertEquals(2, first.size());
+        assertEquals(2, second.size());
+        assertEquals(1, third.size());
+        var identities = java.util.stream.Stream.of(first, second, third).flatMap(List::stream)
+                .map(record -> record.intent().messageId()).collect(java.util.stream.Collectors.toSet());
+        assertEquals(5, identities.size(), "bounded pages neither duplicate nor drop offered work");
+        assertTrue(await(store().claimSagaCommands(key.tenantId(), "bounded-d", 2, TTL)).isEmpty(),
+                "leased pages provide real backpressure until their bounded owners settle or expire");
+    }
+
+    @Test
+    final void sagaOutboxCapacityRefusesTheWholeCreatingBatchWithoutPartialRows() {
+        assumeCapability(StoreCapability.DURABLE_SAGAS);
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        UUID sagaId = UUID.randomUUID(); Instant now = clock().instant();
+        var definitions = new java.util.LinkedHashMap<String, SagaStepDefinition>();
+        var occurrences = new java.util.LinkedHashMap<UUID, SagaStepSnapshot>();
+        var commands = new java.util.ArrayList<SagaCommandIntent>();
+        int attempted = SagaOutboxCapacity.DEFAULTS.maximumOutstandingCommands() + 1;
+        for (int index = 0; index < attempted; index++) {
+            String stepId = "capacity-" + index; UUID occurrenceId = UUID.randomUUID();
+            OpaquePayload payload = fingerprint("capacity-command-" + index);
+            String digest;
+            try { digest = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(payload.bytes())); }
+            catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+            String forward = "capacity-forward-" + occurrenceId;
+            definitions.put(stepId, new SagaStepDefinition(stepId, "participant", "receipt-v1",
+                    "capacity-undo-" + index, List.of(), false, false));
+            occurrences.put(occurrenceId, new SagaStepSnapshot(occurrenceId, stepId, UUID.randomUUID(),
+                    forward, "capacity-compensate-" + occurrenceId, digest, SagaStepStatus.DISPATCHED,
+                    OpaquePayload.empty("application/json"), "", now));
+            commands.add(new SagaCommandIntent(UUID.randomUUID(), sagaId, forward, "participant",
+                    "capacity.command", 1, payload, digest, null, now, 3));
+        }
+        var definition = new SagaDefinition(1, "capacity", "a".repeat(64), "b".repeat(64), definitions);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, occurrences, null, now, now, "", false);
+        var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot));
+        commands.forEach(batch::enqueueSagaCommand);
+
+        var refused = failureOf(() -> await(store().apply(batch.build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertTrue(await(store().loadSaga(key, sagaId)).isEmpty(),
+                "capacity refusal rolls back the owning saga write");
+        assertTrue(await(store().listSagaCommands(key)).isEmpty(),
+                "capacity refusal cannot expose a partial command prefix");
+    }
+
     /** An envelope for {@code key}, carrying causality so the assertions above have something to check. */
     private EventEnvelope event(ExecutionKey key, UUID traversalId, String eventType) {
         return EventEnvelope.of(UUID.randomUUID(), key.tenantId(), eventType, key.processInstanceId(),
@@ -6519,6 +7333,50 @@ public abstract class ExecutionStoreContract {
 
     private static OpaquePayload fingerprint(String value) {
         return OpaquePayload.of(value.getBytes(StandardCharsets.UTF_8), "text/plain");
+    }
+
+    private SagaCommandFixture sagaCommandFixture(int maxAttempts) {
+        ExecutionKey key = newKey(); UUID traversal = UUID.randomUUID(); UUID sagaId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        Instant now = clock().instant();
+        OpaquePayload payload = fingerprint("command-" + sagaId);
+        String digest;
+        try { digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload.bytes())); }
+        catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        UUID occurrence = UUID.randomUUID(); String operation = "forward-" + occurrence;
+        var definition = new SagaDefinition(1, "lease", "a".repeat(64), "b".repeat(64), Map.of(
+                "effect", new SagaStepDefinition("effect", "participant", "receipt-v1",
+                        null, List.of(), true, false)));
+        var step = new SagaStepSnapshot(occurrence, "effect", UUID.randomUUID(), operation,
+                "compensate-" + occurrence, digest, SagaStepStatus.DISPATCHED,
+                OpaquePayload.empty("application/json"), "", now);
+        var snapshot = new SagaSnapshot(key, sagaId, traversal, definition, 1, SagaDisposition.RUNNING,
+                false, Map.of(occurrence, step), null, now, now, "", false);
+        var command = new SagaCommandIntent(UUID.randomUUID(), sagaId, operation, "participant",
+                "test.command", 1, payload, digest, null, now, maxAttempts);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .writeSaga(new SagaWrite(UUID.randomUUID(), 0, snapshot))
+                .enqueueSagaCommand(command).build()));
+        return new SagaCommandFixture(key, sagaId, command);
+    }
+
+    private record SagaCommandFixture(ExecutionKey key, UUID sagaId, SagaCommandIntent command) { }
+
+    private FlowInvocationRecord flowIntent(String tenant, UUID callerProcess, UUID callerTraversal,
+                                            UUID callerInvocation) {
+        Instant now = clock().instant();
+        return new FlowInvocationRecord(tenant, new FlowHandle(UUID.randomUUID()), callerProcess,
+                callerTraversal, callerInvocation, "alice", PrincipalType.USER, "issuer",
+                DeploymentId.of("target"), 7, "a".repeat(64), UUID.randomUUID(), UUID.randomUUID(),
+                FlowInvocationStatus.INTENT, "{\"input\":1}".getBytes(StandardCharsets.UTF_8), null,
+                "", "", null, 1, now, now, now.plusSeconds(60), now.plusSeconds(120));
+    }
+
+    private FlowInvocationMutation flowMutation(FlowInvocationRecord current, FlowInvocationStatus status,
+                                                  byte[] result, UUID claimant) {
+        return new FlowInvocationMutation(current.handle(), current.revision(), status,
+                current.childProcessInstanceId(), current.childTraversalId(), result, "", "", claimant,
+                clock().instant());
     }
 
     private static <T> T await(CompletionStage<T> stage) {

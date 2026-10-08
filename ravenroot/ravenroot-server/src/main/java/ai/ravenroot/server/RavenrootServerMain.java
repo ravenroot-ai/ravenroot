@@ -227,6 +227,7 @@ public final class RavenrootServerMain {
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
+                new ai.ravenroot.server.audit.AuditTrailPublicationSink(auditTrail),
                 toolApprovals, toolApprovalSettings, agentBudgets, humanTasks, humanTaskPolicy);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
@@ -297,6 +298,14 @@ public final class RavenrootServerMain {
                 : new ai.ravenroot.core.process.ProcessLifecycleService(
                         executionStore, application, humanTasks, java.time.Clock.systemUTC());
         var deploymentRegistry = executionStoreOwner.deploymentRegistry();
+        var flowInvocations = executionStore != null && deploymentRegistry != null && humanTasks != null
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.FLOW_INVOCATIONS)
+                ? new ai.ravenroot.core.flow.DefaultFlowInvocationCapability(
+                        executionStore, deploymentRegistry, application, humanTasks,
+                        ai.ravenroot.core.flow.FlowTargetAuthorizer.creatorOwnedTargets(),
+                        ai.ravenroot.core.flow.FlowInvocationPolicy.DEFAULTS, java.time.Clock.systemUTC())
+                : null;
+        if (flowInvocations != null) behaviors.withFlowInvocations(flowInvocations);
         var deploymentSingleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
@@ -329,6 +338,11 @@ public final class RavenrootServerMain {
         } else {
             var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
                     .fromEnvironment(System.getenv());
+            if (flowInvocations != null) {
+                for (String tenantId : recoveryConfiguration.tenantIds()) {
+                    flowInvocations.recoverTenant(tenantId).toCompletableFuture().join();
+                }
+            }
             // The same replica and the same JVM start as the runtime above, and a different role.
             // Distinct on purpose: the shared store's claim-candidate query skips instances whose
             // live lease belongs to a different worker, and a claim by the same worker keeps the
@@ -337,6 +351,11 @@ public final class RavenrootServerMain {
             // leaves the fence unchanged under the runtime's recorder.
             String recoveryWorker = executionOwnershipConfiguration.recoveryIdentity().value();
             var dispatchers = new java.util.ArrayList<ai.ravenroot.core.recovery.RecoveryDispatcher>();
+            if (executionStore.supports(
+                    ai.ravenroot.api.persistence.StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) {
+                dispatchers.add(application.derivedExecutionRecoveryDispatcher(
+                        recoveryWorker, recoveryConfiguration.leaseTtl()));
+            }
             if (toolApprovals != null) {
                 toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
                 var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
@@ -553,6 +572,9 @@ public final class RavenrootServerMain {
                 if (agentBudgets != null) {
                     server.installAgentAuthorityControl(agentBudgets);
                 }
+                if (executionStoreOwner.nodePaletteStore() != null) {
+                    server.installNodePalettes(executionStoreOwner.nodePaletteStore());
+                }
                 if (executionManifests != null) {
                     server.installExecutionManifests(executionManifests);
                 }
@@ -615,6 +637,7 @@ public final class RavenrootServerMain {
             } finally {
                 if (approvalRecovery != null) approvalRecovery.close();
                 if (runnerRecovery != null) runnerRecovery.close();
+                if (flowInvocations != null) flowInvocations.close();
                 if (recoveryDiscovery != null) recoveryDiscovery.close();
                 if (localRunner != null) try { localRunner.close(); }
                 catch (RuntimeException unconfirmed) {
@@ -683,6 +706,7 @@ public final class RavenrootServerMain {
             if (recoveryDiscovery != null) recoveryDiscovery.close();
             if (approvalRecovery != null) approvalRecovery.close();
             if (runnerRecovery != null) runnerRecovery.close();
+            if (flowInvocations != null) flowInvocations.close();
             userCredentials.close();
             closeEmbedRegistrations(embedRegistrations);
             assistantComposition.close();
@@ -815,6 +839,7 @@ public final class RavenrootServerMain {
             BehaviorEnvironment environment, CredentialResolver credentials,
             AuditTrailPluginActivationSink auditSink,
             ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
+            ai.ravenroot.api.publication.PublicationAuditSink publicationAuditSink,
             ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
             ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
             ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
@@ -826,8 +851,8 @@ public final class RavenrootServerMain {
                     toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment,
-                            ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
-                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), humanTasks,
+                            PublicationPolicyConfiguration.fromEnvironment(System.getenv()),
+                            publicationAuditSink, humanTasks,
                             humanTaskPolicy),
                     System.getenv(), services);
         } catch (RuntimeException activationFailed) {

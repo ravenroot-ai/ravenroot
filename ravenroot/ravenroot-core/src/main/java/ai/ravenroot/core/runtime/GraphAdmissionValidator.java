@@ -28,10 +28,17 @@ import java.util.function.Predicate;
 public final class GraphAdmissionValidator {
     private final BehaviorRegistry behaviors;
     private final GraphExecutionLimits limits;
+    private final boolean durableSagasAvailable;
 
     public GraphAdmissionValidator(BehaviorRegistry behaviors, GraphExecutionLimits limits) {
+        this(behaviors, limits, true);
+    }
+
+    GraphAdmissionValidator(BehaviorRegistry behaviors, GraphExecutionLimits limits,
+                            boolean durableSagasAvailable) {
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors");
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.durableSagasAvailable = durableSagasAvailable;
     }
 
     /** Inspects exact submitted bytes and returns one deterministic primary finding at most. */
@@ -130,6 +137,17 @@ public final class GraphAdmissionValidator {
             throw refuse(GraphAdmissionPhase.RESOURCE_LIMIT, GraphAdmissionReason.GRAPH_LIMIT_EXCEEDED,
                     null, null);
         }
+        try {
+            if (!SagaGraphContract.validate(graph, behaviors).isEmpty() && !durableSagasAvailable) {
+                throw refuse(GraphAdmissionPhase.CAPABILITY, GraphAdmissionReason.CAPABILITY_UNAVAILABLE,
+                        null, SagaGraphContract.SCOPE);
+            }
+        } catch (GraphAdmissionException refusal) {
+            throw refusal;
+        } catch (IllegalArgumentException refusal) {
+            throw refuse(GraphAdmissionPhase.SEMANTIC_STRUCTURE, GraphAdmissionReason.INVALID_STRUCTURE,
+                    null, null);
+        }
         int sources = 0;
         for (GraphNode node : graph.nodes().stream().sorted(Comparator.comparing(GraphNode::id)).toList()) {
             var descriptor = node.kind() == NodeKind.BEHAVIOR
@@ -167,6 +185,7 @@ public final class GraphAdmissionValidator {
         new NodeBypassValidator().validate(graph);
         new NodeRuntimeConcurrencyValidator(behaviors).validate(graph);
         new GraphComplexityAdmission(behaviors, limits).validate(graph);
+        SagaGraphContract.validate(graph, behaviors);
     }
 
     private static GraphSummary summary(int nodes, int edges, long starts, long ends,

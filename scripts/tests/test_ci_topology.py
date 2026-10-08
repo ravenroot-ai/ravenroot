@@ -214,5 +214,27 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn('test -n "$base"', backend)
 
 
+class ConfiguratorWorkflowTopologyTest(unittest.TestCase):
+    def test_supported_java_is_selected_before_node_and_maven_work(self) -> None:
+        workflow = WORKFLOW.with_name("configurator" + WORKFLOW.suffix)
+        contents = workflow.read_text(encoding="utf-8")
+        checkout = contents.index("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
+        setup_java = contents.index(
+            "actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c"
+        )
+        setup_node = contents.index("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
+        first_maven = contents.index("mvn -f ")
+
+        positions = [checkout, setup_java, setup_node, first_maven]
+        self.assertEqual(positions, sorted(positions))
+
+        java_step = contents[setup_java:setup_node]
+        self.assertIn("distribution: temurin", java_step)
+        self.assertIn('java-version: "21"', java_step)
+        self.assertIn("cache: maven", java_step)
+        self.assertIn("ravenroot/pom.xml", java_step)
+        self.assertIn("ravenroot/**/pom.xml", java_step)
+
+
 if __name__ == "__main__":
     unittest.main()

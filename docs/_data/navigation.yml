@@ -31,6 +31,8 @@
       url: /examples/governed-runner/disposable-repository/
     - title: Register Machine example library
       url: /examples/register-machine/
+    - title: Intergraph call examples
+      url: /examples/intergraph/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -54,16 +56,22 @@
       url: /operator-guide/activity-capture.html
     - title: Global lifecycle console
       url: /operator-guide/lifecycle-console.html
+    - title: Selective derived executions
+      url: /operator-guide/selective-derived-executions.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle
       url: /operator-guide/plugin-bundles.html
+    - title: Configuration packager
+      url: /operator-guide/configuration-packager.html
     - title: Authoring assistant
       url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations
       url: /operator-guide/embed-operations.html
     - title: Human Task operations
       url: /operator-guide/human-tasks.html
+    - title: Durable sagas and application-command outbox
+      url: /operator-guide/saga-outbox.html
 
 - title: Integrator guide
   items:
@@ -145,8 +153,12 @@
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
+    - title: Intergraph calls
+      url: /reference/intergraph-calls.html
     - title: Session memory
       url: /reference/session-memory.html
+    - title: Personal node palettes
+      url: /reference/personal-node-palettes.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: Interaction WebSocket protocol
@@ -242,12 +254,16 @@
       url: /developer-guide/embed-viewer-verification.html
     - title: Extensions and adapters
       url: /developer-guide/extension-development.html
+    - title: Frontend drawing model plugins
+      url: /developer-guide/frontend-drawing-models.html
     - title: API, documentation, and releases
       url: /developer-guide/api-doc-release.html
     - title: Governance and releases
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.7.0-alpha.1 release notes
+      url: /releases/v0.7.0-alpha.1.html
     - title: Ravenroot 0.6.1-alpha.1 release notes
       url: /releases/v0.6.1-alpha.1.html
     - title: Ravenroot 0.6.0-alpha.1 release notes

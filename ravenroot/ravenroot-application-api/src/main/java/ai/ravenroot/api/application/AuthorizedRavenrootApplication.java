@@ -449,6 +449,71 @@ public final class AuthorizedRavenrootApplication {
         return startGraphMl(context, graphMl, payload, PayloadLimits.DEFAULTS);
     }
 
+    /** Lists payload-free retained boundary choices under execution-read authority.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @return bounded retained boundary choices
+     */
+    public java.util.List<DerivedBoundaryOption> derivedExecutionBoundaries(
+            RequestContext context, UUID sourceProcessInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ,
+                derivedSourceResource(context, sourceProcessInstanceId));
+        return delegate.derivedExecutionBoundaries(SecurityContext.of(context), sourceProcessInstanceId);
+    }
+
+    /** Previews a tenant-scoped selective derived execution under execution-read authority.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @param request bounded proposed derivation
+     * @return non-mutating admission plan or refusal diagnostics
+     */
+    public DerivedExecutionPreview previewDerivedExecution(RequestContext context, UUID sourceProcessInstanceId,
+                                                           DerivedExecutionRequest request) {
+        require(context, AuthorizationAction.EXECUTION_READ,
+                derivedSourceResource(context, sourceProcessInstanceId));
+        return delegate.previewDerivedExecution(SecurityContext.of(context), sourceProcessInstanceId, request);
+    }
+
+    /** Finds an idempotently admitted derivation after applying the complete start authorization.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @param request exact bounded derivation request
+     * @return existing derived identities, or empty before admission
+     */
+    public java.util.Optional<DerivedExecutionStart> existingDerivedExecution(
+            RequestContext context, UUID sourceProcessInstanceId, DerivedExecutionRequest request) {
+        require(context, AuthorizationAction.EXECUTION_READ,
+                derivedSourceResource(context, sourceProcessInstanceId));
+        require(context, AuthorizationAction.EXECUTION_START, collection("executions", context));
+        if (request.authorizeExternalEffects()) {
+            require(context, AuthorizationAction.EXECUTION_CONTROL,
+                    derivedSourceResource(context, sourceProcessInstanceId));
+        }
+        return delegate.existingDerivedExecution(SecurityContext.of(context), sourceProcessInstanceId, request);
+    }
+
+    /** Admits a selective derived execution under the same authority as a fresh execution.
+     * @param context authenticated request context
+     * @param sourceProcessInstanceId exact tenant-scoped source process
+     * @param request bounded derivation request
+     * @return fresh derived execution identities
+     */
+    public DerivedExecutionStart startDerivedExecution(RequestContext context, UUID sourceProcessInstanceId,
+                                                       DerivedExecutionRequest request) {
+        var sourceResource = derivedSourceResource(context, sourceProcessInstanceId);
+        require(context, AuthorizationAction.EXECUTION_READ, sourceResource);
+        require(context, AuthorizationAction.EXECUTION_START, collection("executions", context));
+        if (request.authorizeExternalEffects()) {
+            require(context, AuthorizationAction.EXECUTION_CONTROL, sourceResource);
+        }
+        return delegate.startDerivedExecution(SecurityContext.of(context), sourceProcessInstanceId, request);
+    }
+
+    private static ProtectedResource derivedSourceResource(RequestContext context, UUID sourceProcessInstanceId) {
+        Objects.requireNonNull(sourceProcessInstanceId, "sourceProcessInstanceId");
+        return ProtectedResource.owned("execution", sourceProcessInstanceId.toString(), context.tenantId());
+    }
+
 /**
  * Starts a GraphML traversal after execution authorization and audit.
  * @param context authenticated request context used for authorization and audit attribution.
@@ -1196,6 +1261,14 @@ public final class AuthorizedRavenrootApplication {
         return delegate.processInventoryAvailable();
     }
 
+    /**
+     * Reports whether durable saga diagnostics are available from the composed store.
+     * @return true when the delegate can answer {@link #processInstanceSagas}
+     */
+    public boolean sagaStatusAvailable() {
+        return delegate.sagaStatusAvailable();
+    }
+
 /**
  * The largest page {@link #processInventory} will return in one call. Not tenant data and not
  * gated by authorization for the same reason {@link #processInventoryAvailable()} and
@@ -1267,6 +1340,67 @@ public final class AuthorizedRavenrootApplication {
         require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
         Objects.requireNonNull(processInstanceId, "processInstanceId");
         return delegate.processInstanceTraversals(context.tenantId(), processInstanceId);
+    }
+
+    /**
+     * Reads durable saga diagnostics under the same tenant-scoped execution-read authorization.
+     * @param context authenticated request context
+     * @param processInstanceId process instance whose sagas are requested
+     * @return bounded saga snapshots
+     */
+    public List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+            RequestContext context, UUID processInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        return delegate.processInstanceSagas(context.tenantId(), processInstanceId);
+    }
+
+    /**
+     * Reads durable command-outbox stages under execution-read authorization.
+     * @param context authenticated request context
+     * @param processInstanceId process instance whose commands are requested
+     * @return bounded outbox records; transport payloads must remain redacted by the presenter
+     */
+    public List<ai.ravenroot.api.persistence.SagaOutboxRecord> processInstanceSagaCommands(
+            RequestContext context, UUID processInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        return delegate.processInstanceSagaCommands(context.tenantId(), processInstanceId);
+    }
+
+    /**
+     * Authorizes, audits, and fences a saga recovery request. The action can only reopen work or
+     * request compensation; the underlying application never accepts an operator-authored success.
+     * @param context authenticated operator and request identity
+     * @param processInstanceId process containing the saga
+     * @param sagaId saga selected for recovery
+     * @param expectedSagaRevision revision read from the status endpoint
+     * @param action governed recovery action
+     * @return conditionally persisted saga state
+     */
+    public ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+            RequestContext context, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+            ai.ravenroot.api.persistence.SagaOperatorAction action) {
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        Objects.requireNonNull(sagaId, "sagaId");
+        Objects.requireNonNull(action, "action");
+        require(context, AuthorizationAction.EXECUTION_CONTROL,
+                ProtectedResource.owned("saga", sagaId.toString(), context.tenantId()));
+        auditControl(context, "saga." + action.name().toLowerCase(java.util.Locale.ROOT),
+                "saga", sagaId.toString());
+        try {
+            UUID mutationId = UUID.nameUUIDFromBytes((context.tenantId() + "\u0000" + context.requestId()
+                    + "\u0000" + sagaId + "\u0000" + action).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            var result = delegate.requestSagaAction(context.tenantId(), processInstanceId, sagaId,
+                    expectedSagaRevision, action, mutationId);
+            auditControlSucceeded(context, "saga." + action.name().toLowerCase(java.util.Locale.ROOT),
+                    "saga", sagaId.toString(), result.disposition().name());
+            return result;
+        } catch (RuntimeException failed) {
+            auditControlFailed(context, "saga." + action.name().toLowerCase(java.util.Locale.ROOT),
+                    "saga", sagaId.toString());
+            throw failed;
+        }
     }
 
     /**

@@ -1,0 +1,43 @@
+{
+  "name": "@ravenroot/configurator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Ravenroot configuration packager and installer.",
+  "bin": {
+    "ravenroot-config": "bin/ravenroot-config.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "dist-node",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "pnpm check:coverage && pnpm check:java-fixtures && tsc -p tsconfig.node.json && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:coverage": "tsx scripts/check-coverage.ts",
+    "check:java-fixtures": "tsx scripts/java-fixtures.ts",
+    "fixtures:java": "tsx scripts/java-fixtures.ts --write .generated/configurator-contracts.properties",
+    "example:amqp": "tsx scripts/exercise-amqp.ts",
+    "pack:standalone": "pnpm build && pnpm pack --pack-destination dist-artifacts"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "fflate": "0.8.3",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.7.0",
+    "jsdom": "29.1.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}

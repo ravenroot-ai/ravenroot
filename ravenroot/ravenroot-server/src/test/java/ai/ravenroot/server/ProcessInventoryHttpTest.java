@@ -11,6 +11,7 @@ import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import ai.ravenroot.server.security.AuthenticationException;
 import ai.ravenroot.server.security.RequestAuthenticator;
@@ -19,6 +20,7 @@ import com.sun.net.httpserver.Headers;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -27,6 +29,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -64,6 +70,56 @@ class ProcessInventoryHttpTest {
               </graph>
             </graphml>
             """;
+
+    @Test
+    void sagaStatusDistinguishesExistingEmptyFromAbsentForeignMalformedAndExpiredInstances(
+            @TempDir java.nio.file.Path directory) throws Exception {
+        var clock = new MutableClock(Instant.parse("2026-09-27T00:00:00Z"));
+        try (var engine = new PekkoExecutionEngine("saga-status-http-boundary");
+             var store = new SqliteExecutionStore(directory.resolve("saga-status.db"), clock)) {
+            var application = applicationWith(engine, store);
+            try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.start();
+                var submitted = postAs(server, "/v1/executions?mode=run", GRAPH, "tenant-a");
+                assertEquals(202, submitted.statusCode(), submitted.body());
+                String processInstanceId = extract(submitted.body(), "processInstanceId");
+                pollUntilNonEmpty(server, "tenant-a");
+
+                var own = getAs(server, "/v1/executions/" + processInstanceId + "/sagas", "tenant-a");
+                assertEquals(200, own.statusCode(), own.body());
+                assertEquals("{\"sagas\":[],\"outbox\":[]}", own.body());
+
+                var absent = getAs(server, "/v1/executions/" + UUID.randomUUID() + "/sagas", "tenant-a");
+                var foreign = getAs(server, "/v1/executions/" + processInstanceId + "/sagas", "tenant-b");
+                assertEquals(404, absent.statusCode(), absent.body());
+                assertEquals(404, foreign.statusCode(), foreign.body());
+                assertEquals(errorCode(absent), errorCode(foreign));
+
+                var malformed = getAs(server, "/v1/executions/not-a-uuid/sagas", "tenant-a");
+                assertEquals(400, malformed.statusCode(), malformed.body());
+                assertEquals("INVALID_REQUEST", errorCode(malformed));
+
+                clock.advance(store.terminalRetention().plusSeconds(1));
+                assertEquals(1L, store.purgeExpiredProcessInstances("tenant-a").toCompletableFuture().join());
+                var expired = getAs(server, "/v1/executions/" + processInstanceId + "/sagas", "tenant-a");
+                assertEquals(404, expired.statusCode(), expired.body());
+                assertEquals("UNKNOWN_PROCESS_INSTANCE", errorCode(expired));
+            }
+        }
+    }
+
+    @Test
+    void sagaStatusReportsUnavailableWhenNoDurableSagaStoreIsComposed() throws Exception {
+        try (var engine = new PekkoExecutionEngine("saga-status-http-unavailable")) {
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.start();
+                var response = getAs(server, "/v1/executions/" + UUID.randomUUID() + "/sagas", "tenant-a");
+                assertEquals(501, response.statusCode(), response.body());
+                assertEquals("PROCESS_INVENTORY_UNAVAILABLE", errorCode(response));
+            }
+        }
+    }
 
     /**
      * The positive case, and the wire shape: a completed transient submission is listed by
@@ -449,7 +505,7 @@ class ProcessInventoryHttpTest {
     }
 
     private static DefaultRavenrootApplication applicationWith(PekkoExecutionEngine engine,
-                                                                InMemoryExecutionStore store) {
+                                                                ai.ravenroot.api.persistence.ExecutionStore store) {
         return new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
                 BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
                 new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
@@ -551,6 +607,33 @@ class ProcessInventoryHttpTest {
                             .filter(AuthorizationAction::available)
                             .map(AuthorizationAction::requiredScope)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+        private volatile Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        private void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
         }
     }
 }

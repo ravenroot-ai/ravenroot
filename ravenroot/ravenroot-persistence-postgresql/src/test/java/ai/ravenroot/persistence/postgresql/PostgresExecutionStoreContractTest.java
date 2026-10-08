@@ -61,9 +61,15 @@ class PostgresExecutionStoreContractTest extends ExecutionStoreContract {
         assertTrue(store().supports(StoreCapability.HUMAN_TASKS));
         assertTrue(store().supports(StoreCapability.HUMAN_TASK_CONFIRMATIONS));
         assertTrue(store().supports(StoreCapability.EXECUTION_PAUSES));
+        assertTrue(store().supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE),
+                "retained invocation evidence, replay settlement, ancestry, and pending derived work are "
+                        + "durable PostgreSQL state, so their contract assertions must run rather than skip");
         assertTrue(store().supports(StoreCapability.AGENT_AUTHORITY_BUDGETS),
                 "the compare-and-set on the global control epoch, and the budget sweep it drives, are "
                         + "the assertions that distinguish this adapter from a single-host one");
+        assertTrue(store().supports(StoreCapability.FLOW_INVOCATIONS),
+                "flow intent, settlement, and continuation claims are durable and cross-replica here; "
+                        + "dropping the declaration would skip the intergraph persistence contract");
 
         assertEquals(EnumSet.of(StoreCapability.DURABLE, StoreCapability.TRANSACTIONAL_BATCH,
                         StoreCapability.CROSS_PROCESS_LEASE, StoreCapability.IDEMPOTENCY_PURGE,
@@ -72,7 +78,9 @@ class PostgresExecutionStoreContractTest extends ExecutionStoreContract {
                         StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS, StoreCapability.DURABLE_HANDLERS,
                         StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
                         StoreCapability.HUMAN_TASK_CONFIRMATIONS, StoreCapability.EXECUTION_PAUSES,
-                        StoreCapability.AGENT_AUTHORITY_BUDGETS),
+                        StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
+                        StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.DURABLE_SAGAS,
+                        StoreCapability.FLOW_INVOCATIONS),
                 Set.copyOf(store().capabilities()),
                 "the declared set is exactly what this build implements. A capability added here without "
                         + "an implementation would make the suite assert against behaviour that does not "

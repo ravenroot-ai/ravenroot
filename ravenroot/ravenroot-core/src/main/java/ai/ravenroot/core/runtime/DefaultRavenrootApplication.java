@@ -737,6 +737,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public void validateNodeTemplateReferences(String tenantId, String behavior,
+                                               Map<String, String> properties) {
+        behaviors.validateTemplateReferences(new ai.ravenroot.core.graph.GraphNode(
+                "saved-template", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, behavior,
+                new java.util.LinkedHashMap<>(properties)), tenantId);
+    }
+
+    @Override
     public Map<String, ai.ravenroot.api.catalog.NodeCatalogSource> nodeTypeSources() {
         return behaviors.catalogSources();
     }
@@ -1372,7 +1380,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public GraphSummary inspectGraphMl(InputStream graphMl,
             ai.ravenroot.api.application.GraphAdmissionPurpose purpose) {
         byte[] bytes = readGraphMlBytes(graphMl);
-        return new GraphAdmissionValidator(behaviors, graphExecutionLimits).inspect(bytes, purpose);
+        return new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
+                .inspect(bytes, purpose);
     }
 
     @Override
@@ -1382,8 +1391,544 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public List<ai.ravenroot.api.application.DerivedBoundaryOption> derivedExecutionBoundaries(
+            SecurityContext security, UUID sourceProcessInstanceId) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(sourceProcessInstanceId, "sourceProcessInstanceId");
+        if (executionStore == null || graphDefinitionStore == null || executionManifests() == null
+                || !executionStore.supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) {
+            throw new IllegalStateException("selective derived execution is unavailable");
+        }
+        var source = new ExecutionKey(security.tenantId(), sourceProcessInstanceId);
+        var stored = await(executionStore.load(source));
+        if (!stored.state().status().terminal()) {
+            throw new IllegalStateException("selective derived execution source is not terminal");
+        }
+        var settlement = await(executionStore.replaySettlement(source)).orElseThrow(() ->
+                new IllegalStateException("selective derived execution source is not positively settled"));
+        var manifest = executionManifests().verify(source, executionPolicy(source));
+        if (!settlement.manifestDigest().equals(manifest.digest())) {
+            throw new IllegalStateException("selective derived execution source manifest changed");
+        }
+        var definition = awaitDefinition(graphDefinitionStore.load(
+                new ai.ravenroot.api.persistence.GraphDefinitionKey(security.tenantId(),
+                        manifest.manifest().graphContentId())));
+        try (var manager = GraphManager.readGraphMl(
+                new java.io.ByteArrayInputStream(definition.canonical().bytes()))) {
+            var options = new java.util.ArrayList<ai.ravenroot.api.application.DerivedBoundaryOption>();
+            var retainedEvidence = await(executionStore.replayEvidence(source, 513));
+            if (retainedEvidence.size() > 512) {
+                throw new IllegalStateException("retained boundary discovery exceeds the supported evidence limit");
+            }
+            for (var evidence : retainedEvidence) {
+                if (!evidence.iteration().isEmpty() && evidence.parentInvocationIds().size() < 2) continue;
+                var edges = manager.definition().nextEdges(evidence.nodeId(), evidence.outcome());
+                if (edges.isEmpty() && !"continue".equals(evidence.outcome())) {
+                    edges = manager.definition().nextEdges(evidence.nodeId(), "continue");
+                }
+                for (var edge : edges) {
+                    if (options.size() >= 512) {
+                        throw new IllegalStateException("retained boundary discovery exceeds the supported limit");
+                    }
+                    options.add(new ai.ravenroot.api.application.DerivedBoundaryOption(edge.target(),
+                            evidence.invocationId(), evidence.nodeId(), evidence.outcome(),
+                            evidence.recordedAt(), settlement.retainedUntil()));
+                }
+            }
+            options.sort(java.util.Comparator
+                    .comparing(ai.ravenroot.api.application.DerivedBoundaryOption::nodeId)
+                    .thenComparing(value -> value.predecessorInvocationId().toString()));
+            return List.copyOf(options);
+        }
+    }
+
+    @Override
+    public ai.ravenroot.api.application.DerivedExecutionPreview previewDerivedExecution(
+            SecurityContext security, UUID sourceProcessInstanceId,
+            ai.ravenroot.api.application.DerivedExecutionRequest request) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(sourceProcessInstanceId, "sourceProcessInstanceId");
+        java.util.Objects.requireNonNull(request, "request");
+        if (executionStore == null || graphDefinitionStore == null || executionManifests() == null
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) {
+            throw new IllegalStateException("selective derived execution requires retained definitions, manifests and replay evidence");
+        }
+        var source = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), sourceProcessInstanceId);
+        var storedSource = await(executionStore.load(source));
+        var state = storedSource.state();
+        var refusals = new java.util.ArrayList<String>();
+        var missing = new java.util.ArrayList<String>();
+        if (!state.status().terminal()) refusals.add("SOURCE_NOT_TERMINAL");
+        var settlement = await(executionStore.replaySettlement(source)).orElse(null);
+        if (settlement == null) refusals.add("SOURCE_NOT_QUIESCENT_OR_FENCE_CHANGED");
+        else if (settlement.sourceRevision() != storedSource.revision()) {
+            refusals.add("SOURCE_SETTLEMENT_CHANGED");
+        }
+
+        ai.ravenroot.api.persistence.StoredExecutionManifest manifest;
+        try {
+            var policy = executionPolicy(source);
+            manifest = executionManifests().verify(source, policy);
+        } catch (ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException incompatible) {
+            return new ai.ravenroot.api.application.DerivedExecutionPreview(false,
+                    List.of("INCOMPATIBLE_RUNTIME"), request.boundaries(), java.util.Set.of(), List.of(), List.of(),
+                    List.of(), settlement != null && settlement.sourceOutcomeAmbiguous(), null,
+                    settlement == null ? null : settlement.manifestDigest(),
+                    incompatible.report().dimensions().stream().map(Enum::name)
+                            .collect(java.util.stream.Collectors.toSet()));
+        }
+        if (settlement != null && !settlement.manifestDigest().equals(manifest.digest())) {
+            refusals.add("SOURCE_MANIFEST_CHANGED");
+        }
+        var storedGraph = awaitDefinition(graphDefinitionStore.load(
+                new ai.ravenroot.api.persistence.GraphDefinitionKey(security.tenantId(),
+                        manifest.manifest().graphContentId())));
+        if (!storedGraph.canonical().contentId().equals(manifest.manifest().graphContentId())) {
+            refusals.add("GRAPH_PIN_MISMATCH");
+        }
+        if (request.boundaries().size() != 1) refusals.add("UNSUPPORTED_MULTIPLE_BOUNDARIES");
+        var retained = await(executionStore.replayEvidence(source, 513));
+        if (retained.size() > 512) refusals.add("SOURCE_EVIDENCE_LIMIT_EXCEEDED");
+        var byId = retained.stream().collect(java.util.stream.Collectors.toMap(
+                ai.ravenroot.api.persistence.ReplayInvocationEvidence::invocationId,
+                java.util.function.Function.identity()));
+        var inherited = new java.util.LinkedHashSet<UUID>();
+        var scope = new java.util.ArrayList<String>();
+        var effects = new java.util.ArrayList<String>();
+        if (!request.boundaries().isEmpty()) {
+            var boundary = request.boundaries().getFirst();
+            if (boundary.predecessorInvocationIds().size() != 1) {
+                refusals.add("UNSUPPORTED_JOIN_OR_MAPPED_BOUNDARY");
+            }
+            ai.ravenroot.api.persistence.ReplayInvocationEvidence predecessor = null;
+            for (UUID id : boundary.predecessorInvocationIds()) {
+                var evidence = byId.get(id);
+                if (evidence == null) missing.add(id.toString());
+                else if (!evidence.iteration().isEmpty() && evidence.parentInvocationIds().size() < 2) {
+                    refusals.add("UNSUPPORTED_ITERATION_IDENTITY");
+                }
+                else predecessor = evidence;
+                collectReplayClosure(id, byId, inherited, missing, refusals);
+            }
+            for (UUID inheritedId : inherited) {
+                var evidence = byId.get(inheritedId);
+                if (evidence != null && !matchesSourceAggregate(state, evidence)) {
+                    refusals.add("SOURCE_EVIDENCE_AGGREGATE_MISMATCH");
+                }
+            }
+            try (var manager = ai.ravenroot.core.graph.GraphManager.readGraphMl(
+                    new java.io.ByteArrayInputStream(storedGraph.canonical().bytes()))) {
+                var definition = manager.definition();
+                definition.node(boundary.nodeId());
+                if (predecessor != null && selectedEdge(definition, predecessor, boundary.nodeId()) == null) {
+                    refusals.add("BOUNDARY_NOT_SELECTED_BY_RETAINED_OUTCOME");
+                }
+                var queue = new java.util.ArrayDeque<String>();
+                var seen = new java.util.LinkedHashSet<String>();
+                queue.add(boundary.nodeId());
+                while (!queue.isEmpty()) {
+                    String nodeId = queue.remove();
+                    if (!seen.add(nodeId)) continue;
+                    scope.add(nodeId);
+                    var node = definition.node(nodeId);
+                    if (node.kind() == ai.ravenroot.core.graph.NodeKind.BEHAVIOR) effects.add(nodeId);
+                    definition.edges().stream().filter(edge -> edge.source().equals(nodeId))
+                            .map(ai.ravenroot.core.graph.GraphEdge::target).forEach(queue::add);
+                }
+                var indegree = new java.util.LinkedHashMap<String, Integer>();
+                seen.forEach(id -> indegree.put(id, 0));
+                for (var edge : definition.edges()) {
+                    if (seen.contains(edge.target()) && seen.contains(edge.source())) {
+                        indegree.computeIfPresent(edge.target(), (ignored, value) -> value + 1);
+                    } else if (seen.contains(edge.target()) && !edge.target().equals(boundary.nodeId())) {
+                        refusals.add("UNSUPPORTED_JOIN_CLOSURE_MISSING_BRANCH");
+                    }
+                }
+                var ready = new java.util.ArrayDeque<String>();
+                indegree.forEach((id, degree) -> { if (degree == 0) ready.add(id); });
+                int acyclic = 0;
+                while (!ready.isEmpty()) {
+                    String id = ready.remove(); acyclic++;
+                    for (var edge : definition.edges()) if (edge.source().equals(id) && indegree.containsKey(edge.target())) {
+                        int next = indegree.computeIfPresent(edge.target(), (ignored, value) -> value - 1);
+                        if (next == 0) ready.add(edge.target());
+                    }
+                }
+                if (acyclic != seen.size()) refusals.add("UNSUPPORTED_ITERATION_OR_CYCLE_CLOSURE");
+            }
+        }
+        if (!missing.isEmpty()) refusals.add("MISSING_RETAINED_INPUT");
+        boolean sourceOutcomeAmbiguous = settlement != null && settlement.sourceOutcomeAmbiguous();
+        boolean effectDecisionRequired = !effects.isEmpty() || sourceOutcomeAmbiguous;
+        if (sourceOutcomeAmbiguous && !request.authorizeExternalEffects()) {
+            refusals.add("AMBIGUOUS_SOURCE_OUTCOME_AUTHORIZATION_REQUIRED");
+        } else if (!effects.isEmpty() && !request.authorizeExternalEffects()) {
+            refusals.add("EXTERNAL_EFFECT_AUTHORIZATION_REQUIRED");
+        }
+        if (effectDecisionRequired && request.authorizeExternalEffects()
+                && request.repeatabilityDecision().isBlank()) {
+            refusals.add(sourceOutcomeAmbiguous
+                    ? "AMBIGUOUS_SOURCE_OUTCOME_DECISION_REQUIRED"
+                    : "EFFECT_REPEATABILITY_DECISION_REQUIRED");
+        }
+        return new ai.ravenroot.api.application.DerivedExecutionPreview(refusals.isEmpty(),
+                List.copyOf(new java.util.LinkedHashSet<>(refusals)), request.boundaries(), inherited,
+                scope, missing, effects, sourceOutcomeAmbiguous, manifest.manifest().graphContentId(),
+                manifest.digest(), java.util.Set.of());
+    }
+
+    @Override
+    public java.util.Optional<ai.ravenroot.api.application.DerivedExecutionStart> existingDerivedExecution(
+            SecurityContext security, UUID sourceProcessInstanceId,
+            ai.ravenroot.api.application.DerivedExecutionRequest request) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(sourceProcessInstanceId, "sourceProcessInstanceId");
+        java.util.Objects.requireNonNull(request, "request");
+        if (executionStore == null || executionManifests() == null) return java.util.Optional.empty();
+        var derivedKey = derivedExecutionKey(security, sourceProcessInstanceId, request.idempotencyKey());
+        var ancestry = await(executionStore.derivedAncestry(derivedKey));
+        if (ancestry.isEmpty()) return java.util.Optional.empty();
+        if (!ancestry.orElseThrow().requestFingerprint().equals(
+                derivedRequestFingerprint(sourceProcessInstanceId, request, security))) {
+            throw new IllegalStateException("idempotency key was already used for a different derived request");
+        }
+        var manifest = awaitDefinition(executionManifests().store().load(derivedKey));
+        return java.util.Optional.of(new ai.ravenroot.api.application.DerivedExecutionStart(
+                derivedKey.processInstanceId(), ancestry.orElseThrow().pendingWork().traversalId(),
+                manifest.manifest().graphContentId().value()));
+    }
+
+    @Override
+    public synchronized ai.ravenroot.api.application.DerivedExecutionStart startDerivedExecution(
+            SecurityContext security, UUID sourceProcessInstanceId,
+            ai.ravenroot.api.application.DerivedExecutionRequest request) {
+        var source = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), sourceProcessInstanceId);
+        String idempotencyScope = security.tenantId() + "\u0000" + sourceProcessInstanceId + "\u0000"
+                + request.idempotencyKey();
+        UUID processId = derivedExecutionKey(security, sourceProcessInstanceId, request.idempotencyKey())
+                .processInstanceId();
+        UUID traversalId = UUID.nameUUIDFromBytes(("derived-traversal\u0000" + idempotencyScope)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        UUID invocationId = UUID.nameUUIDFromBytes(("derived-invocation\u0000" + idempotencyScope)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        UUID attemptId = UUID.nameUUIDFromBytes(("derived-attempt\u0000" + idempotencyScope)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var derivedKey = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), processId);
+        String fingerprint = derivedRequestFingerprint(sourceProcessInstanceId, request, security);
+        var existingAncestry = await(executionStore.derivedAncestry(derivedKey));
+        if (existingAncestry.isPresent()) {
+            if (!existingAncestry.orElseThrow().requestFingerprint().equals(fingerprint)) {
+                throw new IllegalStateException("idempotency key was already used for a different derived request");
+            }
+            var existingManifest = awaitDefinition(executionManifests().store().load(derivedKey));
+            return new ai.ravenroot.api.application.DerivedExecutionStart(processId, traversalId,
+                    existingManifest.manifest().graphContentId().value());
+        }
+        var preview = previewDerivedExecution(security, sourceProcessInstanceId, request);
+        if (!preview.admissible()) {
+            throw new IllegalStateException("selective derived execution refused: "
+                    + String.join(",", preview.refusalCodes()));
+        }
+        var settlement = await(executionStore.replaySettlement(source)).orElseThrow(() ->
+                new IllegalStateException("selective derived execution refused: SOURCE_SETTLEMENT_CHANGED"));
+        var manifest = executionManifests().verify(source, executionPolicy(source));
+        var storedGraph = awaitDefinition(graphDefinitionStore.load(
+                new ai.ravenroot.api.persistence.GraphDefinitionKey(security.tenantId(), preview.graphContentId())));
+        var boundary = request.boundaries().getFirst();
+        var evidence = await(executionStore.replayEvidence(source, 513)).stream()
+                .filter(value -> boundary.predecessorInvocationIds().contains(value.invocationId()))
+                .findFirst().orElseThrow();
+        var manager = ai.ravenroot.core.graph.GraphManager.readGraphMl(
+                new java.io.ByteArrayInputStream(storedGraph.canonical().bytes()));
+        var edge = java.util.Objects.requireNonNull(selectedEdge(manager.definition(), evidence, boundary.nodeId()));
+        executionManifests().pinDerived(derivedKey, manifest);
+        var work = new ai.ravenroot.api.persistence.DerivedExecutionWork(derivedKey, traversalId,
+                invocationId, attemptId, boundary, evidence.nodeId(),
+                edge.command().orElse(ai.ravenroot.api.execution.NodeCommand.PROCESS),
+                evidence.output(), evidence.attributes(), security);
+        var ancestry = new ai.ravenroot.api.persistence.DerivedExecutionAncestry(
+                derivedKey, source, request.boundaries(), work, fingerprint, security.qualifiedIdentity(),
+                request.reason(), request.repeatabilityDecision(), Instant.now());
+        final long revision;
+        try {
+            revision = recordAcceptedDerivedExecution(security, processId, traversalId, boundary.nodeId(),
+                    preview.graphContentId().value(), ancestry, settlement, request.idempotencyKey());
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException concurrent) {
+            var admitted = await(executionStore.derivedAncestry(derivedKey));
+            if (admitted.isPresent() && admitted.orElseThrow().requestFingerprint().equals(fingerprint)) {
+                manager.close();
+                return new ai.ravenroot.api.application.DerivedExecutionStart(processId, traversalId,
+                        preview.graphContentId().value());
+            }
+            manager.close();
+            throw concurrent;
+        }
+        ExecutionRecorder recorder = openRecorder(security, processId, revision);
+        launchDerived(ancestry, manifest, manager, recorder);
+        return new ai.ravenroot.api.application.DerivedExecutionStart(processId, traversalId,
+                preview.graphContentId().value());
+    }
+
+    private static ai.ravenroot.api.persistence.ExecutionKey derivedExecutionKey(
+            SecurityContext security, UUID sourceProcessInstanceId, String idempotencyKey) {
+        String scope = security.tenantId() + "\u0000" + sourceProcessInstanceId + "\u0000" + idempotencyKey;
+        UUID processId = UUID.nameUUIDFromBytes(("derived-process\u0000" + scope)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), processId);
+    }
+
+    private void launchDerived(ai.ravenroot.api.persistence.DerivedExecutionAncestry ancestry,
+            ai.ravenroot.api.persistence.StoredExecutionManifest manifest,
+            ai.ravenroot.core.graph.GraphManager manager, ExecutionRecorder recorder) {
+        var work = ancestry.pendingWork();
+        var security = work.requesterContext();
+        var derivedKey = ancestry.derived();
+        UUID processId = derivedKey.processInstanceId();
+        UUID traversalId = work.traversalId();
+        String graphVersion = manifest.manifest().graphContentId().value();
+        GraphRunner runner;
+        try {
+            runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
+                    runnerShutdownStepBound, unknownBehaviors, executionPolicy(derivedKey),
+                    graphExecutionLimits, manifest.manifest().operationalPolicy());
+        } catch (RuntimeException failure) {
+            recorder.close();
+            manager.close();
+            throw failure;
+        }
+        Object payload = ai.ravenroot.api.payload.PayloadJson.read(work.payload().bytes(),
+                ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> attributes = (Map<String, Object>) ai.ravenroot.api.payload.PayloadJson.read(
+                work.attributes().bytes(), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+        var active = new ActiveExecution(manager, runner, security.tenantId(), processId,
+                graphVersion, Instant.now());
+        if (activeExecutions.putIfAbsent(traversalId, active) != null) {
+            active.close();
+            recorder.close();
+            throw new IllegalStateException("derived traversal id collision");
+        }
+        var resultKey = new ExecutionResultRegistry.Key(security.tenantId(), traversalId);
+        executionResults.started(resultKey, processId);
+        CompletionStage<GraphExecutionResult> execution;
+        try {
+            execution = runner.executeDerived(security, processId, traversalId, work, payload, attributes,
+                    graphVersion, recorder, manifest.manifest().operationalPolicy());
+        } catch (RuntimeException failure) {
+            activeExecutions.remove(traversalId, active);
+            active.close();
+            recorder.close();
+            throw failure;
+        }
+        execution.whenComplete((result, error) -> {
+            Throwable failure = unwrapFailure(error);
+            if (error == null && result != null) {
+                executionResults.completed(resultKey, result);
+                recordDurableResult(security, processId, traversalId, graphVersion,
+                        manifest.manifest().operationalPolicy(), active.startedAt,
+                        ProcessInstanceStatus.COMPLETED, null, result.payload(), result, null);
+            } else if (ExecutionTermination.isCancellation(failure)) {
+                executionResults.cancelled(resultKey, processId);
+                recordDurableResult(security, processId, traversalId, graphVersion,
+                        manifest.manifest().operationalPolicy(), active.startedAt,
+                        ProcessInstanceStatus.FAILED,
+                        ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED, null, null, null);
+            } else {
+                executionResults.failed(resultKey, processId);
+                recordDurableResult(security, processId, traversalId, graphVersion,
+                        manifest.manifest().operationalPolicy(), active.startedAt,
+                        ProcessInstanceStatus.FAILED, null, null, null, failure);
+            }
+            runner.replayQuiescence(traversalId).whenComplete((settled, ignored) -> {
+                try {
+                    if (Boolean.TRUE.equals(settled)) recorder.recordReplaySettlement(
+                            executionManifests().verify(derivedKey, executionPolicy(derivedKey)).digest());
+                } finally {
+                    recorder.close();
+                }
+            });
+            activeExecutions.remove(traversalId, active);
+            Thread.startVirtualThread(active::close);
+        });
+    }
+
+    /** Recovery adapter for the one pending root attempt admitted with derived ancestry. */
+    public ai.ravenroot.core.recovery.RecoveryDispatcher derivedExecutionRecoveryDispatcher(
+            String recoveryWorkerId, Duration recoveryLeaseTtl) {
+        java.util.Objects.requireNonNull(recoveryWorkerId, "recoveryWorkerId");
+        java.util.Objects.requireNonNull(recoveryLeaseTtl, "recoveryLeaseTtl");
+        if (executionStore == null || graphDefinitionStore == null || executionManifests() == null) {
+            return ai.ravenroot.core.recovery.RecoveryDispatcher.NONE;
+        }
+        return new ai.ravenroot.core.recovery.RecoveryDispatcher() {
+            @Override
+            public boolean canDispatch(ai.ravenroot.api.persistence.PendingWork item) {
+                if (!(item instanceof ai.ravenroot.api.persistence.PendingWork.AttemptDispatch attempt)) {
+                    return false;
+                }
+                try {
+                    var ancestry = await(executionStore.derivedAncestry(attempt.key())).orElse(null);
+                    if (ancestry == null) return false;
+                    var work = ancestry.pendingWork();
+                    return work.traversalId().equals(attempt.traversalId())
+                            && work.invocationId().equals(attempt.invocationId())
+                            && work.attemptId().equals(attempt.attemptId())
+                            && work.command().equals(attempt.command());
+                } catch (RuntimeException unavailable) {
+                    return false;
+                }
+            }
+
+            @Override
+            public void dispatch(ai.ravenroot.api.persistence.PendingWork item, String idempotencyKey) {
+                if (!(item instanceof ai.ravenroot.api.persistence.PendingWork.AttemptDispatch attempt)
+                        || !canDispatch(attempt)) {
+                    throw new IllegalArgumentException("not an admitted derived boundary attempt");
+                }
+                var ancestry = await(executionStore.derivedAncestry(attempt.key())).orElseThrow();
+                var work = ancestry.pendingWork();
+                var stored = await(executionStore.load(attempt.key()));
+                var manifest = executionManifests().verify(attempt.key(), executionPolicy(attempt.key()));
+                var definition = awaitDefinition(graphDefinitionStore.load(
+                        new ai.ravenroot.api.persistence.GraphDefinitionKey(attempt.key().tenantId(),
+                                manifest.manifest().graphContentId())));
+                var manager = ai.ravenroot.core.graph.GraphManager.readGraphMl(
+                        new java.io.ByteArrayInputStream(definition.canonical().bytes()));
+                ExecutionRecorder recorder;
+                try {
+                    recorder = ExecutionRecorder.resumeClaimed(executionStore, attempt, recoveryWorkerId,
+                            recoveryLeaseTtl, stored.revision());
+                } catch (RuntimeException failure) {
+                    manager.close();
+                    throw failure;
+                }
+                if (!work.boundary().nodeId().equals(
+                        stored.state().traversals().get(work.traversalId())
+                                .invocations().get(work.invocationId()).nodeId())) {
+                    recorder.close();
+                    manager.close();
+                    throw new IllegalStateException("derived pending work no longer matches its aggregate");
+                }
+                launchDerived(ancestry, manifest, manager, recorder);
+            }
+        };
+    }
+
+    private ExecutionPolicy executionPolicy(ai.ravenroot.api.persistence.ExecutionKey execution) {
+        var stored = awaitDefinition(executionManifests().store().load(execution));
+        String policy = stored.manifest().runtime().executionPolicy();
+        return ExecutionPolicy.valueOf(policy);
+    }
+
+    private static ai.ravenroot.core.graph.GraphEdge selectedEdge(
+            ai.ravenroot.core.graph.GraphDefinition definition,
+            ai.ravenroot.api.persistence.ReplayInvocationEvidence evidence, String target) {
+        var selected = definition.nextEdges(evidence.nodeId(), evidence.outcome());
+        if (selected.isEmpty() && !"continue".equals(evidence.outcome())) {
+            selected = definition.nextEdges(evidence.nodeId(), "continue");
+        }
+        return selected.stream().filter(edge -> edge.target().equals(target)).findFirst().orElse(null);
+    }
+
+    /** Stable, versioned and delimiter-safe identity of one logical derived-execution request. */
+    private static String derivedRequestFingerprint(UUID sourceProcessInstanceId,
+            ai.ravenroot.api.application.DerivedExecutionRequest request, SecurityContext security) {
+        try {
+            var bytes = new java.io.ByteArrayOutputStream();
+            try (var out = new java.io.DataOutputStream(bytes)) {
+                writeFingerprintField(out, "ravenroot-derived-request-v1");
+                writeFingerprintField(out, sourceProcessInstanceId.toString());
+                writeFingerprintField(out, security.qualifiedIdentity());
+                out.writeInt(request.boundaries().size());
+                for (var boundary : request.boundaries()) {
+                    writeFingerprintField(out, boundary.nodeId());
+                    var parents = boundary.predecessorInvocationIds().stream()
+                            .map(UUID::toString).sorted().toList();
+                    out.writeInt(parents.size());
+                    for (String parent : parents) writeFingerprintField(out, parent);
+                }
+                writeFingerprintField(out, request.reason());
+                writeFingerprintField(out, request.repeatabilityDecision());
+                out.writeBoolean(request.authorizeExternalEffects());
+            }
+            return sha256(bytes.toByteArray());
+        } catch (java.io.IOException impossible) {
+            throw new IllegalStateException("in-memory derived request encoding failed", impossible);
+        }
+    }
+
+    private static void writeFingerprintField(java.io.DataOutputStream out, String value)
+            throws java.io.IOException {
+        byte[] encoded = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        out.writeInt(encoded.length);
+        out.write(encoded);
+    }
+
+    private static void collectReplayClosure(UUID invocationId,
+            Map<UUID, ai.ravenroot.api.persistence.ReplayInvocationEvidence> evidenceById,
+            java.util.Set<UUID> inherited, List<String> missing, List<String> refusals) {
+        if (!inherited.add(invocationId)) return;
+        var evidence = evidenceById.get(invocationId);
+        if (evidence == null) {
+            missing.add(invocationId.toString());
+            return;
+        }
+        if (!evidence.iteration().isEmpty() && evidence.parentInvocationIds().size() < 2) {
+            refusals.add("UNSUPPORTED_ITERATION_IDENTITY");
+        }
+        evidence.parentInvocationIds().forEach(parent ->
+                collectReplayClosure(parent, evidenceById, inherited, missing, refusals));
+    }
+
+    private static boolean matchesSourceAggregate(ai.ravenroot.api.application.ProcessInstance source,
+            ai.ravenroot.api.persistence.ReplayInvocationEvidence evidence) {
+        var traversal = source.traversals().get(evidence.traversalId());
+        var invocation = traversal == null ? null : traversal.invocations().get(evidence.invocationId());
+        if (invocation == null
+                || invocation.status() != ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED
+                || !invocation.nodeId().equals(evidence.nodeId())
+                || !invocation.command().equals(evidence.command())
+                || !invocation.parentInvocationIds().equals(evidence.parentInvocationIds())) {
+            return false;
+        }
+        return invocation.attempts().stream().anyMatch(attempt ->
+                attempt.attemptId().equals(evidence.attemptId())
+                        && attempt.status() == ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED);
+    }
+
+    @Override
     public ExecutionSubmission startGraphMl(SecurityContext security, UUID executionId, InputStream graphMl,
                                             Object payload, ExecutionPolicy policy) {
+        return startGraphMlInternal(security, executionId, graphMl, payload, policy, false).submission();
+    }
+
+    /**
+     * Starts a registered intergraph child and exposes its in-process completion to the invocation
+     * capability. The ordinary public submission surface still returns only an identifier.
+     */
+    public StartedFlowExecution startCalledGraphMl(SecurityContext security, UUID executionId,
+                                                   InputStream graphMl, Object payload) {
+        return startCalledGraphMl(security, identitySource.nextProcessInstanceId(), executionId, graphMl, payload);
+    }
+
+    /** Starts a child with identities already committed in its durable invocation intent. */
+    public StartedFlowExecution startCalledGraphMl(SecurityContext security, UUID processInstanceId,
+                                                   UUID traversalId, InputStream graphMl, Object payload) {
+        StartedExecution started = startGraphMlInternal(security, traversalId, graphMl, payload,
+                ExecutionPolicy.STANDARD, true, processInstanceId);
+        return new StartedFlowExecution(started.submission(), started.completion());
+    }
+
+    private StartedExecution startGraphMlInternal(SecurityContext security, UUID executionId,
+                                                  InputStream graphMl, Object payload,
+                                                  ExecutionPolicy policy, boolean calledExecution) {
+        return startGraphMlInternal(security, executionId, graphMl, payload, policy, calledExecution, null);
+    }
+
+    private StartedExecution startGraphMlInternal(SecurityContext security, UUID executionId,
+                                                  InputStream graphMl, Object payload,
+                                                  ExecutionPolicy policy, boolean calledExecution,
+                                                  UUID reservedProcessInstanceId) {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
@@ -1399,7 +1944,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // The exact bytes consumed by the mutation cross the same admission boundary exposed by
         // inspection. This precedes every definition read, reservation, manifest lookup, and spawn.
         try {
-            new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+            new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
                     .require(graphBytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);
         } catch (RuntimeException | Error refusal) {
             document.close();
@@ -1437,7 +1982,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // traversal id must therefore BE the caller-supplied identifier, or events would be
         // unattributable to the reserved owner and fail closed. The process-instance id is PERS-01
         // identity and stays application-generated.
-        UUID processInstanceId = identitySource.nextProcessInstanceId();
+        UUID processInstanceId = reservedProcessInstanceId == null
+                ? identitySource.nextProcessInstanceId() : reservedProcessInstanceId;
         UUID traversalId = executionId;
         // Tenant, process-instance id, graph version and start time are captured here, at the
         // one place every path into activeExecutions already passes through, so GET
@@ -1485,15 +2031,17 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             ExecutionRecorder recorder = openRecorder(security, processInstanceId, revision);
             approvalBinding = toolApprovals == null || recorder == null ? null
                     : toolApprovals.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
+                            security.tenantId(), processInstanceId), recorder, runner);
             budgetBinding = agentBudgets == null || recorder == null ? null
                     : agentBudgets.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder, runner);
-            execution = java.util.Objects.requireNonNull(
-                    runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
+            execution = java.util.Objects.requireNonNull(calledExecution
+                    ? runner.executeCalled(security, processInstanceId, traversalId, payload, graphVersion,
+                            null, null, recorder)
+                    : runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
                             null, null, recorder),
                     "execution result");
             AutoCloseable binding = approvalBinding;
@@ -1582,10 +2130,27 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             error == null && result != null));
                 }
                 if (recorder != null) {
-                    // Orderly shutdown of this traversal's lease: hands the instance back at once
-                    // rather than leaving it locked for a whole TTL. Best-effort, because a crash
-                    // does neither and must reach the same state by expiry (ADR 0010 section 13.1).
-                    cleanupFailure = cleanup(cleanupFailure, recorder::close);
+                    boolean suspended = terminalFailure instanceof
+                            ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
+                            || terminalFailure instanceof
+                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension
+                            || terminalFailure instanceof ai.ravenroot.core.runner.RunnerJobSuspension;
+                    runner.replayQuiescence(traversalId).whenComplete((settled, quiescenceFailure) -> {
+                        try {
+                            if (!suspended && quiescenceFailure == null && Boolean.TRUE.equals(settled)) {
+                                var manifests = executionManifests();
+                                if (manifests != null) {
+                                    var key = new ai.ravenroot.api.persistence.ExecutionKey(
+                                            security.tenantId(), processInstanceId);
+                                    recorder.recordReplaySettlement(manifests.verify(key, policy).digest());
+                                }
+                            }
+                        } finally {
+                            // A missing positive proof leaves replay unavailable, then hands the
+                            // source lease back after the bounded quiescence observation finishes.
+                            recorder.close();
+                        }
+                    });
                 }
                 closeApprovalBinding(binding);
                 closeApprovalBinding(resourceBinding);
@@ -1621,7 +2186,21 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             }
             throw startupFailure;
         }
-        return new ExecutionSubmission(processInstanceId, traversalId, graphVersion);
+        return new StartedExecution(new ExecutionSubmission(processInstanceId, traversalId, graphVersion),
+                execution);
+    }
+
+    /** Child identity and completion kept on the trusted internal call path. */
+    public record StartedFlowExecution(ExecutionSubmission submission,
+                                       java.util.concurrent.CompletionStage<GraphExecutionResult> completion) {
+        public StartedFlowExecution {
+            java.util.Objects.requireNonNull(submission, "submission");
+            java.util.Objects.requireNonNull(completion, "completion");
+        }
+    }
+
+    private record StartedExecution(ExecutionSubmission submission,
+                                    java.util.concurrent.CompletionStage<GraphExecutionResult> completion) {
     }
 
     /**
@@ -2318,6 +2897,125 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public boolean sagaStatusAvailable() {
+        return executionStore != null
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE_SAGAS);
+    }
+
+    @Override
+    public List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga status unavailable");
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        await(executionStore.load(key));
+        return await(executionStore.listSagas(key));
+    }
+
+    @Override
+    public List<ai.ravenroot.api.persistence.SagaOutboxRecord> processInstanceSagaCommands(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga status unavailable");
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        await(executionStore.load(key));
+        return await(executionStore.listSagaCommands(key));
+    }
+
+    @Override
+    public ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+            String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+            ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        java.util.Objects.requireNonNull(sagaId, "sagaId");
+        java.util.Objects.requireNonNull(action, "action");
+        java.util.Objects.requireNonNull(mutationId, "mutationId");
+        if (!sagaStatusAvailable()) throw new IllegalStateException("durable saga recovery unavailable");
+        var key = new ai.ravenroot.api.persistence.ExecutionKey(tenantId, processInstanceId);
+        var stored = await(executionStore.load(key));
+        var current = await(executionStore.loadSaga(key, sagaId)).orElseThrow(() ->
+                new ai.ravenroot.api.persistence.ExecutionStoreException(
+                        new ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound(key)));
+        if (!current.key().equals(key)) throw new ai.ravenroot.api.persistence.ExecutionStoreException(
+                new ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound(key));
+        if (current.revision() != expectedSagaRevision) throw new IllegalStateException(
+                "saga revision changed; reload status before requesting recovery");
+        var commands = await(executionStore.listSagaCommands(key));
+        var unknownForward = current.occurrences().values().stream().anyMatch(step ->
+                step.status() == ai.ravenroot.api.persistence.SagaStepStatus.OUTCOME_UNKNOWN
+                        || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.DISPATCHED);
+        var unknownCompensation = current.occurrences().values().stream().anyMatch(step ->
+                step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATION_UNKNOWN
+                        || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATING);
+        var confirmed = current.occurrences().values().stream().filter(step ->
+                step.status() == ai.ravenroot.api.persistence.SagaStepStatus.CONFIRMED_SUCCESS).toList();
+        ai.ravenroot.api.persistence.SagaDisposition disposition;
+        boolean cancellation = current.cancellationRequested();
+        String reason;
+        switch (action) {
+            case RECONCILE -> {
+                if (!unknownForward) throw new IllegalStateException(
+                        "reconciliation requires an unknown forward participant outcome");
+                disposition = ai.ravenroot.api.persistence.SagaDisposition.RUNNING;
+                reason = "operator requested idempotent participant reconciliation";
+            }
+            case RETRY_COMPENSATION -> {
+                if (!unknownCompensation && current.disposition()
+                        != ai.ravenroot.api.persistence.SagaDisposition.COMPENSATION_PENDING) {
+                    throw new IllegalStateException("no durable compensation is pending or unknown");
+                }
+                disposition = ai.ravenroot.api.persistence.SagaDisposition.COMPENSATION_PENDING;
+                cancellation = true;
+                reason = "operator requested compensation retry";
+            }
+            case COMPENSATE -> {
+                if (confirmed.isEmpty()) throw new IllegalStateException("no confirmed effect can be compensated");
+                boolean irreversible = confirmed.stream().anyMatch(step ->
+                        current.definition().steps().get(step.stepId()).irreversible());
+                if (irreversible) throw new IllegalStateException("confirmed irreversible effect cannot be compensated");
+                disposition = ai.ravenroot.api.persistence.SagaDisposition.COMPENSATION_PENDING;
+                cancellation = true;
+                reason = "operator requested compensation of confirmed effects";
+            }
+            default -> throw new IllegalStateException("unsupported saga action");
+        }
+        var now = java.time.Instant.now();
+        var next = new ai.ravenroot.api.persistence.SagaSnapshot(current.key(), current.sagaId(),
+                current.traversalId(), current.definition(), current.revision() + 1, disposition, cancellation,
+                current.occurrences(), current.deadline(), current.createdAt(), now, reason,
+                current.graphCompleted());
+        var batch = ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(stored.revision()))
+                .writeSaga(new ai.ravenroot.api.persistence.SagaWrite(mutationId, current.revision(), next));
+        java.util.Set<String> operationsToRearm = switch (action) {
+            case RECONCILE -> current.occurrences().values().stream()
+                    .filter(step -> step.status() == ai.ravenroot.api.persistence.SagaStepStatus.OUTCOME_UNKNOWN
+                            || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.DISPATCHED)
+                    .map(ai.ravenroot.api.persistence.SagaStepSnapshot::forwardOperationId)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            case RETRY_COMPENSATION -> current.occurrences().values().stream()
+                    .filter(step -> step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATION_UNKNOWN
+                            || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATING
+                            || step.status() == ai.ravenroot.api.persistence.SagaStepStatus.COMPENSATION_PENDING)
+                    .map(ai.ravenroot.api.persistence.SagaStepSnapshot::compensationOperationId)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            case COMPENSATE -> java.util.Set.of();
+        };
+        commands.stream()
+                .filter(command -> command.intent().sagaId().equals(sagaId))
+                .filter(command -> command.status() == ai.ravenroot.api.persistence.SagaOutboxStatus.EXHAUSTED)
+                .filter(command -> operationsToRearm.contains(command.intent().operationId()))
+                .map(command -> command.intent().messageId())
+                .forEach(batch::rearmSagaCommand);
+        await(executionStore.apply(batch.build()));
+        return next;
+    }
+
+    @Override
     public java.time.Instant processInventoryRetainedFrom(String tenantId) {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         if (executionStore == null) {
@@ -2334,7 +3032,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public ai.ravenroot.api.application.ExecutionLookup executionResult(String tenantId, UUID executionId) {
-        var lookup = executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId));
+        var lookup = reconcileDurableExecutionLifecycle(tenantId, executionId,
+                executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId)));
         // The pause is applied on the way out and never stored in the registry. The registry holds
         // an immutable record of what a traversal has done; whether it is holding right now belongs
         // to the runtime, changes without the registry being written, and would go stale the instant
@@ -2352,6 +3051,37 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             return new ai.ravenroot.api.application.ExecutionLookup.Found(found.outcome().withPaused(true));
         }
         return lookup;
+    }
+
+    private ai.ravenroot.api.application.ExecutionLookup reconcileDurableExecutionLifecycle(
+            String tenantId, UUID executionId, ai.ravenroot.api.application.ExecutionLookup lookup) {
+        if (!(lookup instanceof ai.ravenroot.api.application.ExecutionLookup.Found found)
+                || executionStore == null) return lookup;
+        var outcome = found.outcome();
+        try {
+            var stored = await(executionStore.load(new ExecutionKey(tenantId, outcome.processInstanceId())));
+            var traversal = stored.state().traversals().get(executionId);
+            if (traversal == null) return lookup;
+            var durableStatus = ProcessInstanceStatus.valueOf(traversal.status().name());
+            if (durableStatus == outcome.status()) return lookup;
+            // A graph can finish before its durable participant receipts do.  The initial result
+            // record then describes graph completion, while the aggregate remains WAITING and may
+            // later become FAILED because its business effects were compensated.  The aggregate is
+            // the lifecycle authority, including after restart; the graph result still supplies the
+            // bounded node evidence, but it must never promote that business rollback to success.
+            var reconciled = new ai.ravenroot.api.application.ExecutionOutcome(
+                    outcome.processInstanceId(), outcome.traversalId(), durableStatus,
+                    durableStatus == ProcessInstanceStatus.COMPLETED ? outcome.payload() : null,
+                    outcome.visitedNodes(), outcome.defaultedNodes(), outcome.bypassedNodes(),
+                    outcome.handledFailureNodes(), outcome.untakenEdges(), false,
+                    traversal.terminationReason());
+            return new ai.ravenroot.api.application.ExecutionLookup.Found(reconciled);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException unavailable) {
+            if (unavailable.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                return lookup;
+            }
+            throw unavailable;
+        }
     }
 
     @Override
@@ -2480,7 +3210,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             throw new IllegalStateException("Ravenroot application is closed");
         }
         byte[] graphMlBytes = readGraphMlBytes(graphMl);
-        new GraphAdmissionValidator(behaviors, graphExecutionLimits)
+        new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
                 .require(graphMlBytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
         // start() must run INSIDE this critical section, not after it. A freshly
         // registered deployment is COLD until start() flips it, and COLD does not count as active
@@ -3087,7 +3817,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private int inspectEffectiveSources(byte[] graphBytes,
             ai.ravenroot.api.application.GraphAdmissionPurpose purpose) {
-        return new GraphAdmissionValidator(behaviors, graphExecutionLimits).require(graphBytes, purpose);
+        return new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
+                .require(graphBytes, purpose);
     }
 
     /** Keeps the source session's published refusal taxonomy over the shared registration path's own. */
@@ -3390,6 +4121,48 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
                 .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
                 .build())).revision();
+    }
+
+    private long recordAcceptedDerivedExecution(SecurityContext security, UUID processInstanceId,
+            UUID traversalId, String ingressNodeId, String graphVersion,
+            ai.ravenroot.api.persistence.DerivedExecutionAncestry ancestry,
+            ai.ravenroot.api.persistence.ReplaySourceSettlement sourceSettlement, String idempotencyKey) {
+        var key = new ExecutionKey(security.tenantId(), processInstanceId);
+        var traversal = new Traversal(traversalId, ingressNodeId, TraversalStatus.ACCEPTED, Map.of());
+        var accepted = new ProcessInstance(processInstanceId, ProcessInstanceStatus.ACCEPTED,
+                Map.of(traversalId, traversal));
+        Instant issuedAt = ancestry.admittedAt();
+        Duration retention = Duration.between(issuedAt, sourceSettlement.retainedUntil());
+        if (retention.isNegative() || retention.isZero()) {
+            throw new IllegalStateException("replay source retention expired during admission");
+        }
+        var fingerprint = ai.ravenroot.api.persistence.OpaquePayload.of(
+                ancestry.requestFingerprint().getBytes(java.nio.charset.StandardCharsets.UTF_8), "text/plain");
+        var outcome = ai.ravenroot.api.persistence.OpaquePayload.of(
+                (processInstanceId + ":" + traversalId).getBytes(java.nio.charset.StandardCharsets.UTF_8), "text/plain");
+        StoredProcessInstance created = await(executionStore.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(accepted, new GraphVersionPin(graphVersion)))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                        new NodeInvocation(ancestry.pendingWork().invocationId(), ingressNodeId, java.util.Set.of(),
+                                ai.ravenroot.api.application.NodeInvocationStatus.SCHEDULED, List.of(),
+                                ancestry.pendingWork().command())))
+                .apply(new ExecutionTransition.InvocationTransitioned(traversalId,
+                        ancestry.pendingWork().invocationId(),
+                        ai.ravenroot.api.application.NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(traversalId,
+                        ancestry.pendingWork().invocationId(),
+                        new ai.ravenroot.api.application.NodeAttempt(ancestry.pendingWork().attemptId(), 1,
+                                ai.ravenroot.api.application.NodeAttemptStatus.SCHEDULED)))
+                .recordOrigin(ExecutionOrigin.of(null, null, security.requestId()))
+                .recordDerivedAncestry(ancestry)
+                .requiringReplaySourceSettlement(sourceSettlement)
+                .recordIdempotency(new ai.ravenroot.api.persistence.IdempotencyWrite(
+                        "derived:" + idempotencyKey, fingerprint, outcome, retention, issuedAt))
+                .build()));
+        return created.revision();
     }
 
     /**

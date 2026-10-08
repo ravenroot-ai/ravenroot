@@ -39,6 +39,7 @@ export const PANELS = Object.freeze([
   { id: 'search', title: 'Search', zone: 'left', kind: 'control' },
   { id: 'node-types', title: 'Node Types', zone: 'left', kind: 'palette' },
   { id: 'node-catalog', title: 'Node Catalog', zone: 'left', kind: 'palette' },
+  { id: 'node-palettes', title: 'Personal Palettes', zone: 'left', kind: 'palette' },
   { id: 'edge-types', title: 'Edge Types', zone: 'left', kind: 'palette' },
   { id: 'graph-stats', title: 'Graph Stats', zone: 'left', kind: 'bounded' },
   { id: 'inspector', title: 'Inspector', zone: 'right', kind: 'unbounded' },

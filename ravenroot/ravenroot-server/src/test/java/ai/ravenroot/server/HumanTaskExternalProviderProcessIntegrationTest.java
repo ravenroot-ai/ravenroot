@@ -39,8 +39,10 @@ class HumanTaskExternalProviderProcessIntegrationTest {
 
     @Test
     void publicProviderCompletionIsCorsBoundSignedReplaySafeAndDurableAcrossRestart() throws Exception {
-        int backendPort = freePort();
-        int providerPort = freePort();
+        DistinctPorts ports = distinctFreePorts();
+        int backendPort = ports.backend();
+        int providerPort = ports.provider();
+        assertTrue(backendPort != providerPort, "external provider fixture must use a distinct origin");
         String providerOrigin = "http://127.0.0.1:" + providerPort;
         String workbenchOrigin = "http://127.0.0.1:" + backendPort;
         Path ui = Files.createDirectories(directory.resolve("ui"));
@@ -225,9 +227,19 @@ class HumanTaskExternalProviderProcessIntegrationTest {
         }
     }
 
+    private static DistinctPorts distinctFreePorts() throws Exception {
+        try (var backend = new java.net.ServerSocket();
+             var provider = new java.net.ServerSocket()) {
+            backend.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            provider.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            return new DistinctPorts(backend.getLocalPort(), provider.getLocalPort());
+        }
+    }
+
     private record Launch(String capability, UUID taskId, long generation,
                           java.time.Instant expiresAt) { }
     private record Ready(List<String> locators) { }
+    private record DistinctPorts(int backend, int provider) { }
 
     private static final class Child implements AutoCloseable {
         private final Process process;

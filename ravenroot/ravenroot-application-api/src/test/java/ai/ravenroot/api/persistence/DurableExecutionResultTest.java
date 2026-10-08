@@ -64,6 +64,15 @@ class DurableExecutionResultTest {
     }
 
     @Test
+    void recoveryUnavailableOutputIsDistinctFromNoOutputAndFromARefusal() {
+        ExecutionResultPayload unavailable = ExecutionResultPayload.unavailable();
+        assertEquals(ResultPayloadState.UNAVAILABLE, unavailable.state());
+        assertFalse(unavailable.available());
+        assertEquals(0, unavailable.bytes());
+        assertNull(unavailable.retained());
+    }
+
+    @Test
     void credentialMaterialIsReplacedAndTheReplacementIsDeclaredRatherThanSilent() {
         ExecutionResultPayload projected =
                 DurableExecutionResult.project(Map.of("apiKey", "sk-live-0123456789"), CAP);

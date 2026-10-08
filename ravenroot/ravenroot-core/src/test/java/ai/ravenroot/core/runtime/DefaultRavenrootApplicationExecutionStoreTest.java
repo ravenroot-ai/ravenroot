@@ -18,19 +18,28 @@ import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.ExecutionResultNodes;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.application.ProcessInstance;
+import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -183,6 +192,48 @@ class DefaultRavenrootApplicationExecutionStoreTest {
         assertEquals(beforeRestart.outcome().payload(), found.outcome().payload(),
                 "the restarted read must agree with the pre-restart one on what the execution produced");
         assertEquals(beforeRestart.outcome().visitedNodes(), found.outcome().visitedNodes());
+
+        restarted.close();
+        store.close();
+    }
+
+    @Test
+    void durableSagaCompensationOverridesAnEarlierCompletedResultAfterRestart() {
+        Instant now = Instant.parse("2026-09-27T12:00:00Z");
+        var store = new InMemoryExecutionStore(Clock.fixed(now, ZoneOffset.UTC));
+        java.util.UUID traversalId = java.util.UUID.randomUUID();
+        var key = new ExecutionKey(TestIdentities.TENANT_A.tenantId(), java.util.UUID.randomUUID());
+        var created = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessCreated(
+                        new ProcessInstance(key.processInstanceId(), ProcessInstanceStatus.ACCEPTED,
+                                Map.of(traversalId, new Traversal(traversalId, "start",
+                                        TraversalStatus.ACCEPTED, Map.of()))),
+                        new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join();
+        var running = store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                        ProcessInstanceStatus.RUNNING))
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.TraversalTransitioned(
+                        traversalId, TraversalStatus.RUNNING)).build()).toCompletableFuture().join();
+        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(running.revision()))
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.TraversalTransitioned(
+                        traversalId, TraversalStatus.FAILED))
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                        ProcessInstanceStatus.FAILED)).build()).toCompletableFuture().join();
+        store.recordExecutionResult(DurableExecutionResult.of(key, traversalId,
+                new GraphVersionPin("graph-v1"), ProcessInstanceStatus.COMPLETED, null,
+                now, now.plusSeconds(1), Map.of("graph", "finished"),
+                ExecutionResultNodes.of(List.of("start", "participant"), List.of(), List.of(),
+                        List.of(), List.of()), null, store.maxExecutionResultPayloadBytes()))
+                .toCompletableFuture().join();
+
+        var restarted = applicationWith(new StubExecutionEngine(), store);
+        var lookup = assertInstanceOf(ai.ravenroot.api.application.ExecutionLookup.Found.class,
+                restarted.executionResult(TestIdentities.TENANT_A.tenantId(), traversalId));
+        assertEquals(ProcessInstanceStatus.FAILED, lookup.outcome().status(),
+                "a compensated business transaction cannot be reported as successful graph output");
+        assertEquals(null, lookup.outcome().payload());
+        assertEquals(Set.of("start", "participant"), lookup.outcome().visitedNodes());
 
         restarted.close();
         store.close();

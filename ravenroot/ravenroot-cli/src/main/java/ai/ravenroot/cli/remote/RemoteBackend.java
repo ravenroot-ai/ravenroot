@@ -99,6 +99,76 @@ public final class RemoteBackend implements CliBackend {
     }
 
     @Override
+    public List<DerivedBoundaryView> derivedBoundaries(String sourceProcessInstanceId) throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(get(
+                "/v1/executions/" + uuid(sourceProcessInstanceId) + "/derived/boundaries")));
+        return MinimalJson.asArray(body.get("boundaries")).stream().map(MinimalJson::asObject)
+                .map(value -> new DerivedBoundaryView(MinimalJson.asString(value.get("nodeId")),
+                        MinimalJson.asString(value.get("predecessorInvocationId")),
+                        MinimalJson.asString(value.get("predecessorNodeId")),
+                        MinimalJson.asString(value.get("outcome")),
+                        MinimalJson.asString(value.get("recordedAt")),
+                        MinimalJson.asString(value.get("retainedUntil"))))
+                .toList();
+    }
+
+    @Override
+    public DerivedPreviewView previewDerived(String sourceProcessInstanceId, String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(post(
+                "/v1/executions/" + uuid(sourceProcessInstanceId) + "/derived/preview",
+                derivedBody(nodeId, predecessorInvocationId, idempotencyKey, reason,
+                        repeatabilityDecision, authorizeExternalEffects), "application/json")));
+        return new DerivedPreviewView(MinimalJson.asBoolean(body.get("admissible")),
+                strings(body, "refusalCodes"), strings(body, "inheritedInvocationIds"),
+                strings(body, "possibleScopeNodeIds"), strings(body, "missingInputs"),
+                strings(body, "externalEffectNodes"), MinimalJson.asBoolean(body.get("sourceOutcomeAmbiguous")),
+                nullableString(body.get("graphContentId")),
+                nullableString(body.get("manifestDigest")));
+    }
+
+    @Override
+    public DerivedStartView startDerived(String sourceProcessInstanceId, String nodeId,
+            String predecessorInvocationId, String idempotencyKey, String reason,
+            String repeatabilityDecision, boolean authorizeExternalEffects) throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(post(
+                "/v1/executions/" + uuid(sourceProcessInstanceId) + "/derived",
+                derivedBody(nodeId, predecessorInvocationId, idempotencyKey, reason,
+                        repeatabilityDecision, authorizeExternalEffects), "application/json")));
+        return new DerivedStartView(MinimalJson.asString(body.get("processInstanceId")),
+                MinimalJson.asString(body.get("traversalId")), MinimalJson.asString(body.get("graphVersion")));
+    }
+
+    private static byte[] derivedBody(String nodeId, String predecessorInvocationId,
+            String idempotencyKey, String reason, String repeatabilityDecision,
+            boolean authorizeExternalEffects) {
+        var boundary = new LinkedHashMap<String, Object>();
+        boundary.put("nodeId", nodeId);
+        boundary.put("predecessorInvocationIds", List.of(uuid(predecessorInvocationId)));
+        var request = new LinkedHashMap<String, Object>();
+        request.put("schemaVersion", 1L);
+        request.put("boundaries", List.of(boundary));
+        request.put("idempotencyKey", idempotencyKey);
+        request.put("reason", reason);
+        request.put("repeatabilityDecision", repeatabilityDecision);
+        request.put("authorizeExternalEffects", authorizeExternalEffects);
+        return MinimalJson.write(request).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String uuid(String value) {
+        return java.util.UUID.fromString(value).toString();
+    }
+
+    private static List<String> strings(Map<String, Object> body, String name) {
+        return MinimalJson.asArray(body.get(name)).stream().map(MinimalJson::asString).toList();
+    }
+
+    private static String nullableString(Object value) {
+        return value == null ? null : MinimalJson.asString(value);
+    }
+
+    @Override
     public RuntimeView runtime() throws IOException {
         var body = MinimalJson.asObject(MinimalJson.parse(get("/v1/runtime")));
         var nodes = new LinkedHashMap<String, Integer>();

@@ -268,6 +268,11 @@ public final class NodePackages {
             return create(node, java.util.Optional.empty());
         }
 
+        @Override
+        public void validateTemplateReferences(GraphNode node, String tenantId) {
+            behavior.validateTemplateReferences(configurationOf(node), tenantId);
+        }
+
         NodeHandler create(GraphNode node, java.util.Optional<NodeExternalIoCapacity> pinnedCapacity) {
             NodeConfiguration configuration = configurationOf(node);
             NodeAction action;

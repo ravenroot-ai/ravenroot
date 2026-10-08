@@ -324,6 +324,8 @@ public final class RavenrootServer implements AutoCloseable {
      */
     private ai.ravenroot.core.manifest.ExecutionManifestService executionManifests;
     private ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentAuthorityControl;
+    /** Durable personal palette authority, absent when persistence is disabled. */
+    private ai.ravenroot.server.palette.NodePaletteStore nodePalettes;
     private ai.ravenroot.api.application.ExecutionControlAuditSink agentAuthorityControlAudit;
     /**
      * Injectable: the narrower constructors below default to the stdout
@@ -778,6 +780,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/runtime", this::runtime);
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
+        apiContext("/v1/node-palettes", this::nodePalettes);
         apiContext("/v1/human-tasks", this::humanTasks);
         apiPrefixContext("/v1/runner-plane", this::runnerPlane);
         apiContext("/v1/admin/human-tasks", this::adminHumanTasks);
@@ -1167,6 +1170,13 @@ public final class RavenrootServer implements AutoCloseable {
             throw new IllegalStateException("agent authority control is already installed");
         }
         agentAuthorityControl = java.util.Objects.requireNonNull(control, "control");
+    }
+
+    /** Installs durable personal palettes before the listener starts. */
+    synchronized void installNodePalettes(ai.ravenroot.server.palette.NodePaletteStore palettes) {
+        if (started.get()) throw new IllegalStateException("node palettes must be installed before start");
+        if (nodePalettes != null) throw new IllegalStateException("node palettes are already installed");
+        nodePalettes = java.util.Objects.requireNonNull(palettes, "palettes");
     }
 
     /** Test seam that observes the same sanitized control events as the production audit trail. */
@@ -1975,6 +1985,168 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
+    /** Authenticated CRUD for the caller's exact tenant, issuer, and subject palette namespace. */
+    private void nodePalettes(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (nodePalettes == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+        exchange.getResponseHeaders().set("Pragma", "no-cache");
+        var context = httpContext.applicationContext();
+        var owner = new ai.ravenroot.server.palette.NodePaletteStore.Owner(
+                context.tenantId(), context.issuer(), context.subject());
+        String path = exchange.getRequestURI().getPath();
+        try {
+            if ("/v1/node-palettes".equals(path)) {
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_READ);
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writeAll(
+                            nodePalettes.listPalettes(owner), nodePalettes.listTemplates(owner)));
+                } else if ("POST".equals(exchange.getRequestMethod())) {
+                    authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                    var created = nodePalettes.createPalette(owner,
+                            ai.ravenroot.server.palette.NodePaletteWire.readPaletteName(readPaletteBody(exchange)));
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writePalette(created));
+                } else {
+                    paletteMethodNotAllowed(exchange, httpContext, "GET, POST");
+                }
+                return;
+            }
+            if ("/v1/node-palettes/templates".equals(path)) {
+                if (!"POST".equals(exchange.getRequestMethod())) {
+                    paletteMethodNotAllowed(exchange, httpContext, "POST");
+                    return;
+                }
+                authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                var request = ai.ravenroot.server.palette.NodePaletteWire.readCreateTemplate(
+                        readPaletteBody(exchange), application.nodeTypes());
+                if ("BEHAVIOR".equals(request.node().kind())) {
+                    application.validateNodeTemplateReferences(context.tenantId(), request.node().behavior(),
+                            request.node().properties());
+                }
+                var created = nodePalettes.createTemplate(owner, request.paletteId(), request.name(),
+                        request.node().kind(), ai.ravenroot.server.palette.NodePaletteWire.payload(request.node()));
+                json(exchange, 201, ai.ravenroot.server.palette.NodePaletteWire.writeTemplate(created));
+                return;
+            }
+            final String templatesPrefix = "/v1/node-palettes/templates/";
+            if (path.startsWith(templatesPrefix) && path.length() > templatesPrefix.length()) {
+                String suffix = path.substring(templatesPrefix.length());
+                if (suffix.endsWith("/validate")) {
+                    String id = paletteId(suffix.substring(0, suffix.length() - "/validate".length()));
+                    if (!"POST".equals(exchange.getRequestMethod())) {
+                        paletteMethodNotAllowed(exchange, httpContext, "POST");
+                        return;
+                    }
+                    authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_READ);
+                    var saved = ai.ravenroot.server.palette.NodePaletteWire.readStoredNode(
+                            nodePalettes.findTemplate(owner, id).payload());
+                    if ("BEHAVIOR".equals(saved.kind())) {
+                        application.validateNodeTemplateReferences(context.tenantId(), saved.behavior(),
+                                saved.properties());
+                    }
+                    json(exchange, 200, "{\"valid\":true}");
+                    return;
+                }
+                String id = paletteId(suffix);
+                if (!"PATCH".equals(exchange.getRequestMethod())
+                        && !"DELETE".equals(exchange.getRequestMethod())) {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                    return;
+                }
+                authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                long version = paletteVersion(exchange);
+                if ("PATCH".equals(exchange.getRequestMethod())) {
+                    var request = ai.ravenroot.server.palette.NodePaletteWire.readUpdate(readPaletteBody(exchange));
+                    var updated = nodePalettes.updateTemplate(owner, id, version,
+                            request.paletteId(), request.name());
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writeTemplate(updated));
+                } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                    nodePalettes.deleteTemplate(owner, id, version);
+                    json(exchange, 200, "{\"deleted\":true}");
+                } else {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                }
+                return;
+            }
+            final String palettesPrefix = "/v1/node-palettes/";
+            if (path.startsWith(palettesPrefix) && path.length() > palettesPrefix.length()) {
+                String id = paletteId(path.substring(palettesPrefix.length()));
+                if (!"PATCH".equals(exchange.getRequestMethod())
+                        && !"DELETE".equals(exchange.getRequestMethod())) {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                    return;
+                }
+                authorizePalette(context, ai.ravenroot.api.security.AuthorizationAction.PALETTE_MANAGE);
+                long version = paletteVersion(exchange);
+                if ("PATCH".equals(exchange.getRequestMethod())) {
+                    var updated = nodePalettes.renamePalette(owner, id, version,
+                            ai.ravenroot.server.palette.NodePaletteWire.readPaletteName(readPaletteBody(exchange)));
+                    json(exchange, 200, ai.ravenroot.server.palette.NodePaletteWire.writePalette(updated));
+                } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                    nodePalettes.deletePalette(owner, id, version);
+                    json(exchange, 200, "{\"deleted\":true}");
+                } else {
+                    paletteMethodNotAllowed(exchange, httpContext, "PATCH, DELETE");
+                }
+                return;
+            }
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+        } catch (ai.ravenroot.server.palette.NodePaletteStore.StoreException failure) {
+            ErrorCode code = switch (failure.failure()) {
+                case NOT_FOUND -> ErrorCode.UNKNOWN_RESOURCE;
+                case CONFLICT, DUPLICATE_NAME, LIMIT_REACHED -> ErrorCode.CONFLICT;
+                case UNAVAILABLE -> ErrorCode.INTERNAL_ERROR;
+            };
+            fail(exchange, httpContext, code);
+        } catch (PayloadException rejection) {
+            failPayload(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException unavailable) {
+            fail(exchange, httpContext, ErrorCode.NODE_TEMPLATE_REFERENCE_UNAVAILABLE);
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    private void authorizePalette(ai.ravenroot.api.security.RequestContext context,
+                                  ai.ravenroot.api.security.AuthorizationAction action) {
+        authorization.requireAllowed(context, action,
+                ai.ravenroot.api.security.ProtectedResource.collection("node-palettes", context.tenantId()));
+    }
+
+    private static byte[] readPaletteBody(HttpExchange exchange) throws IOException {
+        int maximum = ai.ravenroot.server.palette.NodePaletteWire.REQUEST_LIMITS.maxEncodedBytes();
+        try (var input = exchange.getRequestBody()) {
+            byte[] body = input.readNBytes(maximum + 1);
+            if (body.length > maximum) throw new IllegalArgumentException("request too large");
+            return body;
+        }
+    }
+
+    private static String paletteId(String value) {
+        if (value.indexOf('/') >= 0) throw new IllegalArgumentException("invalid identifier");
+        return java.util.UUID.fromString(value).toString();
+    }
+
+    private static long paletteVersion(HttpExchange exchange) {
+        String raw = exchange.getRequestHeaders().getFirst("If-Match");
+        if (raw == null) throw new IllegalArgumentException("If-Match is required");
+        raw = raw.strip();
+        if (raw.startsWith("\"") && raw.endsWith("\"") && raw.length() > 2) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        long version = Long.parseLong(raw);
+        if (version < 1) throw new IllegalArgumentException("invalid version");
+        return version;
+    }
+
+    private static void paletteMethodNotAllowed(HttpExchange exchange, HttpRequestContext context,
+                                                String methods) throws IOException {
+        exchange.getResponseHeaders().set("Allow", methods);
+        fail(exchange, context, ErrorCode.METHOD_NOT_ALLOWED);
+    }
+
     /**
      * Stores one credential.
      *
@@ -2621,6 +2793,34 @@ public final class RavenrootServer implements AutoCloseable {
                 readProcessInstanceTraversals(exchange, httpContext, segments[1]);
                 return;
             }
+            if (segments.length == 3 && !segments[1].isBlank() && "sagas".equals(segments[2])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                readProcessInstanceSagas(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 5 && !segments[1].isBlank() && "sagas".equals(segments[2])
+                    && !segments[3].isBlank() && !segments[4].isBlank()) {
+                if (!method(exchange, httpContext, "POST")) return;
+                controlSaga(exchange, httpContext, segments[1], segments[3], segments[4]);
+                return;
+            }
+            if (segments.length == 4 && !segments[1].isBlank()
+                    && "derived".equals(segments[2]) && "preview".equals(segments[3])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                derivedExecution(exchange, httpContext, segments[1], true);
+                return;
+            }
+            if (segments.length == 4 && !segments[1].isBlank()
+                    && "derived".equals(segments[2]) && "boundaries".equals(segments[3])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                derivedBoundaries(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 3 && !segments[1].isBlank() && "derived".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                derivedExecution(exchange, httpContext, segments[1], false);
+                return;
+            }
             if (segments.length == 5 && !segments[1].isBlank()
                     && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
                     && ("approve".equals(segments[4]) || "deny".equals(segments[4])
@@ -2663,6 +2863,152 @@ public final class RavenrootServer implements AutoCloseable {
             }
             submitExecution(exchange, httpContext, policy);
         }
+    }
+
+    private void derivedExecution(HttpExchange exchange, HttpRequestContext httpContext,
+            String sourceText, boolean previewOnly) throws IOException {
+        final java.util.UUID sourceId;
+        final ai.ravenroot.api.application.DerivedExecutionRequest request;
+        try {
+            sourceId = java.util.UUID.fromString(sourceText);
+            byte[] body = boundedBody(exchange, 32_768);
+            var root = strictJsonMap(body, java.util.Set.of("schemaVersion", "boundaries",
+                    "idempotencyKey", "reason", "repeatabilityDecision", "authorizeExternalEffects"));
+            if (integer(root, "schemaVersion") != 1) throw new IllegalArgumentException("unsupported schema");
+            if (!(root.entries().get("boundaries")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.ListValue boundaryValues)) {
+                throw new IllegalArgumentException("boundaries must be a list");
+            }
+            var boundaries = new java.util.ArrayList<ai.ravenroot.api.persistence.ReplayBoundarySeed>();
+            for (var value : boundaryValues.values()) {
+                if (!(value instanceof ai.ravenroot.api.payload.PayloadValue.MapValue boundary)
+                        || !boundary.entries().keySet().equals(
+                                java.util.Set.of("nodeId", "predecessorInvocationIds"))
+                        || !(boundary.entries().get("predecessorInvocationIds")
+                                instanceof ai.ravenroot.api.payload.PayloadValue.ListValue predecessorValues)) {
+                    throw new IllegalArgumentException("invalid boundary");
+                }
+                var predecessors = new java.util.LinkedHashSet<java.util.UUID>();
+                for (var predecessor : predecessorValues.values()) {
+                    if (!(predecessor instanceof ai.ravenroot.api.payload.PayloadValue.TextValue id)) {
+                        throw new IllegalArgumentException("predecessor id must be text");
+                    }
+                    predecessors.add(java.util.UUID.fromString(id.value()));
+                }
+                boundaries.add(new ai.ravenroot.api.persistence.ReplayBoundarySeed(
+                        text(boundary, "nodeId"), predecessors));
+            }
+            if (!(root.entries().get("authorizeExternalEffects")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.BooleanValue effects)) {
+                throw new IllegalArgumentException("authorizeExternalEffects must be boolean");
+            }
+            request = new ai.ravenroot.api.application.DerivedExecutionRequest(boundaries,
+                    text(root, "idempotencyKey"), text(root, "reason"),
+                    textAllowEmpty(root, "repeatabilityDecision"), effects.value());
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var context = httpContext.applicationContext();
+            if (previewOnly) {
+                json(exchange, 200, derivedPreviewJson(
+                        authorizedApplication.previewDerivedExecution(context, sourceId, request)));
+            } else {
+                var principal = httpContext.requirePrincipal();
+                var submissionBudget = rateLimiter.checkSubmissionRate(principal.tenantId());
+                if (!submissionBudget.isAllowed()) {
+                    refuse(exchange, httpContext, submissionBudget);
+                    return;
+                }
+                try (var slot = rateLimiter.acquireSubmissionSlot(principal.tenantId())) {
+                    if (!slot.granted()) {
+                        refuse(exchange, httpContext, slot.refusal());
+                        return;
+                    }
+                    var existing = authorizedApplication.existingDerivedExecution(context, sourceId, request);
+                    if (existing.isPresent()) {
+                        json(exchange, 202, derivedStartJson(existing.orElseThrow()));
+                        return;
+                    }
+                    var admission = rateLimiter.activeExecutions().checkAdmission(principal.tenantId());
+                    if (!admission.isAllowed()) {
+                        refuse(exchange, httpContext, admission);
+                        return;
+                    }
+                    json(exchange, 202, derivedStartJson(
+                            authorizedApplication.startDerivedExecution(context, sourceId, request)));
+                }
+            }
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException conflict) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        } catch (IllegalStateException refused) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        }
+    }
+
+    private static String derivedStartJson(ai.ravenroot.api.application.DerivedExecutionStart started) {
+        return "{\"processInstanceId\":\"" + started.processInstanceId()
+                + "\",\"traversalId\":\"" + started.traversalId()
+                + "\",\"graphVersion\":\"" + escape(started.graphVersion()) + "\"}";
+    }
+
+    private void derivedBoundaries(HttpExchange exchange, HttpRequestContext httpContext,
+                                   String sourceText) throws IOException {
+        final java.util.UUID sourceId;
+        try {
+            sourceId = java.util.UUID.fromString(sourceText);
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        final java.util.List<ai.ravenroot.api.application.DerivedBoundaryOption> values;
+        try {
+            values = authorizedApplication.derivedExecutionBoundaries(
+                    httpContext.applicationContext(), sourceId);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException | IllegalStateException unavailable) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+            return;
+        }
+        var json = new StringBuilder("{\"boundaries\":[");
+        for (int index = 0; index < values.size(); index++) {
+            if (index > 0) json.append(',');
+            var value = values.get(index);
+            json.append("{\"nodeId\":\"").append(escape(value.nodeId()))
+                    .append("\",\"predecessorInvocationId\":\"")
+                    .append(value.predecessorInvocationId())
+                    .append("\",\"predecessorNodeId\":\"").append(escape(value.predecessorNodeId()))
+                    .append("\",\"outcome\":\"").append(escape(value.outcome()))
+                    .append("\",\"recordedAt\":\"").append(value.recordedAt())
+                    .append("\",\"retainedUntil\":\"").append(value.retainedUntil()).append("\"}");
+        }
+        json.append("]}");
+        json(exchange, 200, json.toString());
+    }
+
+    private static String derivedPreviewJson(ai.ravenroot.api.application.DerivedExecutionPreview value) {
+        return "{\"admissible\":" + value.admissible()
+                + ",\"refusalCodes\":" + stringArrayJson(value.refusalCodes())
+                + ",\"inheritedInvocationIds\":" + stringArrayJson(value.inheritedEvidence().stream()
+                        .map(java.util.UUID::toString).sorted().toList())
+                + ",\"possibleScopeNodeIds\":" + stringArrayJson(value.scopeNodeIds())
+                + ",\"missingInputs\":" + stringArrayJson(value.missingInputs())
+                + ",\"externalEffectNodes\":" + stringArrayJson(value.externalEffectNodes())
+                + ",\"sourceOutcomeAmbiguous\":" + value.sourceOutcomeAmbiguous()
+                + ",\"graphContentId\":" + nullableJson(value.graphContentId() == null
+                        ? null : value.graphContentId().value())
+                + ",\"manifestDigest\":" + nullableJson(value.manifestDigest() == null
+                        ? null : value.manifestDigest().value())
+                + ",\"compatibilityDimensions\":" + stringArrayJson(value.compatibilityDimensions().stream()
+                        .sorted().toList()) + "}";
+    }
+
+    private static String nullableJson(String value) {
+        return value == null ? "null" : "\"" + escape(value) + "\"";
     }
 
     /** Authenticated, tenant-derived decision path; no stored content is serialized. */
@@ -4597,10 +4943,10 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code Redacted} is a distinct 410, {@code EXECUTION_RESULT_REDACTED}: the execution provably
      * ran, but its payload was never retained in the first place, rather than having aged out after
      * being retained. The two are different facts calling for different operator responses — an
-     * expired result is a retention policy working as configured, a redacted one is either a size cap
-     * an operator can raise or a node returning a value no remote adapter could ever persist — so
+     * expired result is a retention policy working as configured, while a redacted result identifies
+     * a size cap, an unrepresentable node output, or output evidence lost with its original runtime — so
      * they carry different {@code code}s and {@code redactedExecutionJson}'s body adds
-     * {@code payloadState} to say which of the two. {@code Unknown} is 404 and covers a
+     * {@code payloadState} to say which condition applies. {@code Unknown} is 404 and covers a
      * nonexistent id, another tenant's id and a fully evicted one alike — see
      * {@code ExecutionLookup.Unknown} for why those three must not be distinguishable.</p>
      *
@@ -5037,6 +5383,104 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
+    private void readProcessInstanceSagas(HttpExchange exchange, HttpRequestContext httpContext,
+                                          String rawId) throws IOException {
+        if (!authorizedApplication.sagaStatusAvailable()) {
+            fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var sagas = authorizedApplication.processInstanceSagas(
+                    httpContext.applicationContext(), processInstanceId);
+            var commands = authorizedApplication.processInstanceSagaCommands(
+                    httpContext.applicationContext(), processInstanceId);
+            String sagaBody = sagas.stream().map(RavenrootServer::sagaJson)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String commandBody = commands.stream().map(RavenrootServer::sagaCommandJson)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String body = "{\"sagas\":[" + sagaBody + "],\"outbox\":[" + commandBody + "]}";
+            json(exchange, 200, body);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private void controlSaga(HttpExchange exchange, HttpRequestContext httpContext, String rawProcessId,
+                             String rawSagaId, String rawAction) throws IOException {
+        java.util.UUID processId;
+        java.util.UUID sagaId;
+        long expectedRevision;
+        ai.ravenroot.api.persistence.SagaOperatorAction action;
+        try {
+            processId = java.util.UUID.fromString(rawProcessId);
+            sagaId = java.util.UUID.fromString(rawSagaId);
+            expectedRevision = Long.parseLong(exchange.getRequestHeaders()
+                    .getFirst("X-Ravenroot-Expected-Saga-Revision"));
+            action = ai.ravenroot.api.persistence.SagaOperatorAction.valueOf(
+                    rawAction.replace('-', '_').toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var result = authorizedApplication.requestSagaAction(httpContext.applicationContext(), processId,
+                    sagaId, expectedRevision, action);
+            json(exchange, 200, sagaJson(result));
+        } catch (IllegalStateException conflict) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private static String sagaJson(ai.ravenroot.api.persistence.SagaSnapshot saga) {
+        String steps = saga.occurrences().values().stream()
+                .sorted(java.util.Comparator.comparing(ai.ravenroot.api.persistence.SagaStepSnapshot::stepId)
+                        .thenComparing(ai.ravenroot.api.persistence.SagaStepSnapshot::occurrenceId))
+                .map(step -> "{\"occurrenceId\":\"" + step.occurrenceId()
+                        + "\",\"stepId\":\"" + escape(step.stepId())
+                        + "\",\"invocationId\":\"" + step.invocationId()
+                        + "\",\"forwardOperationId\":\"" + escape(step.forwardOperationId())
+                        + "\",\"compensationOperationId\":\"" + escape(step.compensationOperationId())
+                        + "\",\"status\":\"" + step.status()
+                        + "\",\"detail\":\"" + escape(step.detail()) + "\"}")
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"sagaId\":\"" + saga.sagaId() + "\",\"scope\":\""
+                + escape(saga.definition().scopeId()) + "\",\"revision\":" + saga.revision()
+                + ",\"disposition\":\"" + saga.disposition()
+                + "\",\"cancellationRequested\":" + saga.cancellationRequested()
+                + ",\"actionableReason\":\"" + escape(saga.actionableReason())
+                + "\",\"steps\":[" + steps + "]}";
+    }
+
+    private static String sagaCommandJson(ai.ravenroot.api.persistence.SagaOutboxRecord record) {
+        var intent = record.intent();
+        return "{\"messageId\":\"" + intent.messageId()
+                + "\",\"sagaId\":\"" + intent.sagaId()
+                + "\",\"operationId\":\"" + escape(intent.operationId())
+                + "\",\"commandType\":\"" + escape(intent.commandType())
+                + "\",\"schemaVersion\":" + intent.schemaVersion()
+                + ",\"status\":\"" + record.status()
+                + "\",\"attempts\":" + record.attempts()
+                + ",\"maxAttempts\":" + intent.maxAttempts()
+                + ",\"lastFailure\":\"" + escape(record.lastFailure()) + "\"}";
+    }
+
     /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */
     private static String traversalInventoryEntryJson(ai.ravenroot.api.persistence.TraversalInventoryEntry entry) {
         return "{\"traversalId\":\"" + entry.traversalId()
@@ -5165,12 +5609,13 @@ public final class RavenrootServer implements AutoCloseable {
      * one of {@code WITHHELD} (a configured budget refused the payload: either an encoded projection
      * larger than the store's byte cap, or a value the runtime's payload limits rejected before any
      * encoding of it existed, which terminates the traversal on that rejection) or
-     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all) --
+     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all), or
+     * {@code UNAVAILABLE} (recovery proved the terminal lifecycle after the producing runtime ended
+     * before it recorded an output projection) --
      * {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}'s canonical constructor refuses
-     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only two
-     * this method ever renders. A caller reading it can tell "raise the configured cap" from "this
-     * node returns something no remote adapter could ever persist", which is exactly the distinction
-     * {@code EXECUTION_RESULT_EXPIRED} alone could not make -- see
+     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only three
+     * this method ever renders. A caller can distinguish a configured limit, an unrepresentable
+     * value, and output evidence lost with the original runtime -- see
      * {@link ErrorCode#EXECUTION_RESULT_REDACTED}'s own Javadoc.</p>
      */
     private static String redactedExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Redacted redacted,

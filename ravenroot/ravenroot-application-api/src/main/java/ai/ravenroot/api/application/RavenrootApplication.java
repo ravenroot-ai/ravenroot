@@ -43,6 +43,18 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     List<NodeTypeDescriptor> nodeTypes();
 
+    /**
+     * Validates operator-owned references for one sanitized template in its destination tenant.
+     * @param tenantId authenticated destination tenant
+     * @param behavior installed behavior identifier
+     * @param properties descriptor-filtered authored properties
+     * @throws IllegalArgumentException when the authored properties are malformed
+     * @throws NodeTemplateReferenceUnavailableException when the behavior or a destination authority
+     *         reference is unavailable to the authenticated tenant
+     */
+    default void validateNodeTemplateReferences(String tenantId, String behavior,
+                                                Map<String, String> properties) { }
+
 /**
  * Runtime-owned provenance keyed by behavior; absent entries are treated as installed bundles.
  * @return provenance by behavior for entries whose source is known to the runtime
@@ -924,6 +936,59 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Whether this application can expose durable saga diagnostics.
+     * @return true only when a durable saga-capable execution store is composed
+     */
+    default boolean sagaStatusAvailable() {
+        return false;
+    }
+
+    /**
+     * Lists bounded durable saga state for one tenant-scoped process instance.
+     *
+     * @param tenantId tenant that owns the process instance
+     * @param processInstanceId process instance whose saga state is requested
+     * @return immutable saga snapshots; sensitive participant payloads remain opaque
+     * @throws IllegalStateException when {@link #sagaStatusAvailable()} is false
+     */
+    default List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable saga status unavailable");
+    }
+
+    /**
+     * Lists payload-free command-outbox diagnostics for the same process scope.
+     * @param tenantId tenant that owns the process instance
+     * @param processInstanceId process instance whose commands are requested
+     * @return immutable durable records; callers must not expose {@code intent.payload}
+     */
+    default List<ai.ravenroot.api.persistence.SagaOutboxRecord> processInstanceSagaCommands(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable saga status unavailable");
+    }
+
+    /**
+     * Applies a fenced recovery request without allowing the caller to assert participant success.
+     *
+     * @param tenantId tenant that owns the process and saga
+     * @param processInstanceId process containing the saga
+     * @param sagaId saga selected for recovery
+     * @param expectedSagaRevision exact revision observed by the operator
+     * @param action recovery transition to request
+     * @param mutationId stable audit/idempotency identity of this request
+     * @return the persisted saga snapshot after the conditional transition
+     */
+    default ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+            String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+            ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+        throw new UnsupportedOperationException("governed saga recovery is unavailable");
+    }
+
+    /**
      * The per-tenant inventory retention floor, delegating to
      * {@link ai.ravenroot.api.persistence.ExecutionStore#inventoryRetainedFrom}. {@link java.time.Instant#MIN}
      * for an implementation with no durable inventory at all, which is the honest answer: nothing has
@@ -1093,6 +1158,50 @@ public interface RavenrootApplication extends AutoCloseable {
     default ExecutionLookup executionResult(String tenantId, UUID executionId) {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         return new ExecutionLookup.Unknown(java.util.Objects.requireNonNull(executionId, "executionId"));
+    }
+
+    /**
+     * Lists payload-free retained downstream boundary choices for one settled source.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence is inspected
+     * @return bounded boundary choices; empty when no retained edge can seed downstream work
+     */
+    default java.util.List<DerivedBoundaryOption> derivedExecutionBoundaries(
+            SecurityContext security, UUID sourceProcessInstanceId) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
+    /** Previews an exact retained boundary without admitting new work.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence is inspected
+     * @param request bounded proposed derived request
+     * @return proof-oriented preview and typed refusal codes
+     */
+    default DerivedExecutionPreview previewDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                            DerivedExecutionRequest request) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
+    /** Finds an already admitted request without launching or recovering its work.
+     * @param security authenticated tenant identity
+     * @param sourceProcessInstanceId immutable source process
+     * @param request exact idempotent request
+     * @return existing derived identities, or empty when the request has not been admitted
+     */
+    default java.util.Optional<DerivedExecutionStart> existingDerivedExecution(
+            SecurityContext security, UUID sourceProcessInstanceId, DerivedExecutionRequest request) {
+        return java.util.Optional.empty();
+    }
+
+    /** Admits fresh derived work after repeating every preview proof under the same pins.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence seeds the derivation
+     * @param request bounded derived request and idempotency identity
+     * @return fresh derived process and traversal identities
+     */
+    default DerivedExecutionStart startDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                        DerivedExecutionRequest request) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
     }
 
     @Override

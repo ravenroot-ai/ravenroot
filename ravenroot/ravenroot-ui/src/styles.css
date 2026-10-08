@@ -93,15 +93,16 @@
       --panel-scrollbar-w: 4px;
       --panel-header-control-w: 24px;
       /* Compact is a density projection, not a width. Its floor must carry BOTH of the shapes
-         inside the body: one complete grid cell with padding/scrollbar, and the visible grip plus
-         menu and Close controls. The wider requirement wins; the rail and physical column border
+         inside the body: one complete grid cell with padding/scrollbar, and the visible grip,
+         disclosure, menu and Close controls. The wider requirement wins; the rail and physical column border
          are then added exactly once. Keeping this as token arithmetic prevents splitter clamps,
          CSS and ARIA from drifting onto separate pixel constants. */
       --panel-compact-content-min-w: calc(
         var(--panel-short-cell) + 2 * var(--panel-short-pad) + var(--panel-scrollbar-w)
       );
       --panel-compact-header-min-w: calc(
-        var(--panel-header-control-w) + var(--panel-header-control-w) + var(--panel-header-control-w)
+        var(--panel-header-control-w) + var(--panel-header-control-w)
+        + var(--panel-header-control-w) + var(--panel-header-control-w)
       );
       --panel-compact-body-min-w: max(
         var(--panel-compact-content-min-w), var(--panel-compact-header-min-w)
@@ -311,6 +312,7 @@
 
     #workflowbar {
       min-height: 44px; flex-shrink: 0;
+      position: relative;
       display: flex; align-items: center; gap: 10px;
       padding: 5px 14px;
       background: var(--surface-command-bar); border-bottom: 1px solid var(--bd);
@@ -600,8 +602,8 @@
        form uses, so no information is lost, only the divider's decoration. */
     .panel--short #graph-stats {
       display: flex; flex-wrap: wrap;
-      gap: 3px 8px;
-      line-height: 1.4;
+      gap: 2px 8px;
+      line-height: 1.25;
     }
     .panel--short .graph-stat-line {
       flex: 0 0 auto;
@@ -1462,6 +1464,37 @@
     /* The canvas fills what the strip leaves. It is created inside its pane and never moved: moving
        it stops Cytoscape painting, and resize/fit/forceRender do not bring it back. */
     .doc-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+    .drawing-model-controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .drawing-model-actions { position: relative; }
+    .drawing-model-actions > summary { list-style: none; white-space: nowrap; }
+    .drawing-model-actions > summary::-webkit-details-marker { display: none; }
+    .drawing-model-actions-menu {
+      position: absolute; z-index: 210; top: calc(100% + 6px); right: 0;
+      display: grid; gap: 6px; min-width: 210px; padding: 8px;
+      border: 1px solid var(--bd); border-radius: 7px;
+      background: var(--bg-1); box-shadow: var(--shadow-popover);
+    }
+    .drawing-model-actions-menu label { color: var(--tx-3); font-size: 10px; }
+    .drawing-model-actions-menu select { width: 100%; min-width: 0; }
+    .drawing-model-actions-menu .btn { justify-content: flex-start; width: 100%; }
+    .drawing-model-dialog { width: min(760px, calc(100vw - 32px)); color: var(--tx-1); background: var(--bg-1); border: 1px solid var(--bd); border-radius: 10px; }
+    .drawing-model-dialog form { display: grid; gap: 10px; }
+    .drawing-model-dialog textarea { width: 100%; min-height: 360px; resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tx-1); background: var(--bg-0); border: 1px solid var(--bd); }
+    .drawing-model-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .drawing-model-package-list { display: grid; gap: 8px; margin: 14px 0; }
+    .drawing-model-package-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+    .drawing-model-overlay { position: absolute; inset: 0; z-index: 8; display: flex; flex-direction: column; background: var(--bg-0); }
+    .drawing-model-scene { width: 100%; height: 100%; min-height: 0; }
+    .drawing-model-scene path, .drawing-model-scene line { fill: none; stroke: var(--tx-2); stroke-width: 3; }
+    .drawing-model-scene path[role="button"], .drawing-model-scene line[role="button"] { pointer-events: stroke; }
+    .drawing-model-scene marker path { fill: var(--tx-2); stroke: none; }
+    .drawing-model-scene .automata-state { fill: var(--bg-1); stroke: var(--tx-1); stroke-width: 3; cursor: pointer; }
+    .drawing-model-scene .automata-accepting { fill: none; stroke: var(--tx-1); stroke-width: 2; pointer-events: none; }
+    .drawing-model-scene .automata-state-label { fill: var(--tx-1); font: 24px system-ui, sans-serif; pointer-events: none; }
+    .drawing-model-scene .automata-label { fill: var(--tx-1); font: 20px system-ui, sans-serif; pointer-events: none; }
+    .drawing-model-scene .active { stroke: var(--acc); stroke-width: 6; }
+    .drawing-model-scene [role="button"]:focus { outline: none; filter: drop-shadow(0 0 5px var(--acc)); }
+    .drawing-model-evidence-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--bd); color: var(--tx-3); font-size: 12px; }
     /* A document with no authored coordinates has no honest preset frame to show. Keep only that
        initial canvas visually withheld until its selected finite arrangement and routing settle;
        the pane header and live busy announcement remain available throughout. */
@@ -2396,6 +2429,7 @@
       #workflowbar { flex-wrap: wrap; align-content: center; row-gap: 6px; }
       #workflowbar > .spacer { display: none; }
       #workflowbar > .editor-mirrors, #workflowbar > .runtime-controls { flex: 1 1 100%; }
+      #workflowbar > .drawing-model-controls { position: absolute; top: 5px; right: 14px; }
     }
 
     @media (max-width: 900px) {
@@ -2405,6 +2439,7 @@
       #topbar { height: auto; min-height: 52px; padding-block: 8px; flex-wrap: wrap; }
       #topbar > .spacer { display: none; }
       .editor-mirrors { display: none !important; }
+      #workflowbar > .drawing-model-controls { position: static; flex: 1 1 100%; }
       #workflowbar > .runtime-controls { flex: 1 1 100%; }
     }
 
@@ -2586,4 +2621,33 @@
 .visual-group-members .btn { width: 100%; min-height: 38px; white-space: normal; overflow-wrap: anywhere; text-align: left; justify-content: flex-start; font-size: 12px; }
 @media (pointer: coarse) {
   .visual-group-actions .btn, .visual-group-members .btn, .visual-group-dialog button { min-height: 44px; }
+}
+
+.node-palettes { display: grid; gap: 9px; }
+.panel--content-collapsed > .panel-body { display: none; }
+.palette-create { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+.palette-create label { display: grid; gap: 4px; color: var(--tx-2); font-size: 11px; }
+.palette-create input { min-width: 0; width: 100%; box-sizing: border-box; }
+.node-palette { border: 1px solid var(--bd); border-radius: 7px; background: var(--bg-2); }
+.node-palette > summary { cursor: pointer; padding: 8px; font-weight: 650; }
+.palette-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 8px 8px; }
+.palette-actions button, .palette-create button, .node-template button { min-height: 32px; }
+.node-template { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(7rem, auto) auto auto; gap: 5px; padding: 5px 8px; }
+.node-template-insert { text-align: left; overflow-wrap: anywhere; cursor: grab; }
+.panel--short #node-palettes { gap: 4px; }
+.panel--short .palette-create { gap: 4px; }
+.panel--short .palette-create label { gap: 0; font-size: 0; }
+.panel--short .palette-create input { font-size: 11px; padding-block: 4px; }
+.panel--short .node-palettes > .catalog-empty { margin: 0; }
+.panel--short .node-palette > summary { padding-block: 4px; }
+.panel--short .palette-actions { gap: 3px; padding: 0 4px 4px; }
+.panel--short .palette-actions button,
+.panel--short .palette-create button,
+.panel--short .node-template button { min-height: 28px; }
+.panel--short .node-template { grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px 4px; }
+@media (max-width: 720px) {
+  .node-template { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px), (pointer: coarse) {
+  .palette-actions button, .palette-create button, .node-template button { min-height: 44px; }
 }

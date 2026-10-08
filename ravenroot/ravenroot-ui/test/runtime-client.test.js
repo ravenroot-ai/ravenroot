@@ -984,6 +984,22 @@ describe('durable process inventory client (issue 154)', () => {
     await expect(client.processInstanceTraversals('')).rejects.toThrow(/require an id/);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('reads payload-free saga diagnostics for one process instance', async () => {
+    const payload = { sagas: [{ sagaId: 'b', scope: 'order', revision: 4,
+      disposition: 'UNRESOLVED', cancellationRequested: false,
+      actionableReason: 'reconcile participant', steps: [] }], outbox: [] };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200, text: async () => JSON.stringify(payload),
+    });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.processInstanceSagas('aaaaaaaa-0000-0000-0000-000000000001'))
+      .resolves.toEqual(payload);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      '/v1/executions/aaaaaaaa-0000-0000-0000-000000000001/sagas');
+    await expect(client.processInstanceSagas('')).rejects.toThrow(/require an id/);
+  });
 });
 
 function streamResponse(frames, status = 200) {

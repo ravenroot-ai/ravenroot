@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456"
+    "2392aa308682346388bd017d5eda4d6afcf9c6f3c198a3b90e6153e0eebdc9fd"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "5e04cc565ecc882bd9f45274336aaf65c4e88dd4be6cff477a15516595df97aa"
+    "57d39800a570dcd7cd5a4f048d88b5da230cf6bf0c287d8de48fa14f27a5f1c1"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -199,7 +199,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "5e04cc565ecc882bd9f45274336aaf65c4e88dd4be6cff477a15516595df97aa",
+    EMBED_MAIN_PATH: "57d39800a570dcd7cd5a4f048d88b5da230cf6bf0c287d8de48fa14f27a5f1c1",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -215,7 +215,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456",
+        "2392aa308682346388bd017d5eda4d6afcf9c6f3c198a3b90e6153e0eebdc9fd",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -3495,6 +3495,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"settings", "semanticPartitions"} and path[3].isdigit() \
             and path[4] == "candidateIds":
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "activityCaptureAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "activityCaptureAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultEvidence"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -3569,6 +3576,18 @@ def remap_declared_candidate_references(document: dict[str, object],
                     if isinstance(candidate_ids, dict):
                         for role in ("methods", "path", "summary", "successStatuses"):
                             remap_list(candidate_ids, role)
+            # The bound clauses use candidate identities as object keys rather than list values.
+            # They are live RouteTable authority, so an approved identity migration must move the
+            # key along with the descriptor partitions. Historical reconciliation objects remain
+            # untouched by this narrowly scoped rewrite.
+            clauses = authority.get("publishedBoundClauses")
+            if isinstance(clauses, dict):
+                remapped_clauses = {
+                    replacements.get(identifier, identifier): fields
+                    for identifier, fields in clauses.items()
+                }
+                clauses.clear()
+                clauses.update(remapped_clauses)
 
     graph_authorities = document.get("graphLimitAuthorities")
     if isinstance(graph_authorities, dict):
@@ -3730,6 +3749,18 @@ def remap_declared_candidate_references(document: dict[str, object],
                 for row in authority.get(field, []):
                     if isinstance(row, dict):
                         remap_list(row, "candidateIds")
+
+    activity_capture_authorities = document.get("activityCaptureAuthorities")
+    if isinstance(activity_capture_authorities, dict):
+        for authority in activity_capture_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultEvidence")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -6276,7 +6307,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456"),
+         "2392aa308682346388bd017d5eda4d6afcf9c6f3c198a3b90e6153e0eebdc9fd"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7550,7 +7581,10 @@ def external_io_policy_authority_from_source(
             "lease = admission.tryAcquire(message.tenantId(), settings.profile().name(),",
         ),
         EXTERNAL_IO_GRAPH_RUNNER_PATH: (
-            ".whenComplete((ignored, failure) -> behaviors.releaseOperationalPolicy(traversalId));",
+            """return teardown.whenComplete((ignored, failure) -> {
+            activeBudgets.remove(traversalId, activeBudget);
+            behaviors.releaseOperationalPolicy(traversalId);
+        });""",
         ),
         EXTERNAL_IO_APPLICATION_PATH: (
             "policyForNodeAdmission(behaviorNodes)",
@@ -7916,7 +7950,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  'c4d68bec53c69fc6d168b4d7eddc0c653ba7e640513d43806e9c57f45653de7d',
+  '50f4dccf6bfbf2b300d0c3e125ebf75cf9d20fb03e590c0879c9423eaa29ce4b',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -7940,7 +7974,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456',
+  '2392aa308682346388bd017d5eda4d6afcf9c6f3c198a3b90e6153e0eebdc9fd',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -8283,7 +8317,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'dbfee4ea16c5730eb2b4dcd20da2c73ff02bca76820160fab0aa07e75a7e5b9f',
+  '426b3fde2a066a8685ece865d906cf7607acc6b128e1ebfdbbbe5cb560560b08',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -8526,6 +8560,7 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-7472c211aa6980103e4b',
  'oc-00dc7c6b323744d9427e',
  'oc-107e73202ff972e53169',
+ 'oc-1bed77f8f397cfa98208',
  'oc-20f796f0e15a1c389586',
  'oc-23f50ddca7ea65fc2aec',
  'oc-2d7c516244dfb35125e6',
@@ -8550,7 +8585,7 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-8561e4404c8819c4a62f',
  'oc-86ec24b91c7449c418be',
  'oc-886d1581ff889079e85d',
- 'oc-890813c7fb2d8861e36f',
+ 'oc-389255cffa9d91785bc3',
  'oc-92e7a625ae5d828264bc',
  'oc-9afebfed0a8eeafb99ce',
  'oc-a35ea52a7d68498116e3',
@@ -10881,8 +10916,8 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                 'rationale': 'Constructor diagnostic label or one-byte '
                                                              'overflow detection sentinel; actual limit '
                                                              'comes from typed authority.',
-                                                'candidateIds': ['oc-45c33d012ba830f6aa95',
-                                                                 'oc-f104357558572e8b33a8']},
+                                                'candidateIds': ['oc-5cc859036ec85f54143e',
+                                                                 'oc-6e44c0652ce7d3a85a35']},
  'program.authoring.served-schema-version': {'classification': 'protocol-or-format-invariant',
                                              'status': 'retained',
                                              'rationale': 'Fixed peer protocol/header/schema identity, not a '
@@ -12798,7 +12833,7 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': 'e1da6227343f3d5b13617071bf5897f578069930fb580403e326964fdf52548f',
+ 'scripts/publish_environment_reference.py': 'cc59dcf26816442de3b264aac32d1eb11ef49066677041be4ef6f0fcd7cf61d3',
  'scripts/tests/test_publish_environment_reference.py': '376119c0792ea23f1afea14df7091f84f10f57b8c85d11eaa45f4687c91cb72e',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
@@ -12806,7 +12841,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  '90be462c7e8143b2f2c04cd40a5091168e41312ecd7d5fe6834d57a2d072e456'),
+  '2392aa308682346388bd017d5eda4d6afcf9c6f3c198a3b90e6153e0eebdc9fd'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -13760,6 +13795,162 @@ def dual_source_binding_authority_errors(root: Path, setting: str, contract: dic
     return errors
 
 
+SAGA_OUTBOX_CAPACITY_BINDING_KIND = "java-saga-outbox-system-property-v1"
+SAGA_OUTBOX_CAPACITY_PATH = (
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/"
+    "SagaOutboxCapacity.java"
+)
+SAGA_OUTBOX_CAPACITY_SETTINGS = {
+    "saga.outbox.maximum-outstanding-commands": {
+        "field": "maximumOutstandingCommands",
+        "propertyConstant": "COMMANDS_PROPERTY",
+        "property": "ravenroot.saga.outbox.maxOutstandingCommands",
+        "default": "128 commands per tenant",
+        "defaultExpressions": ("128",),
+    },
+    "saga.outbox.maximum-outstanding-bytes": {
+        "field": "maximumOutstandingBytes",
+        "propertyConstant": "BYTES_PROPERTY",
+        "property": "ravenroot.saga.outbox.maxOutstandingBytes",
+        "default": "16 MiB of encoded commands per tenant",
+        "defaultExpressions": ("16L", "1024", "1024"),
+    },
+}
+SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS = {
+    SAGA_OUTBOX_CAPACITY_PATH:
+        "159cf602178d4cd65038cdbc1949fd2f1d097826fde3a2c52a3347fb5dddaa93",
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
+    "InMemoryExecutionStore.java":
+        "690aaed8f9a257fc33a3d32567d6a2e585916a1d81725feaa98fa84897890235",
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/"
+    "SqliteExecutionStore.java":
+        "4da9cc0c08f46491f7c65a2dae5cf63d78a98339e0c9d65a09a68c63b69c7b48",
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/"
+    "postgresql/PostgresExecutionStore.java":
+        "931877ccbb659cee1fb90ddd42f1e4486814e2b880678c243b982f995c358ad1",
+    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
+    "ExecutionStoreContract.java":
+        "5ee3bc4bd46a9aad8f11c59071c5004f5b21469dfb3dceefe03e171b85a0a5c0",
+}
+SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST = \
+    "c17f55d2e2a2d57536718dbfa1a65122e22bce5644254b487a3156f80a4a726b"
+SAGA_OUTBOX_CAPACITY_CONSTRUCTOR_DIGEST = \
+    "380b98fe8309fd9b34a1dc5b9b88d1e21579e3f168fdb4bbd62ce202bcbed93d"
+SAGA_OUTBOX_CAPACITY_TEST_DIGEST = \
+    "668b5c668a6b79fb332dafb9e50cb05e6828f00aa0eb7bf19a7f8f9c6021981b"
+
+
+def saga_outbox_capacity_authority(
+        root: Path, setting: str,
+        discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive one property-only saga capacity setting from its closed typed source."""
+    specification = SAGA_OUTBOX_CAPACITY_SETTINGS.get(setting)
+    if specification is None:
+        return None
+    sources: dict[str, str] = {}
+    try:
+        for path, expected in SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS.items():
+            source = (root / path).read_text(encoding="utf-8")
+            if _source_digest(source) != expected:
+                return None
+            sources[path] = source
+    except (OSError, UnicodeError):
+        return None
+    source = sources[SAGA_OUTBOX_CAPACITY_PATH]
+    if java_record_components(source, "SagaOutboxCapacity") != (
+            "maximumOutstandingCommands", "maximumOutstandingBytes") \
+            or java_method_digest(source, "SagaOutboxCapacity", "configured") != \
+            SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST \
+            or java_span_digest(source, java_compact_constructor_span(
+                source, "SagaOutboxCapacity")) != SAGA_OUTBOX_CAPACITY_CONSTRUCTOR_DIGEST:
+        return None
+    test_source = sources[next(path for path in SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS
+                               if path.endswith("/ExecutionStoreContract.java"))]
+    if java_method_digest(
+            test_source, "ExecutionStoreContract",
+            "sagaOutboxCapacityRefusesTheWholeCreatingBatchWithoutPartialRows",
+    ) != SAGA_OUTBOX_CAPACITY_TEST_DIGEST:
+        return None
+    property_name = str(specification["property"])
+    property_constant = str(specification["propertyConstant"])
+    field = str(specification["field"])
+    property_ids = sorted(candidate.id for candidate in discovered.values()
+                          if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                          and candidate.kind == "property-binding"
+                          and candidate.expression == property_name)
+    declaration_ids = sorted(candidate.id for candidate in discovered.values()
+                             if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                             and candidate.kind == "fixed-declaration"
+                             and candidate.role == property_constant
+                             and candidate.expression == json.dumps(property_name))
+    lookup_ids = sorted(candidate.id for candidate in discovered.values()
+                        if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                        and candidate.kind == "property-binding"
+                        and candidate.role == "System.getProperty"
+                        and candidate.expression == property_constant)
+    expected_defaults = Counter(str(value) for value in specification["defaultExpressions"])
+    default_candidates = [candidate for candidate in discovered.values()
+                          if candidate.path == SAGA_OUTBOX_CAPACITY_PATH
+                          and candidate.kind == "fixed-declaration"
+                          and candidate.role == "DEFAULTS"
+                          and candidate.expression in expected_defaults]
+    if len(property_ids) != 1 or len(declaration_ids) != 1 or len(lookup_ids) != 1 \
+            or Counter(candidate.expression for candidate in default_candidates) != expected_defaults:
+        return None
+    default_ids = sorted(candidate.id for candidate in default_candidates)
+    binding = {
+        "kind": SAGA_OUTBOX_CAPACITY_BINDING_KIND,
+        "sourceOwner": f"{SAGA_OUTBOX_CAPACITY_PATH}#SagaOutboxCapacity",
+        "method": "configured", "constructorType": "SagaOutboxCapacity",
+        "component": field, "propertyConstant": property_constant,
+        "property": property_name,
+        "declarationCandidateIds": declaration_ids,
+        "propertyCandidateIds": property_ids,
+        "lookupCandidateIds": lookup_ids,
+        "configuredMethodDigest": SAGA_OUTBOX_CAPACITY_CONFIGURED_DIGEST,
+        "compactConstructorDigest": SAGA_OUTBOX_CAPACITY_CONSTRUCTOR_DIGEST,
+        "sourceProofs": dict(SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS),
+        "testMethodDigest": SAGA_OUTBOX_CAPACITY_TEST_DIGEST,
+    }
+    default = {
+        "owner": f"{SAGA_OUTBOX_CAPACITY_PATH}#SagaOutboxCapacity",
+        "instanceSymbol": "DEFAULTS", "field": field,
+        "sourceExpression": ("128" if field == "maximumOutstandingCommands"
+                             else "16L * 1024 * 1024"),
+        "candidateIds": default_ids,
+    }
+    return {"bindingAuthority": binding, "defaultAuthority": default,
+            "candidateIds": sorted(declaration_ids + property_ids + lookup_ids + default_ids)}
+
+
+def saga_outbox_capacity_authority_errors(
+        root: Path, setting: str, contract: dict[str, object],
+        setting_entries: list[dict[str, object]], entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    """Require exact property, default, consumer, and executable-test evidence."""
+    expected = saga_outbox_capacity_authority(root, setting, discovered)
+    if expected is None:
+        return [f"{setting}: unsupported or drifted saga outbox capacity authority"]
+    specification = SAGA_OUTBOX_CAPACITY_SETTINGS[setting]
+    errors: list[str] = []
+    if contract.get("owner") != f"{SAGA_OUTBOX_CAPACITY_PATH}#SagaOutboxCapacity" \
+            or contract.get("field") != specification["field"] \
+            or contract.get("bindings") != [specification["property"]] \
+            or contract.get("default") != specification["default"]:
+        errors.append(f"{setting}: typed owner, property binding, or default has drifted")
+    if contract.get("bindingAuthority") != expected["bindingAuthority"]:
+        errors.append(f"{setting}: saga outbox property binding authority has drifted")
+    if contract.get("defaultAuthority") != expected["defaultAuthority"] \
+            or contract.get("defaultEvidence") != expected["defaultAuthority"]["candidateIds"]:
+        errors.append(f"{setting}: saga outbox default authority has drifted")
+    identifiers = sorted(str(entry["id"]) for entry in setting_entries)
+    if identifiers != expected["candidateIds"] \
+            or any(entries.get(identifier, {}).get("setting") != setting
+                   for identifier in expected["candidateIds"]):
+        errors.append(f"{setting}: saga outbox capacity candidate partition has drifted")
+    return errors
+
+
 RUNNER_COORDINATOR_BINDING_KIND = "java-runner-coordinator-environment-v1"
 RUNNER_COORDINATOR_CONFIGURATION_PATH = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorConfiguration.java"
 RUNNER_COORDINATOR_BINDINGS = {
@@ -13841,6 +14032,10 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
         entry for entry in setting_entries if entry.get("kind") == "environment-binding"
     ]
     authority = contract.get("bindingAuthority")
+    if setting in SAGA_OUTBOX_CAPACITY_SETTINGS or (isinstance(authority, dict)
+            and authority.get("kind") == SAGA_OUTBOX_CAPACITY_BINDING_KIND):
+        return saga_outbox_capacity_authority_errors(
+            root, setting, contract, setting_entries, entries, discovered)
     if setting in RUNNER_COORDINATOR_BINDINGS or (isinstance(authority, dict)
             and authority.get("kind") == RUNNER_COORDINATOR_BINDING_KIND):
         return runner_coordinator_binding_errors(
@@ -13941,6 +14136,11 @@ def default_authority_errors(root: Path, setting: str, contract: dict[str, objec
     property_bound = any(entry.get("setting") == setting and entry.get("kind") == "property-binding"
                          for entry in entries.values())
     binding_authority = contract.get("bindingAuthority")
+    if isinstance(binding_authority, dict) \
+            and binding_authority.get("kind") == SAGA_OUTBOX_CAPACITY_BINDING_KIND:
+        # The specialized authority resolves two record components from one composite
+        # DEFAULTS initializer and verifies each component's exact atom multiset.
+        return []
     if isinstance(binding_authority, dict) \
             and binding_authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
         return []
@@ -14250,22 +14450,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-fd55d0a7257b34182233": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-32c4dad8f70a55879b3c":
+    "oc-718c93fcd4195beee84e": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-8a475043a068f68a3359":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-0b0cd0fa86930eafb8bd": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-c1b22a78cf99699bd70d": (
+    "oc-4f76f6164bb685b59511": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-3f9a83111f48f0f5425c": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-058c1a2778a552a15c5a": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-88e5f7eff7fa5a8d9d13": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-fd55d0a7257b34182233": "/v1/events",
-    "oc-32c4dad8f70a55879b3c": "/v1/events",
-    "oc-0b0cd0fa86930eafb8bd": "/v1/events",
-    "oc-c1b22a78cf99699bd70d": "/v1/events/recent",
-    "oc-058c1a2778a552a15c5a": "/v1/events/recent",
+    "oc-718c93fcd4195beee84e": "/v1/events",
+    "oc-8a475043a068f68a3359": "/v1/events",
+    "oc-4f76f6164bb685b59511": "/v1/events",
+    "oc-3f9a83111f48f0f5425c": "/v1/events/recent",
+    "oc-88e5f7eff7fa5a8d9d13": "/v1/events/recent",
 }
 
 
@@ -14670,7 +14870,8 @@ def route_table_candidate_partitions(source: str) -> tuple[
         method_values: list[str] = []
         for argument, _start, _end in methods:
             value = java_literal_concatenation(argument)
-            if value is None or len(value[1]) != 1 or value[0] not in {"GET", "POST", "PUT", "DELETE"}:
+            if value is None or len(value[1]) != 1 \
+                    or value[0] not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
                 return None
             method_values.append(value[0])
         if not path[0].startswith("/") or not summary[0].strip():
@@ -15256,9 +15457,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 108, "path": 98, "summary": 432, "successStatuses": 100}
-    if len(details) != 98 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 98/738 positional shape")
+    expected_counts = {"methods": 121, "path": 108, "summary": 449, "successStatuses": 111}
+    if len(details) != 108 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 108/789 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

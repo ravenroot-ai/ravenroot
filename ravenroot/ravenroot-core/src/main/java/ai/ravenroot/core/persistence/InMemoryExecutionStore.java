@@ -57,6 +57,9 @@ import ai.ravenroot.api.persistence.ProcessInventoryEntry;
 import ai.ravenroot.api.persistence.ProcessInventoryPage;
 import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
@@ -67,6 +70,16 @@ import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
+import ai.ravenroot.api.persistence.SagaCommandIntent;
+import ai.ravenroot.api.persistence.SagaCommandCodec;
+import ai.ravenroot.api.persistence.SagaOutboxCapacity;
+import ai.ravenroot.api.persistence.SagaCommandCompletion;
+import ai.ravenroot.api.persistence.SagaDisposition;
+import ai.ravenroot.api.persistence.SagaOutboxRecord;
+import ai.ravenroot.api.persistence.SagaOutboxSettlement;
+import ai.ravenroot.api.persistence.SagaOutboxStatus;
+import ai.ravenroot.api.persistence.SagaSnapshot;
+import ai.ravenroot.api.persistence.SagaWrite;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -114,6 +127,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<String, Map<String, ai.ravenroot.api.runner.GovernedRunnerResource>> runnerCatalog =
             new HashMap<>();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
+    private final Map<ExecutionKey, LinkedHashMap<UUID, ReplayInvocationEvidence>> replayEvidence =
+            new LinkedHashMap<>();
+    private final Map<ExecutionKey, ReplaySourceSettlement> replaySettlements = new LinkedHashMap<>();
+    private final Map<ExecutionKey, DerivedExecutionAncestry> derivedAncestries = new LinkedHashMap<>();
     private final Map<IdempotencyKey, IdempotencyRecord> idempotency = new LinkedHashMap<>();
     /**
      * Per-tenant temporal low-water-mark. Every record whose {@code expiresAt} is at or after the
@@ -156,8 +173,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Duration terminalRetention;
     private final Duration executionResultRetention;
     private final HumanTaskPolicy humanTaskPolicy;
+    private final SagaOutboxCapacity sagaOutboxCapacity;
     private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
     private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
+    private final Map<SagaKey, SagaSnapshot> sagas = new LinkedHashMap<>();
+    private final Map<OutboxKey, OutboxEntry> sagaOutbox = new LinkedHashMap<>();
+    private final Map<FlowKey, ai.ravenroot.api.flow.FlowInvocationRecord> flowInvocations =
+            new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
         this(Clock.systemUTC(), InMemoryExecutionStorePolicy.DEFAULTS);
@@ -247,6 +269,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         this.terminalRetention = policy.terminalRetention();
         this.executionResultRetention = policy.executionResultRetention();
         this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        this.sagaOutboxCapacity = SagaOutboxCapacity.configured();
     }
 
     @Override
@@ -293,7 +316,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // medium, and this adapter honours every one of them exactly. What it
                 // cannot honour is survival of process death, which is what DURABLE
                 // says and what this adapter still does not say.
-                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
+                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
+                StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
+                StoreCapability.FLOW_INVOCATIONS);
     }
 
     @Override
@@ -341,6 +366,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             batch.idempotency().ifPresent(write -> {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
+            });
+            batch.replayEvidence().forEach(evidence -> {
+                requireWithinPayloadLimit(evidence.output());
+                requireWithinPayloadLimit(evidence.attributes());
+                if (!batch.key().equals(evidence.source())) {
+                    throw failure(ExecutionStoreFailure.invalid("replay evidence source does not match batch"));
+                }
             });
             requireEnvelopesMatchBatch(batch);
 
@@ -464,6 +496,73 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.executionPauses);
                 applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
 
+                for (ReplayInvocationEvidence evidence : batch.replayEvidence()) {
+                    var traversal = folded.traversals().get(evidence.traversalId());
+                    var invocation = traversal == null ? null : traversal.invocations().get(evidence.invocationId());
+                    if (invocation == null || invocation.status() != ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED
+                            || !invocation.nodeId().equals(evidence.nodeId())
+                            || !invocation.command().equals(evidence.command())
+                            || !invocation.parentInvocationIds().equals(evidence.parentInvocationIds())) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay evidence must name the completed post-fold invocation"));
+                    }
+                    var attempt = invocation.attempts().stream()
+                            .filter(value -> value.attemptId().equals(evidence.attemptId()))
+                            .findFirst().orElse(null);
+                    if (attempt == null || attempt.status() != ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay evidence must name the completed post-fold attempt"));
+                    }
+                    ReplayInvocationEvidence prior = replayEvidence.getOrDefault(key, new LinkedHashMap<>())
+                            .get(evidence.invocationId());
+                    if (prior != null && !prior.equals(evidence)) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay evidence conflicts with the retained invocation value"));
+                    }
+                }
+                batch.derivedAncestry().ifPresent(ancestry -> {
+                    if (!ancestry.derived().equals(key)) {
+                        throw failure(ExecutionStoreFailure.invalid("derived ancestry must address the batch execution"));
+                    }
+                    if (!instances.containsKey(ancestry.source())) {
+                        throw failure(new ExecutionStoreFailure.NotFound(ancestry.source()));
+                    }
+                    var work = ancestry.pendingWork();
+                    var workTraversal = folded.traversals().get(work.traversalId());
+                    var workInvocation = workTraversal == null ? null
+                            : workTraversal.invocations().get(work.invocationId());
+                    var workAttempt = workInvocation == null ? null : workInvocation.attempts().stream()
+                            .filter(value -> value.attemptId().equals(work.attemptId())).findFirst().orElse(null);
+                    if (workInvocation == null || workAttempt == null
+                            || !workInvocation.nodeId().equals(work.boundary().nodeId())
+                            || !workInvocation.command().equals(work.command())
+                            || workAttempt.status() != ai.ravenroot.api.application.NodeAttemptStatus.SCHEDULED
+                            || work.payload().size() > maxPayloadBytes()
+                            || work.attributes().size() > maxPayloadBytes()) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "derived work must match the scheduled post-fold boundary attempt"));
+                    }
+                    DerivedExecutionAncestry prior = derivedAncestries.get(key);
+                    if (prior != null && !prior.equals(ancestry)) {
+                        throw failure(ExecutionStoreFailure.invalid("derived ancestry already differs"));
+                    }
+                });
+                batch.replaySourceExpectation().ifPresent(expected -> {
+                    var sourceEntry = instances.get(expected.source());
+                    var current = replaySettlements.get(expected.source());
+                    if (sourceEntry == null || current == null || !current.equals(expected)
+                            || sourceEntry.revision != expected.sourceRevision()
+                            || sourceEntry.fencingToken != expected.fencingToken()
+                            || !now.isBefore(expected.retainedUntil())) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "replay source settlement changed before derived admission"));
+                    }
+                    batch.derivedAncestry().ifPresent(ancestry -> {
+                        if (!ancestry.source().equals(expected.source())) throw failure(
+                                ExecutionStoreFailure.invalid("derived ancestry and source settlement differ"));
+                    });
+                });
+
                 var runnerWorkspace = existing == null ? null : existing.runnerWorkspace;
                 try {
                     for (var operation : batch.runnerOperations()) {
@@ -507,6 +606,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         createdAt, generation, origin, retainedUntil);
                 dropAcknowledgementsForRescheduledWork(next);
 
+                var sagaReplacements = validateSagaWrites(key, batch, now);
+                var outboxInserts = validateSagaCommands(key, batch, now);
+                var outboxRearms = validateSagaCommandRearms(key, batch);
+
                 batch.idempotency().ifPresent(write -> idempotency.put(new IdempotencyKey(key.tenantId(), write.key()),
                         new IdempotencyRecord(write.key(), write.requestFingerprint(), write.outcomeRef(),
                                 revision, now.plus(write.retentionWindow()))));
@@ -516,10 +619,272 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // what makes the shared transactional boundary real rather than described: there is
                 // no instant at which the transition is visible and its events are not.
                 instances.put(key, next);
+                sagaReplacements.forEach(sagas::put);
+                outboxInserts.forEach(sagaOutbox::put);
+                outboxRearms.forEach(entry -> rearm(entry, now));
+                batch.derivedAncestry().ifPresent(ancestry -> derivedAncestries.putIfAbsent(key, ancestry));
+                if (!batch.replayEvidence().isEmpty()) {
+                    var retained = replayEvidence.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
+                    batch.replayEvidence().forEach(value -> retained.putIfAbsent(value.invocationId(), value));
+                }
                 appendToJournal(key, batch, revision, now);
                 return next.toStored();
             }
         });
+    }
+
+    private Map<SagaKey, SagaSnapshot> validateSagaWrites(ExecutionKey key, ExecutionBatch batch, Instant now) {
+        var replacements = new LinkedHashMap<SagaKey, SagaSnapshot>();
+        var mutations = new HashSet<UUID>();
+        for (SagaWrite write : batch.sagaWrites()) {
+            SagaSnapshot snapshot = write.snapshot();
+            if (!snapshot.key().equals(key) || !mutations.add(write.mutationId())) {
+                throw failure(ExecutionStoreFailure.invalid("invalid or duplicate saga write"));
+            }
+            SagaKey sagaKey = new SagaKey(key, snapshot.sagaId());
+            SagaSnapshot current = replacements.getOrDefault(sagaKey, sagas.get(sagaKey));
+            long actual = current == null ? 0L : current.revision();
+            if (actual != write.expectedRevision()) {
+                throw failure(ExecutionStoreFailure.invalid("saga revision conflict"));
+            }
+            if (current != null && !current.definition().equals(snapshot.definition())) {
+                throw failure(ExecutionStoreFailure.invalid("saga definition is immutable"));
+            }
+            if (current != null && !current.traversalId().equals(snapshot.traversalId())) {
+                throw failure(ExecutionStoreFailure.invalid("saga traversal is immutable"));
+            }
+            replacements.put(sagaKey, snapshot);
+        }
+        return replacements;
+    }
+
+    private Map<OutboxKey, OutboxEntry> validateSagaCommands(ExecutionKey key, ExecutionBatch batch, Instant now) {
+        var inserts = new LinkedHashMap<OutboxKey, OutboxEntry>();
+        long outstandingCommands = sagaOutbox.values().stream()
+                .filter(entry -> entry.key.tenantId().equals(key.tenantId()))
+                .filter(entry -> entry.status != SagaOutboxStatus.BUSINESS_COMPLETED
+                        && entry.status != SagaOutboxStatus.EXHAUSTED).count();
+        long outstandingBytes = sagaOutbox.values().stream()
+                .filter(entry -> entry.key.tenantId().equals(key.tenantId()))
+                .filter(entry -> entry.status != SagaOutboxStatus.BUSINESS_COMPLETED
+                        && entry.status != SagaOutboxStatus.EXHAUSTED)
+                .mapToLong(entry -> SagaCommandCodec.encode(entry.intent).length).sum();
+        for (SagaCommandIntent intent : batch.sagaCommands()) {
+            SagaKey sagaKey = new SagaKey(key, intent.sagaId());
+            if (!sagas.containsKey(sagaKey) && batch.sagaWrites().stream()
+                    .noneMatch(write -> write.snapshot().sagaId().equals(intent.sagaId()))) {
+                throw failure(ExecutionStoreFailure.invalid("saga command references an absent saga"));
+            }
+            OutboxKey outboxKey = new OutboxKey(key.tenantId(), intent.messageId());
+            OutboxEntry existing = sagaOutbox.get(outboxKey);
+            if (existing != null) {
+                if (!existing.key.equals(key) || !existing.intent.equals(intent)) {
+                    throw failure(ExecutionStoreFailure.invalid("conflicting saga message identity reuse"));
+                }
+                continue;
+            }
+            int encodedBytes = SagaCommandCodec.encode(intent).length;
+            if (++outstandingCommands > sagaOutboxCapacity.maximumOutstandingCommands()
+                    || (outstandingBytes += encodedBytes) > sagaOutboxCapacity.maximumOutstandingBytes()) {
+                throw failure(ExecutionStoreFailure.invalid("saga outbox tenant capacity exceeded"));
+            }
+            OutboxEntry pending = new OutboxEntry(key, intent, SagaOutboxStatus.PENDING, 0,
+                    null, 0L, null, intent.notBefore(), "", now, null, null);
+            if (inserts.putIfAbsent(outboxKey, pending) != null) {
+                throw failure(ExecutionStoreFailure.invalid("duplicate saga message in one batch"));
+            }
+        }
+        return inserts;
+    }
+
+    private List<OutboxEntry> validateSagaCommandRearms(ExecutionKey key, ExecutionBatch batch) {
+        var result = new ArrayList<OutboxEntry>();
+        var seen = new HashSet<UUID>();
+        for (UUID messageId : batch.sagaCommandsToRearm()) {
+            if (!seen.add(messageId)) throw failure(ExecutionStoreFailure.invalid("duplicate saga command rearm"));
+            OutboxEntry entry = sagaOutbox.get(new OutboxKey(key.tenantId(), messageId));
+            if (entry == null || !entry.key.equals(key) || entry.status != SagaOutboxStatus.EXHAUSTED) {
+                throw failure(ExecutionStoreFailure.invalid("only an exhausted command in this execution may be rearmed"));
+            }
+            boolean owningSagaWritten = batch.sagaWrites().stream()
+                    .anyMatch(write -> write.snapshot().sagaId().equals(entry.intent.sagaId()));
+            if (!owningSagaWritten) {
+                throw failure(ExecutionStoreFailure.invalid("saga command rearm requires an atomic owning saga write"));
+            }
+            result.add(entry);
+        }
+        return List.copyOf(result);
+    }
+
+    private static void rearm(OutboxEntry entry, Instant now) {
+        entry.status = entry.brokerAcceptedAt == null ? SagaOutboxStatus.PENDING : SagaOutboxStatus.BROKER_ACCEPTED;
+        entry.attempts = 0; entry.owner = null; entry.leaseExpiresAt = null;
+        entry.fencingToken++; entry.nextAttemptAt = now;
+        entry.lastFailure = "operator rearmed bounded delivery";
+    }
+
+    @Override
+    public CompletionStage<Optional<SagaSnapshot>> loadSaga(ExecutionKey key, UUID sagaId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key"); Objects.requireNonNull(sagaId, "sagaId");
+            synchronized (monitor) { return Optional.ofNullable(sagas.get(new SagaKey(key, sagaId))); }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagas(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                return sagas.entrySet().stream().filter(entry -> entry.getKey().key.equals(key))
+                        .map(Map.Entry::getValue).sorted(java.util.Comparator.comparing(SagaSnapshot::createdAt))
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> listSagaCommands(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                return sagaOutbox.values().stream().filter(entry -> entry.key.equals(key))
+                        .map(OutboxEntry::record)
+                        .sorted(java.util.Comparator.comparing(record -> record.intent().messageId()))
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaCompletionCandidates(String tenantId, int limit) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid saga candidate limit");
+            synchronized (monitor) {
+                return sagas.values().stream()
+                        .filter(snapshot -> snapshot.key().tenantId().equals(tenantId))
+                        .filter(snapshot -> !leaseLive(instances.get(snapshot.key()), clock.instant()))
+                        .filter(snapshot -> {
+                            var entry = instances.get(snapshot.key());
+                            if (entry == null || entry.state.status().terminal()) return false;
+                            var traversal = entry.state.traversals().get(snapshot.traversalId());
+                            return traversal != null && !traversal.status().terminal();
+                        })
+                        .filter(SagaSnapshot::graphCompleted)
+                        .filter(snapshot -> snapshot.disposition() == SagaDisposition.SUCCEEDED
+                                || snapshot.disposition() == SagaDisposition.COMPENSATED)
+                        .sorted(java.util.Comparator.comparing(SagaSnapshot::updatedAt))
+                        .limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaSnapshot>> listSagaRecoveryCandidates(String tenantId, int limit) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid saga candidate limit");
+            synchronized (monitor) {
+                return sagas.values().stream()
+                        .filter(snapshot -> snapshot.key().tenantId().equals(tenantId))
+                        .filter(snapshot -> !leaseLive(instances.get(snapshot.key()), clock.instant()))
+                        .filter(snapshot -> snapshot.disposition() != SagaDisposition.COMPENSATED
+                                && (snapshot.disposition() != SagaDisposition.SUCCEEDED
+                                || !snapshot.graphCompleted()))
+                        .sorted(java.util.Comparator.comparing(value -> value.sagaId().toString()))
+                        .limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<SagaOutboxRecord>> claimSagaCommands(
+            String tenantId, String workerId, int limit, Duration ttl) {
+        return complete(() -> {
+            requireTenantId(tenantId); requireWorkerId(workerId); requireLeaseTtl(ttl);
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("invalid saga claim limit");
+            synchronized (monitor) {
+                Instant now = clock.instant(); var claimed = new ArrayList<SagaOutboxRecord>();
+                for (OutboxEntry entry : sagaOutbox.values()) {
+                    if (claimed.size() == limit) break;
+                    if (!entry.key.tenantId().equals(tenantId) || entry.status == SagaOutboxStatus.BUSINESS_COMPLETED
+                            || entry.status == SagaOutboxStatus.EXHAUSTED || now.isBefore(entry.nextAttemptAt)) continue;
+                    if (entry.status == SagaOutboxStatus.CLAIMED && entry.leaseExpiresAt != null
+                            && now.isBefore(entry.leaseExpiresAt)) continue;
+                    if (entry.attempts >= entry.intent.maxAttempts()) {
+                        exhaustSaga(entry, now, "delivery attempts exhausted after recovery");
+                        entry.status = SagaOutboxStatus.EXHAUSTED;
+                        entry.owner = null;
+                        entry.leaseExpiresAt = null;
+                        entry.lastFailure = "delivery attempts exhausted after recovery";
+                        continue;
+                    }
+                    entry.status = SagaOutboxStatus.CLAIMED; entry.owner = workerId;
+                    entry.fencingToken++; entry.leaseExpiresAt = now.plus(ttl); entry.attempts++;
+                    claimed.add(entry.record());
+                }
+                return List.copyOf(claimed);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<SagaOutboxRecord> settleSagaCommand(
+            String tenantId, UUID messageId, String workerId, long fencingToken,
+            SagaOutboxSettlement settlement) {
+        return complete(() -> {
+            requireTenantId(tenantId); requireWorkerId(workerId); Objects.requireNonNull(messageId);
+            Objects.requireNonNull(settlement, "settlement");
+            synchronized (monitor) {
+                OutboxEntry entry = sagaOutbox.get(new OutboxKey(tenantId, messageId));
+                if (entry == null) throw failure(ExecutionStoreFailure.invalid("saga message not found"));
+                Instant now = clock.instant();
+                if (entry.status != SagaOutboxStatus.CLAIMED || !workerId.equals(entry.owner)
+                        || entry.fencingToken != fencingToken || entry.leaseExpiresAt == null
+                        || !now.isBefore(entry.leaseExpiresAt)) {
+                    throw failure(ExecutionStoreFailure.invalid("stale saga outbox claimant"));
+                }
+                entry.owner = null; entry.leaseExpiresAt = null;
+                switch (settlement) {
+                    case SagaOutboxSettlement.BrokerAccepted ignored -> {
+                        entry.status = SagaOutboxStatus.BROKER_ACCEPTED; entry.brokerAcceptedAt = now;
+                        entry.nextAttemptAt = now.plusSeconds(1);
+                    }
+                    case SagaOutboxSettlement.BusinessCompleted ignored -> {
+                        SagaKey sagaKey = new SagaKey(entry.key, entry.intent.sagaId());
+                        SagaSnapshot current = sagas.get(sagaKey);
+                        if (current == null) throw failure(ExecutionStoreFailure.invalid("saga disappeared"));
+                        sagas.put(sagaKey, SagaCommandCompletion.fold(current, entry.intent, now));
+                        entry.status = SagaOutboxStatus.BUSINESS_COMPLETED; entry.businessCompletedAt = now;
+                    }
+                    case SagaOutboxSettlement.Retry retry -> {
+                        if (entry.attempts >= entry.intent.maxAttempts()) {
+                            exhaustSaga(entry, now, retry.safeReason());
+                            entry.status = SagaOutboxStatus.EXHAUSTED;
+                        }
+                        else {
+                            entry.status = entry.brokerAcceptedAt == null
+                                    ? SagaOutboxStatus.PENDING : SagaOutboxStatus.BROKER_ACCEPTED;
+                            entry.nextAttemptAt = now.plus(retry.delay());
+                        }
+                        entry.lastFailure = retry.safeReason();
+                    }
+                    case SagaOutboxSettlement.Exhausted exhausted -> {
+                        exhaustSaga(entry, now, exhausted.safeReason());
+                        entry.status = SagaOutboxStatus.EXHAUSTED; entry.lastFailure = exhausted.safeReason();
+                    }
+                }
+                return entry.record();
+            }
+        });
+    }
+
+    private void exhaustSaga(OutboxEntry entry, Instant now, String reason) {
+        SagaKey sagaKey = new SagaKey(entry.key, entry.intent.sagaId());
+        SagaSnapshot current = sagas.get(sagaKey);
+        if (current == null) throw failure(ExecutionStoreFailure.invalid("saga disappeared"));
+        sagas.put(sagaKey, SagaCommandCompletion.exhausted(current, entry.intent, now, reason));
     }
 
     @Override
@@ -1064,6 +1429,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     // reports would remove a row whose own deadline said it was safe.
                     Optional<Instant> deadline = retainedUntilOf(entry);
                     if (entry.runnerWorkspace != null && !entry.runnerWorkspace.retentionSafe()) continue;
+                    boolean unresolvedSaga = sagas.entrySet().stream()
+                            .filter(saga -> saga.getKey().key().equals(instance.getKey()))
+                            .map(Map.Entry::getValue)
+                            .anyMatch(saga -> !saga.graphCompleted()
+                                    || saga.disposition() != SagaDisposition.SUCCEEDED
+                                    && saga.disposition() != SagaDisposition.COMPENSATED);
+                    if (unresolvedSaga) continue;
                     if (deadline.isEmpty() || deadline.get().isAfter(now)) {
                         continue;
                     }
@@ -1077,6 +1449,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 doomed.forEach(instances::remove);
                 doomed.forEach(streamSequences::remove);
+                doomed.forEach(replayEvidence::remove);
+                doomed.forEach(replaySettlements::remove);
+                doomed.forEach(derivedAncestries::remove);
                 // The floor is the LATEST retention deadline this run actually crossed. It has to be
                 // the latest, because the guarantee runs in the direction "everything past it is still
                 // here": a run removing two rows whose deadlines are further apart than the retention
@@ -1097,6 +1472,96 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public CompletionStage<List<ReplayInvocationEvidence>> replayEvidence(ExecutionKey source, int limit) {
+        return complete(() -> {
+            Objects.requireNonNull(source, "source");
+            requireLimit(limit);
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                Entry entry = instances.get(source);
+                if (entry == null || retainedUntilOf(entry).filter(clock.instant()::isBefore).isEmpty()) {
+                    return List.of();
+                }
+                Instant deadline = retainedUntilOf(entry).orElseThrow();
+                return replayEvidence.getOrDefault(source, new LinkedHashMap<>()).values().stream()
+                        .limit(limit)
+                        .map(value -> new ReplayInvocationEvidence(value.source(), value.traversalId(),
+                                value.invocationId(), value.attemptId(), value.nodeId(),
+                                value.parentInvocationIds(), value.command(), value.outcome(), value.iteration(),
+                                value.output(), value.attributes(), value.recordedAt(), deadline))
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<ReplaySourceSettlement> recordReplaySettlement(
+            ReplaySourceSettlement settlement, LeaseHandle lease) {
+        return complete(() -> {
+            Objects.requireNonNull(settlement, "settlement");
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                Entry entry = requireCurrentReplayLease(settlement.source(), lease);
+                if (!entry.state.status().terminal()) {
+                    throw failure(ExecutionStoreFailure.invalid("replay source is not terminal"));
+                }
+                Instant retainedUntil = retainedUntilOf(entry).orElseThrow();
+                var authoritative = new ReplaySourceSettlement(settlement.source(), entry.revision,
+                        entry.fencingToken, settlement.manifestDigest(), settlement.sourceOutcomeAmbiguous(),
+                        clock.instant(), retainedUntil);
+                ReplaySourceSettlement existing = replaySettlements.get(settlement.source());
+                if (existing != null && !existing.equals(authoritative)) {
+                    throw failure(ExecutionStoreFailure.invalid("replay source settlement already differs"));
+                }
+                replaySettlements.putIfAbsent(settlement.source(), authoritative);
+                return replaySettlements.get(settlement.source());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ReplaySourceSettlement>> replaySettlement(ExecutionKey source) {
+        return complete(() -> {
+            Objects.requireNonNull(source, "source");
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                ReplaySourceSettlement settlement = replaySettlements.get(source);
+                Entry entry = instances.get(source);
+                if (settlement == null || entry == null || !clock.instant().isBefore(settlement.retainedUntil())
+                        || entry.fencingToken != settlement.fencingToken()) {
+                    return Optional.empty();
+                }
+                return Optional.of(settlement);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DerivedExecutionAncestry>> derivedAncestry(ExecutionKey derived) {
+        return complete(() -> {
+            Objects.requireNonNull(derived, "derived");
+            requireCapability(StoreCapability.SELECTIVE_REPLAY_EVIDENCE);
+            synchronized (monitor) {
+                return instances.containsKey(derived)
+                        ? Optional.ofNullable(derivedAncestries.get(derived)) : Optional.empty();
+            }
+        });
+    }
+
+    private Entry requireCurrentReplayLease(ExecutionKey key, LeaseHandle lease) {
+        Objects.requireNonNull(lease, "lease");
+        Entry entry = instances.get(key);
+        if (entry == null) throw failure(new ExecutionStoreFailure.NotFound(key));
+        if (!key.equals(lease.key()) || entry.lease == null
+                || !entry.lease.workerId().equals(lease.workerId())
+                || entry.fencingToken != lease.fencingToken()
+                || !clock.instant().isBefore(entry.lease.expiresAt())) {
+            throw failure(new ExecutionStoreFailure.LeaseLost(key, lease.workerId()));
+        }
+        return entry;
+    }
 
     @Override
     public Duration executionResultRetention() {
@@ -1381,6 +1846,246 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         };
     }
 
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> createFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent) {
+        return admitFlowInvocation(intent, Integer.MAX_VALUE);
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> admitFlowInvocation(
+            ai.ravenroot.api.flow.FlowInvocationRecord intent, int maximumUnfinishedPerTenant) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            Objects.requireNonNull(intent, "intent");
+            if (maximumUnfinishedPerTenant < 1) {
+                throw new IllegalArgumentException("maximumUnfinishedPerTenant must be positive");
+            }
+            if (intent.status() != ai.ravenroot.api.flow.FlowInvocationStatus.INTENT
+                    || intent.revision() != 1) {
+                throw new IllegalArgumentException("a new flow invocation must be INTENT at revision 1");
+            }
+            synchronized (monitor) {
+                var key = new FlowKey(intent.tenantId(), intent.handle());
+                ai.ravenroot.api.flow.FlowInvocationRecord existing = flowInvocations.get(key);
+                if (existing != null) {
+                    if (sameFlowIntent(existing, intent)) return existing;
+                    throw new IllegalStateException("flow handle is already bound to another intent");
+                }
+                ai.ravenroot.api.flow.FlowInvocationRecord callerExisting = flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(intent.tenantId())
+                                && record.callerProcessInstanceId().equals(intent.callerProcessInstanceId())
+                                && record.callerInvocationId().equals(intent.callerInvocationId()))
+                        .findFirst().orElse(null);
+                if (callerExisting != null) return callerExisting;
+                long unfinished = flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(intent.tenantId()) && !record.terminal())
+                        .count();
+                if (unfinished >= maximumUnfinishedPerTenant) {
+                    throw new IllegalStateException("tenant flow invocation quota is exhausted");
+                }
+                flowInvocations.put(key, intent);
+                return intent;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> loadFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(handle, "handle");
+            synchronized (monitor) {
+                return Optional.ofNullable(flowInvocations.get(new FlowKey(tenantId, handle)));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.flow.FlowInvocationRecord>> findFlowInvocationByCaller(
+            String tenantId, UUID callerProcessInstanceId, UUID callerInvocationId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            java.util.Objects.requireNonNull(callerProcessInstanceId, "callerProcessInstanceId");
+            java.util.Objects.requireNonNull(callerInvocationId, "callerInvocationId");
+            synchronized (monitor) {
+                return flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(tenantId)
+                                && record.callerProcessInstanceId().equals(callerProcessInstanceId)
+                                && record.callerInvocationId().equals(callerInvocationId))
+                        .findFirst();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.flow.FlowInvocationRecord> mutateFlowInvocation(
+            String tenantId, ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        try {
+            return complete(() -> {
+                requireCapability(StoreCapability.FLOW_INVOCATIONS);
+                requireTenantId(tenantId);
+                Objects.requireNonNull(mutation, "mutation");
+                synchronized (monitor) {
+                    var key = new FlowKey(tenantId, mutation.handle());
+                    var current = flowInvocations.get(key);
+                    if (current == null) return missingFlow(mutation.handle());
+                    if (current.revision() != mutation.expectedRevision()) {
+                        if (sameFlowMutation(current, mutation)) return current;
+                        throw new ai.ravenroot.api.flow.FlowInvocationConflictException(
+                                mutation.expectedRevision(), current.revision());
+                    }
+                    requireFlowTransition(current, mutation);
+                    var next = new ai.ravenroot.api.flow.FlowInvocationRecord(
+                            current.tenantId(), current.handle(), current.callerProcessInstanceId(),
+                            current.callerTraversalId(), current.callerInvocationId(),
+                            current.callerSubject(), current.callerPrincipalType(), current.callerIssuer(),
+                            current.targetDeploymentId(), current.targetVersion(), current.targetDigest(),
+                            mutation.childProcessInstanceId(), mutation.childTraversalId(), mutation.status(),
+                            current.input(), mutation.result(), mutation.failureCode(), mutation.failureMessage(),
+                            mutation.continuationClaim(), current.revision() + 1, current.createdAt(),
+                            mutation.updatedAt(), current.deadlineAt(), current.retainedUntil());
+                    flowInvocations.put(key, next);
+                    return next;
+                }
+            });
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(refused);
+        }
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> unfinishedFlowInvocations(
+            String tenantId, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            synchronized (monitor) {
+                return flowInvocations.entrySet().stream()
+                        .filter(entry -> entry.getKey().tenantId().equals(tenantId))
+                        .map(Map.Entry::getValue)
+                        .filter(record -> !record.terminal())
+                        .sorted(java.util.Comparator.comparing(ai.ravenroot.api.flow.FlowInvocationRecord::createdAt)
+                                .thenComparing(record -> record.handle().toString()))
+                        .limit(limit)
+                        .toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocations(
+            String tenantId, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS); requireTenantId(tenantId);
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            synchronized (monitor) {
+                return flowInvocations.values().stream().filter(record -> record.tenantId().equals(tenantId))
+                        .sorted(java.util.Comparator.comparing(ai.ravenroot.api.flow.FlowInvocationRecord::createdAt)
+                                .thenComparing(record -> record.handle().toString())).limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.flow.FlowInvocationRecord>> retainedFlowInvocationsAfter(
+            String tenantId, Optional<ai.ravenroot.api.flow.FlowHandle> afterExclusive, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(afterExclusive, "afterExclusive");
+            if (limit < 1 || limit > 1_000) throw new IllegalArgumentException("limit must be 1..1000");
+            String cursor = afterExclusive.map(Object::toString).orElse("");
+            synchronized (monitor) {
+                return flowInvocations.values().stream()
+                        .filter(record -> record.tenantId().equals(tenantId)
+                                && record.handle().toString().compareTo(cursor) > 0)
+                        .sorted(java.util.Comparator.comparing(record -> record.handle().toString()))
+                        .limit(limit).toList();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredFlowInvocations(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.FLOW_INVOCATIONS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                long before = flowInvocations.size();
+                Instant now = clock.instant();
+                flowInvocations.entrySet().removeIf(entry -> entry.getKey().tenantId().equals(tenantId)
+                        && entry.getValue().terminal()
+                        && !entry.getValue().retainedUntil().isAfter(now));
+                return before - (long) flowInvocations.size();
+            }
+        });
+    }
+
+    private static ai.ravenroot.api.flow.FlowInvocationRecord missingFlow(
+            ai.ravenroot.api.flow.FlowHandle handle) {
+        throw new IllegalArgumentException("unknown flow handle " + handle);
+    }
+
+    private static boolean sameFlowIntent(ai.ravenroot.api.flow.FlowInvocationRecord left,
+                                          ai.ravenroot.api.flow.FlowInvocationRecord right) {
+        return left.handle().equals(right.handle())
+                && left.callerProcessInstanceId().equals(right.callerProcessInstanceId())
+                && left.callerTraversalId().equals(right.callerTraversalId())
+                && left.callerInvocationId().equals(right.callerInvocationId())
+                && left.targetDeploymentId().equals(right.targetDeploymentId())
+                && left.targetVersion() == right.targetVersion()
+                && left.targetDigest().equals(right.targetDigest())
+                && java.util.Arrays.equals(left.input(), right.input());
+    }
+
+    private static boolean sameFlowMutation(ai.ravenroot.api.flow.FlowInvocationRecord current,
+                                            ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        return current.status() == mutation.status()
+                && Objects.equals(current.childProcessInstanceId(), mutation.childProcessInstanceId())
+                && Objects.equals(current.childTraversalId(), mutation.childTraversalId())
+                && java.util.Arrays.equals(current.result(), mutation.result())
+                && current.failureCode().equals(mutation.failureCode())
+                && current.failureMessage().equals(mutation.failureMessage())
+                && Objects.equals(current.continuationClaim(), mutation.continuationClaim());
+    }
+
+    private static void requireFlowTransition(ai.ravenroot.api.flow.FlowInvocationRecord current,
+                                              ai.ravenroot.api.flow.FlowInvocationMutation mutation) {
+        if (mutation.updatedAt().isBefore(current.updatedAt())) {
+            throw new IllegalArgumentException("flow invocation update time cannot retreat");
+        }
+        if (current.terminal() && mutation.status() != current.status()) {
+            throw new IllegalStateException("a terminal flow invocation cannot change outcome");
+        }
+        if (current.childTraversalId() != null
+                && (!current.childTraversalId().equals(mutation.childTraversalId())
+                || !current.childProcessInstanceId().equals(mutation.childProcessInstanceId()))) {
+            throw new IllegalStateException("a flow invocation cannot change child identity");
+        }
+        if (current.status() == ai.ravenroot.api.flow.FlowInvocationStatus.INTENT
+                && mutation.status() != current.status()
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.LAUNCHED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.FAILED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.CANCELLED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.DEADLINE_EXCEEDED
+                && mutation.status() != ai.ravenroot.api.flow.FlowInvocationStatus.AMBIGUOUS) {
+            throw new IllegalStateException("invalid INTENT settlement");
+        }
+        if (current.status() == ai.ravenroot.api.flow.FlowInvocationStatus.LAUNCHED
+                && mutation.status() == ai.ravenroot.api.flow.FlowInvocationStatus.INTENT) {
+            throw new IllegalStateException("a launched flow invocation cannot return to INTENT");
+        }
+        if (current.continuationClaim() != null
+                && !current.continuationClaim().equals(mutation.continuationClaim())) {
+            throw new IllegalStateException("a flow invocation accepts at most one continuation claimant");
+        }
+    }
+
     /**
      * Discards everything, which for a <strong>non-durable</strong> adapter is exactly right
      * (ADR 0010 section 13.1): retaining state across close would falsely simulate durability, which
@@ -1407,6 +2112,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             inventoryRetainedFrom.clear();
             executionResults.clear();
             executionResultsRetainedFrom.clear();
+            flowInvocations.clear();
         }
     }
 
@@ -3074,6 +3780,44 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private record ResultKey(String tenantId, UUID traversalId) {
     }
 
+    private record FlowKey(String tenantId, ai.ravenroot.api.flow.FlowHandle handle) {
+    }
+
     private record IdempotencyKey(String tenantId, String key) {
+    }
+
+    private record SagaKey(ExecutionKey key, UUID sagaId) { }
+
+    private record OutboxKey(String tenantId, UUID messageId) { }
+
+    private static final class OutboxEntry {
+        private final ExecutionKey key;
+        private final SagaCommandIntent intent;
+        private SagaOutboxStatus status;
+        private int attempts;
+        private String owner;
+        private long fencingToken;
+        private Instant leaseExpiresAt;
+        private Instant nextAttemptAt;
+        private String lastFailure;
+        private final Instant createdAt;
+        private Instant brokerAcceptedAt;
+        private Instant businessCompletedAt;
+
+        private OutboxEntry(ExecutionKey key, SagaCommandIntent intent, SagaOutboxStatus status,
+                            int attempts, String owner, long fencingToken, Instant leaseExpiresAt,
+                            Instant nextAttemptAt, String lastFailure, Instant createdAt,
+                            Instant brokerAcceptedAt, Instant businessCompletedAt) {
+            this.key = key; this.intent = intent; this.status = status; this.attempts = attempts;
+            this.owner = owner; this.fencingToken = fencingToken; this.leaseExpiresAt = leaseExpiresAt;
+            this.nextAttemptAt = nextAttemptAt; this.lastFailure = lastFailure; this.createdAt = createdAt;
+            this.brokerAcceptedAt = brokerAcceptedAt; this.businessCompletedAt = businessCompletedAt;
+        }
+
+        private SagaOutboxRecord record() {
+            return new SagaOutboxRecord(key, intent, status, attempts, owner, fencingToken,
+                    leaseExpiresAt, nextAttemptAt, lastFailure, createdAt,
+                    brokerAcceptedAt, businessCompletedAt);
+        }
     }
 }

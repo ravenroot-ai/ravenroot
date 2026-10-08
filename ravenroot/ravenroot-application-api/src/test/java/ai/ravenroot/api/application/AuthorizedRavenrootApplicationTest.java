@@ -35,6 +35,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AuthorizedRavenrootApplicationTest {
     @Test
+    void derivedExternalOutcomeDecisionCannotBypassExecutionControl() {
+        var raw = new FakeApplication();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, true);
+        UUID source = UUID.randomUUID();
+        var request = new DerivedExecutionRequest(List.of(new ai.ravenroot.api.persistence.ReplayBoundarySeed(
+                "B", Set.of(UUID.randomUUID()))), "reconcile", "continue after ambiguous outcome",
+                "operator reconciled the external attempt", true);
+        var withoutControl = context("tenant-a", Role.OPERATOR, "ravenroot.execute", "ravenroot.observe");
+
+        assertThrows(AuthorizationDeniedException.class,
+                () -> facade.startDerivedExecution(withoutControl, source, request));
+        assertEquals(0, raw.derivedStartCalls,
+                "a claimed reconciliation decision must not reach admission without control authority");
+
+        var withControl = context("tenant-a", Role.OPERATOR, "ravenroot.execute", "ravenroot.observe",
+                "ravenroot.execution.control");
+        facade.startDerivedExecution(withControl, source, request);
+        assertEquals(1, raw.derivedStartCalls);
+    }
+
+    @Test
     void sourceSessionsRequireDistinctPermissionsAndAlwaysDelegateTheAuthenticatedTenant() throws Exception {
         var raw = new FakeApplication();
         var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
@@ -955,6 +977,42 @@ class AuthorizedRavenrootApplicationTest {
                 java.util.Optional.empty(), null);
     }
 
+    @Test
+    void sagaReadsAndActionsAreTenantScopedAuthorizedAndAudited() {
+        var raw = new FakeApplication();
+        UUID processId = UUID.randomUUID();
+        UUID sagaId = UUID.randomUUID();
+        var key = new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", processId);
+        var step = new ai.ravenroot.api.persistence.SagaStepDefinition(
+                "validate", "validate", "pure", null, List.of(), false, false);
+        var definition = new ai.ravenroot.api.persistence.SagaDefinition(1, "order", "a".repeat(64),
+                "b".repeat(64), Map.of(step.stepId(), step));
+        raw.sagaSnapshot = new ai.ravenroot.api.persistence.SagaSnapshot(key, sagaId, UUID.randomUUID(), definition, 4,
+                ai.ravenroot.api.persistence.SagaDisposition.UNRESOLVED, false, Map.of(), null,
+                Instant.EPOCH, Instant.EPOCH, "operator action required", true);
+        var audit = new ArrayList<ExecutionControlAuditEvent>();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, false, AuthorizedRavenrootApplication.DEFAULT_EXECUTION_OWNERSHIP_LIMIT,
+                audit::add);
+
+        assertEquals(List.of(raw.sagaSnapshot), facade.processInstanceSagas(
+                context("tenant-a", Role.OPERATOR, "ravenroot.observe"), processId));
+        assertEquals("tenant-a", raw.sagaTenant);
+        assertThrows(AuthorizationDeniedException.class, () -> facade.requestSagaAction(
+                context("tenant-a", Role.VIEWER, "ravenroot.observe"), processId, sagaId, 4,
+                ai.ravenroot.api.persistence.SagaOperatorAction.RECONCILE));
+
+        assertEquals(raw.sagaSnapshot, facade.requestSagaAction(
+                context("tenant-a", Role.OPERATOR, "ravenroot.execution.control"), processId, sagaId, 4,
+                ai.ravenroot.api.persistence.SagaOperatorAction.RECONCILE));
+        assertEquals("tenant-a", raw.sagaTenant);
+        assertEquals(List.of(ExecutionControlAuditEvent.Disposition.ATTEMPT,
+                        ExecutionControlAuditEvent.Disposition.SUCCEEDED),
+                audit.stream().map(ExecutionControlAuditEvent::disposition).toList());
+        assertTrue(audit.stream().allMatch(event -> event.action().equals("saga.reconcile")
+                && event.resourceType().equals("saga") && event.resourceId().equals(sagaId.toString())));
+    }
+
     private static RequestContext context(String tenant, Role role, String scope) {
         return context("alice", tenant, role, scope);
     }
@@ -1020,6 +1078,26 @@ class AuthorizedRavenrootApplicationTest {
     }
 
     private static final class FakeApplication implements RavenrootApplication {
+        private ai.ravenroot.api.persistence.SagaSnapshot sagaSnapshot;
+        private String sagaTenant;
+
+        @Override
+        public boolean sagaStatusAvailable() { return true; }
+
+        @Override
+        public List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+                String tenantId, UUID processInstanceId) {
+            sagaTenant = tenantId;
+            return sagaSnapshot == null ? List.of() : List.of(sagaSnapshot);
+        }
+
+        @Override
+        public ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+                String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+                ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+            sagaTenant = tenantId;
+            return sagaSnapshot;
+        }
         private ai.ravenroot.api.programming.ProgramAuthoringLimits programLimits =
                 ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
         private final List<GeneratedArtifact> artifacts = new ArrayList<>();
@@ -1170,6 +1248,7 @@ class AuthorizedRavenrootApplicationTest {
         private int activationCalls;
         private int retirementCalls;
         private int startCalls;
+        private int derivedStartCalls;
         private ExecutionPolicy observedPolicy;
         private boolean publishEventDuringStart;
         private RuntimeException startFailure;
@@ -1254,6 +1333,13 @@ class AuthorizedRavenrootApplicationTest {
                 throw failure;
             }
             return new ExecutionSubmission(executionId, "graph");
+        }
+        @Override
+        public DerivedExecutionStart startDerivedExecution(ai.ravenroot.api.security.SecurityContext security,
+                                                           UUID sourceProcessInstanceId,
+                                                           DerivedExecutionRequest request) {
+            derivedStartCalls++;
+            return new DerivedExecutionStart(UUID.randomUUID(), UUID.randomUUID(), "graph");
         }
         @Override public ExecutionSubmission startGraphMl(ai.ravenroot.api.security.SecurityContext security,
                                                           UUID executionId, InputStream graphMl, Object payload,

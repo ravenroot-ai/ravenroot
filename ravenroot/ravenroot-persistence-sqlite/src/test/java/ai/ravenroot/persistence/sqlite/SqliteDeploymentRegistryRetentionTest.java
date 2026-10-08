@@ -121,14 +121,22 @@ class SqliteDeploymentRegistryRetentionTest {
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
              var statement = connection.createStatement()) {
             // Restore the exact version-32 shape. Identity bindings are migration 33 and the
-            // process incarnation origin is migration 34, so both later structures and history
-            // rows must be removed before exercising the identity backfill.
+            // process incarnation origin is migration 34. The recovery indexes and selective
+            // replay tables are migrations 35 and 36, so every later structure and history row
+            // must be removed before exercising the identity backfill.
+            statement.execute("DROP TABLE replay_invocation_evidence");
+            statement.execute("DROP TABLE replay_source_settlement");
+            statement.execute("DROP TABLE derived_execution_ancestry");
             statement.execute("DROP INDEX managed_recovery_attempt_candidate");
             statement.execute("DROP INDEX managed_recovery_timer_candidate");
             statement.execute("DROP INDEX managed_recovery_handler_candidate");
+            statement.execute("DROP TABLE node_template");
+            statement.execute("DROP TABLE node_palette");
             statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
             statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("DROP TABLE deployment_identity_binding");
+            statement.execute("DROP TABLE saga_command_outbox");
+            statement.execute("DROP TABLE saga_instance");
             statement.execute("DELETE FROM store_schema_history WHERE version >= 33");
             statement.execute("PRAGMA user_version = 32");
         }

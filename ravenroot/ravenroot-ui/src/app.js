@@ -76,6 +76,7 @@ import {
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
+import { renderNodePalettes } from './node-palette-view.js';
 import { namedAgentPresets } from './named-agent-presets.js';
 import {
   availableRegisterMachinePresets,
@@ -309,6 +310,7 @@ import {
 import {
   addConnectedNodeAt,
   addNodeAt,
+  addTemplateNodeAt,
   canDuplicateNode,
   canModifyGraph as graphCanModify,
   connectNodes,
@@ -348,7 +350,10 @@ import {
   createCommandHistory,
   discardChangesMessage,
   shouldWarnBeforeUnload,
+  updateGraphPropertiesCommand,
 } from './graph-commands.js';
+import { createDrawingModelController } from './drawing-model-controller.js';
+import { createFrontendPluginSandbox } from './frontend-plugin-sandbox.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
@@ -794,6 +799,7 @@ function beginWorkspaceAuthority(client, state = 'pending') {
   void credentialsWindow?.setClient(null);
   runnerWindow?.setClient(null);
   void deploymentsWindow?.setClient(null);
+  clearPersonalPalettes();
   refreshCommands();
   return workspaceAuthority.generation;
 }
@@ -1020,6 +1026,7 @@ let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
 let nodeTypeCatalog = [];
 let namedAgentCatalog = [];
+let nodePaletteState = { pending: false, error: '', palettes: [], templates: [] };
 // Why the palette is empty, kept apart from the catalog itself: a failed request and a service
 // that legitimately has nothing to offer are different states and are shown differently.
 let nodeCatalogFailure = null;
@@ -2699,6 +2706,7 @@ window.ravenroot = {
   _setWorkspaceSnapshotReaderForTest: reader => {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
+  _createFrontendPluginSandboxForTest: (source, options) => createFrontendPluginSandbox(source, options),
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -3850,6 +3858,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
     if (humanTaskController) void configureHumanTasks(document_);
+    drawingModelController?.scheduleRefresh(document_.id);
   }
   refreshCommands();
 }
@@ -3904,6 +3913,7 @@ function syncActiveDocumentChrome() {
   syncSourceSessionChrome(workspace.active);
   syncProgramReadinessChrome(workspace.active);
   refreshCommands();
+  void drawingModelController?.reload();
 }
 
 function syncExecutionReconciliationChrome(hasDocument) {
@@ -4938,7 +4948,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
       bypassed: Boolean(n.data('bypassed')),
       labelSide: layeredLabelSide(owner?.layoutMode),
     }));
-    applyRuntimeVisual(n);
+    applyRuntimeVisual(n, owner);
   });
   // Restated after the per-node style above, which writes this family's placement inline: a
   // restyle must not drag the names back under the cards of a top-down drawing.
@@ -6679,7 +6689,7 @@ function syncGraphRendererInPlace({
       element.data(next.data);
       if (restoreModelPositionIds?.has(id)) element.position(next.position);
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(element, owner);
-      else applyRuntimeVisual(element);
+      else applyRuntimeVisual(element, owner);
       const after = {
         x: element.position('x'), y: element.position('y'),
         width: element.width(), height: element.height(),
@@ -8242,7 +8252,7 @@ function programPhase(owner, nodeId, result) {
     const runtimeState = phase === 'READY' ? 'completed'
       : phase === 'FAILED' || phase === 'RETIRED' || result.transportError ? 'failed' : 'idle';
     node.data('runtimeState', runtimeState);
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, nodeId, 0, runtimeState);
   }
   if (owner === workspace.active) {
@@ -8438,7 +8448,7 @@ function resetProgramGeneration(owner, state, plan) {
     if (!node?.length) return;
     node.removeData('programPhase');
     node.data('runtimeState', 'idle');
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, model.id, 0, 'idle');
   });
 }
@@ -9540,6 +9550,141 @@ function renderNodeCatalog() {
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
     },
   });
+}
+
+function renderPersonalPalettes() {
+  const container = document.getElementById('node-palettes');
+  if (!container) return;
+  renderNodePalettes(container, nodePaletteState, {
+    onCreatePalette: async name => paletteMutation(() => runtimeClient.createNodePalette(name)),
+    onSave: palette => saveSelectedNodeTemplate(palette),
+    onRename: palette => {
+      const name = globalThis.prompt('Palette name', palette.name)?.trim();
+      if (name && name !== palette.name) void paletteMutation(
+        () => runtimeClient.renameNodePalette(palette.id, palette.version, name));
+    },
+    onDelete: palette => {
+      if (globalThis.confirm(`Delete “${palette.name}” and its saved nodes?`)) void paletteMutation(
+        () => runtimeClient.deleteNodePalette(palette.id, palette.version));
+    },
+    onInsert: template => insertSavedTemplate(template),
+    onDragStart: (event, template) => {
+      event.dataTransfer?.setData('application/x-ravenroot-node-template', template.id);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+    },
+    onRenameTemplate: template => {
+      const name = globalThis.prompt('Saved node name', template.name)?.trim();
+      if (name && name !== template.name) void paletteMutation(() => runtimeClient.updateNodeTemplate(
+        template.id, template.version, template.paletteId, name));
+    },
+    onMoveTemplate: (template, paletteId) => {
+      if (paletteId !== template.paletteId) void paletteMutation(() => runtimeClient.updateNodeTemplate(
+        template.id, template.version, paletteId, template.name));
+    },
+    onDeleteTemplate: template => {
+      if (globalThis.confirm(`Delete saved node “${template.name}”?`)) void paletteMutation(
+        () => runtimeClient.deleteNodeTemplate(template.id, template.version));
+    },
+  });
+}
+
+function clearPersonalPalettes() {
+  nodePaletteState = { pending: false, error: '', palettes: [], templates: [] };
+  renderPersonalPalettes();
+}
+
+async function loadPersonalPalettes(client = runtimeClient) {
+  if (!client) return;
+  nodePaletteState = { ...nodePaletteState, pending: true, error: '' };
+  renderPersonalPalettes();
+  try {
+    const result = await client.nodePalettes();
+    if (client !== runtimeClient || result?.schemaVersion !== 1
+        || !Array.isArray(result.palettes) || !Array.isArray(result.templates)) return;
+    nodePaletteState = { pending: false, error: '', palettes: result.palettes, templates: result.templates };
+  } catch (error) {
+    if (client !== runtimeClient) return;
+    nodePaletteState = { pending: false, error: error.message || 'Personal palettes are unavailable',
+      palettes: [], templates: [] };
+  }
+  renderPersonalPalettes();
+}
+
+async function paletteMutation(operation) {
+  if (!runtimeClient) return;
+  try {
+    await operation();
+    await loadPersonalPalettes(runtimeClient);
+  } catch (error) {
+    showInspectorMessage(error.message || 'Personal palette update failed.');
+    addActivityMessage('palette', error.message || 'Personal palette update failed', 'failed');
+  }
+}
+
+function saveSelectedNodeTemplate(palette) {
+  const selected = cy?.nodes(':selected');
+  if (!modifyEnabled || !selected || selected.length !== 1) {
+    showInspectorMessage('Select exactly one node in Editing before saving it.');
+    return;
+  }
+  const node = graphData.nodeMap[selected.first().id()];
+  if (!node) return;
+  const name = globalThis.prompt('Saved node name', node.name || node.id)?.trim();
+  if (!name) return;
+  void paletteMutation(() => runtimeClient.createNodeTemplate(palette.id, name, {
+    name: node.name, kind: node.kind, behavior: node.behavior || '',
+    nodeType: node.nodeType || '', classname: node.classname || '',
+    description: node.description || '', width: node.ow, height: node.oh,
+    properties: { ...(node.properties || {}) },
+  }));
+}
+
+async function insertSavedTemplate(template, position = null, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard) return runAfterInspectorDraft(() =>
+    insertSavedTemplate(template, position, { skipDraftGuard: true }));
+  if (!modifyEnabled || !canModifyGraph(graphData, layoutMode) || layoutBusy) {
+    showInspectorMessage('Switch to Editing before inserting a saved node.');
+    return null;
+  }
+  const owner = workspace.active;
+  const graph = graphData;
+  const history = editHistory;
+  const revision = history.revision();
+  const client = runtimeClient;
+  if (!client) {
+    showInspectorMessage('Connect to the service before inserting a saved node.');
+    return null;
+  }
+  try {
+    await client.validateNodeTemplate(template.id);
+  } catch (error) {
+    showInspectorMessage(error.message || 'The saved node is no longer valid for this tenant.');
+    addActivityMessage('palette', error.message || 'Saved node validation failed', 'failed');
+    return null;
+  }
+  if (runtimeClient !== client || workspace.active !== owner || graphData !== graph
+      || editHistory !== history || history.revision() !== revision) {
+    showInspectorMessage('The workflow changed while the saved node was being validated. Try again.');
+    return null;
+  }
+  if (!position) {
+    const rect = cy.container()?.getBoundingClientRect();
+    if (!rect) return null;
+    position = modelPositionFromClient({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      rect, cy.pan(), cy.zoom());
+  }
+  const result = addTemplateNodeAt(graph, position, template, history);
+  if (!result.node) {
+    showInspectorMessage(`Cannot insert saved node: ${result.reason}.`);
+    announceGraph(result.reason);
+    return null;
+  }
+  cy.add(buildElements({ nodes: [result.node], edges: [] }));
+  cy.batch(() => applyVisualStyle(visualStyle, cy, workspace.active));
+  updateStats(); scheduleMinimap(); updateHistoryUi();
+  showNodeInfo(cy.getElementById(result.node.id));
+  addActivityMessage('editor', `Inserted saved node ${template.name}`, 'completed');
+  return result.node;
 }
 
 function selectCatalogNodeType(behavior) {
@@ -11546,6 +11691,8 @@ async function connectRuntime(atBoot = false) {
     tokenProvider: runtimeTokenProvider,
   });
   namedAgentCatalog = [];
+  nodePaletteState = { pending: true, error: '', palettes: [], templates: [] };
+  renderPersonalPalettes();
   // The assistant reaches THE SAME Ravenroot service with THE SAME user authentication, and
   // nothing else — it has no base URL of its own to be pointed elsewhere. That is what makes "a
   // denial to the user is a denial to the panel" true here rather than merely intended, and it is
@@ -11578,6 +11725,7 @@ async function connectRuntime(atBoot = false) {
         runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
+        void loadPersonalPalettes(connectedClient);
       } else if (scope === false) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
       }
@@ -12449,7 +12597,20 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     target.execution.monitoringFlow ||= createMonitoringRuntimeState();
     const knownEdgeIds = new Set((targetGraph?.edges || []).map(edge => edge.id));
     const observation = observeEdgeTraversal(target.execution.monitoringFlow, event, { knownEdgeIds });
-    if (observation.changed) updateD3RuntimeEdge(target, observation.edgeId);
+    if (observation.changed) {
+      updateD3RuntimeEdge(target, observation.edgeId);
+      if (isActive) {
+        drawingModelController?.scheduleRefresh(target.id);
+        const generation = target.execution.generation;
+        const delay = Math.max(0, observation.expiresAt - Date.now()) + 1;
+        setTimeout(() => {
+          if (workspace.find(target.id) === target && target === workspace.active
+              && target.execution.generation === generation) {
+            drawingModelController?.scheduleRefresh(target.id);
+          }
+        }, delay);
+      }
+    }
     return;
   }
   if (!event.nodeId || !targetCy) return;
@@ -12527,7 +12688,7 @@ function flushRuntimeNodePaint(owner, queue) {
     node.data('lastOccurredAt', view.lastOccurredAt);
     node.data('processingDuration', view.processingDuration);
     node.data('fallback', view.fallback);
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, nodeId, view.instances, view.state, view.arrivals, {
       type: view.lastEventType,
       occurredAt: view.lastOccurredAt,
@@ -12538,6 +12699,10 @@ function flushRuntimeNodePaint(owner, queue) {
     if (groupId) affectedGroups.add(groupId);
   }
   affectedGroups.forEach(groupId => paintVisibleGroupRuntime(owner, groupId));
+  // Schedule from the owner-scoped flush rather than only from non-idle styling. Reset/rebind can
+  // legitimately paint an observed node back to idle, and that removal is evidence the plugin must
+  // receive just as promptly as an active highlight.
+  if (isActive) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function paintVisibleGroupRuntime(owner, groupId) {
@@ -12592,7 +12757,10 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
   runtimeNodePaintQueues.get(owner)?.nodes.clear();
-  if (!targetCy) return;
+  if (!targetCy) {
+    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
+    return;
+  }
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
     node.data('instances', 0);
@@ -12614,6 +12782,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
   } else if (isN8nFamilyLayout(targetVisualStyle)) {
     applyN8nNodeStyle(targetCy, owner);
   }
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function runtimeColor(state) {
@@ -12670,7 +12839,7 @@ function runtimeNodeLabel(node) {
   return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }
 
-function applyRuntimeVisual(node) {
+function applyRuntimeVisual(node, owner = workspace.active) {
   const state = node.data('runtimeState') || 'idle';
   const active = Number(node.data('instances')) || 0;
   node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
@@ -12684,6 +12853,7 @@ function applyRuntimeVisual(node) {
     'underlay-opacity': state === 'active' ? 0.28 : 0.12,
     'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
   });
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArrivals = 0, event = {}) {
@@ -12750,6 +12920,7 @@ function updateD3RuntimeEdge(owner, edgeId) {
       visible?.data('runtimeCount', flow.count);
     }
     scheduleMinimap(owner);
+    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
   };
   paint();
 }
@@ -13770,7 +13941,9 @@ function hideLoading() { document.getElementById('loading').classList.add('off')
 
 const wrap = document.getElementById('cy-wrap');
 function isCatalogDrag(event) {
-  return [...(event.dataTransfer?.types || [])].includes('application/x-ravenroot-node');
+  const types = [...(event.dataTransfer?.types || [])];
+  return types.includes('application/x-ravenroot-node')
+    || types.includes('application/x-ravenroot-node-template');
 }
 wrap.addEventListener('dragover', e => {
   e.preventDefault();
@@ -13784,6 +13957,16 @@ wrap.addEventListener('dragleave', e => { if (!wrap.contains(e.relatedTarget)) d
 wrap.addEventListener('drop', e => {
   e.preventDefault();
   document.getElementById('dropzone').classList.remove('on');
+  const templateId = e.dataTransfer?.getData('application/x-ravenroot-node-template');
+  if (templateId) {
+    const template = nodePaletteState.templates.find(candidate => candidate.id === templateId);
+    if (!template) return;
+    const rect = cy.container()?.getBoundingClientRect();
+    if (!rect) return;
+    const position = modelPositionFromClient({ x: e.clientX, y: e.clientY }, rect, cy.pan(), cy.zoom());
+    insertSavedTemplate(template, position);
+    return;
+  }
   const behavior = e.dataTransfer?.getData('application/x-ravenroot-node');
   if (behavior) {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) {
@@ -13869,8 +14052,36 @@ function renderShortcutHelp() {
 
 const ZONE_HOSTS = { left: 'sidebar-scroll', right: 'info-body-zone', bottom: 'dock' };
 const COLUMN_ELEMENTS = { left: 'sidebar', right: 'info' };
+const PALETTE_DISCLOSURE_KEY = 'ravenroot.ui.palette-disclosures.v1';
 
 let panelLayout = readStoredLayout();
+
+function storedPaletteDisclosures() {
+  try {
+    const value = JSON.parse(globalThis.localStorage?.getItem(PALETTE_DISCLOSURE_KEY) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+function applyPaletteDisclosures() {
+  const stored = storedPaletteDisclosures();
+  document.querySelectorAll('[data-action="panel-disclosure"]').forEach(control => {
+    const expanded = stored[control.dataset.panel] !== false;
+    const label = `${expanded ? 'Collapse' : 'Expand'} ${panelDescriptor(control.dataset.panel)?.title || 'section'}`;
+    control.setAttribute('aria-expanded', String(expanded));
+    control.setAttribute('aria-label', label);
+    control.dataset.tooltip = label;
+    control.textContent = expanded ? '▾' : '▸';
+    panelElement(control.dataset.panel)?.classList.toggle('panel--content-collapsed', !expanded);
+  });
+}
+
+function togglePaletteDisclosure(control) {
+  const stored = storedPaletteDisclosures();
+  stored[control.dataset.panel] = control.getAttribute('aria-expanded') !== 'true';
+  try { globalThis.localStorage?.setItem(PALETTE_DISCLOSURE_KEY, JSON.stringify(stored)); } catch { /* optional */ }
+  applyPaletteDisclosures();
+}
 
 function readStoredLayout() {
   // Degrades without exception, in every direction: no storage API at all (private mode, a
@@ -15572,7 +15783,9 @@ document.addEventListener('click', event => {
     abandonAssistantConnection();
     renderAssistantState();
   }
-  else if (action === 'panel-close') {
+  else if (action === 'panel-disclosure') {
+    togglePaletteDisclosure(control);
+  } else if (action === 'panel-close') {
     updatePanelLayout(setPanelClosed(panelLayout, control.dataset.panel, true));
   } else if (action === 'panel-menu') {
     if (control.getAttribute('aria-expanded') === 'true') closePopovers();
@@ -16003,6 +16216,46 @@ document.getElementById('help-box').addEventListener('click', event => {
   event.stopPropagation();
 });
 
+const drawingModelController = createDrawingModelController({
+  document: window.document,
+  getContext: () => {
+    const owner = workspace.find(workspace.activeId);
+    return owner && graphData ? {
+      documentId: owner.id,
+      graph: graphData,
+      container: owner.container,
+      operational: {
+        activeNodeIds: owner.cy?.nodes()
+          .filter(node => node.data('runtimeObserved') && node.data('runtimeState') !== 'idle')
+          .map(node => node.id()) || [],
+        activeEdgeIds: graphData.edges
+          .filter(edge => edgeFlowSnapshot(owner.execution.monitoringFlow, edge.id).recent > 0)
+          .map(edge => edge.id),
+      },
+    } : null;
+  },
+  editGraphProperties: (patch, unset, label) => {
+    if (!graphData || graphData.format !== 'graphml' || !documentIsEditable(workspace.active)) return false;
+    editHistory.execute(graphData, updateGraphPropertiesCommand(patch, label, unset));
+    updateHistoryUi();
+    return true;
+  },
+  selectEvidence: ({ role, id, nodeIds, edgeIds, documentId }) => {
+    const owner = workspace.find(documentId);
+    if (!owner || owner !== workspace.active || owner.cy !== cy) return;
+    invalidateStableSelection();
+    owner.cy.elements().unselect();
+    [...nodeIds, ...edgeIds].forEach(elementId => owner.cy.getElementById(elementId).select());
+    revealInspector();
+    if (nodeIds.length === 1) showNodeInfo(owner.cy.getElementById(nodeIds[0]));
+    else showInspectorMessage(`${role === 'transition' ? 'Transition' : 'State'} ${id} maps to `
+      + `${nodeIds.length} workflow node(s) and ${edgeIds.length} ordered workflow edge(s).`);
+    addActivityMessage('drawing-model', `Inspected mapped ${role} ${id}`, 'completed');
+  },
+  notify: (message, state) => addActivityMessage('drawing-model', message, state),
+});
+window.ravenroot.drawingModels = drawingModelController;
+
 // ═══════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════
@@ -16026,6 +16279,7 @@ window.addEventListener('load', () => {
   renderShortcutHelp();
   updateHistoryUi();
   syncCommandBarDensity();
+  applyPaletteDisclosures();
   const params = new URLSearchParams(location.search);
   // The page asks the service what it offers instead of deciding on its own that it may not ask.
   // Whether authentication is required is the service's answer — a 401 still produces exactly the
@@ -16052,4 +16306,5 @@ window.addEventListener('load', () => {
   const fileParam = params.get('file');
   if (fileParam) autoLoadUrl(fileParam);
   else newWorkflow();
+  void drawingModelController.reload();
 });

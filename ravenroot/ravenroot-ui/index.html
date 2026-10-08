@@ -214,6 +214,29 @@
 
 <div id="application-menu" class="application-menu" role="menu" hidden></div>
 
+<dialog id="drawing-model-dialog" class="drawing-model-dialog" aria-labelledby="drawing-model-dialog-title">
+  <form method="dialog">
+    <h2 id="drawing-model-dialog-title">Presentation mapping</h2>
+    <p>Map synthetic states and transitions to real workflow nodes and ordered edge paths. Ravenroot validates every id and path before saving.</p>
+    <label for="drawing-model-mapping-json">Versioned mapping JSON</label>
+    <textarea id="drawing-model-mapping-json" spellcheck="false" rows="20" aria-describedby="drawing-model-error"></textarea>
+    <p id="drawing-model-error" class="form-error" role="alert"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-drawing-model-cancel>Cancel</button>
+      <button type="submit" class="btn primary">Save mapping</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="drawing-model-package-dialog" class="drawing-model-dialog" aria-labelledby="drawing-model-package-title">
+  <h2 id="drawing-model-package-title">Installed frontend packages</h2>
+  <p>Enable, disable, or remove packages independently of the active drawing model.</p>
+  <div id="drawing-model-package-list" class="drawing-model-package-list"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn" data-drawing-model-package-close>Close</button>
+  </div>
+</dialog>
+
 <!-- ══ WORKFLOW COMMAND BAR ═════════════════════════════════════ -->
 <div id="workflowbar">
   <div class="btn-group command-mirrors editor-mirrors">
@@ -229,6 +252,23 @@
     <button class="btn" id="btn-autosave" type="button" data-command-id="edit.autosave"
             data-command-label aria-pressed="true"></button>
     <button class="btn" id="btn-export" data-command-id="file.save" title="Save the current workflow as GraphML">⇩ Save GraphML</button>
+  </div>
+  <div class="drawing-model-controls" role="group" aria-label="Drawing model">
+    <details class="drawing-model-actions">
+      <summary class="btn" id="drawing-model-options" title="Install and manage frontend drawing packages">Drawing options</summary>
+      <div class="drawing-model-actions-menu" role="group" aria-label="Drawing model options">
+        <label for="drawing-model-select">Drawing model</label>
+        <select id="drawing-model-select" title="Choose the drawing model for this document">
+          <option value="integrated">Integrated Design</option>
+        </select>
+        <button class="btn" type="button" id="drawing-model-install" title="Install a frontend plugin package directory">＋ Install package</button>
+        <input id="drawing-model-package-input" class="visually-hidden" type="file" multiple webkitdirectory
+               aria-label="Frontend plugin package directory">
+        <button class="btn" type="button" id="drawing-model-mapping" title="Author the explicit presentation mapping">Edit mapping</button>
+        <button class="btn" type="button" id="drawing-model-manage" title="Enable, disable, or remove installed packages">Manage packages</button>
+        <button class="btn" type="button" id="drawing-model-full-flow" title="Return to the complete operational flow" hidden>Full operational flow</button>
+      </div>
+    </details>
   </div>
   <div class="spacer"></div>
   <!-- One ordered unit so the unique runtime controls wrap together instead of being clipped one
@@ -338,6 +378,8 @@
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
           <h2 class="panel-title" id="panel-nodetypes-t">Node Types</h2>
+        <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-types"
+                aria-expanded="true" aria-controls="panel-nodetypes-body" aria-label="Collapse Node Types">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-types"
                 aria-haspopup="menu" aria-expanded="false"
                 aria-label="Node Types panel options" data-tooltip="Node Types panel options">
@@ -348,13 +390,15 @@
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
-        <div class="panel-body"><div class="panel-content"><div id="leg-nodes"></div></div></div>
+        <div class="panel-body" id="panel-nodetypes-body"><div class="panel-content"><div id="leg-nodes"></div></div></div>
       </section>
 
       <section class="panel" data-panel-id="node-catalog" data-panel-zone="left" aria-labelledby="panel-catalog-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
           <h2 class="panel-title" id="panel-catalog-t">Node Catalog</h2>
+        <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-catalog"
+                aria-expanded="true" aria-controls="panel-catalog-body" aria-label="Collapse Node Catalog">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-catalog"
                 aria-haspopup="menu" aria-expanded="false"
                 aria-label="Node Catalog panel options" data-tooltip="Node Catalog panel options">
@@ -365,8 +409,29 @@
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
-        <div class="panel-body"><div class="panel-content">
+        <div class="panel-body" id="panel-catalog-body"><div class="panel-content">
           <div id="node-catalog" class="node-catalog"><div class="catalog-empty">Connect to the service to load programmable nodes.</div></div>
+        </div></div>
+      </section>
+
+      <section class="panel" data-panel-id="node-palettes" data-panel-zone="left" aria-labelledby="panel-palettes-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-palettes-t">Personal Palettes</h2>
+        <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-palettes"
+                aria-expanded="true" aria-controls="panel-palettes-body" aria-label="Collapse Personal Palettes">▾</button>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-palettes"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Personal Palettes panel options" data-tooltip="Personal Palettes panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-palettes"
+                aria-label="Close Personal Palettes panel" data-tooltip="Close Personal Palettes panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body" id="panel-palettes-body"><div class="panel-content">
+          <div id="node-palettes" class="node-palettes"><div class="catalog-empty">Connect to load personal palettes.</div></div>
         </div></div>
       </section>
 
@@ -944,6 +1009,21 @@
     <p id="lifecycle-process-status" class="credential-status" role="status" aria-live="polite"></p>
     <ul id="lifecycle-process-list" class="credential-list lifecycle-process-list"
         aria-labelledby="lifecycle-processes-title" hidden></ul>
+  </section>
+  <section class="credentials-listing" aria-labelledby="derived-execution-title">
+    <h3 id="derived-execution-title">Selective derived execution</h3>
+    <p class="credential-note">Continue retained work in a fresh execution. Preview shows the possible downstream scope and exact inherited invocation evidence before submission.</p>
+    <form id="derived-execution-form" class="credential-form" novalidate autocomplete="off">
+      <div class="editor-field full"><label for="derived-source-id">Source process id *</label><input id="derived-source-id" required spellcheck="false"></div>
+      <div class="editor-field full"><label for="derived-boundary-choice">Retained downstream boundary *</label><select id="derived-boundary-choice" required><option value="">Select a source process, then discover retained boundaries</option></select><button id="derived-discover" class="btn" type="button">Discover retained boundaries</button></div>
+      <div class="editor-field"><label for="derived-idempotency-key">Generated request key *</label><input id="derived-idempotency-key" required maxlength="200" spellcheck="false"></div>
+      <div class="editor-field full"><label for="derived-reason">Reason *</label><textarea id="derived-reason" required maxlength="500"></textarea></div>
+      <div class="editor-field full"><label for="derived-repeatability">Effect reconciliation or repeatability decision</label><textarea id="derived-repeatability" maxlength="500"></textarea></div>
+      <label class="credential-note"><input id="derived-authorize-effects" type="checkbox"> I am authorized to repeat selected downstream external effects.</label>
+      <div class="credential-actions"><button id="derived-preview" class="btn" type="button">Preview</button><button id="derived-start" class="btn primary" type="submit" disabled>Start derived execution</button></div>
+      <p id="derived-execution-status" class="credential-status" role="status" aria-live="polite"></p>
+      <pre id="derived-execution-preview" class="human-task-review-text" tabindex="0" hidden></pre>
+    </form>
   </section>
 </dialog>
 

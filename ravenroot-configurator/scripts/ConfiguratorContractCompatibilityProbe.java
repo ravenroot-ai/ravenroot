@@ -5,6 +5,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -38,15 +39,16 @@ public final class ConfiguratorContractCompatibilityProbe {
         if ("configuration".equals(mode)) {
             Method factory = type.getDeclaredMethod(required(id + ".method"), Map.class);
             factory.setAccessible(true);
-            require(factory.invoke(null, Map.of(environmentKey, valid)) != null, id + " rejected configurator output");
+            require(factory.invoke(null, environment(id, environmentKey, valid)) != null, id + " rejected configurator output");
             for (int index = 0; index < Integer.parseInt(required(id + ".positiveCount")); index++) {
-                Object accepted = factory.invoke(null, Map.of(environmentKey, required(id + ".positive." + index + ".value")));
+                Object accepted = factory.invoke(null, environment(id, environmentKey,
+                        required(id + ".positive." + index + ".value")));
                 require(accepted != null, id + " rejected valid vector " + required(id + ".positive." + index + ".label"));
                 verifyAssertion(required(id + ".positive." + index + ".assertion"), accepted, id);
             }
             for (int index = 0; index < Integer.parseInt(required(id + ".negativeCount")); index++) {
                 String invalid = required(id + ".negative." + index + ".value");
-                try { factory.invoke(null, Map.of(environmentKey, invalid)); throw new AssertionError(id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")"); }
+                try { factory.invoke(null, environment(id, environmentKey, invalid)); throw new AssertionError(id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")"); }
                 catch (InvocationTargetException expected) { require(expected.getCause() != null, id + " rejection lost its cause"); }
             }
             return;
@@ -58,17 +60,18 @@ public final class ConfiguratorContractCompatibilityProbe {
                         && candidate.getParameterCount() == arguments.length)
                 .findFirst().orElseThrow();
         resolve.setAccessible(true);
-        Object accepted = resolve.invoke(constructor.newInstance(Map.of(environmentKey, valid)), (Object[]) arguments);
+        Object accepted = resolve.invoke(constructor.newInstance(environment(id, environmentKey, valid)), (Object[]) arguments);
         require(accepted instanceof Optional<?> && ((Optional<?>) accepted).isPresent(), id + " rejected configurator output");
         String alternate = required(id + ".alternateValid");
         if (!alternate.isEmpty()) {
-            Object optionalAccepted = resolve.invoke(constructor.newInstance(Map.of(environmentKey, alternate)), (Object[]) arguments);
+            Object optionalAccepted = resolve.invoke(constructor.newInstance(environment(id, environmentKey, alternate)), (Object[]) arguments);
             require(optionalAccepted instanceof Optional<?> && ((Optional<?>) optionalAccepted).isPresent(), id + " rejected valid omitted optional fields");
         }
         for (int index = 0; index < Integer.parseInt(required(id + ".positiveCount")); index++) {
             String rawArguments = required(id + ".positive." + index + ".args");
             String[] positiveArguments = rawArguments.isEmpty() ? new String[0] : rawArguments.split("\u001f", -1);
-            Object result = resolve.invoke(constructor.newInstance(Map.of(environmentKey, required(id + ".positive." + index + ".value"))),
+            Object result = resolve.invoke(constructor.newInstance(environment(id, environmentKey,
+                            required(id + ".positive." + index + ".value"))),
                     (Object[]) positiveArguments);
             require(result instanceof Optional<?> && ((Optional<?>) result).isPresent(),
                     id + " rejected valid vector " + required(id + ".positive." + index + ".label"));
@@ -78,9 +81,32 @@ public final class ConfiguratorContractCompatibilityProbe {
             String invalid = required(id + ".negative." + index + ".value");
             String rawArguments = required(id + ".negative." + index + ".args");
             String[] invalidArguments = rawArguments.isEmpty() ? new String[0] : rawArguments.split("\u001f", -1);
-            Object refused = resolve.invoke(constructor.newInstance(Map.of(environmentKey, invalid)), (Object[]) invalidArguments);
+            String expected = required(id + ".negative." + index + ".expected");
+            final Object refused;
+            try {
+                refused = resolve.invoke(constructor.newInstance(environment(id, environmentKey, invalid)),
+                        (Object[]) invalidArguments);
+            } catch (InvocationTargetException rejected) {
+                require("security-exception".equals(expected) && rejected.getCause() instanceof SecurityException,
+                        id + " rejected negative vector " + index + " through an unexpected boundary");
+                continue;
+            }
+            require("empty".equals(expected), id + " did not enforce the expected security refusal for negative vector " + index);
             require(refused instanceof Optional<?> && ((Optional<?>) refused).isEmpty(), id + " accepted negative vector " + index + " (" + required(id + ".negative." + index + ".label") + ")");
         }
+    }
+
+    private Map<String, String> environment(String id, String primaryKey, String primaryValue) {
+        Map<String, String> environment = new LinkedHashMap<>();
+        environment.put(primaryKey, primaryValue);
+        int additional = Integer.parseInt(required(id + ".additionalEnvironmentCount"));
+        for (int index = 0; index < additional; index++) {
+            String key = required(id + ".additionalEnvironment." + index + ".key");
+            String value = required(id + ".additionalEnvironment." + index + ".value");
+            require(environment.putIfAbsent(key, value) == null,
+                    id + " fixture declares a duplicate environment key");
+        }
+        return Map.copyOf(environment);
     }
 
     private static void verifyAssertion(String assertion, Object accepted, String id) throws Exception {

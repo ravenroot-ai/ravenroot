@@ -13,6 +13,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TrustedNetworkKafkaProfileTest {
     @Test
+    void loopbackPlaintextStillRequiresTheExactAdministratorScope() {
+        String key = EnvironmentKafkaProfileResolver.environmentVariableName("t", "p");
+        String spoofedKey = EnvironmentKafkaProfileResolver.environmentVariableName("t", "spoofed");
+        String value = "localhost:9092;use_all_dns_ips;false;PLAIN;user;secret;client;events;"
+                + "audit;trace;false;0;false;none;all;true;3;5;false;2;10;1000;4096;8192";
+        assertThrows(SecurityException.class,
+                () -> new EnvironmentKafkaProfileResolver(Map.of(key, value)).resolve("t", "p"));
+
+        String policy = encoded("""
+                {"version":1,"rules":[{"name":"kafka-local","protocols":["kafka"],
+                "ports":[9092],"hosts":["localhost"],"addresses":["127.0.0.0/8","::1/128"],
+                "profiles":["t/p"],"allowPlaintext":true}]}
+                """);
+        assertTrue(new EnvironmentKafkaProfileResolver(Map.of(
+                key, value, TrustedNetworkPolicy.ENVIRONMENT_VARIABLE, policy)).resolve("t", "p").isPresent());
+        assertThrows(SecurityException.class, () -> new EnvironmentKafkaProfileResolver(Map.of(
+                spoofedKey, value, TrustedNetworkPolicy.ENVIRONMENT_VARIABLE, policy)).resolve("t", "spoofed"));
+    }
+
+    @Test
     void authenticatedNonLoopbackPlaintextRequiresExactAdministratorRule() {
         String key = EnvironmentKafkaProfileResolver.environmentVariableName("t", "p");
         String value = "10.30.1.8:9092;use_all_dns_ips;false;SCRAM-SHA-256;user;secret;client;events;"

@@ -55,8 +55,10 @@ public final class OpenApiSpecGenerator {
         json.append("    \"description\": \"").append(JsonStrings.escape(NOT_A_STABILITY_PROMISE)).append("\"\n");
         json.append("  },\n");
         json.append("  \"paths\": {\n");
-        json.append(routes.stream().sorted(java.util.Comparator.comparing(RouteDescriptor::path))
-                .map(OpenApiSpecGenerator::pathEntry).collect(Collectors.joining(",\n")));
+        var byPath = routes.stream().collect(Collectors.groupingBy(RouteDescriptor::path,
+                java.util.TreeMap::new, Collectors.toList()));
+        json.append(byPath.entrySet().stream().map(entry -> pathEntry(entry.getKey(), entry.getValue()))
+                .collect(Collectors.joining(",\n")));
         json.append("\n  },\n");
         json.append("  \"components\": {\n");
         json.append("    \"securitySchemes\": {\n");
@@ -73,10 +75,17 @@ public final class OpenApiSpecGenerator {
         return json.toString();
     }
 
-    private static String pathEntry(RouteDescriptor route) {
-        String operations = route.methods().stream().sorted().map(method -> operationEntry(route, method))
+    private static String pathEntry(String path, List<RouteDescriptor> routes) {
+        var methods = new java.util.HashSet<String>();
+        for (RouteDescriptor route : routes) for (String method : route.methods()) {
+            if (!methods.add(method)) throw new IllegalArgumentException("duplicate route method " + method + " " + path);
+        }
+        String operations = routes.stream().flatMap(route -> route.methods().stream()
+                        .map(method -> java.util.Map.entry(method, route)))
+                .sorted(java.util.Map.Entry.comparingByKey())
+                .map(entry -> operationEntry(entry.getValue(), entry.getKey()))
                 .collect(Collectors.joining(",\n"));
-        return "    \"" + JsonStrings.escape(route.path()) + "\": {\n" + operations + "\n    }";
+        return "    \"" + JsonStrings.escape(path) + "\": {\n" + operations + "\n    }";
     }
 
     private static String operationEntry(RouteDescriptor route, String method) {
@@ -149,9 +158,27 @@ public final class OpenApiSpecGenerator {
             names.add(matcher.group(1));
         }
         var parameters = new java.util.ArrayList<String>();
-        names.forEach(name -> parameters.add("          {\"name\": \""
-                + JsonStrings.escape(name) + "\", \"in\": \"path\", "
-                + "\"required\": true, \"schema\": {\"type\": \"string\"}}"));
+        names.forEach(name -> {
+            String schema = "version".equals(name) && route.path().startsWith("/v1/graph-artifacts/")
+                    ? "{\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1, "
+                        + "\"maximum\": 9007199254740991}"
+                    : "{\"type\": \"string\"}";
+            parameters.add("          {\"name\": \"" + JsonStrings.escape(name)
+                    + "\", \"in\": \"path\", \"required\": true, \"schema\": " + schema + "}");
+        });
+        if (route.path().startsWith("/v1/graph-artifacts/{graphId}/{version}/")
+                && "POST".equals(method)) {
+            parameters.add("          {\"name\": \"expectedSha256\", \"in\": \"query\", "
+                    + "\"required\": true, \"schema\": {\"type\": \"string\", "
+                    + "\"pattern\": \"^[0-9a-f]{64}$\"}}");
+            parameters.add("          {\"name\": \"expectedArtifactRef\", \"in\": \"query\", "
+                    + "\"required\": true, \"schema\": {\"type\": \"string\", "
+                    + "\"pattern\": \"^[0-9a-f]{64}:[0-9a-f]{64}$\"}}");
+            if (route.path().endsWith("/deploy")) {
+                parameters.add("          {\"name\": \"id\", \"in\": \"query\", \"required\": true, "
+                        + "\"schema\": {\"type\": \"string\"}}");
+            }
+        }
         if ("/v1/human-tasks".equals(route.path()) && "GET".equals(method)) {
             parameters.add("          {\"name\": \"status\", \"in\": \"query\", \"required\": false, "
                     + "\"description\": \"Comma-separated lifecycle statuses.\", \"schema\": "
@@ -560,7 +587,24 @@ public final class OpenApiSpecGenerator {
             java.util.Map.entry(WireErrorCodes.EMBED_SESSION_UNAVAILABLE, 403),
             java.util.Map.entry(WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE, 503),
             java.util.Map.entry(WireErrorCodes.EMBED_DATA_TOO_LARGE, 413),
-            java.util.Map.entry(WireErrorCodes.EMBED_REQUEST_TOO_LARGE, 413));
+            java.util.Map.entry(WireErrorCodes.EMBED_REQUEST_TOO_LARGE, 413),
+            java.util.Map.entry(WireErrorCodes.AUTHORING_NOT_FOUND, 404),
+            java.util.Map.entry(WireErrorCodes.AUTHORING_INVALID_DOCUMENT, 422),
+            java.util.Map.entry(WireErrorCodes.AUTHORING_LIMIT_EXCEEDED, 413),
+            java.util.Map.entry(WireErrorCodes.AUTHORING_UNAVAILABLE, 503),
+            java.util.Map.entry(WireErrorCodes.PUBLICATION_REQUIRED, 412),
+            java.util.Map.entry(WireErrorCodes.UNSUPPORTED_PROVIDER, 501),
+            java.util.Map.entry(WireErrorCodes.PUBLISHED_ARTIFACT_CHANGED, 409),
+            java.util.Map.entry(WireErrorCodes.PUBLISHED_DEPENDENCIES_CHANGED, 412),
+            java.util.Map.entry(WireErrorCodes.PUBLISHED_DEFINITION_NOT_IMPORTED, 412),
+            java.util.Map.entry(WireErrorCodes.PUBLISHED_DEFINITION_CONFLICT, 409),
+            java.util.Map.entry(WireErrorCodes.PUBLISHED_DEFINITION_TOO_LARGE, 413),
+            java.util.Map.entry(WireErrorCodes.PUBLISHED_DEFINITION_UNAVAILABLE, 503),
+            java.util.Map.entry(WireErrorCodes.DEPLOYMENT_CONFLICT, 409),
+            java.util.Map.entry(WireErrorCodes.INVALID_DEPLOYMENT, 422),
+            java.util.Map.entry(WireErrorCodes.DEPLOYMENT_LIMIT_EXCEEDED, 429),
+            java.util.Map.entry(WireErrorCodes.IMMUTABLE_DEFINITION_STORE_REQUIRED, 501),
+            java.util.Map.entry(WireErrorCodes.ARTIFACT_OPERATION_FAILED, 500));
 
     private static int statusOrDefault(String code) {
         try {

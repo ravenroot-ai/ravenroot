@@ -48,6 +48,24 @@ public final class WireErrorCodes {
     public static final String EMBED_TEMPORARILY_UNAVAILABLE = "EMBED_TEMPORARILY_UNAVAILABLE";
     public static final String EMBED_DATA_TOO_LARGE = "EMBED_DATA_TOO_LARGE";
     public static final String EMBED_REQUEST_TOO_LARGE = "EMBED_REQUEST_TOO_LARGE";
+    // Git graph-authoring and immutable publication adapters use this bounded local vocabulary.
+    public static final String AUTHORING_NOT_FOUND = "NOT_FOUND";
+    public static final String AUTHORING_INVALID_DOCUMENT = "INVALID_DOCUMENT";
+    public static final String AUTHORING_LIMIT_EXCEEDED = "LIMIT_EXCEEDED";
+    public static final String AUTHORING_UNAVAILABLE = "AUTHORING_UNAVAILABLE";
+    public static final String PUBLICATION_REQUIRED = "PUBLICATION_REQUIRED";
+    public static final String UNSUPPORTED_PROVIDER = "UNSUPPORTED_PROVIDER";
+    public static final String PUBLISHED_ARTIFACT_CHANGED = "PUBLISHED_ARTIFACT_CHANGED";
+    public static final String PUBLISHED_DEPENDENCIES_CHANGED = "PUBLISHED_DEPENDENCIES_CHANGED";
+    public static final String PUBLISHED_DEFINITION_NOT_IMPORTED = "PUBLISHED_DEFINITION_NOT_IMPORTED";
+    public static final String PUBLISHED_DEFINITION_CONFLICT = "PUBLISHED_DEFINITION_CONFLICT";
+    public static final String PUBLISHED_DEFINITION_TOO_LARGE = "PUBLISHED_DEFINITION_TOO_LARGE";
+    public static final String PUBLISHED_DEFINITION_UNAVAILABLE = "PUBLISHED_DEFINITION_UNAVAILABLE";
+    public static final String DEPLOYMENT_CONFLICT = "DEPLOYMENT_CONFLICT";
+    public static final String INVALID_DEPLOYMENT = "INVALID_DEPLOYMENT";
+    public static final String DEPLOYMENT_LIMIT_EXCEEDED = "DEPLOYMENT_LIMIT_EXCEEDED";
+    public static final String IMMUTABLE_DEFINITION_STORE_REQUIRED = "IMMUTABLE_DEFINITION_STORE_REQUIRED";
+    public static final String ARTIFACT_OPERATION_FAILED = "ARTIFACT_OPERATION_FAILED";
 
     /** Every code an HTTP caller can actually observe: {@link ErrorCode} names plus the constants above. */
     public static Set<String> all() {
@@ -67,6 +85,23 @@ public final class WireErrorCodes {
         codes.add(EMBED_TEMPORARILY_UNAVAILABLE);
         codes.add(EMBED_DATA_TOO_LARGE);
         codes.add(EMBED_REQUEST_TOO_LARGE);
+        codes.add(AUTHORING_NOT_FOUND);
+        codes.add(AUTHORING_INVALID_DOCUMENT);
+        codes.add(AUTHORING_LIMIT_EXCEEDED);
+        codes.add(AUTHORING_UNAVAILABLE);
+        codes.add(PUBLICATION_REQUIRED);
+        codes.add(UNSUPPORTED_PROVIDER);
+        codes.add(PUBLISHED_ARTIFACT_CHANGED);
+        codes.add(PUBLISHED_DEPENDENCIES_CHANGED);
+        codes.add(PUBLISHED_DEFINITION_NOT_IMPORTED);
+        codes.add(PUBLISHED_DEFINITION_CONFLICT);
+        codes.add(PUBLISHED_DEFINITION_TOO_LARGE);
+        codes.add(PUBLISHED_DEFINITION_UNAVAILABLE);
+        codes.add(DEPLOYMENT_CONFLICT);
+        codes.add(INVALID_DEPLOYMENT);
+        codes.add(DEPLOYMENT_LIMIT_EXCEEDED);
+        codes.add(IMMUTABLE_DEFINITION_STORE_REQUIRED);
+        codes.add(ARTIFACT_OPERATION_FAILED);
         return Set.copyOf(codes);
     }
 }

@@ -3,6 +3,7 @@ import {
   validateHumanTaskCapability,
   validateHumanTaskRow,
 } from './human-task-attention.js';
+import { validateGraphAuthoringCapability } from './graph-authoring-client.js';
 
 const DEFAULT_MAX_FRAME_BYTES = 64 * 1024;
 const DEFAULT_MAX_RETRIES = 5;
@@ -54,6 +55,8 @@ export function validateRuntimeConfiguration(value) {
     workspace = Object.freeze({ tenantId: value.workspace.tenantId });
   }
   const humanTasks = value.humanTasks == null ? null : validateHumanTaskCapability(value.humanTasks);
+  const graphAuthoring = value.graphAuthoring == null ? null
+    : validateGraphAuthoringCapability(value.graphAuthoring);
   return {
     schemaVersion: value.schemaVersion,
     graphDocumentMaxBytes: value.graphDocumentMaxBytes,
@@ -63,6 +66,7 @@ export function validateRuntimeConfiguration(value) {
       maxProgramsPerBuild: authoring.maxProgramsPerBuild,
     }),
     workspace,
+    ...(graphAuthoring ? { graphAuthoring } : {}),
     ...(humanTasks ? { humanTasks } : {}),
   };
 }

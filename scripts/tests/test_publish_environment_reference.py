@@ -10,6 +10,7 @@ from scripts import publish_environment_reference as publisher
 
 from scripts.publish_environment_reference import (
     ACTIVITY_CAPTURE_VARIABLES,
+    GRAPH_AUTHORING_VARIABLES,
     INTERACTION_WEBSOCKET_VARIABLES,
     boundary,
     group,
@@ -20,6 +21,34 @@ from scripts.publish_environment_reference import (
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
+    def test_graph_authoring_bindings_are_exact_and_link_their_operator_contract(self):
+        names = variables()
+        actual = {
+            name for name in names
+            if name.startswith("RAVENROOT_GRAPH_AUTHORING_")
+            or name.startswith("RAVENROOT_GRAPH_ARTIFACT_")
+        }
+        self.assertEqual(GRAPH_AUTHORING_VARIABLES, actual)
+        for name in GRAPH_AUTHORING_VARIABLES:
+            with self.subTest(name=name):
+                self.assertEqual("graph-authoring", group(name))
+                self.assertNotEqual(
+                    "See the linked contract for exact type, default, and applicability.",
+                    boundary(name),
+                )
+
+        section = render().split(
+            "## Graph source control and published artifacts", 1
+        )[1].split("## ", 1)[0]
+        self.assertIn(
+            "../operator-guide/graph-source-control.md#configure-the-source-archive",
+            section,
+        )
+        self.assertIn("defaults to `LOCAL`", section)
+        self.assertIn("defaults to `10485760`", section)
+        self.assertIn("maximum `120000` milliseconds", section)
+        self.assertIn("mutations are never retried blindly", section)
+
     def test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory(self):
         names = publisher.ui_settings()
         self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_PREFIX",

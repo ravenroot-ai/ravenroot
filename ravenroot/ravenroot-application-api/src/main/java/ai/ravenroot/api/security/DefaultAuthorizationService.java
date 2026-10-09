@@ -114,8 +114,16 @@ public final class DefaultAuthorizationService implements AuthorizationService {
                 Role.TENANT_ADMIN, Role.PLATFORM_ADMIN), AuthorizationAction.PALETTE_READ);
         put(matrix, EnumSet.of(Role.OPERATOR, Role.DEVELOPER, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.PALETTE_MANAGE);
+        put(matrix, EnumSet.of(Role.OPERATOR, Role.DEVELOPER, Role.APPROVER,
+                        Role.TENANT_ADMIN, Role.PLATFORM_ADMIN), AuthorizationAction.GRAPH_READ);
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
-                AuthorizationAction.GRAPH_READ, AuthorizationAction.EXECUTION_START);
+                AuthorizationAction.EXECUTION_START);
+        put(matrix, EnumSet.of(Role.DEVELOPER, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.GRAPH_WRITE);
+        put(matrix, EnumSet.of(Role.APPROVER, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.GRAPH_RELEASE);
+        put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.GRAPH_ARTIFACT_DEPLOY);
         put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.EMBED_GRAPH_READ, AuthorizationAction.EMBED_SESSION_CREATE,
                 AuthorizationAction.EMBED_DEPLOYMENT_DISCOVER,

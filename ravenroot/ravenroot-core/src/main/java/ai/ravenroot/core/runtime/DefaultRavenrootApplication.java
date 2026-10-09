@@ -1385,6 +1385,79 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public ai.ravenroot.api.application.GraphArtifactDependencies resolveGraphArtifactDependencies(
+            SecurityContext security, InputStream graphMl) {
+        java.util.Objects.requireNonNull(security, "security");
+        byte[] bytes = readGraphMlBytes(java.util.Objects.requireNonNull(graphMl, "graphMl"));
+        var inspection = new GraphAdmissionValidator(behaviors, graphExecutionLimits, sagaStatusAvailable())
+                .inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
+        if (!inspection.valid()) {
+            throw new ai.ravenroot.api.application.GraphAdmissionException(inspection.findings().isEmpty()
+                    ? ai.ravenroot.api.application.GraphAdmissionFinding.of(
+                    ai.ravenroot.api.application.GraphAdmissionPhase.CAPABILITY,
+                    ai.ravenroot.api.application.GraphAdmissionReason.CAPABILITY_UNAVAILABLE,
+                    null, null, "graph-artifact-admission") : inspection.findings().getFirst());
+        }
+        try (var manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(bytes))) {
+            var definition = manager.definition();
+            for (var node : definition.nodes()) {
+                if (node.behavior() != null && behaviors.descriptor(node).isEmpty()) {
+                    throw graphArtifactDependencyUnavailable(node.id());
+                }
+            }
+            var behaviorNames = definition.nodes().stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
+                    .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+            var packages = behaviors.nodePackageBindingsFor(behaviorNames).stream()
+                    .map(BehaviorRegistry.RegisteredNodePackageBinding::identity).toList();
+            var programs = new java.util.ArrayList<ai.ravenroot.api.application.GraphProgramDependency>();
+            String compatibility = programRuntime.compatibilityFingerprint();
+            String compatibilityDigest = sha256(compatibility.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            for (var node : definition.nodes()) {
+                if (!"program".equals(node.behavior())) continue;
+                String language = requiredProgramProperty(node, "language", true);
+                String source = requiredProgramProperty(node, "source", false);
+                String sourceDigest = ai.ravenroot.api.programming.ProgramArtifactIdentity.sha256(language, source);
+                var artifact = artifacts.findByTenantAndDigest(security.tenantId(), sourceDigest)
+                        .filter(value -> value.state() == ArtifactState.ACTIVE)
+                        .filter(value -> programArtifactCompatible(value, compatibility))
+                        .orElseThrow(() -> graphArtifactDependencyUnavailable(node.id()));
+                if (!sourceDigest.equals(artifact.sha256())) {
+                    throw graphArtifactDependencyUnavailable(node.id());
+                }
+                programs.add(new ai.ravenroot.api.application.GraphProgramDependency(
+                        node.id(), language, sourceDigest, artifact.id(), artifact.sha256(),
+                        artifact.revision(), compatibilityDigest));
+            }
+            return new ai.ravenroot.api.application.GraphArtifactDependencies(packages, programs);
+        }
+    }
+
+    private static String requiredProgramProperty(ai.ravenroot.core.graph.GraphNode node, String name,
+                                                   boolean trim) {
+        Object raw = node.properties().get(name);
+        String value = raw == null ? "" : raw.toString();
+        String required = trim ? value.trim() : value;
+        if (required.isBlank()) throw graphArtifactDependencyUnavailable(node.id());
+        return required;
+    }
+
+    private static boolean programArtifactCompatible(GeneratedArtifact artifact, String current) {
+        String recorded = artifact.metadata().get("ravenroot.program.compatibilityFingerprint");
+        return recorded == null || recorded.isBlank() || MessageDigest.isEqual(
+                recorded.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                current.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static ai.ravenroot.api.application.GraphAdmissionException graphArtifactDependencyUnavailable(
+            String nodeId) {
+        return new ai.ravenroot.api.application.GraphAdmissionException(
+                ai.ravenroot.api.application.GraphAdmissionFinding.of(
+                        ai.ravenroot.api.application.GraphAdmissionPhase.CAPABILITY,
+                        ai.ravenroot.api.application.GraphAdmissionReason.CAPABILITY_UNAVAILABLE,
+                        nodeId, null, "graph-artifact-dependency"));
+    }
+
+    @Override
     public ExecutionSubmission startGraphMl(SecurityContext security, UUID executionId, InputStream graphMl,
                                             Object payload) {
         return startGraphMl(security, executionId, graphMl, payload, ExecutionPolicy.STANDARD);
@@ -3306,6 +3379,73 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 DeploymentId.of(key.deploymentId()));
         bindLifecycleIdentity(registration.record(), security);
         return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    @Override
+    public ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(
+            SecurityContext security, ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            InputStream graphMl) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(identity, "identity");
+        byte[] graphBytes = readGraphMlBytes(java.util.Objects.requireNonNull(graphMl, "graphMl"));
+        inspectEffectiveSources(graphBytes,
+                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
+        if (graphDefinitionStore == null) {
+            throw new UnsupportedOperationException("published graph imports require an immutable definition store");
+        }
+        var canonical = ai.ravenroot.api.persistence.CanonicalGraphMl.of(graphBytes);
+        var stored = awaitDefinition(graphDefinitionStore.put(security.tenantId(), identity, canonical));
+        var verified = awaitDefinition(graphDefinitionStore.resolve(security.tenantId(), identity));
+        if (!stored.canonical().contentId().equals(verified.canonical().contentId())
+                || !canonical.contentId().equals(verified.canonical().contentId())) {
+            throw new IllegalStateException("published graph identity did not verify");
+        }
+        return verified;
+    }
+
+    @Override
+    public LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(identity, "identity");
+        if (graphDefinitionStore == null) {
+            throw new UnsupportedOperationException("pinned graph deployments require an immutable definition store");
+        }
+        var verified = awaitDefinition(graphDefinitionStore.resolve(security.tenantId(), identity));
+        byte[] graphBytes = verified.canonical().bytes();
+        int sourceCount = inspectEffectiveSources(graphBytes,
+                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        Registration registration = register(key, graphBytes, sourceCount, DeploymentId.of(key.deploymentId()));
+        bindLifecycleIdentity(registration.record(), security);
+        return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    @Override
+    public LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            ai.ravenroot.api.persistence.GraphContentId expectedContentId) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(identity, "identity");
+        java.util.Objects.requireNonNull(expectedContentId, "expectedContentId");
+        if (graphDefinitionStore == null) {
+            throw new UnsupportedOperationException("pinned graph deployments require an immutable definition store");
+        }
+        var verified = awaitDefinition(graphDefinitionStore.resolve(security.tenantId(), identity));
+        if (!MessageDigest.isEqual(expectedContentId.value().getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+                verified.canonical().contentId().value().getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
+            throw new ai.ravenroot.api.persistence.GraphDefinitionStoreException(
+                    new ai.ravenroot.api.persistence.GraphDefinitionStoreFailure.IdentityConflict(
+                            security.tenantId(), identity, verified.canonical().contentId(), expectedContentId));
+        }
+        return registerPinnedLocalDeployment(security, deploymentId, identity);
+    }
+
+    @Override
+    public LocalDeploymentStatus registerPublishedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        importPublishedGraphDefinition(security, identity, graphMl);
+        return registerPinnedLocalDeployment(security, deploymentId, identity);
     }
 
     /**

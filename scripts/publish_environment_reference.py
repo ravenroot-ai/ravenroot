@@ -57,6 +57,10 @@ GROUPS = {
     "execution-runtime": Group(
         "Execution runtime", "configuration.md#execution-runtime-and-engine-limits"
     ),
+    "graph-authoring": Group(
+        "Graph source control and published artifacts",
+        "../operator-guide/graph-source-control.md#configure-the-source-archive",
+    ),
     "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits"),
     "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy"),
     "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls"),
@@ -73,6 +77,80 @@ GROUPS = {
 }
 
 ROW_BOUNDARIES = {
+    "RAVENROOT_GRAPH_AUTHORING_MODE": (
+        "startup enum `LOCAL` or `GIT`; unset defaults to `LOCAL`, which keeps browser-local files "
+        "and ignores the remaining Git authoring and artifact bindings"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_PROVIDER": (
+        "Git-mode provider enum; unset defaults to `GITHUB`, currently the only accepted value"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER": (
+        "required in Git mode; operator-owned GitHub account or organization, 1 through 100 "
+        "ASCII letters, digits, `_`, `.`, or `-`"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME": (
+        "required in Git mode; operator-owned repository name, 1 through 100 ASCII letters, "
+        "digits, `_`, `.`, or `-`"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY": (
+        "confined repository-relative graph root; unset defaults to `graphs`; 1 through 512 "
+        "allowed path characters with no absolute, trailing, doubled, or `..` segment"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH": (
+        "tenant-draft branch prefix; unset defaults to `draft`; 1 through 200 allowed branch "
+        "characters and must differ from the release branch"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH": (
+        "reviewed graph release branch; unset defaults to `main`; 1 through 200 allowed branch "
+        "characters and must differ from the draft prefix"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE": (
+        "absolute HTTPS GitHub API origin/path; unset defaults to `https://api.github.com`; "
+        "Enterprise path prefixes are retained and credentials, query, or fragment are refused"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE": (
+        "required in Git mode; `PAT` resolves a server-side token and `APP` mints a repository-scoped "
+        "installation token; credentials never enter browser responses"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE": (
+        "required nonblank opaque server credential name; resolves a PAT or GitHub App private key "
+        "through the credential store and is never a caller-selected value"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID": (
+        "required only for `APP`; positive decimal GitHub App identifier of 1 through 20 digits; "
+        "not a credential"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID": (
+        "required only for `APP`; positive decimal installation identifier of 1 through 20 digits; "
+        "the minted token is limited to the configured repository"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES": (
+        "required comma-separated `tenant=relative/path` grants; namespaces are confined, duplicate "
+        "tenants and colliding derived draft branches are refused, and absent tenants receive no access"
+    ),
+    "RAVENROOT_GRAPH_ARTIFACT_BASE_URL": (
+        "required in Git mode; absolute HTTPS immutable-artifact base ending in `/`, without "
+        "credentials, query, or fragment; outbound access is confined to this origin"
+    ),
+    "RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH": (
+        "confined relative immutable catalog snapshot path; unset defaults to `catalog.json`; "
+        "absolute, trailing, doubled, or `..` paths are refused"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES": (
+        "Git-mode GraphML request, Git blob, and downloaded artifact ceiling; unset defaults to "
+        "`10485760`; accepted range is 1 through `104857600` bytes"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE": (
+        "Git document and history page size; unset defaults to `50`; accepted range is 1 through `200`"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS": (
+        "positive connect, request, and complete response-body deadline; unset defaults to `15000`; "
+        "maximum `120000` milliseconds"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT": (
+        "additional retries for eligible GitHub `GET` failures; unset defaults to `1`; accepted "
+        "range is 0 through 3 and mutations are never retried blindly"
+    ),
     "RAVENROOT_ACTIVITY_CAPTURE_ENABLED": (
         "optional durable node-content archive; unset defaults to `false` and performs no archive "
         "schema or content I/O"
@@ -221,6 +299,28 @@ ACTIVITY_CAPTURE_VARIABLES = frozenset({
     "RAVENROOT_ACTIVITY_CAPTURE_REDACT_KEYS",
 })
 
+GRAPH_AUTHORING_VARIABLES = frozenset({
+    "RAVENROOT_GRAPH_ARTIFACT_BASE_URL",
+    "RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH",
+    "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE",
+    "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE",
+    "RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH",
+    "RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE",
+    "RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID",
+    "RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID",
+    "RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY",
+    "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES",
+    "RAVENROOT_GRAPH_AUTHORING_MODE",
+    "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE",
+    "RAVENROOT_GRAPH_AUTHORING_PROVIDER",
+    "RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH",
+    "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME",
+    "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER",
+    "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS",
+    "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT",
+    "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES",
+})
+
 
 def variables() -> dict[str, tuple[Path, ...]]:
     found: dict[str, set[Path]] = {}
@@ -247,6 +347,8 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name in GRAPH_AUTHORING_VARIABLES:
+        return "graph-authoring"
     if name in ACTIVITY_CAPTURE_VARIABLES:
         return "activity"
     if name in {"RAVENROOT_POD_UID", "RAVENROOT_NETWORK_CONTROL_HOST", "RAVENROOT_WORKSPACE_LIMIT_BYTES",

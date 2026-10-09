@@ -855,7 +855,8 @@ class RavenrootServerTest {
             assertEquals("{\"schemaVersion\":2,\"graphDocumentMaxBytes\":" + exact.length
                             + ",\"programAuthoring\":{\"maxSourceBytes\":1048576,"
                             + "\"maxBuildRequestBytes\":10485760,\"maxProgramsPerBuild\":256}"
-                            + ",\"workspace\":{\"tenantId\":\"local\"}}",
+                            + ",\"workspace\":{\"tenantId\":\"local\"}"
+                            + ",\"graphAuthoring\":{\"mode\":\"local\",\"provider\":\"none\",\"operations\":[]}}",
                     configuration.body());
             assertEquals("private, no-store", configuration.headers().firstValue("Cache-Control").orElseThrow());
 

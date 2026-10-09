@@ -5,6 +5,7 @@ Author graph documents in the workspace, control execution deliberately, and und
 ## Reading path
 
 - [Workspace and graph authoring](workspace-authoring.md) — Navigate the canvas, create nodes and edges, edit properties, and preserve valid GraphML.
+- [Repository-backed graph authoring](repository-authoring.md) — Save, inspect history, restore, review, publish, deploy, and roll back governed graph versions.
 - [Payloads, outcomes, and routing](payload-routing.md) — Shape data through nodes and make edge selection explicit with named outcomes.
 - [Test, Run, and execution control](test-run-observe.md) — Choose the correct execution mode, pause or cancel safely, and interpret execution evidence.
 - [Human Task confirmations](human-task-confirmations.md) — Author bounded confirmation prompts, act on an exact durable task, and reconcile races or restarts.

@@ -5,6 +5,7 @@ import hashlib
 import io
 import copy
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -88,7 +89,12 @@ def production_reappearance_fixture() -> tuple[
     checkpoint, checkpoint_raw = committed_inventory(REAPPEARANCE_CHECKPOINT_REVISION)
     active_ids = {entry["id"] for entry in document["entries"]}
     retired = {entry["id"]: entry for entry in document["retiredEntries"]}
-    collisions = sorted(active_ids & set(retired))
+    collisions = sorted(identifier for identifier in active_ids & set(retired)
+                        if retired[identifier].get("status") == "pending-review")
+    document["retiredEntries"] = [
+        entry for entry in document["retiredEntries"]
+        if entry.get("id") not in active_ids or entry.get("id") in collisions
+    ]
     candidate_by_id = {candidate.id: candidate for candidate in candidates}
     records = [{
         "kind": audit.REAPPEARANCE_KIND,
@@ -608,7 +614,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 shutil.copy2(ROOT / path, target)
             schema = root / audit.HELM_SCHEMA_PATH
             schema.write_text(schema.read_text(encoding="utf-8").replace(
-                '"const": true', '"const": false', 1), encoding="utf-8")
+                '"runAsNonRoot": { "type": "boolean", "const": true }', '"runAsNonRoot": { "type": "boolean", "const": false }', 1), encoding="utf-8")
             errors = audit.helm_authority_errors(root, None, {}, candidates)
             self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
 
@@ -1134,6 +1140,39 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.replace(item, line=item.line + 1) if item.id == identifier else item
             for item in candidates)
         self.assertEqual([], anchored_errors(moved, discovered=moved_candidates))
+
+    def test_reviewed_identity_reappearance_preserves_exact_retired_semantics(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        candidates = audit.discover(ROOT)
+        records = [record for record in document["normalizedIdentityReappearanceHistory"]
+                   if record.get("kind") == audit.REVIEWED_REAPPEARANCE_KIND]
+        self.assertEqual(2, len(records))
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, document, candidates)
+        self.assertEqual([], errors)
+        self.assertTrue({record["candidateId"] for record in records} <= allowed)
+
+        changed = copy.deepcopy(document)
+        identifier = records[0]["candidateId"]
+        next(entry for entry in changed["entries"]
+             if entry["id"] == identifier)["rationale"] = "Changed after the checkpoint."
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, changed, candidates)
+        self.assertTrue(any("current semantic metadata differs" in error for error in errors), errors)
+        self.assertEqual(set(), allowed)
+
+    def test_reviewed_reappearance_payload_excludes_only_historical_source_evidence(self) -> None:
+        retired = {
+            "status": "retained", "classification": "protocol-or-format-invariant",
+            "rationale": "Reviewed authority.", "retirementRationale": "Preserved retirement.",
+            "evidence": "historic source rendering", "customAuthority": "closed-v1",
+        }
+        self.assertEqual({
+            "status": "retained", "classification": "protocol-or-format-invariant",
+            "rationale": "Reviewed authority.", "retirementRationale": "Preserved retirement.",
+            "customAuthority": "closed-v1",
+        }, audit.reviewed_reappearance_semantic_payload(retired))
+
 
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
@@ -2155,12 +2194,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(108, len(details))
+            self.assertEqual(120, len(details))
             self.assertEqual(
-                {"methods": 121, "path": 108, "summary": 449, "successStatuses": 111},
+                {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(789, len(entries))
+            self.assertEqual(837, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -2471,10 +2510,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNotNone(generate_span)
             start, end = generate_span
             ignored_routes = original_generator[start:end].replace(
-                "json.append(routes.stream()", "String ignored = routes.stream()", 1)
-            ignored_routes = ignored_routes.replace(
-                '.collect(Collectors.joining(",\\n")));',
-                '.collect(Collectors.joining(",\\n"));\n        json.append("");', 1)
+                "json.append(byPath.entrySet().stream()",
+                "String ignored = byPath.entrySet().stream()", 1)
             self.assertNotEqual(original_generator[start:end], ignored_routes)
             generator_path.write_text(
                 original_generator[:start] + ignored_routes + original_generator[end:],
@@ -2485,7 +2522,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             changed["consumerBodyDigests"]["openApiGenerate"] = audit.java_method_digest(
                 mutated, "OpenApiSpecGenerator", "generate")
             errors = self.route_table_errors(root, changed, entries, candidates)
-            self.assertTrue(any("routes-to-pathEntry append chain" in error for error in errors), errors)
+            self.assertTrue(any("grouped method-specific publication" in error
+                                for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
             success_span = audit.java_method_span(
@@ -4330,7 +4368,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -4574,7 +4612,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 449 |",
+                "| Retained published contract descriptions | 461 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4582,7 +4620,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 448 |",
+                "| Retained published contract descriptions | 460 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6345,7 +6383,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
@@ -6597,8 +6635,37 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
                                  if discovered[identifier].path == schema_path]
             self.assertTrue(values_candidates)
             self.assertTrue(schema_candidates)
-            self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
-            self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
+            values_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1]).read_text()
+            values_start = re.search(r"(?m)^activityCapture:\s*$", values_source)
+            self.assertIsNotNone(values_start)
+            assert values_start is not None
+            next_values_key = re.search(
+                r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                values_source[values_start.end():],
+            )
+            values_end = (values_start.end() + next_values_key.start() - 1
+                          if next_values_key is not None else len(values_source) - 1)
+            values_lines = (
+                audit.line_number(values_source, values_start.start()),
+                audit.line_number(values_source, values_end),
+            )
+            schema_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[2]).read_text()
+            schema_start = re.search(r'"activityCapture"\s*:\s*\{', schema_source)
+            self.assertIsNotNone(schema_start)
+            assert schema_start is not None
+            schema_open = schema_source.find("{", schema_start.start())
+            schema_close = audit.matching_delimiter(
+                audit.strip_c_comments_and_literals(schema_source), schema_open, "{", "}")
+            self.assertIsNotNone(schema_close)
+            assert schema_close is not None
+            schema_lines = (
+                audit.line_number(schema_source, schema_start.start()),
+                audit.line_number(schema_source, schema_close),
+            )
+            self.assertTrue(all(values_lines[0] <= candidate.line <= values_lines[1]
+                                for candidate in values_candidates))
+            self.assertTrue(all(schema_lines[0] <= candidate.line <= schema_lines[1]
+                                for candidate in schema_candidates))
             self.assertTrue(all(candidate.role.startswith("activityCapture.")
                                 for candidate in values_candidates + schema_candidates
                                 if candidate.kind == "configuration-scalar"))
@@ -6621,6 +6688,155 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
                     self.assertIsNone(
                         audit.activity_capture_authority_from_source(root, discovered))
                 path.write_text(original, encoding="utf-8")
+
+
+class GraphAuthoringPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        paths = {
+            *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+            *audit.GRAPH_AUTHORING_TEST_PROOFS,
+            audit.GRAPH_AUTHORING_ROUTE_PATH, audit.GRAPH_AUTHORING_SERVER_PATH,
+            audit.GRAPH_AUTHORING_APPLICATION_PATH, audit.GRAPH_AUTHORING_UI_PATH,
+            *(path for path, _method in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS),
+            audit.GRAPH_AUTHORING_AUTHORIZATION_PATH, audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
+            Path(audit.HELM_VALUES_PATH), Path(audit.HELM_SCHEMA_PATH),
+            Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+        }
+        for relative in paths:
+            destination = cls.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.graph_authoring_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The graph authoring and publication boundary must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "graphAuthoringAuthority": audit.GRAPH_AUTHORING_AUTHORITY_ID,
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The closed graph authoring configuration owns this server-side setting.",
+            }
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(metadata))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    graphAuthoringAuthority=audit.GRAPH_AUTHORING_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def test_exact_boundary_closes_settings_routes_artifacts_ui_and_deployment_carriers(self) -> None:
+        authority = self.authority
+        self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS), len(authority["contracts"]))
+        identifiers = [identifier for contract in authority["contracts"]
+                       for identifier in contract["candidateIds"]]
+        identifiers += [identifier for partition in authority["semanticPartitions"]
+                        for identifier in partition["candidateIds"]]
+        self.assertEqual(len(identifiers), len(set(identifiers)))
+        self.assertEqual(set(identifiers), audit.graph_authoring_cohort_candidate_ids(
+            self.root, self.discovered))
+        self.assertEqual([], audit.graph_authoring_authority_errors(
+            self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: authority},
+            self.entries, self.discovered))
+        self.assertEqual({
+            "/v1/graph-authoring", "/v1/graph-authoring/{id}",
+            "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
+            "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
+            "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+            "/v1/graph-artifacts/{graphId}/{version}/import",
+            "/v1/graph-artifacts/{graphId}/{version}/deploy",
+        }, set(authority["routePaths"]))
+
+    def test_removed_auth_store_tenant_and_limit_guards_or_drifted_carriers_fail_closed(self) -> None:
+        mutations = (
+            (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
+             "maxDocumentBytes > 100 * 1024 * 1024", "maxDocumentBytes > 101 * 1024 * 1024"),
+            (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
+             "if (tenantNamespaces.isEmpty())", "if (false)"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GraphAuthoringHttpApi.java"),
+             "AuthorizationAction.GRAPH_RELEASE", "AuthorizationAction.GRAPH_WRITE"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "PublishedGraphArtifactCatalog.java"),
+             "artifact.sourceCommit().equals(sourceRevision)", "true"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "PublishedGraphArtifactHttpApi.java"),
+             "artifact.token().getBytes(StandardCharsets.US_ASCII)",
+             "expectedArtifactRef.getBytes(StandardCharsets.US_ASCII)"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GraphReleaseMetadata.java"),
+             "MAX_RELEASE_VERSION = 9_007_199_254_740_991L",
+             "MAX_RELEASE_VERSION = Long.MAX_VALUE"),
+            (audit.GRAPH_AUTHORING_APPLICATION_PATH,
+             'if (graphDefinitionStore == null) {\n'
+             '            throw new UnsupportedOperationException("published graph imports require',
+             'if (false) {\n'
+             '            throw new UnsupportedOperationException("published graph imports require'),
+            (audit.GRAPH_AUTHORING_APPLICATION_PATH,
+             ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);",
+             ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "applyAcceptedGraphMl(target.graph, result", "void applyAcceptedGraphMl(target.graph, result"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "authoring-capability.js"),
+             "return actions.blocked();", "return actions.local();"),
+            (Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+             "RAVENROOT_CREDENTIAL_6769742D617574686F72696E67",
+             "RAVENROOT_CREDENTIAL_UNSCOPED"),
+            (audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
+             "value: LOCAL", "value: GIT"),
+            (audit.GRAPH_AUTHORING_ROUTE_PATH,
+             '"/v1/graph-artifacts/{graphId}/{version}/import"',
+             '"/v1/graph-artifacts/{graphId}/{version}/load"'),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, mutation=after):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(
+                        audit.graph_authoring_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_authority_and_candidate_markers_are_mandatory(self) -> None:
+        self.assertTrue(audit.graph_authoring_authority_errors(
+            self.root, None, self.entries, self.discovered))
+        entries = copy.deepcopy(self.entries)
+        entries[self.authority["candidateIds"][0]].pop("graphAuthoringAuthority")
+        errors = audit.graph_authoring_authority_errors(
+            self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: self.authority},
+            entries, self.discovered)
+        self.assertTrue(any("partition" in error or "marker" in error for error in errors), errors)
+
+    def test_inventory_dispatches_the_mandatory_graph_authoring_authority(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads(
+                (root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "graph_authoring_authority_errors",
+                    return_value=["graph-authoring-routing-probe"]) as routed:
+                self.assertIn("graph-authoring-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
 
 
 class ProgramGithubPolicyAuditTest(unittest.TestCase):

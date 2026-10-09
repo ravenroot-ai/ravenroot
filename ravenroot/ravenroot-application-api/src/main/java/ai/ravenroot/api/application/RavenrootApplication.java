@@ -207,6 +207,20 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Resolves exact package and tenant-owned ACTIVE program dependencies without executing or
+     * creating artifacts. Older embedders fail closed because they cannot prove publication
+     * compatibility.
+     *
+     * @param security ingress-established tenant used for program artifact confinement
+     * @param graphMl exact admitted GraphML bytes; ownership remains with the caller
+     * @return immutable runtime-resolved dependency evidence
+     */
+    default GraphArtifactDependencies resolveGraphArtifactDependencies(SecurityContext security,
+                                                                        InputStream graphMl) {
+        throw new UnsupportedOperationException("graph artifact dependency resolution is unavailable");
+    }
+
+    /**
  * Trusted start contract for adapters that must establish security state before execution events
  * can be published. Implementations must use exactly {@code executionId} or fail before starting.
  *
@@ -374,6 +388,67 @@ public interface RavenrootApplication extends AutoCloseable {
     default LocalDeploymentStatus registerLocalDeployment(SecurityContext security, String deploymentId,
                                                           InputStream graphMl) {
         throw new UnsupportedOperationException("process-local deployments are not supported");
+    }
+
+    /**
+     * Imports CI-verified bytes into the tenant's immutable definition store without deploying or
+     * running them. An existing identity may be reused only when it resolves to the same digest.
+     *
+     * @param security ingress-established tenant and principal owning the immutable definition
+     * @param identity stable graph and authored-version identity verified against the GraphML
+     * @param graphMl exact CI-published GraphML bytes; ownership remains with the adapter
+     * @return immutable stored definition including the verified content digest
+     */
+    default ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(
+            SecurityContext security, ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            InputStream graphMl) {
+        throw new UnsupportedOperationException("published graph imports are not supported");
+    }
+
+    /**
+     * Registers a stopped deployment from an already imported authored identity. Registration
+     * resolves the immutable bytes again and never starts an execution.
+     *
+     * @param security ingress-established tenant and principal owning the registration
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity previously imported graph and authored-version identity
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
+        throw new UnsupportedOperationException("pinned graph deployments are not supported");
+    }
+
+    /**
+     * Registers an already imported definition only when its immutable content identity still
+     * matches the publication selected by the caller.
+     *
+     * @param security ingress-established tenant and principal owning the registration
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity previously imported graph and authored-version identity
+     * @param expectedContentId content identity of the selected verified publication
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            ai.ravenroot.api.persistence.GraphContentId expectedContentId) {
+        throw new UnsupportedOperationException("digest-bound pinned graph deployments are not supported");
+    }
+
+    /**
+     * Imports and registers a CI-verified publication for trusted embedders. This convenience seam
+     * preserves the distinct immutable import and stopped deployment steps and does not run it.
+     *
+     * @param security ingress-established tenant and principal owning both operations
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity stable graph and authored-version identity verified against the GraphML
+     * @param graphMl exact CI-published GraphML bytes; ownership remains with the adapter
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPublishedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        importPublishedGraphDefinition(security, identity, graphMl);
+        return registerPinnedLocalDeployment(security, deploymentId, identity);
     }
 
     /**

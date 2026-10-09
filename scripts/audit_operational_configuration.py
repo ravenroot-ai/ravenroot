@@ -15814,14 +15814,15 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
             or java_method_digest(generator, "OpenApiSpecGenerator", "generate") != \
             consumer_digests["openApiGenerate"]:
         errors.append("RouteTable OpenAPI generate signature/body has drifted")
-    for expression in (
-            "routes.stream().collect(Collectors.groupingBy(RouteDescriptor::path, "
-            "java.util.TreeMap::new, Collectors.toList()))",
-            "byPath.entrySet().stream().map(entry -> pathEntry(entry.getKey(), entry.getValue()))",
-            "collect(Collectors.joining("):
-        if normalized(expression) not in generate_code:
-            errors.append(
-                f"RouteTable OpenAPI generate lost grouped method-specific publication: {expression}")
+    grouping = normalized(
+        "routes.stream().collect(Collectors.groupingBy(RouteDescriptor::path, "
+        "java.util.TreeMap::new, Collectors.toList()))")
+    publication_chain = normalized(
+        "json.append(byPath.entrySet().stream()"
+        ".map(entry -> pathEntry(entry.getKey(), entry.getValue()))"
+        ".collect(Collectors.joining()))")
+    if grouping not in generate_code or publication_chain not in generate_code:
+        errors.append("RouteTable OpenAPI generate lost grouped method-specific publication")
     if normalized("return json.toString()") not in generate_code:
         errors.append("RouteTable OpenAPI generate lost return json.toString()")
     for role, method, header, required in (

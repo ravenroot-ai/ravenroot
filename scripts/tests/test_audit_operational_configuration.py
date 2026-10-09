@@ -2510,10 +2510,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNotNone(generate_span)
             start, end = generate_span
             ignored_routes = original_generator[start:end].replace(
-                "json.append(routes.stream()", "String ignored = routes.stream()", 1)
-            ignored_routes = ignored_routes.replace(
-                '.collect(Collectors.joining(",\\n")));',
-                '.collect(Collectors.joining(",\\n"));\n        json.append("");', 1)
+                "json.append(byPath.entrySet().stream()",
+                "String ignored = byPath.entrySet().stream()", 1)
             self.assertNotEqual(original_generator[start:end], ignored_routes)
             generator_path.write_text(
                 original_generator[:start] + ignored_routes + original_generator[end:],
@@ -4614,7 +4612,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 459 |",
+                "| Retained published contract descriptions | 461 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4622,7 +4620,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 458 |",
+                "| Retained published contract descriptions | 460 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

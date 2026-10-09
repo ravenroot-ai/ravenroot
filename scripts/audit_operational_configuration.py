@@ -3085,6 +3085,12 @@ def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
             if key not in SOURCE_METADATA_FIELDS and key not in {"retirement", "identityMigration"}}
 
 
+def reviewed_reappearance_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
+    """Return reviewed authority metadata while excluding retired source-rendering evidence."""
+    return {key: value for key, value in candidate_semantic_payload(entry).items()
+            if key != "evidence"}
+
+
 def final_review_authority_errors(
         root: Path, document: dict[str, object],
         expected_metadata: dict[str, dict[str, object]],
@@ -4582,7 +4588,7 @@ def normalized_identity_reappearance_errors(
             errors.append(f"{prefix} checkpoint addition metadata does not match its active row")
             continue
         if record.get("kind") == REVIEWED_REAPPEARANCE_KIND \
-                and checkpoint_metadata != candidate_semantic_payload(retired):
+                and checkpoint_metadata != reviewed_reappearance_semantic_payload(retired):
             errors.append(f"{prefix} reviewed semantic metadata differs from its retired authority")
             continue
 

@@ -1161,6 +1161,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any("current semantic metadata differs" in error for error in errors), errors)
         self.assertEqual(set(), allowed)
 
+    def test_reviewed_reappearance_payload_excludes_only_historical_source_evidence(self) -> None:
+        retired = {
+            "status": "retained", "classification": "protocol-or-format-invariant",
+            "rationale": "Reviewed authority.", "retirementRationale": "Preserved retirement.",
+            "evidence": "historic source rendering", "customAuthority": "closed-v1",
+        }
+        self.assertEqual({
+            "status": "retained", "classification": "protocol-or-format-invariant",
+            "rationale": "Reviewed authority.", "retirementRationale": "Preserved retirement.",
+            "customAuthority": "closed-v1",
+        }, audit.reviewed_reappearance_semantic_payload(retired))
+
 
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}

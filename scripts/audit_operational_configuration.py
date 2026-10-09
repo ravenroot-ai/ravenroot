@@ -15821,7 +15821,9 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
         "json.append(byPath.entrySet().stream()"
         ".map(entry -> pathEntry(entry.getKey(), entry.getValue()))"
         ".collect(Collectors.joining()))")
-    if grouping not in generate_code or publication_chain not in generate_code:
+    compact_generate = re.sub(r"\s+", "", generate_code)
+    if grouping not in generate_code \
+            or re.sub(r"\s+", "", publication_chain) not in compact_generate:
         errors.append("RouteTable OpenAPI generate lost grouped method-specific publication")
     if normalized("return json.toString()") not in generate_code:
         errors.append("RouteTable OpenAPI generate lost return json.toString()")

@@ -6773,13 +6773,27 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
                   if path.name == "PublishedGraphArtifactCatalog.java"),
              "artifact.sourceCommit().equals(sourceRevision)", "true"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "PublishedGraphArtifactHttpApi.java"),
+             "artifact.token().getBytes(StandardCharsets.US_ASCII)",
+             "expectedArtifactRef.getBytes(StandardCharsets.US_ASCII)"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GraphReleaseMetadata.java"),
+             "MAX_RELEASE_VERSION = 9_007_199_254_740_991L",
+             "MAX_RELEASE_VERSION = Long.MAX_VALUE"),
             (audit.GRAPH_AUTHORING_APPLICATION_PATH,
              'if (graphDefinitionStore == null) {\n'
              '            throw new UnsupportedOperationException("published graph imports require',
              'if (false) {\n'
              '            throw new UnsupportedOperationException("published graph imports require'),
+            (audit.GRAPH_AUTHORING_APPLICATION_PATH,
+             ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);",
+             ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);"),
             (audit.GRAPH_AUTHORING_UI_PATH,
              "applyAcceptedGraphMl(target.graph, result", "void applyAcceptedGraphMl(target.graph, result"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "authoring-capability.js"),
+             "return actions.blocked();", "return actions.local();"),
             (Path("deploy/helm/ravenroot/templates/deployment.yaml"),
              "RAVENROOT_CREDENTIAL_6769742D617574686F72696E67",
              "RAVENROOT_CREDENTIAL_UNSCOPED"),

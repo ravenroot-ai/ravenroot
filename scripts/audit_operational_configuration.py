@@ -14849,10 +14849,8 @@ def graph_authoring_cohort_candidate_ids(
                    for item in parsed_routes[1]]
     if {item.get("path") for item in descriptors if item.get("path") in route_paths} != route_paths:
         return None
-    for descriptor in descriptors:
-        if descriptor.get("path") in route_paths:
-            for ids in descriptor["candidateIds"].values():
-                selected.update(ids)
+    # Route candidates remain owned by the dedicated RouteTable publication authority. This
+    # boundary verifies the exact path roster without claiming or reclassifying those rows.
     selected.update(identifier for identifier, candidate in discovered.items()
                     if candidate.path == GRAPH_AUTHORING_AUTHORIZATION_PATH.as_posix()
                     and (candidate.role.startswith("GRAPH_") or candidate.expression.strip('"\'').startswith("graph:")))

@@ -4344,6 +4344,7 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
 
 
 REAPPEARANCE_KIND = "pending-candidate-normalized-identity-reappearance-v1"
+REVIEWED_REAPPEARANCE_KIND = "reviewed-candidate-normalized-identity-reappearance-v1"
 REAPPEARANCE_FIELDS = {
     "kind", "issue", "candidateId", "approved", "rationale",
     "priorInventoryRevision", "priorInventoryPath", "priorInventoryDigest",
@@ -4435,7 +4436,8 @@ def normalized_identity_reappearance_errors(
 
     for identifier, record in records.items():
         prefix = f"normalized identity reappearance {identifier}"
-        if record.get("kind") != REAPPEARANCE_KIND or record.get("approved") is not True \
+        if record.get("kind") not in {REAPPEARANCE_KIND, REVIEWED_REAPPEARANCE_KIND} \
+                or record.get("approved") is not True \
                 or not isinstance(record.get("issue"), str) \
                 or re.fullmatch(r"#[1-9][0-9]*", str(record.get("issue"))) is None \
                 or not isinstance(record.get("rationale"), str) \
@@ -4507,7 +4509,8 @@ def normalized_identity_reappearance_errors(
         }
         before = refresh.get("beforeRevision") if isinstance(refresh, dict) else None
         after = refresh.get("afterRevision") if isinstance(refresh, dict) else None
-        eligible = retired.get("status") == "pending-review" \
+        pending_eligible = record.get("kind") == REAPPEARANCE_KIND \
+            and retired.get("status") == "pending-review" \
             and retired.get("classification") is None \
             and "removal" not in retired and "retirement" not in retired \
             and isinstance(refresh, dict) and set(refresh) == expected_refresh_fields \
@@ -4521,8 +4524,22 @@ def normalized_identity_reappearance_errors(
             and commit_exists(root, before) and commit_exists(root, after) \
             and revision_is_ancestor(root, before, after) \
             and revision_is_ancestor(root, after, prior_revision)
-        if not eligible:
+        reviewed_status = retired.get("status")
+        reviewed_classification = retired.get("classification")
+        reviewed_eligible = record.get("kind") == REVIEWED_REAPPEARANCE_KIND \
+            and reviewed_status in STATUSES - {"pending-review"} \
+            and reviewed_classification in CLASSIFICATIONS \
+            and reviewed_status in CLASSIFICATION_STATUSES.get(str(reviewed_classification), set()) \
+            and "removal" not in retired and "retirement" not in retired \
+            and isinstance(retired.get("rationale"), str) \
+            and bool(str(retired.get("rationale")).strip()) \
+            and isinstance(retired.get("retirementRationale"), str) \
+            and bool(str(retired.get("retirementRationale")).strip())
+        if not pending_eligible and record.get("kind") == REAPPEARANCE_KIND:
             errors.append(f"{prefix} retired row is not an eligible mechanical pending refresh")
+            continue
+        if not reviewed_eligible and record.get("kind") == REVIEWED_REAPPEARANCE_KIND:
+            errors.append(f"{prefix} retired row is not an eligible reviewed retirement")
             continue
 
         reconciliation_id = record.get("reconciliationId")
@@ -4564,6 +4581,10 @@ def normalized_identity_reappearance_errors(
                 or not str(checkpoint_metadata.get("rationale")).strip():
             errors.append(f"{prefix} checkpoint addition metadata does not match its active row")
             continue
+        if record.get("kind") == REVIEWED_REAPPEARANCE_KIND \
+                and checkpoint_metadata != candidate_semantic_payload(retired):
+            errors.append(f"{prefix} reviewed semantic metadata differs from its retired authority")
+            continue
 
         candidate = discovered.get(identifier)
         current_entry = active.get(identifier)
@@ -4572,6 +4593,9 @@ def normalized_identity_reappearance_errors(
             continue
         if any(current_entry.get(key) != value for key, value in candidate.source_fields().items()):
             errors.append(f"{prefix} current source fields do not match discovery")
+            continue
+        if candidate_semantic_payload(current_entry) != checkpoint_metadata:
+            errors.append(f"{prefix} current semantic metadata differs from its checkpoint addition")
             continue
         normalized_rows = (retired, checkpoint_active[0], current_entry)
         if any(tuple(row.get(field) for field in NORMALIZED_IDENTITY_FIELDS)
@@ -14716,7 +14740,7 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     GRAPH_AUTHORING_CLIENT_PATH:
         "0b3e41f6ca9443f46985c23968d8b61da3717a8f0de9fb17dcd4b919a7fe43cd",
     GRAPH_AUTHORING_PUBLISHER_PATH:
-        "97f323442b3cbd1c888cf393f3c9da6e646f6a89986d29ebacbf5776ffc7f6ee",
+        "b2b80828de0df227859f1a8b6847719d81db59092ec1827887b9ff6072b5fe1b",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubAuthoringRepositoryTest.java"):
@@ -14734,7 +14758,7 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/graph-authoring-client.test.js"):
         "1040f53ddb7296cbc94cb14992ec00825197c16bb412f5e62146df97a7924cf9",
     Path("scripts/test_publish_graph_artifacts.py"):
-        "2e609b0a0c3174b4770b52da8330153ede28c4f6d573230e35c19b7c5c2baf09",
+        "27d877eaa73bc93148d1f7a176cf16215a59d1b54fb2f14a2d9272b6808a04d5",
 }
 GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installGraphAuthoring"):

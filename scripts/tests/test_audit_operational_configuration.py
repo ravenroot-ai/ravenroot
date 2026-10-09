@@ -89,7 +89,12 @@ def production_reappearance_fixture() -> tuple[
     checkpoint, checkpoint_raw = committed_inventory(REAPPEARANCE_CHECKPOINT_REVISION)
     active_ids = {entry["id"] for entry in document["entries"]}
     retired = {entry["id"]: entry for entry in document["retiredEntries"]}
-    collisions = sorted(active_ids & set(retired))
+    collisions = sorted(identifier for identifier in active_ids & set(retired)
+                        if retired[identifier].get("status") == "pending-review")
+    document["retiredEntries"] = [
+        entry for entry in document["retiredEntries"]
+        if entry.get("id") not in active_ids or entry.get("id") in collisions
+    ]
     candidate_by_id = {candidate.id: candidate for candidate in candidates}
     records = [{
         "kind": audit.REAPPEARANCE_KIND,
@@ -1135,6 +1140,27 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.replace(item, line=item.line + 1) if item.id == identifier else item
             for item in candidates)
         self.assertEqual([], anchored_errors(moved, discovered=moved_candidates))
+
+    def test_reviewed_identity_reappearance_preserves_exact_retired_semantics(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        candidates = audit.discover(ROOT)
+        records = [record for record in document["normalizedIdentityReappearanceHistory"]
+                   if record.get("kind") == audit.REVIEWED_REAPPEARANCE_KIND]
+        self.assertEqual(2, len(records))
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, document, candidates)
+        self.assertEqual([], errors)
+        self.assertTrue({record["candidateId"] for record in records} <= allowed)
+
+        changed = copy.deepcopy(document)
+        identifier = records[0]["candidateId"]
+        next(entry for entry in changed["entries"]
+             if entry["id"] == identifier)["rationale"] = "Changed after the checkpoint."
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, changed, candidates)
+        self.assertTrue(any("current semantic metadata differs" in error for error in errors), errors)
+        self.assertEqual(set(), allowed)
+
 
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}

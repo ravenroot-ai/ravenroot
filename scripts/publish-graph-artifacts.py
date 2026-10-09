@@ -9,8 +9,10 @@ import json
 import os
 import pathlib
 import re
+import socket
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -18,17 +20,65 @@ import xml.etree.ElementTree as ET
 NS = {"g": "http://graphml.graphdrawing.org/xmlns"}
 MAX_CATALOG_BYTES = 2 * 1024 * 1024
 SOURCE_COMMIT = re.compile(r"[0-9a-f]{40,64}")
+HTTP_TIMEOUT_SECONDS = 60
+HTTP_RESPONSE_BYTES = 64 * 1024
+AWS_CLI_TIMEOUT_SECONDS = 90
+AWS_CONNECT_TIMEOUT_SECONDS = 10
+AWS_READ_TIMEOUT_SECONDS = 30
+AWS_MAX_ATTEMPTS = "3"
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so an authorization header never crosses origins."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+HTTP_OPENER = urllib.request.build_opener(NoRedirectHandler())
 
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def read_bounded(response, limit: int) -> bytes:
-    value = response.read(limit + 1)
-    if len(value) > limit:
-        raise SystemExit("remote artifact exceeds the configured size limit")
-    return value
+def read_bounded(response, limit: int, deadline: float) -> bytes:
+    """Read within both a byte limit and the request's absolute deadline."""
+    try:
+        raw_socket = response.fp.raw._sock
+    except AttributeError:
+        raw_socket = None
+    chunks: list[bytes] = []
+    length = 0
+    read = getattr(response, "read1", response.read)
+    while length <= limit:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SystemExit("remote request exceeded the configured time limit")
+        if raw_socket is not None:
+            raw_socket.settimeout(remaining)
+        try:
+            chunk = read(min(64 * 1024, limit + 1 - length))
+        except (TimeoutError, socket.timeout) as error:
+            raise SystemExit("remote request exceeded the configured time limit") from error
+        if time.monotonic() > deadline:
+            raise SystemExit("remote request exceeded the configured time limit")
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+        length += len(chunk)
+    raise SystemExit("remote artifact exceeds the configured size limit")
+
+
+def open_http(request, limit: int) -> tuple[int, bytes]:
+    deadline = time.monotonic() + HTTP_TIMEOUT_SECONDS
+    try:
+        with HTTP_OPENER.open(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            return response.status, read_bounded(response, limit, deadline)
+    except urllib.error.HTTPError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        raise SystemExit("remote request failed within the configured network boundary") from error
 
 
 def admission(graph: bytes, url: str, token: str) -> dict:
@@ -39,8 +89,8 @@ def admission(graph: bytes, url: str, token: str) -> dict:
         headers={"Content-Type": "application/graphml+xml", "Accept": "application/json",
                  **({"Authorization": f"Bearer {token}"} if token else {})},
     )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        value = json.loads(read_bounded(response, MAX_CATALOG_BYTES))
+    _status, body = open_http(request, MAX_CATALOG_BYTES)
+    value = json.loads(body)
     if (not value.get("valid") or value.get("violations") or value.get("findings")
             or any(not isinstance(value.get(name), int)
                    for name in ("nodes", "edges", "startNodes", "endNodes"))):
@@ -78,8 +128,8 @@ def http_get(url: str, token: str, limit: int = MAX_CATALOG_BYTES) -> bytes:
         "Accept": "application/json, application/graphml+xml;q=0.9",
         **({"Authorization": f"Bearer {token}"} if token else {}),
     })
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return read_bounded(response, limit)
+    _status, body = open_http(request, limit)
+    return body
 
 
 def http_create(base: str, path: str, data: bytes, content_type: str, token: str) -> None:
@@ -88,15 +138,30 @@ def http_create(base: str, path: str, data: bytes, content_type: str, token: str
         headers={"Content-Type": content_type, "If-None-Match": "*",
                  **({"Authorization": f"Bearer {token}"} if token else {})})
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            if response.status not in {200, 201, 204}:
-                raise SystemExit(f"artifact upload returned {response.status}")
+        status, _body = open_http(request, HTTP_RESPONSE_BYTES)
+        if status not in {200, 201, 204}:
+            raise SystemExit(f"artifact upload returned {status}")
     except urllib.error.HTTPError as error:
         if error.code not in {409, 412}:
+            error.close()
             raise
+        error.close()
         existing = http_get(url, token, max(len(data), 1))
         if existing != data:
             raise SystemExit(f"immutable artifact exists with different bytes: {path}") from error
+
+
+def aws_run(command: list[str]) -> subprocess.CompletedProcess:
+    bounded_command = [command[0], "--cli-connect-timeout", str(AWS_CONNECT_TIMEOUT_SECONDS),
+                       "--cli-read-timeout", str(AWS_READ_TIMEOUT_SECONDS), *command[1:]]
+    environment = {**os.environ, "AWS_MAX_ATTEMPTS": AWS_MAX_ATTEMPTS,
+                   "AWS_RETRY_MODE": "standard"}
+    try:
+        return subprocess.run(bounded_command, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE, text=True, env=environment,
+                              timeout=AWS_CLI_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise SystemExit("immutable artifact storage request exceeded the configured time limit") from error
 
 
 def s3_create(bucket: str, path: str, data: bytes, content_type: str) -> None:
@@ -106,12 +171,11 @@ def s3_create(bucket: str, path: str, data: bytes, content_type: str) -> None:
         source.write_bytes(data)
         command = ["aws", "s3api", "put-object", "--bucket", bucket, "--key", path,
                    "--content-type", content_type, "--if-none-match", "*", "--body", str(source)]
-        result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        result = aws_run(command)
         if result.returncode == 0:
             return
-        fetched = subprocess.run(["aws", "s3api", "get-object", "--bucket", bucket,
-                                  "--key", path, str(existing)], stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.PIPE, text=True)
+        fetched = aws_run(["aws", "s3api", "get-object", "--bucket", bucket,
+                           "--key", path, str(existing)])
         if fetched.returncode != 0 or not existing.exists() or existing.read_bytes() != data:
             raise SystemExit(f"immutable artifact upload failed or existing bytes differ: {path}")
 

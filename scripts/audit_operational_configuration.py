@@ -14810,6 +14810,8 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
         "c9a979d7c81c71430c0c45b40825d9fa52ce7f6b4cd5a3c460061a438e2777df",
     (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "resolveGraphArtifactDependencies"):
         "4acb49dd5c595eb1322bd76dd28c1802dcefcdcaaae23672fdd4b7304724d53f",
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "programArtifactCompatible"):
+        "fba0dabfe9698464e03999be81708e10de098c972fe1d19d26338274d1756e07",
     (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "registerPublishedLocalDeployment"):
         "ce151ac425186080f2508e6d8bf3bc337d30ca1be8c0d74bb4c8a4940b9ac648",
 }

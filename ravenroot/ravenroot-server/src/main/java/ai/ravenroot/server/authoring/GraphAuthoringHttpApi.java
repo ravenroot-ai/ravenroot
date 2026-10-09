@@ -232,7 +232,9 @@ public final class GraphAuthoringHttpApi implements AutoCloseable {
         result.put("documentId", value.documentId()); result.put("displayPath", value.displayPath());
         result.put("graphId", value.graphId()); result.put("releaseVersion", value.releaseVersion());
         result.put("revision", revision(value.revision())); result.put("released", value.released());
-        result.put("published", value.published()); result.put("draftDeleted", value.draftDeleted()); return result;
+        result.put("published", value.published()); result.put("draftDeleted", value.draftDeleted());
+        result.put("releasedGraphId", value.releasedGraphId());
+        result.put("releasedVersion", value.releasedVersion()); return result;
     }
     private static Map<String, Object> revision(GraphAuthoringRepository.Revision value) {
         return Map.of("draft", value.draft(), "release", value.release(), "publication", value.publication());

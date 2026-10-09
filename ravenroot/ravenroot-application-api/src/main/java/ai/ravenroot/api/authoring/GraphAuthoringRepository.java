@@ -89,11 +89,14 @@ public interface GraphAuthoringRepository extends AutoCloseable {
      * @param releaseVersion positive authored release version carried by the GraphML
      * @param revision complete optimistic-concurrency state for the document
      * @param released whether reviewed release bytes exist for this graph
-     * @param published whether immutable publication evidence exists for the release
+     * @param published whether immutable publication evidence binds the exact reviewed release
      * @param draftDeleted whether the draft is absent while retained release bytes remain
+     * @param releasedGraphId graph identity in the reviewed source, or an empty string when absent
+     * @param releasedVersion positive reviewed-source version, or zero when absent
      */
     record DocumentSummary(String documentId, String displayPath, String graphId, long releaseVersion,
-                           Revision revision, boolean released, boolean published, boolean draftDeleted) {
+                           Revision revision, boolean released, boolean published, boolean draftDeleted,
+                           String releasedGraphId, long releasedVersion) {
         /**
          * Validates browser-safe identity, version, and source state.
          *
@@ -105,6 +108,8 @@ public interface GraphAuthoringRepository extends AutoCloseable {
          * @param released whether reviewed release bytes exist
          * @param published whether immutable publication evidence exists
          * @param draftDeleted whether only retained release bytes remain
+         * @param releasedGraphId reviewed-source graph identity, or an empty string when absent
+         * @param releasedVersion reviewed-source version, or zero when absent
          */
         public DocumentSummary {
             documentId = requireText(documentId, "documentId");
@@ -112,6 +117,14 @@ public interface GraphAuthoringRepository extends AutoCloseable {
             graphId = requireText(graphId, "graphId");
             if (releaseVersion < 1) throw new IllegalArgumentException("releaseVersion must be positive");
             Objects.requireNonNull(revision, "revision");
+            releasedGraphId = Objects.requireNonNull(releasedGraphId, "releasedGraphId");
+            if (released) {
+                releasedGraphId = requireText(releasedGraphId, "releasedGraphId");
+                if (releasedVersion < 1) throw new IllegalArgumentException("releasedVersion must be positive");
+            } else if (!releasedGraphId.isEmpty() || releasedVersion != 0 || published || draftDeleted) {
+                throw new IllegalArgumentException("absent release cannot carry release state");
+            }
+            if (published && !released) throw new IllegalArgumentException("published release must exist");
         }
     }
 

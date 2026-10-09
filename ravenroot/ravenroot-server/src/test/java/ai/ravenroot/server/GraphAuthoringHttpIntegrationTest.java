@@ -63,6 +63,8 @@ class GraphAuthoringHttpIntegrationTest {
             assertTrue(tenantA.body().contains("tenant-a.graphml"));
             assertFalse(tenantA.body().contains("tenant-b.graphml"));
             assertTrue(tenantB.body().contains("tenant-b.graphml"));
+            assertTrue(tenantA.body().contains("\"releasedVersion\":0"), tenantA.body());
+            assertTrue(tenantA.body().contains("\"releasedGraphId\":\"\""), tenantA.body());
 
             var denied = client.send(HttpRequest.newBuilder(base)
                     .header("Authorization", "Bearer tenant-a:alice:none").GET().build(),
@@ -111,7 +113,7 @@ class GraphAuthoringHttpIntegrationTest {
         @Override public CompletionStage<ReleaseProposal> proposeRelease(Actor actor, MutationRequest request) { throw new UnsupportedOperationException(); }
         private static DocumentSummary summary(String id) {
             return new DocumentSummary(id, id, "orders", 1,
-                    new Revision("absent", "absent", "absent"), false, false, false);
+                    new Revision("absent", "absent", "absent"), false, false, false, "", 0);
         }
     }
 }

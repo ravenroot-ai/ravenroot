@@ -105,6 +105,20 @@ export function decodeGraphMl(document_) {
 const GRAPH_ID_PROPERTY = 'ravenroot.authoring.graphId';
 const RELEASE_VERSION_PROPERTY = 'ravenroot.authoring.releaseVersion';
 
+export function repositorySourceStatus(authoring) {
+  const version = Number.isSafeInteger(authoring?.releaseVersion) && authoring.releaseVersion > 0
+    ? `v${authoring.releaseVersion}` : 'version pending';
+  const releasedVersion = Number.isSafeInteger(authoring?.releasedVersion) && authoring.releasedVersion > 0
+    ? `v${authoring.releasedVersion}` : null;
+  return Object.freeze({
+    sourceState: authoring?.draftDeleted ? 'Released source' : 'Repository draft',
+    version,
+    releaseState: authoring?.released ? `Released${releasedVersion ? ` ${releasedVersion}` : ''}` : 'Not released',
+    publicationState: authoring?.published ? 'Published'
+      : authoring?.released ? 'Publication pending or failed' : null,
+  });
+}
+
 /**
  * Makes the server-accepted GraphML the next serialization base while retaining the current graph
  * objects. Edits made during an in-flight save stay in the node/edge model; the accepted source

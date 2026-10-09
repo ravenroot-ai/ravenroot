@@ -66,6 +66,20 @@ class PublishedGraphArtifactCatalogTest {
                 () -> new PublishedGraphArtifactCatalog(configuration(), unavailable).list("tenant-a"));
     }
 
+    @Test void publicationTokenRequiresExactReleaseCommitAndBytes() {
+        var client = new ArtifactClient();
+        String source = "a".repeat(40);
+        addRelease(client, "orders", 1, "one", source);
+        client.catalog();
+        var catalog = new PublishedGraphArtifactCatalog(configuration(), client);
+        byte[] graph = catalog.resolve("tenant-a", "orders", 1).graphMl();
+
+        assertNotEquals("absent", catalog.token("tenant-a", "orders", 1, source, graph));
+        assertEquals("absent", catalog.token("tenant-a", "orders", 1, "b".repeat(40), graph));
+        graph[graph.length - 1] ^= 1;
+        assertEquals("absent", catalog.token("tenant-a", "orders", 1, source, graph));
+    }
+
     @Test void conflictingDuplicateIdentityAndSourceCommitMismatchAreRefused() {
         var duplicate = new ArtifactClient();
         addRelease(duplicate, "orders", 1, "one", "a".repeat(40));

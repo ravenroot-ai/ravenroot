@@ -49,7 +49,7 @@ class GithubAuthoringRepositoryTest {
 
     @Test void pinnedTreeReadsRejectCurrentAndHistoricalCrossTenantSymlinks() {
         var github = new ScriptedGithub();
-        try (var repository = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
             var first = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"),
                     EMPTY, "symlink-test-key-000000001")).toCompletableFuture().join();
             String historicalCommit = commit(first.summary().revision().draft());
@@ -72,7 +72,7 @@ class GithubAuthoringRepositoryTest {
 
     @Test void gitBlobReadsSupportDocumentsLargerThanContentsApiInlineLimit() {
         var github = new ScriptedGithub();
-        try (var repository = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
             byte[] large = graph("x".repeat(1024 * 1024 + 4096));
             var saved = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("large.graphml", large,
                     EMPTY, "large-blob-test-key-0000001")).toCompletableFuture().join();
@@ -84,7 +84,7 @@ class GithubAuthoringRepositoryTest {
 
     @Test void failedAttemptWithSameKeyRetriesAndTwoAuthorsCannotOverwrite() {
         var github = new ScriptedGithub();
-        try (var repository = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
             github.failOnce("/git/blobs");
             var request = new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"), EMPTY,
                     "request-key-000000000001");
@@ -107,11 +107,11 @@ class GithubAuthoringRepositoryTest {
         var request = new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"), EMPTY,
                 "request-key-000000000003");
         github.loseNextPatchResponse();
-        try (var first = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var first = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
             assertTrue(new String(first.save(ALICE, request).toCompletableFuture().join().graphMl(),
                     StandardCharsets.UTF_8).contains("one"));
         }
-        try (var restarted = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var restarted = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
             var replay = restarted.save(ALICE, request).toCompletableFuture().join();
             assertEquals(1, replay.summary().releaseVersion());
             assertEquals(1, github.authoredCommitCount());
@@ -121,22 +121,72 @@ class GithubAuthoringRepositoryTest {
     @Test void publicationChangeBeforeRefAdvanceRefusesVersionTransition() {
         var github = new ScriptedGithub();
         var publication = new MutablePublication();
-        github.beforeNextPatch(() -> publication.value = "published-concurrently");
         try (var repository = repository(github, publication)) {
-            var request = new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"), EMPTY,
-                    "request-key-000000000004");
+            var created = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("one"), EMPTY, "request-key-000000000004"))
+                    .toCompletableFuture().join();
+            github.mergeDraftToMain();
+            var beforePublication = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            assertFalse(beforePublication.summary().published());
+            github.beforeNextPatch(() -> publication.value = "published-concurrently");
+            var request = new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("two"),
+                    beforePublication.summary().revision(), "request-key-000000000005");
             assertFailure(GraphAuthoringException.Failure.CONFLICT,
                     () -> repository.save(ALICE, request).toCompletableFuture().join());
-            assertEquals("absent", repository.list(ALICE, "").toCompletableFuture().join()
-                    .items().stream().findFirst().map(item -> item.revision().draft()).orElse("absent"));
-            assertEquals(2, github.authoredCommitCount(),
+            var unchanged = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            assertArrayEquals(created.graphMl(), unchanged.graphMl());
+            assertEquals(1, unchanged.summary().releaseVersion());
+            assertTrue(unchanged.summary().published());
+            assertEquals(3, github.authoredCommitCount(),
                     "the accepted stale commit is cancelled by a second fast-forward commit");
+        }
+    }
+
+    @Test void onlyExactSuccessfulPublicationAdvancesADivergedDraftOnce() {
+        var github = new ScriptedGithub();
+        var publication = new MutablePublication();
+        try (var repository = repository(github, publication)) {
+            var created = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("one"), EMPTY, "publication-flow-key-0001"))
+                    .toCompletableFuture().join();
+            github.mergeDraftToMain();
+            var failedPublication = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            assertTrue(failedPublication.summary().released());
+            assertFalse(failedPublication.summary().published());
+            assertEquals(1, failedPublication.summary().releasedVersion());
+
+            var divergedBeforePublication = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("two"), failedPublication.summary().revision(),
+                    "publication-flow-key-0002")).toCompletableFuture().join();
+            assertEquals(1, divergedBeforePublication.summary().releaseVersion(),
+                    "a release branch without verified publication cannot advance authored version");
+
+            publication.value = "verified-publication-v1";
+            var simultaneous = repository.list(ALICE, "").toCompletableFuture().join().items().getFirst();
+            assertEquals(1, simultaneous.releaseVersion());
+            assertEquals(1, simultaneous.releasedVersion());
+            assertTrue(simultaneous.published());
+
+            var firstSaveAfterPublication = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", divergedBeforePublication.graphMl(), simultaneous.revision(),
+                    "publication-flow-key-0003")).toCompletableFuture().join();
+            assertEquals(2, firstSaveAfterPublication.summary().releaseVersion());
+            assertEquals(1, firstSaveAfterPublication.summary().releasedVersion());
+            assertTrue(firstSaveAfterPublication.summary().published());
+            var later = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("three"), firstSaveAfterPublication.summary().revision(),
+                    "publication-flow-key-0004")).toCompletableFuture().join();
+            assertEquals(2, later.summary().releaseVersion(), "later saves retain the incremented draft version");
+            assertEquals(1, later.summary().releasedVersion());
+            assertArrayEquals(created.graphMl(), repository.open(ALICE, "orders.graphml", true)
+                    .toCompletableFuture().join().graphMl());
         }
     }
 
     @Test void completeRemoteLifecyclePreservesVersionsHistoryAndReleasedBytes() {
         var github = new ScriptedGithub();
-        try (var firstDevice = repository(github, (tenant, graph, version) -> "absent")) {
+        var publication = new MutablePublication();
+        try (var firstDevice = repository(github, publication)) {
             var created = firstDevice.save(ALICE, new GraphAuthoringRepository.SaveRequest(
                     "orders.graphml", graph("one"), EMPTY, "lifecycle-key-000000001"))
                     .toCompletableFuture().join();
@@ -150,7 +200,7 @@ class GithubAuthoringRepositoryTest {
             assertEquals(commitsAfterCreate, github.authoredCommitCount());
         }
 
-        try (var secondDevice = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var secondDevice = repository(github, publication)) {
             var listed = secondDevice.list(ALICE, "").toCompletableFuture().join();
             assertEquals(List.of("orders.graphml"), listed.items().stream()
                     .map(GraphAuthoringRepository.DocumentSummary::documentId).toList());
@@ -160,6 +210,7 @@ class GithubAuthoringRepositoryTest {
             String versionOneCommit = commit(releasedCandidate.summary().revision().draft());
 
             github.mergeDraftToMain();
+            publication.value = "verified-publication-v1";
             var released = secondDevice.open(ALICE, "orders.graphml", true).toCompletableFuture().join();
             assertEquals(1, released.summary().releaseVersion());
             assertTrue(released.summary().released());
@@ -191,7 +242,8 @@ class GithubAuthoringRepositoryTest {
             var restored = secondDevice.restore(ALICE, new GraphAuthoringRepository.MutationRequest(
                     "orders.graphml", versionOneCommit, changedAgain.summary().revision(),
                     "lifecycle-key-000000005")).toCompletableFuture().join();
-            assertEquals(2, restored.summary().releaseVersion());
+            assertEquals(1, restored.summary().releaseVersion(),
+                    "restoring the exact published release does not invent a changed version");
             assertTrue(new String(restored.graphMl(), StandardCharsets.UTF_8).contains("one"));
 
             var discarded = secondDevice.discardDraft(ALICE, new GraphAuthoringRepository.MutationRequest(
@@ -218,7 +270,7 @@ class GithubAuthoringRepositoryTest {
 
     @Test void lostReleaseProposalResponseReconcilesOnlyItsFingerprint() {
         var github = new ScriptedGithub();
-        try (var repository = repository(github, (tenant, graph, version) -> "absent")) {
+        try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
             var saved = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
                     "orders.graphml", graph("one"), EMPTY, "release-flow-key-000001"))
                     .toCompletableFuture().join();
@@ -270,7 +322,7 @@ class GithubAuthoringRepositoryTest {
 
     private static final class MutablePublication implements PublicationEvidence {
         private volatile String value = "absent";
-        @Override public String token(String tenantId, String graphId, long releaseVersion) { return value; }
+        @Override public String token(String tenantId, String graphId, long releaseVersion, String sourceRevision, byte[] graphMl) { return value; }
     }
 
     private static final class ScriptedGithub extends HttpClient {

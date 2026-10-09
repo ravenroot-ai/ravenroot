@@ -194,10 +194,9 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
         if (!releasedSource) return new Document(state.summary(), source.bytes());
         GraphReleaseMetadata.Metadata metadata = GraphReleaseMetadata.read(source.bytes());
         if (metadata == null) throw failure(GraphAuthoringException.Failure.INVALID_DOCUMENT);
-        boolean published = !"absent".equals(publications.token(actor.tenantId(), metadata.graphId(),
-                metadata.releaseVersion()));
+        boolean published = state.summary().published();
         var summary = new DocumentSummary(documentId, documentId, metadata.graphId(), metadata.releaseVersion(),
-                state.revision(), true, published, true);
+                state.revision(), true, published, true, metadata.graphId(), metadata.releaseVersion());
         return new Document(summary, source.bytes());
     }
 
@@ -405,15 +404,11 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
         } else {
             version = submittedMetadata == null ? 1 : submittedMetadata.releaseVersion();
         }
-        if (releaseMetadata != null && state.draft() != null
-                && equivalent(state.draft().bytes(), state.release().bytes(), graphId,
-                        releaseMetadata.releaseVersion())) {
-            if (!equivalent(submitted, state.release().bytes(), graphId, releaseMetadata.releaseVersion())) {
-                version = Math.addExact(releaseMetadata.releaseVersion(), 1);
-            }
-        } else if (releaseMetadata != null && state.draft() == null) {
-            version = equivalent(submitted, state.release().bytes(), graphId, releaseMetadata.releaseVersion())
-                    ? releaseMetadata.releaseVersion() : Math.addExact(releaseMetadata.releaseVersion(), 1);
+        if (releaseMetadata != null && state.summary().published()) {
+            boolean matchesPublishedRelease = equivalent(submitted, state.release().bytes(), graphId,
+                    releaseMetadata.releaseVersion());
+            version = matchesPublishedRelease ? releaseMetadata.releaseVersion()
+                    : Math.max(version, Math.addExact(releaseMetadata.releaseVersion(), 1));
         }
         if (releaseMetadata != null && version < releaseMetadata.releaseVersion()) throw failure(GraphAuthoringException.Failure.CONFLICT);
         return GraphReleaseMetadata.assign(submitted, graphId, version);
@@ -429,18 +424,26 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
         ensureDraftBranch(actor);
         FileSnapshot draft = file(actor, documentId, draftBranch(actor), false);
         FileSnapshot release = file(actor, documentId, configuration.releaseBranch(), false);
-        GraphReleaseMetadata.Metadata metadata = draft != null ? GraphReleaseMetadata.read(draft.bytes())
-                : release != null ? GraphReleaseMetadata.read(release.bytes()) : null;
-        String publication = metadata == null ? "absent"
-                : publications.token(actor.tenantId(), metadata.graphId(), metadata.releaseVersion());
+        GraphReleaseMetadata.Metadata draftMetadata = draft == null ? null : GraphReleaseMetadata.read(draft.bytes());
+        GraphReleaseMetadata.Metadata releaseMetadata = release == null ? null : GraphReleaseMetadata.read(release.bytes());
+        if ((draft != null && draftMetadata == null) || (release != null && releaseMetadata == null)
+                || (draftMetadata != null && releaseMetadata != null
+                    && !draftMetadata.graphId().equals(releaseMetadata.graphId()))) {
+            throw failure(GraphAuthoringException.Failure.INVALID_DOCUMENT);
+        }
+        GraphReleaseMetadata.Metadata metadata = draftMetadata != null ? draftMetadata : releaseMetadata;
+        String publication = releaseMetadata == null ? "absent"
+                : publications.token(actor.tenantId(), releaseMetadata.graphId(), releaseMetadata.releaseVersion(),
+                        release.commitSha(), release.bytes());
         Revision revision = new Revision(token(draft), token(release), publication);
         if (metadata == null) {
             metadata = new GraphReleaseMetadata.Metadata("unassigned", 1);
         }
-        boolean released = release != null;
+        boolean released = releaseMetadata != null;
         boolean published = !"absent".equals(publication);
         DocumentSummary summary = new DocumentSummary(documentId, documentId, metadata.graphId(),
-                metadata.releaseVersion(), revision, released, published, draft == null && release != null);
+                metadata.releaseVersion(), revision, released, published, draft == null && released,
+                released ? releaseMetadata.graphId() : "", released ? releaseMetadata.releaseVersion() : 0);
         return new State(draft, release, summary);
     }
 

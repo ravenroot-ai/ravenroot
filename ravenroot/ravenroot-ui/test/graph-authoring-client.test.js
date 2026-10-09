@@ -3,6 +3,7 @@ import {
   applyAcceptedGraphMl,
   GraphAuthoringClient,
   decodeGraphMl,
+  repositorySourceStatus,
   validateGraphAuthoringCapability,
 } from '../src/graph-authoring-client.js';
 import { parseGraphML } from '../src/graph-parsers.js';
@@ -61,8 +62,23 @@ describe('graph authoring client', () => {
     expect(roundTrip.graphProperties['ravenroot.authoring.graphId']).toBe('orders');
     expect(roundTrip.graphProperties['ravenroot.authoring.releaseVersion']).toBe('3');
     expect(roundTrip.nodes.some(node => node.id === 'during-save')).toBe(true);
+    const firstNoOpSerialization = serializeGraphML(roundTrip);
+    expect(serializeGraphML(parseGraphML(firstNoOpSerialization))).toBe(firstNoOpSerialization);
     expect(() => applyAcceptedGraphMl(current, { ...envelope, releaseVersion: 4 }, parseGraphML))
       .toThrow(/inconsistent/);
+  });
+
+  it('keeps current draft and exact reviewed publication status visible separately', () => {
+    expect(repositorySourceStatus({ releaseVersion: 2, releasedVersion: 1,
+      released: true, published: true, draftDeleted: false })).toEqual({
+      sourceState: 'Repository draft', version: 'v2', releaseState: 'Released v1',
+      publicationState: 'Published',
+    });
+    expect(repositorySourceStatus({ releaseVersion: 1, releasedVersion: 1,
+      released: true, published: false, draftDeleted: true })).toEqual({
+      sourceState: 'Released source', version: 'v1', releaseState: 'Released v1',
+      publicationState: 'Publication pending or failed',
+    });
   });
 
   it('maps repository history, mutations, release and rollback to server routes', async () => {

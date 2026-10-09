@@ -209,7 +209,12 @@ import {
 } from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
-import { applyAcceptedGraphMl, GraphAuthoringClient, decodeGraphMl } from './graph-authoring-client.js';
+import {
+  applyAcceptedGraphMl,
+  GraphAuthoringClient,
+  decodeGraphMl,
+  repositorySourceStatus,
+} from './graph-authoring-client.js';
 import {
   applyAssistantGraphProposal,
   catalogProposalDigest,
@@ -2799,18 +2804,16 @@ function documentModeLabel(document_) {
   if (!document_) return 'No document';
   const authoring = document_.authoring;
   if (authoring?.providerDocumentId) {
-    const version = Number.isSafeInteger(authoring.releaseVersion) && authoring.releaseVersion > 0
-      ? `v${authoring.releaseVersion}` : 'version pending';
+    const { sourceState, version, releaseState, publicationState } = repositorySourceStatus(authoring);
     const revision = authoring.draftDeleted ? authoring.revision?.release
       : authoring.revision?.draft !== 'absent' ? authoring.revision?.draft : authoring.revision?.release;
     const sourceRevision = typeof revision === 'string' && revision !== 'absent'
       ? revision.split(':', 1)[0].slice(0, 12) : 'revision pending';
-    const sourceState = authoring.draftDeleted ? 'Released source' : 'Repository draft';
-    const releaseState = authoring.published ? 'Published' : authoring.released ? 'Released' : 'Not released';
     const editState = authoring.saveFlight ? 'Saving…' : authoring.saveError ? 'Save failed'
       : graphAuthoringUnavailable ? 'Repository unavailable'
         : paneIsDirty(document_) ? 'Unsaved edits' : null;
-    return [sourceState, version, sourceRevision, releaseState, editState].filter(Boolean).join(' · ');
+    return [sourceState, version, sourceRevision, releaseState, publicationState, editState]
+      .filter(Boolean).join(' · ');
   }
   const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
     : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
@@ -15219,6 +15222,9 @@ function applyAuthoringDocument(target, result, providerDocumentId = result.docu
   target.authoring.revision = structuredClone(result.revision);
   target.authoring.graphId = result.graphId;
   target.authoring.releaseVersion = result.releaseVersion;
+  target.authoring.releasedGraphId = result.releasedGraphId || null;
+  target.authoring.releasedVersion = Number.isSafeInteger(result.releasedVersion) && result.releasedVersion > 0
+    ? result.releasedVersion : null;
   target.authoring.released = Boolean(result.released);
   target.authoring.published = Boolean(result.published);
   target.authoring.draftDeleted = Boolean(result.draftDeleted);
@@ -15241,9 +15247,11 @@ async function openRepositoryGraph(requested = null) {
       if (!page.items.length) return showInspectorMessage('This repository has no graphs in your workspace.') || false;
       const choices = page.items.flatMap(item => [
         ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
-          source: 'draft', label: `${item.documentId} [draft] · v${item.releaseVersion}` }] : []),
+          source: 'draft', label: `${item.documentId} [draft] · v${item.releaseVersion}`
+            + (item.released ? ` · released v${item.releasedVersion}${item.published ? ' · published' : ' · publication pending or failed'}` : '') }] : []),
         ...(item.released ? [{ key: `${item.documentId} [released]`, documentId: item.documentId,
-          source: 'release', label: `${item.documentId} [released] · reviewed source${item.published ? ' · published' : ''}` }] : []),
+          source: 'release', label: `${item.documentId} [released] · v${item.releasedVersion}`
+            + (item.published ? ' · published' : ' · publication pending or failed') }] : []),
       ]);
       const selected = globalThis.prompt(`Open a repository graph:\n\n${choices.map(item => item.label).join('\n')}`,
         choices[0].key)?.trim();

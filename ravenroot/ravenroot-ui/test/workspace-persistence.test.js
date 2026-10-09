@@ -48,14 +48,16 @@ describe('tenant workspace snapshot', () => {
     source.authoring = {
       providerDocumentId: 'orders.graphml',
       revision: { draft: 'd', release: 'r', publication: 'p' },
-      graphId: 'orders', releaseVersion: 7, released: true, published: true,
+      graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
+      released: true, published: true,
       draftDeleted: true, saveFlight: 'never-persist-request-state', saveError: 'never-persist-error-state',
     };
     const stored = persistedDocument(source);
     expect(stored.authoring).toEqual({
       providerDocumentId: 'orders.graphml',
       revision: { draft: 'd', release: 'r', publication: 'p' },
-      graphId: 'orders', releaseVersion: 7, released: true, published: true, draftDeleted: true,
+      graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
+      released: true, published: true, draftDeleted: true,
     });
     expect(JSON.stringify(stored)).not.toContain('never-persist-request-state');
     expect(JSON.stringify(stored)).not.toContain('never-persist-error-state');

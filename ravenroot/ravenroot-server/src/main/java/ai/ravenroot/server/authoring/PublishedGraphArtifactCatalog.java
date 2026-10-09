@@ -51,10 +51,16 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
                 1024, Math.max(JSON_LIMITS.maxEncodedBytes(), configuration.maxDocumentBytes()));
     }
 
-    @Override public String token(String tenantId, String graphId, long releaseVersion) {
+    @Override public String token(String tenantId, String graphId, long releaseVersion,
+                                  String sourceRevision, byte[] graphMl) {
+        Objects.requireNonNull(sourceRevision, "sourceRevision");
+        Objects.requireNonNull(graphMl, "graphMl");
         return entries().stream().filter(entry -> entry.tenantId.equals(tenantId)
                         && entry.graphId.equals(graphId) && entry.releaseVersion == releaseVersion)
-                .findFirst().map(entry -> resolve(entry).token()).orElse("absent");
+                .findFirst().map(this::resolve)
+                .filter(artifact -> artifact.sourceCommit().equals(sourceRevision)
+                        && MessageDigest.isEqual(artifact.graphMl(), graphMl))
+                .map(Artifact::token).orElse("absent");
     }
 
     public List<Artifact> list(String tenantId) {

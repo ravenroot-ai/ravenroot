@@ -6688,6 +6688,7 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_TEST_PROOFS,
             audit.GRAPH_AUTHORING_ROUTE_PATH, audit.GRAPH_AUTHORING_SERVER_PATH,
             audit.GRAPH_AUTHORING_APPLICATION_PATH, audit.GRAPH_AUTHORING_UI_PATH,
+            *(path for path, _method in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS),
             audit.GRAPH_AUTHORING_AUTHORIZATION_PATH, audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
             Path(audit.HELM_VALUES_PATH), Path(audit.HELM_SCHEMA_PATH),
             Path("deploy/helm/ravenroot/templates/deployment.yaml"),
@@ -6757,6 +6758,9 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
                   if path.name == "GraphAuthoringHttpApi.java"),
              "AuthorizationAction.GRAPH_RELEASE", "AuthorizationAction.GRAPH_WRITE"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "PublishedGraphArtifactCatalog.java"),
+             "artifact.sourceCommit().equals(sourceRevision)", "true"),
             (audit.GRAPH_AUTHORING_APPLICATION_PATH,
              'if (graphDefinitionStore == null) {\n'
              '            throw new UnsupportedOperationException("published graph imports require',

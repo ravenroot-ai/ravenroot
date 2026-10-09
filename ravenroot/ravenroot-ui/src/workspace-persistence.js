@@ -35,6 +35,9 @@ function persistedAuthoring(value) {
     revision: Object.freeze({ draft: revision.draft, release: revision.release, publication: revision.publication }),
     graphId: nullableString(value.graphId, 'graphId'),
     releaseVersion: Number.isSafeInteger(value.releaseVersion) && value.releaseVersion > 0 ? value.releaseVersion : null,
+    releasedGraphId: nullableString(value.releasedGraphId, 'releasedGraphId'),
+    releasedVersion: Number.isSafeInteger(value.releasedVersion) && value.releasedVersion > 0
+      ? value.releasedVersion : null,
     released: Boolean(value.released), published: Boolean(value.published),
     draftDeleted: Boolean(value.draftDeleted) });
 }

@@ -1195,7 +1195,7 @@
     },
     "/v1/graph-authoring": {
       "get": {
-        "summary": "Lists one authenticated tenant's Git-backed graph documents and trusted release state.",
+        "summary": "Lists one authenticated tenant's Git-backed graph documents with the current draft version, the distinct reviewed release version, source availability, and exact verified publication state.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "responses": {
@@ -1211,7 +1211,7 @@
     },
     "/v1/graph-authoring/{id}": {
       "delete": {
-        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML draft with three-way optimistic concurrency.",
+        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -1230,7 +1230,7 @@
         }
       },
       "get": {
-        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML draft with three-way optimistic concurrency.",
+        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -1249,7 +1249,7 @@
         }
       },
       "put": {
-        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML draft with three-way optimistic concurrency.",
+        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [

@@ -81,6 +81,8 @@ export function createDocumentRecord({
       revision: null,
       graphId: null,
       releaseVersion: null,
+      releasedGraphId: null,
+      releasedVersion: null,
       released: false,
       published: false,
       draftDeleted: false,

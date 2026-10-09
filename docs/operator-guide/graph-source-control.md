@@ -8,15 +8,25 @@ Git mode currently supports GitHub and GitHub Enterprise through a provider-neut
 
 | Setting | Purpose |
 |---|---|
-| `RAVENROOT_GRAPH_AUTHORING_PROVIDER=GITHUB` | Selects the installed provider adapter. |
-| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER`, `..._NAME` | Select the operator-owned graph repository. |
-| `RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY` | Confines every graph path under one directory. |
-| `RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH`, `..._RELEASE_BRANCH` | Name the draft prefix and reviewed release branch. Each tenant receives a separate draft branch. |
-| `RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES` | Comma-separated trusted mappings such as `tenant-a=customers/a,tenant-b=customers/b`. A tenant without a mapping is denied. |
-| `RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE` | HTTPS API base, including an Enterprise prefix such as `/api/v3`. |
-| `RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE` | `APP` or `PAT`. |
-| `RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE` | Opaque server-side credential reference. It is never returned to the browser or logs. |
-| `RAVENROOT_GRAPH_ARTIFACT_BASE_URL`, `..._CATALOG_PATH` | HTTPS location of one immutable catalog snapshot produced by release CI. |
+| `RAVENROOT_GRAPH_AUTHORING_MODE` | Startup enum `LOCAL` or `GIT`. Unset defaults to `LOCAL`, which ignores the remaining Git authoring and artifact bindings. |
+| `RAVENROOT_GRAPH_AUTHORING_PROVIDER` | Git-mode provider enum. Unset defaults to `GITHUB`, currently the only accepted value. |
+| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER` | Required GitHub account or organization. It accepts 1–100 ASCII letters, digits, `_`, `.`, or `-`. |
+| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME` | Required operator-owned repository name with the same 1–100 character boundary. |
+| `RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY` | Confined repository-relative graph root, default `graphs`, with 1–512 allowed path characters and no absolute, trailing, doubled, or `..` segment. |
+| `RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH` | Tenant-draft branch prefix, default `draft`, with 1–200 allowed branch characters. It must differ from the release branch. |
+| `RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH` | Reviewed graph release branch, default `main`, with 1–200 allowed branch characters. It must differ from the draft prefix. |
+| `RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES` | Required comma-separated grants such as `tenant-a=customers/a,tenant-b=customers/b`. Namespaces are confined; duplicate tenants and colliding derived draft branches are refused, and an absent tenant has no repository access. |
+| `RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE` | Absolute HTTPS API origin/path, default `https://api.github.com`. An Enterprise prefix such as `/api/v3` is retained; credentials, query, and fragment are refused. |
+| `RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE` | Required `APP` or `PAT`. `PAT` resolves a server-side token; `APP` mints a repository-scoped installation token. |
+| `RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE` | Required opaque server-side credential name resolving the PAT or App private key. It is never caller-selected or returned to the browser or logs. |
+| `RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID` | Required only for `APP`; positive decimal App identifier of 1–20 digits. It is an identifier, not a credential. |
+| `RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID` | Required only for `APP`; positive decimal installation identifier of 1–20 digits. The installation token is restricted to the configured repository. |
+| `RAVENROOT_GRAPH_ARTIFACT_BASE_URL` | Required absolute HTTPS immutable-artifact base ending in `/`, without credentials, query, or fragment. Outbound access is confined to this origin. |
+| `RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH` | Confined relative immutable catalog snapshot path, default `catalog.json`; absolute, trailing, doubled, or `..` paths are refused. |
+| `RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES` | GraphML request, Git blob, and downloaded artifact ceiling. Default `10485760`; accepted Git-mode range 1–`104857600` bytes. |
+| `RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE` | Document and history page size. Default `50`; accepted range 1–200. |
+| `RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS` | Positive connect, request, and complete response-body deadline. Default `15000`; maximum `120000` milliseconds. |
+| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | Additional retries for eligible GitHub `GET` failures. Default `1`; accepted range 0–3. Mutations are never retried blindly. |
 
 For a GitHub App, also set the App and installation IDs. Store the PKCS#8/PKCS#1 private key at the credential reference. The adapter mints a short-lived installation token scoped to the configured repository with contents, pull-request, and metadata permissions. A PAT is resolved through the same server-only credential chain. The Helm chart uses the fixed reference `git-authoring` and reads its encoded environment binding from a Kubernetes Secret.
 

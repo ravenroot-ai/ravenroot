@@ -41,6 +41,8 @@ class GraphAuthoringHttpIntegrationTest {
             String token = exchange.getRequestHeaders().getFirst("Authorization");
             String[] claims = token.replace("Bearer ", "").split(":", -1);
             Set<String> scopes = claims.length > 2 && claims[2].equals("none") ? Set.of()
+                    : claims.length > 2 && claims[2].equals("read")
+                    ? Set.of(AuthorizationAction.GRAPH_READ.requiredScope())
                     : Set.of(AuthorizationAction.GRAPH_READ.requiredScope(),
                     AuthorizationAction.GRAPH_WRITE.requiredScope());
             var principal = new AuthenticatedPrincipal(claims[1], AuthenticatedPrincipal.Type.USER,
@@ -71,6 +73,24 @@ class GraphAuthoringHttpIntegrationTest {
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(403, denied.statusCode(), denied.body());
 
+            var readOnly = client.send(HttpRequest.newBuilder(base)
+                    .header("Authorization", "Bearer tenant-a:reader:read").GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, readOnly.statusCode(), readOnly.body());
+            int savesBeforeDeniedWrite = repository.saveCalls;
+            var readOnlyWrite = client.send(HttpRequest.newBuilder(
+                            base.resolve("/v1/graph-authoring/denied.graphml"))
+                    .header("Authorization", "Bearer tenant-a:reader:read")
+                    .header("Idempotency-Key", "read-only-key-000000001")
+                    .header("X-Ravenroot-Expected-Draft", "absent")
+                    .header("X-Ravenroot-Expected-Release", "absent")
+                    .header("X-Ravenroot-Expected-Publication", "absent")
+                    .PUT(HttpRequest.BodyPublishers.ofString("<graphml/>" )).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(403, readOnlyWrite.statusCode(), readOnlyWrite.body());
+            assertEquals(savesBeforeDeniedWrite, repository.saveCalls,
+                    "GRAPH_READ authority must never reach a repository mutation");
+
             var saved = client.send(HttpRequest.newBuilder(base.resolve("/v1/graph-authoring/orders.graphml"))
                     .header("Authorization", "Bearer tenant-b:bob:all")
                     .header("Idempotency-Key", "request-key-000000000001")
@@ -94,6 +114,7 @@ class GraphAuthoringHttpIntegrationTest {
 
     private static final class TenantRecordingRepository implements GraphAuthoringRepository {
         volatile Actor lastActor;
+        volatile int saveCalls;
         @Override public Set<Capability> capabilities() { return Set.of(Capability.LIST, Capability.OPEN, Capability.SAVE); }
         @Override public CompletionStage<Page<DocumentSummary>> list(Actor actor, String cursor) {
             lastActor = actor;
@@ -103,7 +124,8 @@ class GraphAuthoringHttpIntegrationTest {
             lastActor = actor; return CompletableFuture.completedFuture(new Document(summary(id), "<graphml/>".getBytes()));
         }
         @Override public CompletionStage<Document> save(Actor actor, SaveRequest request) {
-            lastActor = actor; return CompletableFuture.completedFuture(new Document(summary(request.documentId()), request.graphMl()));
+            lastActor = actor; saveCalls++;
+            return CompletableFuture.completedFuture(new Document(summary(request.documentId()), request.graphMl()));
         }
         @Override public CompletionStage<Page<HistoryEntry>> history(Actor actor, String id, String cursor) { throw new UnsupportedOperationException(); }
         @Override public CompletionStage<Difference> diff(Actor actor, String id, String from, String to) { throw new UnsupportedOperationException(); }

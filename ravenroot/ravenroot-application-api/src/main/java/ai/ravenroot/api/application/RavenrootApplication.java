@@ -207,6 +207,20 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Resolves exact package and tenant-owned ACTIVE program dependencies without executing or
+     * creating artifacts. Older embedders fail closed because they cannot prove publication
+     * compatibility.
+     *
+     * @param security ingress-established tenant used for program artifact confinement
+     * @param graphMl exact admitted GraphML bytes; ownership remains with the caller
+     * @return immutable runtime-resolved dependency evidence
+     */
+    default GraphArtifactDependencies resolveGraphArtifactDependencies(SecurityContext security,
+                                                                        InputStream graphMl) {
+        throw new UnsupportedOperationException("graph artifact dependency resolution is unavailable");
+    }
+
+    /**
  * Trusted start contract for adapters that must establish security state before execution events
  * can be published. Implementations must use exactly {@code executionId} or fail before starting.
  *
@@ -403,6 +417,22 @@ public interface RavenrootApplication extends AutoCloseable {
     default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
             ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
         throw new UnsupportedOperationException("pinned graph deployments are not supported");
+    }
+
+    /**
+     * Registers an already imported definition only when its immutable content identity still
+     * matches the publication selected by the caller.
+     *
+     * @param security ingress-established tenant and principal owning the registration
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity previously imported graph and authored-version identity
+     * @param expectedContentId content identity of the selected verified publication
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            ai.ravenroot.api.persistence.GraphContentId expectedContentId) {
+        throw new UnsupportedOperationException("digest-bound pinned graph deployments are not supported");
     }
 
     /**

@@ -16,6 +16,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -44,7 +45,7 @@ public final class PublishedGraphArtifactHttpApi {
                 var items = catalog.list(context.tenantId()).stream().map(value -> Map.of(
                         "graphId", value.graphId(), "releaseVersion", value.releaseVersion(),
                         "sha256", value.graphMlSha256(), "compatibilityContract", value.compatibilityContract(),
-                        "dependencies", value.dependencies())).toList();
+                        "artifactRef", value.token(), "dependencies", dependencies(value.dependencies()))).toList();
                 write(exchange, 200, Map.of("items", items)); return;
             }
             String[] parts = suffix.split("/");
@@ -54,21 +55,39 @@ public final class PublishedGraphArtifactHttpApi {
                 error(exchange, 404, "UNKNOWN_RESOURCE"); return;
             }
             String graphId = URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
-            long version = Long.parseLong(parts[2]);
+            long version = parseReleaseVersion(parts[2]);
+            Map<String, String> query = query(exchange);
+            String expectedSha256 = requiredSha256(query, "expectedSha256");
+            String expectedArtifactRef = requiredArtifactRef(query, "expectedArtifactRef");
             authorization.requireAllowed(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY,
                     ProtectedResource.collection("published-graphs", context.tenantId()));
             var artifact = catalog.resolve(context.tenantId(), graphId, version);
+            if (!MessageDigest.isEqual(expectedSha256.getBytes(StandardCharsets.US_ASCII),
+                    artifact.graphMlSha256().getBytes(StandardCharsets.US_ASCII))) {
+                error(exchange, 409, "PUBLISHED_ARTIFACT_CHANGED"); return;
+            }
+            if (!MessageDigest.isEqual(expectedArtifactRef.getBytes(StandardCharsets.US_ASCII),
+                    artifact.token().getBytes(StandardCharsets.US_ASCII))) {
+                error(exchange, 409, "PUBLISHED_ARTIFACT_CHANGED"); return;
+            }
+            var resolvedDependencies = application.resolvePublishedGraphDependencies(context,
+                    new ByteArrayInputStream(artifact.graphMl()));
+            if (!resolvedDependencies.equals(artifact.dependencies())) {
+                error(exchange, 412, "PUBLISHED_DEPENDENCIES_CHANGED"); return;
+            }
             var identity = new GraphDefinitionIdentity(artifact.graphId(), Long.toString(artifact.releaseVersion()));
             if ("import".equals(parts[3])) {
                 var stored = application.importPublishedGraphDefinition(context, identity,
                         new ByteArrayInputStream(artifact.graphMl()));
                 write(exchange, 200, Map.of("graphId", identity.graphId(),
-                        "releaseVersion", artifact.releaseVersion(), "sha256", artifact.graphMlSha256(),
+                        "releaseVersion", artifact.releaseVersion(),
+                        "sha256", stored.canonical().contentId().value(),
                         "contentId", stored.canonical().contentId().value(), "state", "PINNED"));
                 return;
             }
-            String deploymentId = required(query(exchange), "id");
-            var status = application.registerPinnedLocalDeployment(context, deploymentId, identity);
+            String deploymentId = required(query, "id");
+            var status = application.registerPinnedLocalDeployment(context, deploymentId, identity,
+                    new ai.ravenroot.api.persistence.GraphContentId(expectedSha256));
             write(exchange, 200, Map.of("deploymentId", status.deploymentId(), "state", status.state().name(),
                     "scope", ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE, "graphId", artifact.graphId(),
                     "releaseVersion", artifact.releaseVersion(), "sha256", artifact.graphMlSha256()));
@@ -113,6 +132,17 @@ public final class PublishedGraphArtifactHttpApi {
         }
     }
 
+    static long parseReleaseVersion(String value) {
+        if (value == null || !value.matches("[1-9][0-9]*")) {
+            throw new IllegalArgumentException("release version must be a canonical positive integer");
+        }
+        long parsed = Long.parseLong(value);
+        if (parsed > GraphReleaseMetadata.MAX_RELEASE_VERSION) {
+            throw new IllegalArgumentException("release version exceeds the supported exact range");
+        }
+        return parsed;
+    }
+
     private static Map<String, String> query(HttpExchange exchange) {
         var result = new LinkedHashMap<String, String>(); String raw = exchange.getRequestURI().getRawQuery();
         if (raw == null) return result;
@@ -124,6 +154,28 @@ public final class PublishedGraphArtifactHttpApi {
     }
     private static String required(Map<String, String> values, String key) {
         String value = values.get(key); if (value == null || value.isBlank()) throw new IllegalArgumentException(key); return value;
+    }
+    private static String requiredSha256(Map<String, String> values, String key) {
+        String value = required(values, key);
+        if (!value.matches("[0-9a-f]{64}")) throw new IllegalArgumentException(key);
+        return value;
+    }
+    private static String requiredArtifactRef(Map<String, String> values, String key) {
+        String value = required(values, key);
+        if (!value.matches("[0-9a-f]{64}:[0-9a-f]{64}")) throw new IllegalArgumentException(key);
+        return value;
+    }
+    private static Map<String, Object> dependencies(
+            ai.ravenroot.api.application.GraphArtifactDependencies value) {
+        var packages = value.nodePackages().stream().map(item -> Map.<String, Object>of(
+                "packageId", item.packageId(), "identityDigest", item.identityDigest())).toList();
+        var programs = value.programs().stream().map(item -> Map.<String, Object>of(
+                "nodeId", item.nodeId(), "language", item.language(),
+                "sourceSha256", item.sourceSha256(), "artifactId", item.artifactId(),
+                "artifactSha256", item.artifactSha256(), "artifactRevision", item.artifactRevision(),
+                "runtimeCompatibilitySha256", item.runtimeCompatibilitySha256())).toList();
+        return Map.of("contract", ai.ravenroot.api.application.GraphArtifactDependencies.CONTRACT,
+                "nodePackages", packages, "programs", programs);
     }
     private static void error(HttpExchange exchange, int status, String code) throws IOException {
         write(exchange, status, Map.of("error", code));

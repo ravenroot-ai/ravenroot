@@ -19,6 +19,10 @@ SPEC.loader.exec_module(publisher)
 
 
 class PublisherTest(unittest.TestCase):
+    def dependencies(self):
+        return {"contract": "ravenroot-graph-dependencies-v1", "nodePackages": [
+            {"packageId": "mail", "identityDigest": "d" * 64}], "programs": []}
+
     def release(self, version=2, graph_hash="a" * 64):
         return {
             "tenantId": "tenant-a", "graphId": "orders", "releaseVersion": version,
@@ -39,7 +43,21 @@ class PublisherTest(unittest.TestCase):
         changed = self.release(graph_hash="d" * 64)
         self.assertEqual([current], publisher.append_release([current], current))
         with self.assertRaisesRegex(SystemExit, "different immutable evidence"):
-            publisher.append_release([current], changed)
+                publisher.append_release([current], changed)
+
+    def test_versions_and_dependency_evidence_are_strict(self):
+        self.assertEqual(self.dependencies(), publisher.validate_dependencies(self.dependencies()))
+        for invalid in [0, -1, 1.5, 1e0, 9_007_199_254_740_992]:
+            release = self.release()
+            release["releaseVersion"] = invalid
+            with mock.patch.object(publisher, "http_get", return_value=json.dumps({
+                    "contract": "ravenroot-graph-catalog-v1", "artifacts": [release]}).encode()):
+                with self.assertRaisesRegex(SystemExit, "invalid release evidence"):
+                    publisher.previous_entries("https://catalog", "")
+        malformed = self.dependencies()
+        malformed["nodePackages"][0]["identityDigest"] = "not-a-digest"
+        with self.assertRaisesRegex(SystemExit, "node-package evidence"):
+            publisher.validate_dependencies(malformed)
 
     def test_conditional_http_retry_compares_existing_bytes(self):
         conflict = urllib.error.HTTPError("https://store/object", 412, "exists", {}, io.BytesIO())
@@ -186,7 +204,8 @@ class PublisherTest(unittest.TestCase):
   </graph>
 </graphml>'''
         accepted = {"valid": True, "violations": [], "findings": [],
-                    "nodes": 2, "edges": 1, "startNodes": 1, "endNodes": 1}
+                    "nodes": 2, "edges": 1, "startNodes": 1, "endNodes": 1,
+                    "dependencies": self.dependencies()}
         uploaded = {}
 
         def capture(_base, path, data, content_type, _token):
@@ -213,8 +232,7 @@ class PublisherTest(unittest.TestCase):
         self.assertEqual(release["sourceCommit"], manifest["sourceCommit"])
         self.assertEqual(publisher.digest(graph), manifest["graphMlSha256"])
         self.assertEqual(accepted["nodes"], manifest["compatibility"]["nodes"])
-        self.assertEqual([{"id": "builtin.end", "kind": "behavior"},
-                          {"id": "builtin.start", "kind": "behavior"}], manifest["dependencies"])
+        self.assertEqual(self.dependencies(), manifest["dependencies"])
         self.assertEqual(graph, uploaded[release["graphMlPath"]][0])
         self.assertEqual("application/graphml+xml", uploaded[release["graphMlPath"]][1])
         self.assertEqual(publisher.digest(uploaded[release["manifestPath"]][0]),

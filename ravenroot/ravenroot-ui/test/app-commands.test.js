@@ -38,8 +38,14 @@ describe('application command catalog', () => {
       hasOpenDocuments: true,
       applicationTheme: 'dark',
       canDuplicateSelectedNode: true,
+      authoringCapability: 'local',
     };
     expect(byId['file.replaceActive'].isEnabled(context)).toBe(true);
+    expect(byId['file.open'].isEnabled({ ...context, authoringCapability: 'blocked' })).toBe(false);
+    expect(byId['file.save'].isEnabled({ ...context, authoringCapability: 'blocked' })).toBe(false);
+    expect(byId['file.localOpen'].isVisible({ ...context, authoringCapability: 'blocked' })).toBe(true);
+    expect(byId['file.localSave'].isVisible({ ...context, authoringCapability: 'blocked' })).toBe(true);
+    expect(byId['file.localSave'].isEnabled({ ...context, authoringCapability: 'blocked' })).toBe(true);
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false }))
       .toBe(true);
     expect(byId['file.fork'].isEnabled(context)).toBe(false);

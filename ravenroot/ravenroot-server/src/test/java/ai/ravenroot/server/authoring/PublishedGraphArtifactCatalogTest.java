@@ -3,6 +3,7 @@ package ai.ravenroot.server.authoring;
 import ai.ravenroot.api.authoring.GraphAuthoringException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.persistence.PinnedNodePackage;
 import org.junit.jupiter.api.Test;
 
 import javax.net.ssl.SSLContext;
@@ -47,7 +48,9 @@ class PublishedGraphArtifactCatalogTest {
         var rollback = catalog.resolve("tenant-a", "orders", 1);
         assertEquals("a".repeat(40), rollback.sourceCommit());
         assertTrue(new String(rollback.graphMl(), StandardCharsets.UTF_8).contains("one"));
-        assertEquals(List.of(Map.of("kind", "behavior", "id", "builtin.echo")), rollback.dependencies());
+        assertEquals(List.of(new PinnedNodePackage("mail", "d".repeat(64))),
+                rollback.dependencies().nodePackages());
+        assertTrue(rollback.dependencies().programs().isEmpty());
     }
 
     @Test void digestMismatchAndUnavailableManifestAreRefused() {
@@ -96,6 +99,17 @@ class PublishedGraphArtifactCatalogTest {
                 () -> new PublishedGraphArtifactCatalog(configuration(), sourceMismatch).list("tenant-a"));
     }
 
+    @Test void catalogVersionsRejectAliasesFractionsExponentsAndUnsafeIntegers() {
+        for (Object invalid : List.of("1", 1.0, 1.5, 1e20, 9_007_199_254_740_992L)) {
+            var client = new ArtifactClient();
+            addRelease(client, "orders", 1, "one", "a".repeat(40));
+            client.entries.getFirst().put("releaseVersion", invalid);
+            client.catalog();
+            assertFailure(GraphAuthoringException.Failure.INVALID_DOCUMENT,
+                    () -> new PublishedGraphArtifactCatalog(configuration(), client).list("tenant-a"));
+        }
+    }
+
     private static void addRelease(ArtifactClient client, String graphId, long version, String label, String source) {
         byte[] raw = ("<?xml version=\"1.0\"?><graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">"
                 + "<key id=\"label\" for=\"graph\" attr.name=\"label\" attr.type=\"string\"/>"
@@ -113,7 +127,9 @@ class PublishedGraphArtifactCatalogTest {
                         "purpose", "LOCAL_DEPLOYMENT", "nodes", 1, "edges", 0,
                         "startNodes", 1, "endNodes", 1,
                         "violations", List.of(), "findings", List.of()),
-                "dependencies", List.of(Map.of("kind", "behavior", "id", "builtin.echo")));
+                "dependencies", Map.of("contract", "ravenroot-graph-dependencies-v1",
+                        "nodePackages", List.of(Map.of("packageId", "mail", "identityDigest", "d".repeat(64))),
+                        "programs", List.of()));
         byte[] manifestBytes = PayloadJson.writeJava(manifest, JSON);
         String manifestPath = "manifests/" + graphId + "-" + version + ".json";
         client.objects.put(graphPath, graph);

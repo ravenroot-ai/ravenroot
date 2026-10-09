@@ -145,6 +145,38 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             application.close(); definitions.close();
         }
     }
+
+    @Test
+    void selectedPublicationDigestMustMatchPinnedBytesBeforeRegistration(@TempDir Path directory) throws Exception {
+        var definitions = new SqliteGraphDefinitionStore(directory.resolve("selected-digest.db"),
+                Clock.systemUTC(), GraphDefinitionReferences.NONE);
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+                new RecordingSourceBehavior(), 8, definitions);
+        var identity = new GraphDefinitionIdentity("orders", "1");
+        byte[] selectedA = NO_SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8);
+        byte[] selectedB = NO_SOURCE_GRAPH.replace("id=\"g\"", "id=\"other\"")
+                .getBytes(StandardCharsets.UTF_8);
+        try {
+            var imported = application.importPublishedGraphDefinition(TENANT_A, identity,
+                    new ByteArrayInputStream(selectedA));
+            var mismatch = assertThrows(ai.ravenroot.api.persistence.GraphDefinitionStoreException.class,
+                    () -> application.registerPinnedLocalDeployment(TENANT_A, "orders", identity,
+                            ai.ravenroot.api.persistence.GraphContentId.of(selectedB)));
+            assertTrue(mismatch.failure()
+                    instanceof ai.ravenroot.api.persistence.GraphDefinitionStoreFailure.IdentityConflict);
+            assertTrue(application.localDeployments(TENANT_A.tenantId()).isEmpty(),
+                    "digest mismatch must happen before deployment registry mutation");
+
+            var registered = application.registerPinnedLocalDeployment(TENANT_A, "orders", identity,
+                    imported.canonical().contentId());
+            assertEquals(LocalDeploymentState.REGISTERED, registered.state());
+            assertEquals(imported.canonical().contentId(), definitions.resolve(TENANT_A.tenantId(), identity)
+                    .toCompletableFuture().join().canonical().contentId());
+        } finally {
+            application.close();
+            definitions.close();
+        }
+    }
     private static final String HUMAN_TASK_GRAPH = """
             <?xml version="1.0" encoding="UTF-8"?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">

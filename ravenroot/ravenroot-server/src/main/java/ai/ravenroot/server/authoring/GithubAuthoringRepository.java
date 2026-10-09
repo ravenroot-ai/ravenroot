@@ -150,7 +150,6 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
     private Page<DocumentSummary> listSync(Actor actor, String cursor) {
         Objects.requireNonNull(actor, "actor");
         int page = page(cursor);
-        ensureDraftBranch(actor);
         var names = new java.util.TreeSet<String>();
         names.addAll(documentsAt(actor, draftBranch(actor)));
         names.addAll(documentsAt(actor, configuration.releaseBranch()));
@@ -217,7 +216,8 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
         IdempotencyEntry prior = beginIdempotency(actor, request.idempotencyKey(), operation, fingerprint);
         if (prior != null && prior.result() instanceof Document result) return result;
 
-        if (committed(actor, request.documentId(), fingerprint)) {
+        boolean draftBranchExisted = ref(draftBranch(actor), true) != null;
+        if (draftBranchExisted && committed(actor, request.documentId(), fingerprint)) {
             State recovered = state(actor, request.documentId());
             if (recovered.draft() == null) throw unavailable();
             GraphReleaseMetadata.Rewritten recoveredBytes = preserveSubmittedReleaseMetadata
@@ -227,10 +227,17 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
             completeIdempotency(actor, request.idempotencyKey(), operation, fingerprint, result);
             return result;
         }
+        State initial = state(actor, request.documentId());
+        requireExpected(request.expected(), initial.revision());
 
         ensureDraftBranch(actor);
         State state = state(actor, request.documentId());
-        requireExpected(request.expected(), state.revision());
+        if (draftBranchExisted) {
+            requireExpected(request.expected(), state.revision());
+        } else if (!initial.revision().release().equals(state.revision().release())
+                || !initial.revision().publication().equals(state.revision().publication())) {
+            throw failure(GraphAuthoringException.Failure.CONFLICT);
+        }
         GraphReleaseMetadata.Rewritten accepted = preserveSubmittedReleaseMetadata
                 ? preservedGraphMl(request.graphMl()) : acceptedGraphMl(request.graphMl(), state);
         requireUniqueGraphId(actor, request.documentId(), accepted.metadata().graphId());
@@ -421,7 +428,6 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
 
     private State state(Actor actor, String documentId) {
         validateDocumentId(documentId);
-        ensureDraftBranch(actor);
         FileSnapshot draft = file(actor, documentId, draftBranch(actor), false);
         FileSnapshot release = file(actor, documentId, configuration.releaseBranch(), false);
         GraphReleaseMetadata.Metadata draftMetadata = draft == null ? null : GraphReleaseMetadata.read(draft.bytes());
@@ -472,7 +478,7 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
 
     /** Resolve each component through non-recursive Git trees pinned to one commit. */
     private DirectorySnapshot directory(String ref, boolean exactCommit, String directoryPath) {
-        String commitSha = exactCommit ? ref : ref(ref, false);
+        String commitSha = exactCommit ? ref : ref(ref, true);
         if (commitSha == null) return null;
         Response commitResponse = request("GET", "/repos/" + repository() + "/git/commits/" + path(commitSha),
                 null, Set.of(200, 404));
@@ -587,7 +593,7 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
 
     /** Reconciles an unknown response by finding this request's server-authored commit marker. */
     private boolean committed(Actor actor, String documentId, String fingerprint) {
-        ensureDraftBranch(actor);
+        if (ref(draftBranch(actor), true) == null) return false;
         Response response = request("GET", "/repos/" + repository() + "/commits?sha=" + query(draftBranch(actor))
                 + "&path=" + query(documentPath(actor, documentId)) + "&per_page=100&page=1", null, Set.of(200));
         Object decoded = json(response.body());

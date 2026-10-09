@@ -1145,7 +1145,16 @@
           "405": {"description": "METHOD_NOT_ALLOWED"},
           "431": {"description": "HEADER_VALUE_TOO_LARGE"},
           "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "503": {"description": "AUTHORING_UNAVAILABLE"},
+          "412": {"description": "PUBLISHED_DEPENDENCIES_CHANGED"},
+          "501": {"description": "IMMUTABLE_DEFINITION_STORE_REQUIRED"},
+          "500": {"description": "ARTIFACT_OPERATION_FAILED"}
         }
       }
     },
@@ -1156,7 +1165,10 @@
         "security": [{"bearerAuth": []}],
         "parameters": [
           {"name": "graphId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "version", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "version", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1, "maximum": 9007199254740991}},
+          {"name": "expectedSha256", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+          {"name": "expectedArtifactRef", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{64}:[0-9a-f]{64}$"}},
+          {"name": "id", "in": "query", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
           "200": {"description": "success"},
@@ -1167,7 +1179,14 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "503": {"description": "AUTHORING_UNAVAILABLE"},
+          "412": {"description": "PUBLISHED_DEPENDENCIES_CHANGED"},
+          "501": {"description": "IMMUTABLE_DEFINITION_STORE_REQUIRED"},
+          "500": {"description": "ARTIFACT_OPERATION_FAILED"}
         }
       }
     },
@@ -1178,7 +1197,9 @@
         "security": [{"bearerAuth": []}],
         "parameters": [
           {"name": "graphId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "version", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "version", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1, "maximum": 9007199254740991}},
+          {"name": "expectedSha256", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+          {"name": "expectedArtifactRef", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{64}:[0-9a-f]{64}$"}}
         ],
         "responses": {
           "200": {"description": "success"},
@@ -1189,14 +1210,21 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "503": {"description": "AUTHORING_UNAVAILABLE"},
+          "412": {"description": "PUBLISHED_DEPENDENCIES_CHANGED"},
+          "501": {"description": "IMMUTABLE_DEFINITION_STORE_REQUIRED"},
+          "500": {"description": "ARTIFACT_OPERATION_FAILED"}
         }
       }
     },
     "/v1/graph-authoring": {
       "get": {
         "summary": "Lists one authenticated tenant's Git-backed graph documents with the current draft version, the distinct reviewed release version, source availability, and exact verified publication state.",
-        "x-assistant-posture": "NEVER",
+        "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "responses": {
           "200": {"description": "success"},
@@ -1205,20 +1233,28 @@
           "405": {"description": "METHOD_NOT_ALLOWED"},
           "431": {"description": "HEADER_VALUE_TOO_LARGE"},
           "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },
     "/v1/graph-authoring/{id}": {
       "delete": {
-        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
+        "summary": "Deletes one tenant-confined draft after checking draft, release, and publication state while retaining Git history.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
-          "200": {"description": "success"},
+          "204": {"description": "success"},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1226,12 +1262,18 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       },
       "get": {
-        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
-        "x-assistant-posture": "NEVER",
+        "summary": "Opens one tenant-confined draft or reviewed GraphML source without creating a Git branch.",
+        "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
@@ -1245,11 +1287,17 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       },
       "put": {
-        "summary": "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
+        "summary": "Saves or creates one tenant-confined GraphML draft with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -1264,7 +1312,13 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },
@@ -1283,7 +1337,15 @@
           "405": {"description": "METHOD_NOT_ALLOWED"},
           "431": {"description": "HEADER_VALUE_TOO_LARGE"},
           "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },
@@ -1304,7 +1366,13 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },
@@ -1323,7 +1391,15 @@
           "405": {"description": "METHOD_NOT_ALLOWED"},
           "431": {"description": "HEADER_VALUE_TOO_LARGE"},
           "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },
@@ -1344,7 +1420,13 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },
@@ -1365,7 +1447,13 @@
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
-          "409": {"description": "CONFLICT"}
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
         }
       }
     },

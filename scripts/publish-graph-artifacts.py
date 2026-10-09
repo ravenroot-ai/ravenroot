@@ -22,6 +22,7 @@ MAX_CATALOG_BYTES = 2 * 1024 * 1024
 SOURCE_COMMIT = re.compile(r"[0-9a-f]{40,64}")
 HTTP_TIMEOUT_SECONDS = 60
 HTTP_RESPONSE_BYTES = 64 * 1024
+MAX_AUTHORED_RELEASE_VERSION = 9_007_199_254_740_991
 AWS_CLI_TIMEOUT_SECONDS = 90
 AWS_CONNECT_TIMEOUT_SECONDS = 10
 AWS_READ_TIMEOUT_SECONDS = 30
@@ -81,6 +82,45 @@ def open_http(request, limit: int) -> tuple[int, bytes]:
         raise SystemExit("remote request failed within the configured network boundary") from error
 
 
+def validate_dependencies(value: object) -> dict:
+    if not isinstance(value, dict) or set(value) != {"contract", "nodePackages", "programs"}:
+        raise SystemExit("Ravenroot admission returned malformed dependency evidence")
+    if value["contract"] != "ravenroot-graph-dependencies-v1":
+        raise SystemExit("Ravenroot admission returned an unsupported dependency contract")
+    packages, programs = value["nodePackages"], value["programs"]
+    if (not isinstance(packages, list) or not isinstance(programs, list)
+            or len(packages) > 256 or len(programs) > 256):
+        raise SystemExit("Ravenroot admission returned malformed dependency evidence")
+    sha256 = re.compile(r"[0-9a-f]{64}")
+    package_ids: set[str] = set()
+    for item in packages:
+        if (not isinstance(item, dict) or set(item) != {"packageId", "identityDigest"}
+                or not isinstance(item["packageId"], str) or not item["packageId"]
+                or not isinstance(item["identityDigest"], str)
+                or not sha256.fullmatch(item["identityDigest"])
+                or item["packageId"] in package_ids):
+            raise SystemExit("Ravenroot admission returned malformed node-package evidence")
+        package_ids.add(item["packageId"])
+    node_ids: set[str] = set()
+    program_keys = {"nodeId", "language", "sourceSha256", "artifactId", "artifactSha256",
+                    "artifactRevision", "runtimeCompatibilitySha256"}
+    for item in programs:
+        if (not isinstance(item, dict) or set(item) != program_keys
+                or not all(isinstance(item[key], str) and item[key]
+                           for key in ("nodeId", "language", "artifactId"))
+                or not all(isinstance(item[key], str) and sha256.fullmatch(item[key])
+                           for key in ("sourceSha256", "artifactSha256", "runtimeCompatibilitySha256"))
+                or type(item["artifactRevision"]) is not int or item["artifactRevision"] < 1
+                or item["nodeId"] in node_ids):
+            raise SystemExit("Ravenroot admission returned malformed program-artifact evidence")
+        node_ids.add(item["nodeId"])
+    if packages != sorted(packages, key=lambda item: (item["packageId"], item["identityDigest"])):
+        raise SystemExit("Ravenroot admission returned unstable node-package evidence ordering")
+    if programs != sorted(programs, key=lambda item: (item["nodeId"], item["sourceSha256"], item["artifactId"])):
+        raise SystemExit("Ravenroot admission returned unstable program evidence ordering")
+    return value
+
+
 def admission(graph: bytes, url: str, token: str) -> dict:
     request = urllib.request.Request(
         f"{url.rstrip('/')}/v1/graphs/inspect?purpose=LOCAL_DEPLOYMENT",
@@ -95,10 +135,11 @@ def admission(graph: bytes, url: str, token: str) -> dict:
             or any(not isinstance(value.get(name), int)
                    for name in ("nodes", "edges", "startNodes", "endNodes"))):
         raise SystemExit(f"Ravenroot admission refused the graph: {value.get('violations') or value.get('findings')}")
+    value["dependencies"] = validate_dependencies(value.get("dependencies"))
     return value
 
 
-def metadata(graph: bytes) -> tuple[str, int, list[dict[str, str]]]:
+def metadata(graph: bytes) -> tuple[str, int]:
     root = ET.fromstring(graph)
     keys = {item.get("id"): item.get("attr.name") for item in root.findall("g:key", NS)}
     graphs = root.findall("g:graph", NS)
@@ -108,19 +149,17 @@ def metadata(graph: bytes) -> tuple[str, int, list[dict[str, str]]]:
     values = {keys.get(item.get("key")): (item.text or "").strip()
               for item in graph_element.findall("g:data", NS)}
     graph_id = values.get("ravenroot.authoring.graphId", "")
+    raw_version = values.get("ravenroot.authoring.releaseVersion", "")
     try:
-        version = int(values.get("ravenroot.authoring.releaseVersion", "0"))
+        if not re.fullmatch(r"[1-9][0-9]*", raw_version):
+            raise ValueError("non-canonical authored release version")
+        version = int(raw_version)
     except ValueError as error:
         raise SystemExit("Authored release version is malformed") from error
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", graph_id) or graph_id == "submission" or version < 1:
+    if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", graph_id)
+            or graph_id == "submission" or version < 1 or version > MAX_AUTHORED_RELEASE_VERSION):
         raise SystemExit("GraphML lacks an allowed authored graph identity and positive release version")
-    dependencies: set[tuple[str, str]] = set()
-    for owner in [graph_element, *graph_element.findall("g:node", NS)]:
-        for item in owner.findall("g:data", NS):
-            name, value = keys.get(item.get("key")), (item.text or "").strip()
-            if name in {"behavior", "nodeType"} and value:
-                dependencies.add((name, value))
-    return graph_id, version, [{"kind": kind, "id": value} for kind, value in sorted(dependencies)]
+    return graph_id, version
 
 
 def http_get(url: str, token: str, limit: int = MAX_CATALOG_BYTES) -> bytes:
@@ -198,7 +237,8 @@ def previous_entries(url: str | None, token: str) -> list[dict]:
         except KeyError as error:
             raise SystemExit("previous catalog entry lacks release evidence") from error
         if (not all(isinstance(value, str) and value for value in identity[:2])
-                or not isinstance(identity[2], int) or identity[2] < 1
+                or type(identity[2]) is not int or identity[2] < 1
+                or identity[2] > MAX_AUTHORED_RELEASE_VERSION
                 or not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes)
                 or not isinstance(source_commit, str) or not SOURCE_COMMIT.fullmatch(source_commit)):
             raise SystemExit("previous catalog entry contains invalid release evidence")
@@ -240,7 +280,7 @@ def main() -> None:
         raise SystemExit("select exactly one of --http-base or --s3-bucket")
     graph = args.graphml.read_bytes()
     accepted = admission(graph, args.admission_url, os.getenv("RAVENROOT_ADMISSION_TOKEN", ""))
-    graph_id, version, dependencies = metadata(graph)
+    graph_id, version = metadata(graph)
     graph_sha = digest(graph)
     tenant_segment = digest(args.tenant.encode("utf-8"))[:32]
     prefix = f"graphs/tenants/{tenant_segment}/{graph_id}/{version}/{graph_sha}"
@@ -254,7 +294,8 @@ def main() -> None:
     manifest = {
         "contract": "ravenroot-graph-artifact-v1", "tenantId": args.tenant,
         "graphId": graph_id, "releaseVersion": version, "sourceCommit": source_commit,
-        "graphMlSha256": graph_sha, "compatibility": compatibility, "dependencies": dependencies,
+        "graphMlSha256": graph_sha, "compatibility": compatibility,
+        "dependencies": accepted["dependencies"],
     }
     manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     manifest_sha = digest(manifest_bytes)

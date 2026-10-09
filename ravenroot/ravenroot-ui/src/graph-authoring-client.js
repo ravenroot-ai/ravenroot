@@ -3,6 +3,53 @@ function requiredText(value, name) {
   return value;
 }
 
+export const MAX_AUTHORED_RELEASE_VERSION = 9_007_199_254_740_991;
+
+export function parseAuthoredReleaseVersion(value) {
+  if (typeof value === 'number') {
+    if (Number.isSafeInteger(value) && value >= 1 && value <= MAX_AUTHORED_RELEASE_VERSION) return value;
+  } else if (typeof value === 'string' && /^[1-9][0-9]*$/.test(value)) {
+    const parsed = BigInt(value);
+    if (parsed <= BigInt(MAX_AUTHORED_RELEASE_VERSION)) return Number(parsed);
+  }
+  throw new TypeError('Authored release version must be a canonical safe positive integer');
+}
+
+function requiredSha256(value) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new TypeError('Published graph digest must be lowercase SHA-256');
+  }
+  return value;
+}
+
+function requiredArtifactRef(value) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}:[0-9a-f]{64}$/.test(value)) {
+    throw new TypeError('Published artifact reference is malformed');
+  }
+  return value;
+}
+
+function validatePublishedArtifacts(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.items)) {
+    throw new Error('Published graph catalog response is malformed');
+  }
+  const identities = new Set();
+  return Object.freeze({ items: Object.freeze(value.items.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+        || typeof item.graphId !== 'string'
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(item.graphId)
+        || item.graphId === 'submission') {
+      throw new Error('Published graph catalog response is malformed');
+    }
+    const releaseVersion = parseAuthoredReleaseVersion(item.releaseVersion);
+    const identity = `${item.graphId}\0${releaseVersion}`;
+    if (identities.has(identity)) throw new Error('Published graph catalog contains duplicate identities');
+    identities.add(identity);
+    return Object.freeze({ ...item, releaseVersion, sha256: requiredSha256(item.sha256),
+      artifactRef: requiredArtifactRef(item.artifactRef) });
+  })) });
+}
+
 export function validateGraphAuthoringCapability(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || !['local', 'git'].includes(value.mode)
@@ -67,13 +114,21 @@ export class GraphAuthoringClient {
     return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}/release`,
       { method: 'POST', headers: this.#mutationHeaders(revision, idempotencyKey) });
   }
-  artifacts() { return this.#json('/v1/graph-artifacts'); }
-  importArtifact(graphId, releaseVersion) {
-    return this.#json(`/v1/graph-artifacts/${encodeURIComponent(graphId)}/${releaseVersion}/import`,
+  async artifacts() { return validatePublishedArtifacts(await this.#json('/v1/graph-artifacts')); }
+  importArtifact(graphId, releaseVersion, expectedSha256, expectedArtifactRef) {
+    const version = parseAuthoredReleaseVersion(releaseVersion);
+    const digest = requiredSha256(expectedSha256);
+    const artifactRef = requiredArtifactRef(expectedArtifactRef);
+    return this.#json(`/v1/graph-artifacts/${encodeURIComponent(graphId)}/${version}/import`
+      + `?expectedSha256=${encodeURIComponent(digest)}&expectedArtifactRef=${encodeURIComponent(artifactRef)}`,
       { method: 'POST' });
   }
-  deploy(graphId, releaseVersion, deploymentId) {
-    return this.#json(`/v1/graph-artifacts/${encodeURIComponent(graphId)}/${releaseVersion}/deploy?id=${encodeURIComponent(deploymentId)}`,
+  deploy(graphId, releaseVersion, deploymentId, expectedSha256, expectedArtifactRef) {
+    const version = parseAuthoredReleaseVersion(releaseVersion);
+    const digest = requiredSha256(expectedSha256);
+    const artifactRef = requiredArtifactRef(expectedArtifactRef);
+    return this.#json(`/v1/graph-artifacts/${encodeURIComponent(graphId)}/${version}/deploy?id=${encodeURIComponent(deploymentId)}`
+      + `&expectedSha256=${encodeURIComponent(digest)}&expectedArtifactRef=${encodeURIComponent(artifactRef)}`,
       { method: 'POST' });
   }
 

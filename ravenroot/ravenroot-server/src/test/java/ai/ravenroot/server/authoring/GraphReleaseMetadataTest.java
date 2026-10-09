@@ -40,4 +40,23 @@ class GraphReleaseMetadataTest {
         assertEquals(GraphAuthoringException.Failure.INVALID_DOCUMENT,
                 assertThrows(GraphAuthoringException.class, () -> GraphReleaseMetadata.read(partial)).failure());
     }
+
+    @Test void authoredVersionUsesTheSharedExactSafeIntegerCeiling() {
+        var maximum = GraphReleaseMetadata.assign(GRAPH, "orders", GraphReleaseMetadata.MAX_RELEASE_VERSION);
+        assertEquals(GraphReleaseMetadata.MAX_RELEASE_VERSION,
+                GraphReleaseMetadata.read(maximum.graphMl()).releaseVersion());
+        assertEquals(GraphAuthoringException.Failure.INVALID_DOCUMENT,
+                assertThrows(GraphAuthoringException.class,
+                        () -> GraphReleaseMetadata.assign(GRAPH, "orders",
+                                GraphReleaseMetadata.MAX_RELEASE_VERSION + 1)).failure());
+        String accepted = new String(GraphReleaseMetadata.assign(GRAPH, "orders", 1).graphMl(),
+                StandardCharsets.UTF_8);
+        for (String invalid : new String[] {"01", "+1", "1.0", "1e0", "9007199254740992",
+                "9223372036854775808"}) {
+            byte[] bytes = accepted.replace(">1</data>", ">" + invalid + "</data>")
+                    .getBytes(StandardCharsets.UTF_8);
+            assertEquals(GraphAuthoringException.Failure.INVALID_DOCUMENT,
+                    assertThrows(GraphAuthoringException.class, () -> GraphReleaseMetadata.read(bytes)).failure(), invalid);
+        }
+    }
 }

@@ -180,6 +180,14 @@ import {
 import { resolveOutcomes, unreachableOutcome } from './node-outcomes.js';
 import { RavenrootRuntimeClient, memoryTokenProvider } from './runtime-client.js';
 import {
+  AUTHORING_CAPABILITY_STATE,
+  loadAuthoringCapability,
+  pendingAuthoringCapability,
+  primaryPersistenceTarget,
+  runPrimaryPersistence,
+  unavailableAuthoringCapability,
+} from './authoring-capability.js';
+import {
   captureSourceSessionToken,
   effectiveSourceCount,
   recoverSourceSessionState,
@@ -213,6 +221,7 @@ import {
   applyAcceptedGraphMl,
   GraphAuthoringClient,
   decodeGraphMl,
+  parseAuthoredReleaseVersion,
   repositorySourceStatus,
 } from './graph-authoring-client.js';
 import {
@@ -1020,6 +1029,7 @@ let graphAuthoringUnavailable = false;
 let runtimeDisconnect = null;
 let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
+let graphAuthoringCapability = pendingAuthoringCapability();
 let runtimeConnectionGeneration = 0;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
@@ -2818,6 +2828,12 @@ function documentModeLabel(document_) {
   const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
     : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
   const local = document_.tenantId === null ? `${label} · session only` : label;
+  if (graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.PENDING) {
+    return `${local} · Authoring capability pending`;
+  }
+  if (graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.UNAVAILABLE) {
+    return `${local} · Authoring unavailable`;
+  }
   return graphAuthoringUnavailable ? `${local} · Repository unavailable` : local;
 }
 
@@ -11680,6 +11696,9 @@ function syncGraphPositions() {
 async function connectRuntime(atBoot = false) {
   const connectionGeneration = ++runtimeConnectionGeneration;
   const authorityGeneration = beginWorkspaceAuthority(null);
+  graphAuthoringCapability = pendingAuthoringCapability();
+  refreshCommands();
+  syncGraphModeLabel();
   const input = document.getElementById('service-url');
   const baseUrl = input.value.trim().replace(/\/$/, '');
   input.value = baseUrl;
@@ -11714,6 +11733,10 @@ async function connectRuntime(atBoot = false) {
         runtimeClient = null;
         runtimeConfigurationRequest = null;
         runtimeConfiguration = null;
+        graphAuthoringCapability = unavailableAuthoringCapability(
+          new Error('External service connection was cancelled'));
+        refreshCommands();
+        syncGraphModeLabel();
         void configureHumanTasks();
         return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
       }
@@ -11748,9 +11771,19 @@ async function connectRuntime(atBoot = false) {
   assistantClient = null;
   void refreshAssistantAvailability();
   runtimeConfiguration = null;
-  runtimeConfigurationRequest = connectedClient.configuration().then(async configuration => {
-    const result = { client: connectedClient, configuration, error: null };
+  graphAuthoringCapability = pendingAuthoringCapability();
+  refreshCommands();
+  runtimeConfigurationRequest = loadAuthoringCapability(connectedClient).then(async result => {
+    const { configuration } = result;
     if (runtimeClient === connectedClient) {
+      graphAuthoringCapability = result.capability;
+      refreshCommands();
+      syncGraphModeLabel();
+      if (result.error || !configuration) {
+        failWorkspaceAuthority(connectedClient, authorityGeneration,
+          `Workspace authority could not be verified: ${result.error?.message || 'configuration unavailable'}`);
+        return result;
+      }
       runtimeConfiguration = result;
       const scope = await switchWorkspacePersistence(configuration, connectedClient);
       if (scope !== false && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
@@ -11768,13 +11801,6 @@ async function connectRuntime(atBoot = false) {
       }
     }
     return result;
-  }).catch(error => {
-    if (runtimeClient === connectedClient) {
-      runtimeConfiguration = null;
-      failWorkspaceAuthority(connectedClient, authorityGeneration,
-        `Workspace authority could not be verified: ${error.message}`);
-    }
-    return { client: connectedClient, configuration: null, error };
   });
   const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
@@ -11820,6 +11846,9 @@ async function connectRuntime(atBoot = false) {
       addActivityMessage('catalog', catalogEmptyState(error, []).message, 'failed');
     });
   } catch (error) {
+    graphAuthoringCapability = unavailableAuthoringCapability(error);
+    refreshCommands();
+    syncGraphModeLabel();
     nodeCatalogPending = false;
     renderNodeCatalog();
     setRuntimeConnectionState('error', error.message);
@@ -11857,6 +11886,10 @@ async function revokeRuntimeAccess() {
   runtimeClient = null;
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
+  graphAuthoringCapability = unavailableAuthoringCapability(
+    new Error('Runtime access was revoked'));
+  refreshCommands();
+  syncGraphModeLabel();
   workspacePersistenceReason = 'Workspace authority was revoked. Documents remain open for export.';
   syncActiveDocumentChrome();
   suspendHumanTaskRecovery();
@@ -15208,7 +15241,14 @@ function proceedToCloseDocument(id, origin) {
 let pendingActiveDeploymentClose = null;
 
 function gitAuthoringEnabled() {
-  return runtimeConfiguration?.configuration?.graphAuthoring?.mode === 'git' && graphAuthoringClient;
+  return graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT && graphAuthoringClient;
+}
+
+function primaryPersistenceUnavailable() {
+  const detail = graphAuthoringCapability.error?.message;
+  showInspectorMessage(`Open and Save are unavailable until authoring capabilities are verified. `
+    + `Reconnect or authenticate and retry${detail ? `: ${detail}` : '.'}`);
+  return false;
 }
 
 function setGraphAuthoringAvailability(available) {
@@ -15372,12 +15412,17 @@ async function publishedArtifacts() {
     const choices = page.items.map(item => `${item.graphId}@${item.releaseVersion} · ${item.sha256.slice(0, 12)}`);
     const selection = globalThis.prompt(`Published versions (selecting an older version performs rollback):\n\n${choices.join('\n')}\n\nEnter graphId@version to pin and register:`, '')?.trim();
     if (!selection) return false;
-    const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})@(\d+)$/.exec(selection);
+    const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})@([1-9][0-9]*)$/.exec(selection);
     if (!match) throw new Error('Use graphId@version.');
+    const releaseVersion = parseAuthoredReleaseVersion(match[2]);
+    const selected = page.items.find(item => item.graphId === match[1]
+      && item.releaseVersion === releaseVersion);
+    if (!selected) throw new Error('Select an exact version from the verified catalog shown above.');
     const deploymentId = globalThis.prompt('Deployment name', `${match[1]}-${match[2]}`)?.trim();
     if (!deploymentId) return false;
-    await graphAuthoringClient.importArtifact(match[1], Number(match[2]));
-    const result = await graphAuthoringClient.deploy(match[1], Number(match[2]), deploymentId);
+    await graphAuthoringClient.importArtifact(match[1], releaseVersion, selected.sha256, selected.artifactRef);
+    const result = await graphAuthoringClient.deploy(match[1], releaseVersion, deploymentId,
+      selected.sha256, selected.artifactRef);
     addActivityMessage('deployment', `Pinned ${result.graphId} v${result.releaseVersion} and registered it as ${result.deploymentId}. It is not running.`, 'completed'); return true;
   } catch (error) { showInspectorMessage(error.message || 'The published version could not be deployed.'); return false; }
 }
@@ -15427,15 +15472,21 @@ function closeActiveDeploymentDialog(outcome) {
 
 const commandRegistry = createCommandRegistry(createAppCommands({
   newDocument: () => runAfterInspectorDraft(() => openDocument()),
-  openFile: context => runAfterInspectorDraft(() => context.gitAuthoring
-    ? openRepositoryGraph() : document.getElementById('file-inp').click()),
+  openFile: () => runAfterInspectorDraft(() => runPrimaryPersistence(graphAuthoringCapability, {
+    git: () => openRepositoryGraph(),
+    local: () => document.getElementById('file-inp').click(),
+    blocked: () => primaryPersistenceUnavailable(),
+  })),
   localOpen: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
   replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
   forkDocument: context => runAfterInspectorDraft(() => context.repositoryReleasedSource
     ? openRepositoryGraph({ documentId: activeAuthoring.providerDocumentId, source: 'draft' })
     : forkActiveDocument()),
-  save: context => runAfterInspectorDraft(() => context.gitAuthoring
-    ? saveRepositoryGraph() : exportGraphML(), { preserveDraft: true }),
+  save: () => runAfterInspectorDraft(() => runPrimaryPersistence(graphAuthoringCapability, {
+    git: () => saveRepositoryGraph(),
+    local: () => exportGraphML(),
+    blocked: () => primaryPersistenceUnavailable(),
+  }), { preserveDraft: true }),
   localSave: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
   repositoryOpen: () => runAfterInspectorDraft(() => openRepositoryGraph()),
   repositorySave: () => runAfterInspectorDraft(() => saveRepositoryGraph(), { preserveDraft: true }),
@@ -15515,7 +15566,8 @@ function commandContext() {
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
-    gitAuthoring: Boolean(runtimeConfiguration?.configuration?.graphAuthoring?.mode === 'git'),
+    authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
+    gitAuthoring: graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT,
     repositoryDocument: Boolean(activeAuthoring?.providerDocumentId),
     repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
     repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted

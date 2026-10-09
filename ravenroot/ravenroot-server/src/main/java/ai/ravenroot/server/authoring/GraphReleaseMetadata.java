@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
 public final class GraphReleaseMetadata {
     public static final String GRAPH_ID = "ravenroot.authoring.graphId";
     public static final String RELEASE_VERSION = "ravenroot.authoring.releaseVersion";
+    /** Largest authored version represented exactly by every supported JavaScript client. */
+    public static final long MAX_RELEASE_VERSION = 9_007_199_254_740_991L;
     private static final String NS = "http://graphml.graphdrawing.org/xmlns";
     private static final Pattern STABLE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
 
@@ -28,7 +30,7 @@ public final class GraphReleaseMetadata {
             if (graphId == null || !STABLE_ID.matcher(graphId).matches()) {
                 throw invalid();
             }
-            if (releaseVersion < 1) throw invalid();
+            if (releaseVersion < 1 || releaseVersion > MAX_RELEASE_VERSION) throw invalid();
         }
     }
 
@@ -46,7 +48,9 @@ public final class GraphReleaseMetadata {
         String version = value(document, graph, RELEASE_VERSION);
         if (graphId == null && version == null) return null;
         if (graphId == null || version == null) throw invalid();
-        try { return new Metadata(graphId.strip(), Long.parseLong(version.strip())); }
+        String canonicalVersion = version.strip();
+        if (!canonicalVersion.matches("[1-9][0-9]*")) throw invalid();
+        try { return new Metadata(graphId.strip(), Long.parseLong(canonicalVersion)); }
         catch (NumberFormatException malformed) { throw invalid(); }
     }
 

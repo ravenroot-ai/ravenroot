@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyAcceptedGraphMl,
   GraphAuthoringClient,
+  MAX_AUTHORED_RELEASE_VERSION,
   decodeGraphMl,
+  parseAuthoredReleaseVersion,
   repositorySourceStatus,
   validateGraphAuthoringCapability,
 } from '../src/graph-authoring-client.js';
@@ -41,6 +43,35 @@ describe('graph authoring client', () => {
       .toThrow(/malformed/);
     const xml = '<graphml>é</graphml>';
     expect(decodeGraphMl({ graphMl: btoa(unescape(encodeURIComponent(xml))) })).toBe(xml);
+  });
+
+  it('accepts only canonical exact authored versions shared with JSON and GraphML', () => {
+    expect(parseAuthoredReleaseVersion(1)).toBe(1);
+    expect(parseAuthoredReleaseVersion(String(MAX_AUTHORED_RELEASE_VERSION)))
+      .toBe(MAX_AUTHORED_RELEASE_VERSION);
+    for (const value of [0, -1, MAX_AUTHORED_RELEASE_VERSION + 1, 1.5, 1e20,
+      '0', '01', '+1', '1.0', '1e0', '9007199254740992']) {
+      expect(() => parseAuthoredReleaseVersion(value)).toThrow(/canonical safe positive integer/);
+    }
+  });
+
+  it('keeps adjacent high catalog versions distinct and rejects rounded response identities', async () => {
+    const digest = 'a'.repeat(64);
+    const artifactRef = `${'b'.repeat(64)}:${digest}`;
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [
+        { graphId: 'orders', releaseVersion: 9007199254740990, sha256: digest, artifactRef },
+        { graphId: 'orders', releaseVersion: 9007199254740991, sha256: digest, artifactRef },
+      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('{"items":[{"graphId":"orders",'
+        + '"releaseVersion":9007199254740993,"sha256":"' + digest
+        + '","artifactRef":"' + artifactRef + '"}]}',
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const client = new GraphAuthoringClient('', { fetchImpl });
+    const catalog = await client.artifacts();
+    expect(catalog.items.map(item => item.releaseVersion))
+      .toEqual([9007199254740990, 9007199254740991]);
+    await expect(client.artifacts()).rejects.toThrow(/safe positive integer/);
   });
 
   it('uses accepted identity XML as the next save base without erasing in-flight edits', () => {
@@ -95,8 +126,10 @@ describe('graph authoring client', () => {
     await client.delete('orders.graphml', revision, 'delete-key-000000001');
     await client.release('orders.graphml', revision, 'release-key-00000001');
     await client.artifacts();
-    await client.importArtifact('orders', 1);
-    await client.deploy('orders', 1, 'orders-rollback');
+    const selectedDigest = 'd'.repeat(64);
+    const selectedRef = `${'e'.repeat(64)}:${selectedDigest}`;
+    await client.importArtifact('orders', 1, selectedDigest, selectedRef);
+    await client.deploy('orders', 1, 'orders-rollback', selectedDigest, selectedRef);
     const urls = fetchImpl.mock.calls.map(([url]) => url);
     expect(urls[0]).toContain('/orders.graphml/history');
     expect(urls[1]).toContain('/orders.graphml/diff?from=');
@@ -106,8 +139,8 @@ describe('graph authoring client', () => {
       'https://ravenroot.example/v1/graph-authoring/orders.graphml',
       'https://ravenroot.example/v1/graph-authoring/orders.graphml/release',
       'https://ravenroot.example/v1/graph-artifacts',
-      'https://ravenroot.example/v1/graph-artifacts/orders/1/import',
-      'https://ravenroot.example/v1/graph-artifacts/orders/1/deploy?id=orders-rollback',
+      `https://ravenroot.example/v1/graph-artifacts/orders/1/import?expectedSha256=${selectedDigest}&expectedArtifactRef=${encodeURIComponent(selectedRef)}`,
+      `https://ravenroot.example/v1/graph-artifacts/orders/1/deploy?id=orders-rollback&expectedSha256=${selectedDigest}&expectedArtifactRef=${encodeURIComponent(selectedRef)}`,
     ]);
     expect(fetchImpl.mock.calls.slice(2, 6).every(([, options]) =>
       options.headers.get('X-Ravenroot-Expected-Publication') === 'publication')).toBe(true);

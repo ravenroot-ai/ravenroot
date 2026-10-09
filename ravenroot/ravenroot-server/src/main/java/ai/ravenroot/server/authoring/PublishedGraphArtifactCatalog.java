@@ -1,8 +1,11 @@
 package ai.ravenroot.server.authoring;
 
+import ai.ravenroot.api.application.GraphArtifactDependencies;
+import ai.ravenroot.api.application.GraphProgramDependency;
 import ai.ravenroot.api.authoring.GraphAuthoringException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.core.security.OutboundHttpPolicy;
 
 import java.io.IOException;
@@ -30,9 +33,9 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
     public record Artifact(String tenantId, String graphId, long releaseVersion, String graphMlSha256,
                            URI graphMlUrl, String manifestSha256, URI manifestUrl,
                            String sourceCommit, String compatibilityContract,
-                           List<Map<String, String>> dependencies, byte[] graphMl) {
+                           GraphArtifactDependencies dependencies, byte[] graphMl) {
         public Artifact {
-            dependencies = List.copyOf(dependencies); graphMl = graphMl.clone();
+            Objects.requireNonNull(dependencies, "dependencies"); graphMl = graphMl.clone();
         }
         @Override public byte[] graphMl() { return graphMl.clone(); }
         public String token() { return manifestSha256 + ":" + graphMlSha256; }
@@ -94,7 +97,7 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
         count(compatibility, "nodes"); count(compatibility, "edges");
         count(compatibility, "startNodes"); count(compatibility, "endNodes");
         String compatibilityContract = string(compatibility, "contract");
-        List<Map<String, String>> dependencies = dependencies(manifest.get("dependencies"));
+        GraphArtifactDependencies dependencies = dependencies(manifest.get("dependencies"));
         byte[] graph = get(entry.graphMlUrl, configuration.maxDocumentBytes());
         if (!digest(graph).equals(entry.graphMlSha256)) throw invalid();
         GraphReleaseMetadata.Metadata metadata = GraphReleaseMetadata.read(graph);
@@ -119,7 +122,7 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
             String tenant = string(item, "tenantId");
             String graphId = string(item, "graphId");
             long version = number(item, "releaseVersion");
-            if (version < 1) throw invalid();
+            if (version < 1 || version > GraphReleaseMetadata.MAX_RELEASE_VERSION) throw invalid();
             String graphDigest = sha256(item, "graphMlSha256");
             String manifestDigest = sha256(item, "manifestSha256");
             String sourceCommit = sourceCommit(item, "sourceCommit");
@@ -177,17 +180,40 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
         Object found = value.get(key); if (!(found instanceof String text) || text.isBlank()) throw invalid(); return text;
     }
     private static long number(Map<String, Object> value, String key) {
-        Object found = value.get(key); if (!(found instanceof Number number)) throw invalid(); return number.longValue();
+        Object found = value.get(key); if (!(found instanceof Long number)) throw invalid(); return number;
     }
-    private static List<Map<String, String>> dependencies(Object value) {
-        if (!(value instanceof List<?> list)) throw invalid();
-        return list.stream().map(item -> {
-            Map<String, Object> dependency = object(item);
-            String kind = string(dependency, "kind");
-            String id = string(dependency, "id");
-            if (!("behavior".equals(kind) || "nodeType".equals(kind)) || id.length() > 512) throw invalid();
-            return Map.of("kind", kind, "id", id);
-        }).toList();
+    private static GraphArtifactDependencies dependencies(Object value) {
+        Map<String, Object> dependency = object(value);
+        exactKeys(dependency, Set.of("contract", "nodePackages", "programs"));
+        if (!GraphArtifactDependencies.CONTRACT.equals(string(dependency, "contract"))) throw invalid();
+        if (!(dependency.get("nodePackages") instanceof List<?> packageValues)
+                || !(dependency.get("programs") instanceof List<?> programValues)
+                || packageValues.size() > 256 || programValues.size() > 256) throw invalid();
+        try {
+            var packages = packageValues.stream().map(item -> {
+                Map<String, Object> entry = object(item);
+                exactKeys(entry, Set.of("packageId", "identityDigest"));
+                return new PinnedNodePackage(string(entry, "packageId"), sha256(entry, "identityDigest"));
+            }).toList();
+            var programs = programValues.stream().map(item -> {
+                Map<String, Object> entry = object(item);
+                exactKeys(entry, Set.of("nodeId", "language", "sourceSha256", "artifactId",
+                        "artifactSha256", "artifactRevision", "runtimeCompatibilitySha256"));
+                return new GraphProgramDependency(string(entry, "nodeId"), string(entry, "language"),
+                        sha256(entry, "sourceSha256"), string(entry, "artifactId"),
+                        sha256(entry, "artifactSha256"), nonnegative(entry, "artifactRevision"),
+                        sha256(entry, "runtimeCompatibilitySha256"));
+            }).toList();
+            return new GraphArtifactDependencies(packages, programs);
+        } catch (IllegalArgumentException rejected) {
+            throw invalid();
+        }
+    }
+    private static long nonnegative(Map<String, Object> value, String key) {
+        long result = number(value, key); if (result < 0) throw invalid(); return result;
+    }
+    private static void exactKeys(Map<String, Object> value, Set<String> keys) {
+        if (!value.keySet().equals(keys)) throw invalid();
     }
     private static long count(Map<String, Object> value, String key) {
         long count = number(value, key); if (count < 0 || count > Integer.MAX_VALUE) throw invalid(); return count;

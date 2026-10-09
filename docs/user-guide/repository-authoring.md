@@ -2,6 +2,8 @@
 
 When an operator enables Git authoring, the main **Open** and **Save** actions become **Open from repository** and **Save draft to repository**. **Open local file** and **Download GraphML** remain available in the **File** menu.
 
+Until the runtime configuration proves whether this workspace is local or repository-backed, the main Open and Save actions stay unavailable. An authorization failure, malformed response, or unreachable configured runtime keeps them unavailable instead of silently downloading a local file. Use **Retry connection** to recover. **Open local file** and **Download GraphML** remain explicit offline actions in the File menu during that failure state.
+
 - **Open from repository** lists graphs in your assigned workspace and opens the exact stored GraphML.
 - **Save draft to repository** creates or updates a draft. Ravenroot shows an authored version and keeps edits made while a save is running unsaved.
 - **Repository history** lists source commits and can restore one as a new commit.

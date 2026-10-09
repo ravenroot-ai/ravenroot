@@ -47,6 +47,38 @@ class GithubAuthoringRepositoryTest {
     private static final GraphAuthoringRepository.Revision EMPTY =
             new GraphAuthoringRepository.Revision("absent", "absent", "absent");
 
+    @Test void missingDraftBranchReadsAreSideEffectFreeAndFirstWriteProvisionsIt() {
+        var github = new ScriptedGithub();
+        try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
+            assertTrue(repository.list(ALICE, "").toCompletableFuture().join().items().isEmpty());
+            assertFailure(GraphAuthoringException.Failure.NOT_FOUND,
+                    () -> repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join());
+            assertEquals(0, github.refMutationCount());
+
+            var saved = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("one"), EMPTY, "lazy-branch-key-00000001"))
+                    .toCompletableFuture().join();
+            assertEquals(1, github.refCreationCount());
+            assertEquals(1, saved.summary().releaseVersion());
+
+            github.mergeDraftToMain();
+            github.deleteDraftBranch();
+            var released = repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join();
+            long mutationsBeforeReleasedReads = github.refMutationCount();
+            assertEquals(List.of("orders.graphml"), repository.list(ALICE, "").toCompletableFuture().join()
+                    .items().stream().map(GraphAuthoringRepository.DocumentSummary::documentId).toList());
+            assertArrayEquals(saved.graphMl(), released.graphMl());
+            assertEquals(mutationsBeforeReleasedReads, github.refMutationCount());
+
+            var edited = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("two"), released.summary().revision(),
+                    "released-fork-key-000001"))
+                    .toCompletableFuture().join();
+            assertEquals(2, github.refCreationCount());
+            assertTrue(new String(edited.graphMl(), StandardCharsets.UTF_8).contains("two"));
+        }
+    }
+
     @Test void pinnedTreeReadsRejectCurrentAndHistoricalCrossTenantSymlinks() {
         var github = new ScriptedGithub();
         try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
@@ -339,6 +371,8 @@ class GithubAuthoringRepositoryTest {
         private boolean losePatch;
         private boolean losePull;
         private Runnable beforePatch;
+        private long refCreations;
+        private long refMutations;
 
         ScriptedGithub() {
             String root = sha(1);
@@ -354,6 +388,9 @@ class GithubAuthoringRepositoryTest {
         long authoredCommitCount() { return commits.values().stream().filter(value -> value.message.contains("Ravenroot-Authoring-Request")).count(); }
         int pullCount() { return pulls.size(); }
         void mergeDraftToMain() { refs.put("main", refs.get("draft/customers-a")); }
+        void deleteDraftBranch() { refs.remove("draft/customers-a"); }
+        long refCreationCount() { return refCreations; }
+        long refMutationCount() { return refMutations; }
         void markSymlink(String commitId, String path, String target) {
             Commit commit = commits.get(commitId);
             var files = new HashMap<>(commit.files);
@@ -397,6 +434,8 @@ class GithubAuthoringRepositoryTest {
             if ("POST".equals(method) && path.equals(api + "/git/refs")) {
                 Map<String, Object> body = map(decoded);
                 refs.put(string(body, "ref").substring("refs/heads/".length()), string(body, "sha"));
+                refCreations++;
+                refMutations++;
                 return response(201, Map.of("ok", true));
             }
             if ("GET".equals(method) && path.startsWith(api + "/contents/")) {
@@ -496,6 +535,7 @@ class GithubAuthoringRepositoryTest {
                 return response(201, Map.of("sha", id));
             }
             if ("PATCH".equals(method) && path.startsWith(api + "/git/refs/heads/")) {
+                refMutations++;
                 if (beforePatch != null) {
                     Runnable action = beforePatch; beforePatch = null; action.run();
                 }

@@ -2715,6 +2715,12 @@ public final class RavenrootServer implements AutoCloseable {
             var summary = authorizedApplication.inspectGraphMl(
                     httpContext.applicationContext(),
                     new java.io.ByteArrayInputStream(graph), purpose);
+            String dependencies = "";
+            if (summary.valid() && purpose == ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT) {
+                var resolved = authorizedApplication.inspectGraphArtifactDependencies(
+                        httpContext.applicationContext(), new java.io.ByteArrayInputStream(graph));
+                dependencies = ",\"dependencies\":" + graphArtifactDependenciesJson(resolved);
+            }
             // "valid" and "violations" distinguish validity on this exact endpoint;
             // POST /v1/graphs/inspect otherwise reports the same four counts whether
             // the document was a sound graph or not.
@@ -2722,7 +2728,7 @@ public final class RavenrootServer implements AutoCloseable {
                     + ",\"startNodes\":" + summary.startNodes() + ",\"endNodes\":" + summary.endNodes()
                     + ",\"valid\":" + summary.valid() + ",\"violations\":" + stringArrayJson(summary.violations())
                     + ",\"findings\":" + findingsJson(summary.findings())
-                    + "}");
+                    + dependencies + "}");
         } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
             failGraphExecutionLimit(exchange, httpContext, rejection);
         } catch (GraphMlParseException error) {
@@ -5699,6 +5705,24 @@ public final class RavenrootServer implements AutoCloseable {
     private static String findingsJson(List<ai.ravenroot.api.application.GraphAdmissionFinding> values) {
         return values.stream().map(RavenrootServer::findingJson)
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    }
+
+    private static String graphArtifactDependenciesJson(
+            ai.ravenroot.api.application.GraphArtifactDependencies value) {
+        String packages = value.nodePackages().stream().map(item -> "{\"packageId\":\""
+                        + escape(item.packageId()) + "\",\"identityDigest\":\""
+                        + item.identityDigest() + "\"}")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        String programs = value.programs().stream().map(item -> "{\"nodeId\":\""
+                        + escape(item.nodeId()) + "\",\"language\":\"" + escape(item.language())
+                        + "\",\"sourceSha256\":\"" + item.sourceSha256()
+                        + "\",\"artifactId\":\"" + escape(item.artifactId())
+                        + "\",\"artifactSha256\":\"" + item.artifactSha256()
+                        + "\",\"artifactRevision\":" + item.artifactRevision()
+                        + ",\"runtimeCompatibilitySha256\":\"" + item.runtimeCompatibilitySha256() + "\"}")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return "{\"contract\":\"" + ai.ravenroot.api.application.GraphArtifactDependencies.CONTRACT
+                + "\",\"nodePackages\":" + packages + ",\"programs\":" + programs + "}";
     }
 
     private static String findingJson(ai.ravenroot.api.application.GraphAdmissionFinding value) {

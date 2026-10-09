@@ -2156,12 +2156,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(108, len(details))
+            self.assertEqual(118, len(details))
             self.assertEqual(
-                {"methods": 121, "path": 108, "summary": 449, "successStatuses": 111},
+                {"methods": 133, "path": 118, "summary": 459, "successStatuses": 121},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(789, len(entries))
+            self.assertEqual(831, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,

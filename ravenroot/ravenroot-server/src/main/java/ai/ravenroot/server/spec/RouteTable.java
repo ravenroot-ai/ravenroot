@@ -266,12 +266,10 @@ public final class RouteTable {
                             ErrorCode.GRAPHML_MALFORMED_XML.code(), ErrorCode.GRAPHML_COMPRESSED_ARCHIVE.code(),
                             ErrorCode.GRAPHML_INVALID_GRAPH.code(), ErrorCode.INVALID_REQUEST.code()), READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/graph-authoring",
-                    "Lists one authenticated tenant's Git-backed graph documents with the current draft version, "
-                            + "the distinct reviewed release version, source availability, and exact verified publication state.",
+                    "Lists one authenticated tenant's Git-backed graph documents with the current draft version, the distinct reviewed release version, source availability, and exact verified publication state.",
                     true, true, 200, STANDARD_ERRORS, NEVER, false),
             new RouteDescriptor(Set.of("GET", "PUT", "DELETE"), "/v1/graph-authoring/{id}",
-                    "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic "
-                            + "concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
+                    "Opens, saves, creates, or deletes one tenant-confined GraphML source with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
                     true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("GET"), "/v1/graph-authoring/{id}/history",
                     "Lists bounded file history for one tenant-confined graph document.",

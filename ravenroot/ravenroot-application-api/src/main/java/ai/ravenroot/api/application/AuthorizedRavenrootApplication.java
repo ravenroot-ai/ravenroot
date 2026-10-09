@@ -687,21 +687,46 @@ public final class AuthorizedRavenrootApplication {
         return delegate.registerLocalDeployment(SecurityContext.of(context), deploymentId, graphMl);
     }
 
-    /** Registers only caller-tenant published bytes under the supplied authored identity. */
+    /**
+     * Imports caller-tenant publication bytes and registers a stopped deployment under the supplied
+     * authored identity after {@link AuthorizationAction#GRAPH_ARTIFACT_DEPLOY} authorization.
+     *
+     * @param context authenticated caller supplying the owning tenant
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity stable graph and authored-version identity verified against the GraphML
+     * @param graphMl exact CI-published GraphML bytes; ownership remains with the adapter
+     * @return current process-local status of the stopped registration
+     */
     public LocalDeploymentStatus registerPublishedLocalDeployment(RequestContext context, String deploymentId,
             ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
         require(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY, collection("published-graphs", context));
         return delegate.registerPublishedLocalDeployment(SecurityContext.of(context), deploymentId, identity, graphMl);
     }
 
-    /** Imports verified publication bytes without creating or starting a deployment. */
+    /**
+     * Imports verified publication bytes without creating or starting a deployment after
+     * {@link AuthorizationAction#GRAPH_ARTIFACT_DEPLOY} authorization.
+     *
+     * @param context authenticated caller supplying the owning tenant
+     * @param identity stable graph and authored-version identity verified against the GraphML
+     * @param graphMl exact CI-published GraphML bytes; ownership remains with the adapter
+     * @return immutable stored definition including the verified content digest
+     */
     public ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(RequestContext context,
             ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
         require(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY, collection("published-graphs", context));
         return delegate.importPublishedGraphDefinition(SecurityContext.of(context), identity, graphMl);
     }
 
-    /** Registers an already pinned publication without starting it. */
+    /**
+     * Registers an already pinned publication without starting it after
+     * {@link AuthorizationAction#GRAPH_ARTIFACT_DEPLOY} authorization.
+     *
+     * @param context authenticated caller supplying the owning tenant
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity previously imported graph and authored-version identity
+     * @return current process-local status of the stopped registration
+     */
     public LocalDeploymentStatus registerPinnedLocalDeployment(RequestContext context, String deploymentId,
             ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
         require(context, AuthorizationAction.GRAPH_ARTIFACT_DEPLOY, collection("published-graphs", context));

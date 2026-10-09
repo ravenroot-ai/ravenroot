@@ -614,7 +614,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 shutil.copy2(ROOT / path, target)
             schema = root / audit.HELM_SCHEMA_PATH
             schema.write_text(schema.read_text(encoding="utf-8").replace(
-                '"const": true', '"const": false', 1), encoding="utf-8")
+                '"runAsNonRoot": { "type": "boolean", "const": true }', '"runAsNonRoot": { "type": "boolean", "const": false }', 1), encoding="utf-8")
             errors = audit.helm_authority_errors(root, None, {}, candidates)
             self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
 
@@ -4369,7 +4369,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -4613,7 +4613,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 449 |",
+                "| Retained published contract descriptions | 459 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4621,7 +4621,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 448 |",
+                "| Retained published contract descriptions | 458 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6384,7 +6384,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 

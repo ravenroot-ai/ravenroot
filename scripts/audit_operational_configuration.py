@@ -14526,22 +14526,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-d2944a18d2b2c13a7166": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-dae715744fb0ed21c5cd":
+    "oc-ea00b99bbe41ad4b06c3": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-135e67fc3370f38d8b75":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-41c49019bac585bb7178": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-73b075f4965ea79bb8ee": (
+    "oc-ec005816961871c98610": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-0bf6a519fab1c305c2c6": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-3039d7b1d1df0440ffec": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-14f0fd6f72463e865d79": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-d2944a18d2b2c13a7166": "/v1/events",
-    "oc-dae715744fb0ed21c5cd": "/v1/events",
-    "oc-41c49019bac585bb7178": "/v1/events",
-    "oc-73b075f4965ea79bb8ee": "/v1/events/recent",
-    "oc-3039d7b1d1df0440ffec": "/v1/events/recent",
+    "oc-ea00b99bbe41ad4b06c3": "/v1/events",
+    "oc-135e67fc3370f38d8b75": "/v1/events",
+    "oc-ec005816961871c98610": "/v1/events",
+    "oc-0bf6a519fab1c305c2c6": "/v1/events/recent",
+    "oc-14f0fd6f72463e865d79": "/v1/events/recent",
 }
 
 
@@ -14749,18 +14749,23 @@ GRAPH_AUTHORING_FILE_PROOFS = {
         "c5d81882097df2bdb57ed362df71af1124027bb659bd6ac4ea4a429afd2485e2",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphProgramDependency.java"):
         "02ca6b2a286e62a9cd18c213bf2c1e628d2c6f686b44fee922ec48bbc59db2b4",
-    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d",
-    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "753cf2cb56afd581e1ed341ca518cd88ed103aa3c764f835a6902a0839ab1f06",
-    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
-        "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
     GRAPH_AUTHORING_CLIENT_PATH:
         "89e3be9a469194d5efa1db7638fc88f97143692749918b668a408b23b4fc8d5c",
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
         "fc6894ee287b9c0913f5c64a3ef0c2404d85a738ea7e2d22b2a3a1f92b0f9612",
     GRAPH_AUTHORING_PUBLISHER_PATH:
         "d0419b38a9b27141904f35c58e589e88ed924fd6e746f088a57f86fd81511dc8",
+}
+# These shared public/server surfaces are exact source evidence for the boundary, but their
+# unrelated candidates retain their existing semantic authorities rather than being claimed by
+# graph authoring as a whole file.
+GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
+    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
+        "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d",
+    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
+        "753cf2cb56afd581e1ed341ca518cd88ed103aa3c764f835a6902a0839ab1f06",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
+        "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
@@ -14961,7 +14966,9 @@ def graph_authoring_authority_from_source(
         root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
     try:
         sources = {path: (root / path).read_text(encoding="utf-8")
-                   for path in (*GRAPH_AUTHORING_FILE_PROOFS, *GRAPH_AUTHORING_TEST_PROOFS)}
+                   for path in (*GRAPH_AUTHORING_FILE_PROOFS,
+                                *GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+                                *GRAPH_AUTHORING_TEST_PROOFS)}
         server = (root / GRAPH_AUTHORING_SERVER_PATH).read_text(encoding="utf-8")
         application = (root / GRAPH_AUTHORING_APPLICATION_PATH).read_text(encoding="utf-8")
         ui = (root / GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
@@ -14975,8 +14982,9 @@ def graph_authoring_authority_from_source(
         schema = json.loads(schema_text)
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None
-    if any(_source_digest(sources[path]) != digest
-           for path, digest in {**GRAPH_AUTHORING_FILE_PROOFS, **GRAPH_AUTHORING_TEST_PROOFS}.items()):
+    if any(_source_digest(sources[path]) != digest for path, digest in {
+            **GRAPH_AUTHORING_FILE_PROOFS, **GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+            **GRAPH_AUTHORING_TEST_PROOFS}.items()):
         return None
     if any(java_method_digest(server if path == GRAPH_AUTHORING_SERVER_PATH else application,
                               type_symbol, method) != digest
@@ -15804,18 +15812,22 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
             or java_method_digest(generator, "OpenApiSpecGenerator", "generate") != \
             consumer_digests["openApiGenerate"]:
         errors.append("RouteTable OpenAPI generate signature/body has drifted")
-    publication_chain = (
-        "json.append(routes.stream().sorted(java.util.Comparator.comparing(RouteDescriptor::path))"
-        ".map(OpenApiSpecGenerator::pathEntry).collect(Collectors.joining()));")
-    generate_compact = re.sub(r"\s+", "", strip_c_comments_and_literals(generate_source))
-    if publication_chain not in generate_compact:
-        errors.append("RouteTable OpenAPI generate lost the routes-to-pathEntry append chain")
+    for expression in (
+            "routes.stream().collect(Collectors.groupingBy(RouteDescriptor::path, "
+            "java.util.TreeMap::new, Collectors.toList()))",
+            "byPath.entrySet().stream().map(entry -> pathEntry(entry.getKey(), entry.getValue()))",
+            "collect(Collectors.joining("):
+        if normalized(expression) not in generate_code:
+            errors.append(
+                f"RouteTable OpenAPI generate lost grouped method-specific publication: {expression}")
     if normalized("return json.toString()") not in generate_code:
         errors.append("RouteTable OpenAPI generate lost return json.toString()")
     for role, method, header, required in (
-        ("openApiPathEntry", "pathEntry", "private static String pathEntry(RouteDescriptor route)",
-         ("route.methods().stream().sorted().map(method -> operationEntry(route, method))",
-          "JsonStrings.escape(route.path())", "operations")),
+        ("openApiPathEntry", "pathEntry",
+         "private static String pathEntry(String path, List<RouteDescriptor> routes)",
+         ("routes.stream().flatMap(route -> route.methods().stream()",
+          "operationEntry(entry.getValue(), entry.getKey())",
+          "JsonStrings.escape(path)", "if (!methods.add(method))", "operations")),
         ("openApiOperationEntry", "operationEntry",
          "private static String operationEntry(RouteDescriptor route, String method)",
          ("method.toLowerCase(java.util.Locale.ROOT)", "JsonStrings.escape(route.summary())",
@@ -16005,9 +16017,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 133, "path": 118, "summary": 459, "successStatuses": 121}
-    if len(details) != 118 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 118/831 positional shape")
+    expected_counts = {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123}
+    if len(details) != 120 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 120/837 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

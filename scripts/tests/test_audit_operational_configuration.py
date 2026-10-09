@@ -2194,12 +2194,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(118, len(details))
+            self.assertEqual(120, len(details))
             self.assertEqual(
-                {"methods": 133, "path": 118, "summary": 459, "successStatuses": 121},
+                {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(831, len(entries))
+            self.assertEqual(837, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -2524,7 +2524,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             changed["consumerBodyDigests"]["openApiGenerate"] = audit.java_method_digest(
                 mutated, "OpenApiSpecGenerator", "generate")
             errors = self.route_table_errors(root, changed, entries, candidates)
-            self.assertTrue(any("routes-to-pathEntry append chain" in error for error in errors), errors)
+            self.assertTrue(any("grouped method-specific publication" in error
+                                for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
             success_span = audit.java_method_span(
@@ -6697,7 +6698,8 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary.name)
         paths = {
-            *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_TEST_PROOFS,
+            *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+            *audit.GRAPH_AUTHORING_TEST_PROOFS,
             audit.GRAPH_AUTHORING_ROUTE_PATH, audit.GRAPH_AUTHORING_SERVER_PATH,
             audit.GRAPH_AUTHORING_APPLICATION_PATH, audit.GRAPH_AUTHORING_UI_PATH,
             *(path for path, _method in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS),

@@ -56,7 +56,7 @@ semantic review and focused source inventories remain required for those boundar
 
 Retired source candidates preserved in inventory history: 2240.
 
-Approved normalized-identity reappearances: 21. Active candidates and
+Approved normalized-identity reappearances: 23. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
 
 Checked inventory-schema migrations: 2. Validation requires the recorded source

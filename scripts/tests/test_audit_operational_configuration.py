@@ -5,6 +5,7 @@ import hashlib
 import io
 import copy
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -6597,8 +6598,37 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
                                  if discovered[identifier].path == schema_path]
             self.assertTrue(values_candidates)
             self.assertTrue(schema_candidates)
-            self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
-            self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
+            values_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1]).read_text()
+            values_start = re.search(r"(?m)^activityCapture:\s*$", values_source)
+            self.assertIsNotNone(values_start)
+            assert values_start is not None
+            next_values_key = re.search(
+                r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                values_source[values_start.end():],
+            )
+            values_end = (values_start.end() + next_values_key.start() - 1
+                          if next_values_key is not None else len(values_source) - 1)
+            values_lines = (
+                audit.line_number(values_source, values_start.start()),
+                audit.line_number(values_source, values_end),
+            )
+            schema_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[2]).read_text()
+            schema_start = re.search(r'"activityCapture"\s*:\s*\{', schema_source)
+            self.assertIsNotNone(schema_start)
+            assert schema_start is not None
+            schema_open = schema_source.find("{", schema_start.start())
+            schema_close = audit.matching_delimiter(
+                audit.strip_c_comments_and_literals(schema_source), schema_open, "{", "}")
+            self.assertIsNotNone(schema_close)
+            assert schema_close is not None
+            schema_lines = (
+                audit.line_number(schema_source, schema_start.start()),
+                audit.line_number(schema_source, schema_close),
+            )
+            self.assertTrue(all(values_lines[0] <= candidate.line <= values_lines[1]
+                                for candidate in values_candidates))
+            self.assertTrue(all(schema_lines[0] <= candidate.line <= schema_lines[1]
+                                for candidate in schema_candidates))
             self.assertTrue(all(candidate.role.startswith("activityCapture.")
                                 for candidate in values_candidates + schema_candidates
                                 if candidate.kind == "configuration-scalar"))

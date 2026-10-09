@@ -446,7 +446,8 @@ HELM_FIXED_LIST_CONTRACTS = {
     "persistence.accessModes.0": "ReadWriteOnce",
 }
 HELM_JAVA_CARRIER_PREFIXES = (
-    "executionRuntime.", "activityCapture.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
+    "graphAuthoring.", "executionRuntime.", "activityCapture.", "graph.", "ai.", "humanTask.",
+    "assistant.", "rateLimit.",
 )
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(
@@ -3502,6 +3503,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] == "contracts" and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultEvidence"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "graphAuthoringAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "graphAuthoringAuthorities" \
+            and path[2] in {"contracts", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultEvidence"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -3761,6 +3769,19 @@ def remap_declared_candidate_references(document: dict[str, object],
                 for contract in contracts:
                     remap_list(contract, "candidateIds")
                     remap_list(contract, "defaultEvidence")
+
+    graph_authoring_authorities = document.get("graphAuthoringAuthorities")
+    if isinstance(graph_authoring_authorities, dict):
+        for authority in graph_authoring_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("contracts", "semanticPartitions"):
+                for row in authority.get(field, []):
+                    if isinstance(row, dict):
+                        remap_list(row, "candidateIds")
+                        if field == "contracts":
+                            remap_list(row, "defaultEvidence")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -4076,6 +4097,31 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             }
             for identifier in contract["candidateIds"]:
                 activity_by_id[identifier].update(metadata)
+    if graph_authoring_source_present(root):
+        graph_authoring_authority = graph_authoring_authority_from_source(root, current)
+        if graph_authoring_authority is None:
+            return None, ["cannot derive the closed graph authoring and publication authority"]
+        refreshed["graphAuthoringAuthorities"] = {
+            GRAPH_AUTHORING_AUTHORITY_ID: graph_authoring_authority,
+        }
+        by_id = {str(entry["id"]): entry for entry in merged}
+        for contract in graph_authoring_authority["contracts"]:
+            metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "graphAuthoringAuthority": GRAPH_AUTHORING_AUTHORITY_ID,
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The closed graph authoring configuration owns this server-side setting.",
+            }
+            for identifier in contract["candidateIds"]:
+                by_id[identifier].update(metadata)
+        for partition in graph_authoring_authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                by_id[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    graphAuthoringAuthority=GRAPH_AUTHORING_AUTHORITY_ID)
     if ai_operational_source_present(root):
         ai_operational_authority = ai_operational_authority_from_source(root, current)
         if ai_operational_authority is None:
@@ -14631,6 +14677,398 @@ def activity_capture_authority_errors(
     return errors
 
 
+GRAPH_AUTHORING_AUTHORITY_ID = "graph-authoring-publication-boundary-v1"
+GRAPH_AUTHORING_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/"
+    "GraphAuthoringConfiguration.java")
+GRAPH_AUTHORING_ROUTE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
+GRAPH_AUTHORING_SERVER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java")
+GRAPH_AUTHORING_APPLICATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+GRAPH_AUTHORING_UI_PATH = Path("ravenroot/ravenroot-ui/src/app.js")
+GRAPH_AUTHORING_CLIENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-authoring-client.js")
+GRAPH_AUTHORING_AUTHORIZATION_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/AuthorizationAction.java")
+GRAPH_AUTHORING_RAW_KUBERNETES_PATH = Path("deploy/kubernetes/ravenroot.yaml")
+GRAPH_AUTHORING_PUBLISHER_PATH = Path("scripts/publish-graph-artifacts.py")
+
+GRAPH_AUTHORING_FILE_PROOFS = {
+    GRAPH_AUTHORING_CONFIGURATION_PATH:
+        "7b2ee4320ec2610fe4d7b9b096cdcfd017caba2c91c30173df6a96ff3e7df011",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringHttpApi.java"):
+        "781a3f992494cae4a32c3b818930b0bfb1892dc43642a9e1b91e9a9d459804ae",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactHttpApi.java"):
+        "c9d4e0b12d1f966bb6e57f9c532b618ec2d41832a57f89cfd960544f4256b535",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalog.java"):
+        "cfc0f46a13bb4bb5d6998eb0c91c805e33b6ed1ccdec0aeedc3d0d2b36a72df1",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/BoundedHttpResponseBody.java"):
+        "6fb605ab94be203f277359d51668ea9c7079406aaba61093805fe52828535aba",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GithubAuthoringRepository.java"):
+        "db36ac046ee1aeede6438bb960454e175c93a10f55f17b1c270bae08d3124ed9",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GithubTokenSource.java"):
+        "5fa84e15b6ec9d94935966ff75e026084968381766988c3641aa59c4e26e983b",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphReleaseMetadata.java"):
+        "17bb5acd9c2e08782cb23eddca79b4b1117dca262075a458052c03123e59d744",
+    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/authoring/GraphAuthoringRepository.java"):
+        "f041a692b53837dbeca46586171579ab93e08b111b7fb0618919c93f2bbb66eb",
+    GRAPH_AUTHORING_CLIENT_PATH:
+        "0b3e41f6ca9443f46985c23968d8b61da3717a8f0de9fb17dcd4b919a7fe43cd",
+    GRAPH_AUTHORING_PUBLISHER_PATH:
+        "97f323442b3cbd1c888cf393f3c9da6e646f6a89986d29ebacbf5776ffc7f6ee",
+}
+GRAPH_AUTHORING_TEST_PROOFS = {
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubAuthoringRepositoryTest.java"):
+        "ca084eed0b6024aa87834e5d472fbd9581fb14ed04dec0b72c338abd11a377d5",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubTokenSourceTest.java"):
+        "523700c1d4dc5463e7df96b7ae0b0487690c2c868e4169800db060a9d462aeff",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/BoundedHttpResponseBodyTest.java"):
+        "8de6368ff8a8bfc6714b6ba993747c844966cfc870d2069467a3cc85f4f71edb",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphAuthoringConfigurationTest.java"):
+        "30f5f9ef5d8087cd4aa967080f55d3c49e4e52daabf09ede6407bc9e124bac54",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalogTest.java"):
+        "65379cc5b0504a0d86b795a6aeddc6c732db123e50d50b9e0fa7d43ff2eb6ea5",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphReleaseMetadataTest.java"):
+        "c505eb584ea3411c229de2afa3e9bbc0bd18b8dc950069b4066190051862c030",
+    Path("ravenroot/ravenroot-ui/test/graph-authoring-client.test.js"):
+        "1040f53ddb7296cbc94cb14992ec00825197c16bb412f5e62146df97a7924cf9",
+    Path("scripts/test_publish_graph_artifacts.py"):
+        "2e609b0a0c3174b4770b52da8330153ede28c4f6d573230e35c19b7c5c2baf09",
+}
+GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installGraphAuthoring"):
+        "e55468297916b313cd7e6b993d50867e25a3679ba7aa6b6e3d78e9bc57232366",
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "graphAuthoring"):
+        "1c5981f6c7548dca0b569d44214a817902a299b748c24537023483623ed52cf8",
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installPublishedGraphArtifacts"):
+        "4222014e1a5b1797adc44689cbc5fe387bceb671595d3d0c3411940b4dae3c52",
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "publishedGraphArtifacts"):
+        "3fc65b63e928bf849bf2854933d02880c05df2fdc5f18f2eff75aaa103b6e862",
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "importPublishedGraphDefinition"):
+        "c9a979d7c81c71430c0c45b40825d9fa52ce7f6b4cd5a3c460061a438e2777df",
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "registerPinnedLocalDeployment"):
+        "833e9505f21b48f2708d6185989c1cff181d7c7d819084b784181da70d38d801",
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "registerPublishedLocalDeployment"):
+        "ce151ac425186080f2508e6d8bf3bc337d30ca1be8c0d74bb4c8a4940b9ac648",
+}
+GRAPH_AUTHORING_UI_METHOD_PROOFS = {
+    "gitAuthoringEnabled": "cf50d41c26d20d25378fa539d3af7882394f3984c4c4475e47e2c96a2327dece",
+    "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
+    "applyAuthoringDocument": "e0671d5eed45c10300118b9080078bef9b387e590027429fb1d3895fba15351e",
+    "openRepositoryGraph": "b8065ed61d8c992fc4fe8783a1602b230de8a4909cfeaab599335b8edb5418ed",
+    "saveRepositoryGraph": "0489bca68694899ee22bce723e7db7e92f6af8d7125f93dd66147780d40d0499",
+    "repositoryHistory": "455dba6b85e8b9e2d202aa851c0e9c073b740eee02ec45bc8c6233aff5b19dcb",
+    "repositoryDiscard": "5048fc18dfcc587d53b40a41b759de139d5f0b178323a9bab81eee12025b2fc0",
+    "repositoryDelete": "954a18af00d54b9aabaa5731898bf33cdd740f14831a382546ff15870d2049d7",
+    "repositoryRelease": "def7c49bdc1e193b5b4303446a614ac288469056511210809886e932ca94b95f",
+    "publishedArtifacts": "543993f61be110580f45919daeec3313e037497187622e714b855a0b14a42b1a",
+}
+GRAPH_AUTHORING_SETTINGS = (
+    ("graph.authoring.mode", "mode", "RAVENROOT_GRAPH_AUTHORING_MODE", "LOCAL", "LOCAL or GIT."),
+    ("graph.authoring.provider", "provider", "RAVENROOT_GRAPH_AUTHORING_PROVIDER", "GITHUB in Git mode; NONE locally", "GITHUB when Git mode is enabled."),
+    ("graph.authoring.repository-owner", "repositoryOwner", "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER", "required in Git mode", "One GitHub owner segment, at most 100 characters."),
+    ("graph.authoring.repository-name", "repositoryName", "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME", "required in Git mode", "One GitHub repository segment, at most 100 characters."),
+    ("graph.authoring.graph-directory", "graphDirectory", "RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY", "graphs", "Confined relative repository path."),
+    ("graph.authoring.draft-branch", "draftBranch", "RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH", "draft", "Confined Git branch distinct from the release branch."),
+    ("graph.authoring.release-branch", "releaseBranch", "RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "main", "Confined Git branch distinct from the draft branch."),
+    ("graph.authoring.github-api-base", "apiBase", "RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE", "https://api.github.com", "Absolute HTTPS origin/path without credentials, query, or fragment."),
+    ("graph.authoring.credential-mode", "credentialMode", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "required in Git mode", "PAT or APP; NONE only in local mode."),
+    ("graph.authoring.credential-reference", "credentialReference", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE", "required in Git mode", "Opaque server-side credential reference."),
+    ("graph.authoring.github-app-id", "appId", "RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID", "empty unless APP mode", "Positive decimal GitHub App identifier in APP mode."),
+    ("graph.authoring.github-installation-id", "installationId", "RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID", "empty unless APP mode", "Positive decimal installation identifier in APP mode."),
+    ("graph.authoring.tenant-namespaces", "tenantNamespaces", "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "required in Git mode", "Explicit unique tenant=confined-directory mappings."),
+    ("graph.artifact.base-url", "artifactBase", "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "required in Git mode", "Absolute HTTPS base ending in slash."),
+    ("graph.artifact.catalog-path", "artifactCatalogPath", "RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH", "catalog.json", "Confined relative catalog path."),
+    ("graph.authoring.max-document-bytes", "maxDocumentBytes", "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES", "10485760", "1..268435456 bytes; Git mode is capped at 104857600."),
+    ("graph.authoring.page-size", "pageSize", "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE", "50", "1..200 entries."),
+    ("graph.authoring.request-timeout-millis", "requestTimeout", "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS", "15000", "1..120000 milliseconds."),
+    ("graph.authoring.retry-limit", "retryLimit", "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", "1", "0..3 retries."),
+)
+
+
+def _javascript_function_span(source: str, method: str) -> tuple[int, int] | None:
+    matches = list(re.finditer(
+        rf"(?:(?:async)\s+)?function\s+{re.escape(method)}\s*\(", source))
+    if len(matches) != 1:
+        return None
+    opening = source.find("(", matches[0].start())
+    parameters = matching_delimiter(source, opening, "(", ")")
+    if parameters is None:
+        return None
+    brace = source.find("{", parameters + 1)
+    end = matching_delimiter(source, brace, "{", "}")
+    return None if end is None else (matches[0].start(), end + 1)
+
+
+def graph_authoring_source_present(root: Path) -> bool:
+    return any((root / path).exists() for path in (
+        GRAPH_AUTHORING_CONFIGURATION_PATH, GRAPH_AUTHORING_CLIENT_PATH,
+        GRAPH_AUTHORING_PUBLISHER_PATH))
+
+
+def graph_authoring_cohort_candidate_ids(
+        root: Path, discovered: dict[str, Candidate]) -> set[str] | None:
+    try:
+        route_source = (root / GRAPH_AUTHORING_ROUTE_PATH).read_text(encoding="utf-8")
+        server = (root / GRAPH_AUTHORING_SERVER_PATH).read_text(encoding="utf-8")
+        application = (root / GRAPH_AUTHORING_APPLICATION_PATH).read_text(encoding="utf-8")
+        ui = (root / GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
+        values = (root / HELM_VALUES_PATH).read_text(encoding="utf-8")
+        schema = (root / HELM_SCHEMA_PATH).read_text(encoding="utf-8")
+        template = (root / "deploy/helm/ravenroot/templates/deployment.yaml").read_text(encoding="utf-8")
+    except (OSError, UnicodeError, ValueError):
+        return None
+    paths = {path.as_posix() for path in (*GRAPH_AUTHORING_FILE_PROOFS, *GRAPH_AUTHORING_TEST_PROOFS)}
+    selected = {identifier for identifier, candidate in discovered.items()
+                if candidate.path in paths}
+    for path, type_symbol, method in GRAPH_AUTHORING_JAVA_METHOD_PROOFS:
+        source = server if path == GRAPH_AUTHORING_SERVER_PATH else application
+        for start, end in program_github_method_spans(source, type_symbol, method):
+            first, last = line_number(source, start), line_number(source, end)
+            selected.update(identifier for identifier, candidate in discovered.items()
+                            if candidate.path == path.as_posix() and first <= candidate.line <= last)
+    for method in GRAPH_AUTHORING_UI_METHOD_PROOFS:
+        span = _javascript_function_span(ui, method)
+        if span is None:
+            return None
+        first, last = line_number(ui, span[0]), line_number(ui, span[1])
+        selected.update(identifier for identifier, candidate in discovered.items()
+                        if candidate.path == GRAPH_AUTHORING_UI_PATH.as_posix()
+                        and first <= candidate.line <= last)
+    route_paths = {"/v1/graph-authoring", "/v1/graph-authoring/{id}",
+                   "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
+                   "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
+                   "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+                   "/v1/graph-artifacts/{graphId}/{version}/import",
+                   "/v1/graph-artifacts/{graphId}/{version}/deploy"}
+    parsed_routes = route_table_candidate_partitions(route_source)
+    if parsed_routes is None:
+        return None
+    descriptors = [{"path": item["path"], "candidateIds": item["candidateIds"]}
+                   for item in parsed_routes[1]]
+    if {item.get("path") for item in descriptors if item.get("path") in route_paths} != route_paths:
+        return None
+    for descriptor in descriptors:
+        if descriptor.get("path") in route_paths:
+            for ids in descriptor["candidateIds"].values():
+                selected.update(ids)
+    selected.update(identifier for identifier, candidate in discovered.items()
+                    if candidate.path == GRAPH_AUTHORING_AUTHORIZATION_PATH.as_posix()
+                    and (candidate.role.startswith("GRAPH_") or candidate.expression.strip('"\'').startswith("graph:")))
+    carrier_spans: list[tuple[str, int, int]] = []
+    values_match = re.search(r"(?m)^graphAuthoring:\s*$", values)
+    schema_spans = json_value_spans(schema)
+    template_start = template.find("{{- if .Values.graphAuthoring.enabled }}")
+    template_end = template.find("{{- end }}", template_start)
+    if values_match is None or schema_spans is None or template_start < 0 or template_end < 0:
+        return None
+    next_values = re.search(r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$", values[values_match.end():])
+    values_end = values_match.end() + (next_values.start() if next_values else len(values))
+    schema_span = schema_spans.get(("properties", "graphAuthoring"))
+    if schema_span is None:
+        return None
+    carrier_spans.extend((
+        (HELM_VALUES_PATH, line_number(values, values_match.start()), line_number(values, values_end)),
+        (HELM_SCHEMA_PATH, line_number(schema, schema_span[0]), line_number(schema, schema_span[1] - 1)),
+        ("deploy/helm/ravenroot/templates/deployment.yaml", line_number(template, template_start),
+         line_number(template, template_end)),
+    ))
+    for path, first, last in carrier_spans:
+        selected.update(identifier for identifier, candidate in discovered.items()
+                        if candidate.path == path and first <= candidate.line <= last)
+    selected.update(identifier for identifier, candidate in discovered.items()
+                    if candidate.path == GRAPH_AUTHORING_RAW_KUBERNETES_PATH.as_posix()
+                    and candidate.expression == "RAVENROOT_GRAPH_AUTHORING_MODE")
+    return selected
+
+
+def graph_authoring_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8")
+                   for path in (*GRAPH_AUTHORING_FILE_PROOFS, *GRAPH_AUTHORING_TEST_PROOFS)}
+        server = (root / GRAPH_AUTHORING_SERVER_PATH).read_text(encoding="utf-8")
+        application = (root / GRAPH_AUTHORING_APPLICATION_PATH).read_text(encoding="utf-8")
+        ui = (root / GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
+        authorization = (root / GRAPH_AUTHORING_AUTHORIZATION_PATH).read_text(encoding="utf-8")
+        values = (root / HELM_VALUES_PATH).read_text(encoding="utf-8")
+        schema_text = (root / HELM_SCHEMA_PATH).read_text(encoding="utf-8")
+        template = (root / "deploy/helm/ravenroot/templates/deployment.yaml").read_text(encoding="utf-8")
+        raw = (root / GRAPH_AUTHORING_RAW_KUBERNETES_PATH).read_text(encoding="utf-8")
+        schema = json.loads(schema_text)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if any(_source_digest(sources[path]) != digest
+           for path, digest in {**GRAPH_AUTHORING_FILE_PROOFS, **GRAPH_AUTHORING_TEST_PROOFS}.items()):
+        return None
+    if any(java_method_digest(server if path == GRAPH_AUTHORING_SERVER_PATH else application,
+                              type_symbol, method) != digest
+           for (path, type_symbol, method), digest in GRAPH_AUTHORING_JAVA_METHOD_PROOFS.items()):
+        return None
+    ui_digests: dict[str, str] = {}
+    for method, expected in GRAPH_AUTHORING_UI_METHOD_PROOFS.items():
+        span = _javascript_function_span(ui, method)
+        if span is None:
+            return None
+        digest = hashlib.sha256(normalized(ui[slice(*span)]).encode("utf-8")).hexdigest()
+        if digest != expected:
+            return None
+        ui_digests[method] = digest
+    configuration = sources[GRAPH_AUTHORING_CONFIGURATION_PATH]
+    semantic_requirements = (
+        (configuration, "maxDocumentBytes < 1 || maxDocumentBytes > 256 * 1024 * 1024"),
+        (configuration, "maxDocumentBytes > 100 * 1024 * 1024"),
+        (configuration, "pageSize < 1 || pageSize > 200"),
+        (configuration, "requestTimeout.compareTo(Duration.ofMinutes(2)) > 0"),
+        (configuration, "retryLimit < 0 || retryLimit > 3"),
+        (configuration, "Git authoring requires explicit tenant namespace mappings"),
+        (configuration, "tenant namespaces must map to distinct draft branches"),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringHttpApi.java")],
+         "AuthorizationAction.GRAPH_RELEASE"),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringHttpApi.java")],
+         "X-Ravenroot-Expected-Publication"),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "PublishedGraphArtifactHttpApi.java")],
+         "importPublishedGraphDefinition"),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "PublishedGraphArtifactHttpApi.java")],
+         "registerPinnedLocalDeployment"),
+        (application, "published graph imports require an immutable definition store"),
+        (application, "pinned graph deployments require an immutable definition store"),
+        (authorization, "GRAPH_READ(\"ravenroot.graph.inspect\", true)"),
+        (authorization, "GRAPH_WRITE(\"ravenroot.graph.write\", true)"),
+        (authorization, "GRAPH_RELEASE(\"ravenroot.graph.release\", true)"),
+        (ui, "Edits made while the request was in flight remain dirty"),
+        (ui, "await graphAuthoringClient.importArtifact"),
+        (ui, "await graphAuthoringClient.deploy"),
+        (raw, "- name: RAVENROOT_GRAPH_AUTHORING_MODE\n              value: LOCAL"),
+        (template, "RAVENROOT_CREDENTIAL_6769742D617574686F72696E67"),
+    )
+    if any(fragment not in source for source, fragment in semantic_requirements):
+        return None
+    graph_schema = json_pointer(schema, "#/properties/graphAuthoring")
+    required_fields = {"enabled", "provider", "repositoryOwner", "repositoryName", "graphDirectory",
+                       "draftBranch", "releaseBranch", "githubApiBase", "credentialMode",
+                       "credentialSecretName", "credentialSecretKey", "githubAppId",
+                       "githubInstallationId", "tenantNamespaces", "artifactBaseUrl",
+                       "artifactCatalogPath"}
+    if not isinstance(graph_schema, dict) or graph_schema.get("additionalProperties") is not False \
+            or set(graph_schema.get("required", [])) != required_fields:
+        return None
+    cohort = graph_authoring_cohort_candidate_ids(root, discovered)
+    if cohort is None:
+        return None
+    by_environment = {environment: (setting, field, default, validation)
+                      for setting, field, environment, default, validation in GRAPH_AUTHORING_SETTINGS}
+    contracts: list[dict[str, object]] = []
+    assigned: set[str] = set()
+    for environment, (setting, field, default, validation) in by_environment.items():
+        ids = sorted(identifier for identifier in cohort
+                     if discovered[identifier].expression.strip('"\'') == environment)
+        if not ids:
+            return None
+        assigned.update(ids)
+        contracts.append({
+            "setting": setting,
+            "owner": f"{GRAPH_AUTHORING_CONFIGURATION_PATH.as_posix()}#GraphAuthoringConfiguration",
+            "field": field, "bindings": [environment], "default": default,
+            "defaultEvidence": ids, "validation": validation,
+            "scope": "One server process and its configured graph repository tenant partition.",
+            "pinning": "Resolved once at server composition; callers cannot select repository, path, endpoint, or credential.",
+            "coverage": "Typed configuration, authenticated HTTP adapter, Git provider, immutable publication catalog, deployment carriers, UI client, publisher, and executable tests.",
+            "candidateIds": ids,
+        })
+    residual = cohort - assigned
+    tests = sorted(identifier for identifier in residual if discovered[identifier].surface == "test-fixture")
+    limits = sorted(identifier for identifier in residual if discovered[identifier].path in {
+        GRAPH_AUTHORING_CONFIGURATION_PATH.as_posix(), HELM_VALUES_PATH, HELM_SCHEMA_PATH,
+        "deploy/helm/ravenroot/templates/deployment.yaml",
+        GRAPH_AUTHORING_RAW_KUBERNETES_PATH.as_posix(),
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringHttpApi.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactHttpApi.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalog.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/BoundedHttpResponseBody.java",
+    } and discovered[identifier].surface != "test-fixture")
+    protocol = sorted(residual - set(tests) - set(limits))
+    partitions = [
+        {"semanticPartition": "graph-authoring.security-limits-and-carriers",
+         "status": "retained", "classification": "security-ceiling-or-default",
+         "rationale": "Closed bounds, strict schemas, credential carriers, and local-safe defaults constrain graph authoring and publication.",
+         "candidateIds": limits},
+        {"semanticPartition": "graph-authoring.protocol-and-lifecycle",
+         "status": "retained", "classification": "protocol-or-format-invariant",
+         "rationale": "Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary.",
+         "candidateIds": protocol},
+        {"semanticPartition": "graph-authoring.executable-fixtures",
+         "status": "retained", "classification": "test-fixture",
+         "rationale": "Executable fixtures cover tenancy, races, bounded I/O, publication validation, UI behavior, and rollback.",
+         "candidateIds": tests},
+    ]
+    all_ids = [identifier for contract in contracts for identifier in contract["candidateIds"]]
+    all_ids += [identifier for partition in partitions for identifier in partition["candidateIds"]]
+    if len(all_ids) != len(set(all_ids)) or set(all_ids) != cohort:
+        return None
+    return {
+        "kind": "graph-authoring-publication-boundary-v1", "contracts": contracts,
+        "semanticPartitions": partitions, "candidateIds": sorted(all_ids),
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sorted(sources.items(), key=lambda item: item[0].as_posix())],
+        "javaMethodDigests": {f"{path.as_posix()}#{type_symbol}.{method}": digest
+                              for (path, type_symbol, method), digest in GRAPH_AUTHORING_JAVA_METHOD_PROOFS.items()},
+        "uiMethodDigests": ui_digests,
+        "routePaths": sorted({"/v1/graph-authoring", "/v1/graph-authoring/{id}",
+                              "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
+                              "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
+                              "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+                              "/v1/graph-artifacts/{graphId}/{version}/import",
+                              "/v1/graph-artifacts/{graphId}/{version}/deploy"}),
+        "helmGraphAuthoringSchemaDigest": canonical_json_digest(graph_schema),
+    }
+
+
+def graph_authoring_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    marked = {identifier for identifier, row in entries.items()
+              if row.get("graphAuthoringAuthority") is not None}
+    if not graph_authoring_source_present(root):
+        return [] if authorities in (None, {}) and not marked else [
+            "graph authoring authority exists without its source family"]
+    expected = graph_authoring_authority_from_source(root, discovered)
+    if expected is None:
+        return ["graph authoring and publication boundary is incomplete, unbounded, or unsupported"]
+    errors: list[str] = []
+    if authorities != {GRAPH_AUTHORING_AUTHORITY_ID: expected}:
+        errors.append("graph authoring requires the exact mandatory source-derived authority")
+    if marked != set(expected["candidateIds"]):
+        errors.append("graph authoring authority candidate partition is incomplete or foreign")
+    operator = {identifier: contract for contract in expected["contracts"]
+                for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in expected["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
+    for identifier in expected["candidateIds"]:
+        row = entries.get(identifier, {})
+        if row.get("graphAuthoringAuthority") != GRAPH_AUTHORING_AUTHORITY_ID:
+            errors.append(f"{identifier}: graph authoring authority marker has drifted")
+            continue
+        if identifier in operator:
+            contract = operator[identifier]
+            expected_metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The closed graph authoring configuration owns this server-side setting.",
+            }
+        else:
+            partition = retained[identifier]
+            expected_metadata = {key: partition[key]
+                                 for key in ("status", "classification", "rationale")}
+        for key, value in expected_metadata.items():
+            if row.get(key) != value:
+                errors.append(f"{identifier}: graph authoring {key} authority has drifted")
+    return errors
+
+
 def environment_reference_description_candidate_ids(
         root: Path, candidates: Iterable[Candidate]) -> set[str]:
     """Return source-derived atoms that route real production bindings into the reference page."""
@@ -16566,6 +17004,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             entry.get("persistenceAuthority"),
             entry.get("externalIoPolicyAuthority"),
             entry.get("aiOperationalAuthority"),
+            entry.get("graphAuthoringAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -16646,6 +17085,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(activity_capture_authority_errors(
         root, document.get("activityCaptureAuthorities"), entries, discovered,
     ))
+    errors.extend(graph_authoring_authority_errors(
+        root, document.get("graphAuthoringAuthorities"), entries, discovered,
+    ))
     errors.extend(ai_operational_authority_errors(
         root, document.get("aiOperationalAuthorities"), entries, discovered,
     ))
@@ -16681,6 +17123,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
             continue
         if representative.get("activityCaptureAuthority") == ACTIVITY_CAPTURE_AUTHORITY_ID:
+            continue
+        if representative.get("graphAuthoringAuthority") == GRAPH_AUTHORING_AUTHORITY_ID:
             continue
         if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
             continue

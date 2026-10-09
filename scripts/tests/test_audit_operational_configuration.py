@@ -6623,6 +6623,136 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
                 path.write_text(original, encoding="utf-8")
 
 
+class GraphAuthoringPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        paths = {
+            *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_TEST_PROOFS,
+            audit.GRAPH_AUTHORING_ROUTE_PATH, audit.GRAPH_AUTHORING_SERVER_PATH,
+            audit.GRAPH_AUTHORING_APPLICATION_PATH, audit.GRAPH_AUTHORING_UI_PATH,
+            audit.GRAPH_AUTHORING_AUTHORIZATION_PATH, audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
+            Path(audit.HELM_VALUES_PATH), Path(audit.HELM_SCHEMA_PATH),
+            Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+        }
+        for relative in paths:
+            destination = cls.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.graph_authoring_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The graph authoring and publication boundary must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "graphAuthoringAuthority": audit.GRAPH_AUTHORING_AUTHORITY_ID,
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The closed graph authoring configuration owns this server-side setting.",
+            }
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(metadata))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    graphAuthoringAuthority=audit.GRAPH_AUTHORING_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def test_exact_boundary_closes_settings_routes_artifacts_ui_and_deployment_carriers(self) -> None:
+        authority = self.authority
+        self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS), len(authority["contracts"]))
+        identifiers = [identifier for contract in authority["contracts"]
+                       for identifier in contract["candidateIds"]]
+        identifiers += [identifier for partition in authority["semanticPartitions"]
+                        for identifier in partition["candidateIds"]]
+        self.assertEqual(len(identifiers), len(set(identifiers)))
+        self.assertEqual(set(identifiers), audit.graph_authoring_cohort_candidate_ids(
+            self.root, self.discovered))
+        self.assertEqual([], audit.graph_authoring_authority_errors(
+            self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: authority},
+            self.entries, self.discovered))
+        self.assertEqual({
+            "/v1/graph-authoring", "/v1/graph-authoring/{id}",
+            "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
+            "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
+            "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+            "/v1/graph-artifacts/{graphId}/{version}/import",
+            "/v1/graph-artifacts/{graphId}/{version}/deploy",
+        }, set(authority["routePaths"]))
+
+    def test_removed_auth_store_tenant_and_limit_guards_or_drifted_carriers_fail_closed(self) -> None:
+        mutations = (
+            (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
+             "maxDocumentBytes > 100 * 1024 * 1024", "maxDocumentBytes > 101 * 1024 * 1024"),
+            (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
+             "if (tenantNamespaces.isEmpty())", "if (false)"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GraphAuthoringHttpApi.java"),
+             "AuthorizationAction.GRAPH_RELEASE", "AuthorizationAction.GRAPH_WRITE"),
+            (audit.GRAPH_AUTHORING_APPLICATION_PATH,
+             'if (graphDefinitionStore == null) {\n'
+             '            throw new UnsupportedOperationException("published graph imports require',
+             'if (false) {\n'
+             '            throw new UnsupportedOperationException("published graph imports require'),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "applyAcceptedGraphMl(target.graph, result", "void applyAcceptedGraphMl(target.graph, result"),
+            (Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+             "RAVENROOT_CREDENTIAL_6769742D617574686F72696E67",
+             "RAVENROOT_CREDENTIAL_UNSCOPED"),
+            (audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
+             "value: LOCAL", "value: GIT"),
+            (audit.GRAPH_AUTHORING_ROUTE_PATH,
+             '"/v1/graph-artifacts/{graphId}/{version}/import"',
+             '"/v1/graph-artifacts/{graphId}/{version}/load"'),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, mutation=after):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(
+                        audit.graph_authoring_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_authority_and_candidate_markers_are_mandatory(self) -> None:
+        self.assertTrue(audit.graph_authoring_authority_errors(
+            self.root, None, self.entries, self.discovered))
+        entries = copy.deepcopy(self.entries)
+        entries[self.authority["candidateIds"][0]].pop("graphAuthoringAuthority")
+        errors = audit.graph_authoring_authority_errors(
+            self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: self.authority},
+            entries, self.discovered)
+        self.assertTrue(any("partition" in error or "marker" in error for error in errors), errors)
+
+    def test_inventory_dispatches_the_mandatory_graph_authoring_authority(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads(
+                (root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "graph_authoring_authority_errors",
+                    return_value=["graph-authoring-routing-probe"]) as routed:
+                self.assertIn("graph-authoring-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+
 class ProgramGithubPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

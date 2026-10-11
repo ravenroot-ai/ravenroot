@@ -354480,7 +354480,7 @@
     {
       "id": "oc-5142a378057ec3d21b19",
       "path": "scripts/central_registry.py",
-      "line": 104,
+      "line": 105,
       "symbol": "exists",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354498,7 +354498,7 @@
     {
       "id": "oc-4f01b1172085279cde03",
       "path": "scripts/central_registry.py",
-      "line": 192,
+      "line": 193,
       "symbol": "local_signature",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354516,7 +354516,7 @@
     {
       "id": "oc-03ca2e6a9d6276664098",
       "path": "scripts/central_registry.py",
-      "line": 204,
+      "line": 205,
       "symbol": "build_bundle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354534,7 +354534,7 @@
     {
       "id": "oc-bba7487596e4415ac040",
       "path": "scripts/central_registry.py",
-      "line": 214,
+      "line": 215,
       "symbol": "build_bundle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354552,7 +354552,7 @@
     {
       "id": "oc-d4ddf755d320e24511f1",
       "path": "scripts/central_registry.py",
-      "line": 224,
+      "line": 225,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354570,7 +354570,7 @@
     {
       "id": "oc-80389a367ec25b48c67d",
       "path": "scripts/central_registry.py",
-      "line": 230,
+      "line": 231,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354588,7 +354588,7 @@
     {
       "id": "oc-3884855566668cdaf0b8",
       "path": "scripts/central_registry.py",
-      "line": 232,
+      "line": 233,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354606,7 +354606,7 @@
     {
       "id": "oc-9e2866afdf5f5d6899b6",
       "path": "scripts/central_registry.py",
-      "line": 234,
+      "line": 235,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354624,7 +354624,7 @@
     {
       "id": "oc-27039ee0879a4ec4a937",
       "path": "scripts/central_registry.py",
-      "line": 235,
+      "line": 236,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354642,7 +354642,7 @@
     {
       "id": "oc-8c5c2a008640b3171ae8",
       "path": "scripts/central_registry.py",
-      "line": 241,
+      "line": 242,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354660,7 +354660,7 @@
     {
       "id": "oc-f2d8bfb5806aa6c1af37",
       "path": "scripts/central_registry.py",
-      "line": 242,
+      "line": 243,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354678,7 +354678,7 @@
     {
       "id": "oc-dc2f44ae8187b923455b",
       "path": "scripts/central_registry.py",
-      "line": 244,
+      "line": 245,
       "symbol": "verify_signatures",
       "kind": "script-default",
       "role": "payload_path",
@@ -354696,7 +354696,7 @@
     {
       "id": "oc-c3d6d0db155bfcbde73c",
       "path": "scripts/central_registry.py",
-      "line": 245,
+      "line": 246,
       "symbol": "verify_signatures",
       "kind": "script-default",
       "role": "signature_path",
@@ -354714,7 +354714,7 @@
     {
       "id": "oc-496172f3bd8689949a99",
       "path": "scripts/central_registry.py",
-      "line": 251,
+      "line": 252,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354732,7 +354732,7 @@
     {
       "id": "oc-a74d5968811c818658dc",
       "path": "scripts/central_registry.py",
-      "line": 253,
+      "line": 254,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354750,7 +354750,7 @@
     {
       "id": "oc-d48fd60e6a2d1c4ad5b5",
       "path": "scripts/central_registry.py",
-      "line": 265,
+      "line": 266,
       "symbol": "verify_signatures",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354768,7 +354768,7 @@
     {
       "id": "oc-abefe9fa83db822e20ca",
       "path": "scripts/central_registry.py",
-      "line": 281,
+      "line": 282,
       "symbol": "validate_bundle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354786,7 +354786,7 @@
     {
       "id": "oc-baab6ee105008bd844de",
       "path": "scripts/central_registry.py",
-      "line": 333,
+      "line": 334,
       "symbol": "compare_local",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354804,7 +354804,7 @@
     {
       "id": "oc-f3073e078aade09238e3",
       "path": "scripts/central_registry.py",
-      "line": 343,
+      "line": 344,
       "symbol": "compare_local",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354822,7 +354822,7 @@
     {
       "id": "oc-eb2bc958fd77834e66dd",
       "path": "scripts/central_registry.py",
-      "line": 351,
+      "line": 352,
       "symbol": "compare_local",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354840,7 +354840,7 @@
     {
       "id": "oc-2cd10fa5ba0c41b701c7",
       "path": "scripts/central_registry.py",
-      "line": 373,
+      "line": 374,
       "symbol": "portal_request",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354858,7 +354858,7 @@
     {
       "id": "oc-d20ebd97ec7b49b70345",
       "path": "scripts/central_registry.py",
-      "line": 373,
+      "line": 374,
       "symbol": "portal_request",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354876,7 +354876,7 @@
     {
       "id": "oc-05ca9f72b35071fbf2a4",
       "path": "scripts/central_registry.py",
-      "line": 374,
+      "line": 375,
       "symbol": "portal_request",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354894,7 +354894,7 @@
     {
       "id": "oc-75fe597a703c5928432a",
       "path": "scripts/central_registry.py",
-      "line": 380,
+      "line": 381,
       "symbol": "upload_bundle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354912,7 +354912,7 @@
     {
       "id": "oc-e03a8a6c00d42e67c17e",
       "path": "scripts/central_registry.py",
-      "line": 380,
+      "line": 381,
       "symbol": "upload_bundle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354930,7 +354930,7 @@
     {
       "id": "oc-e2755c0c7b5ed1627b99",
       "path": "scripts/central_registry.py",
-      "line": 401,
+      "line": 402,
       "symbol": "upload_bundle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354948,7 +354948,7 @@
     {
       "id": "oc-a539c0d86b0f18a30017",
       "path": "scripts/central_registry.py",
-      "line": 408,
+      "line": 409,
       "symbol": "wait_for_deployment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -354966,7 +354966,7 @@
     {
       "id": "oc-518d522131ea44b5f473",
       "path": "scripts/central_registry.py",
-      "line": 443,
+      "line": 444,
       "symbol": "write_output",
       "kind": "script-default",
       "role": "output_path",
@@ -354984,7 +354984,7 @@
     {
       "id": "oc-3c28ef6ab2b3be9cea88",
       "path": "scripts/central_registry.py",
-      "line": 445,
+      "line": 446,
       "symbol": "write_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355002,7 +355002,7 @@
     {
       "id": "oc-42d15ec729b61818000b",
       "path": "scripts/central_registry.py",
-      "line": 445,
+      "line": 446,
       "symbol": "write_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355020,7 +355020,7 @@
     {
       "id": "oc-6822719ed5b8bfbdfedc",
       "path": "scripts/central_registry.py",
-      "line": 458,
+      "line": 459,
       "symbol": "parser",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355038,7 +355038,7 @@
     {
       "id": "oc-dee49dba5b42e1f4908c",
       "path": "scripts/central_registry.py",
-      "line": 461,
+      "line": 462,
       "symbol": "parser",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355056,7 +355056,7 @@
     {
       "id": "oc-49d0b7d83c63ecf7ea75",
       "path": "scripts/central_registry.py",
-      "line": 464,
+      "line": 465,
       "symbol": "parser",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355074,7 +355074,7 @@
     {
       "id": "oc-64952529bb1752cab68e",
       "path": "scripts/central_registry.py",
-      "line": 482,
+      "line": 483,
       "symbol": "main",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355092,7 +355092,7 @@
     {
       "id": "oc-4e9821c7634dcda66a61",
       "path": "scripts/central_registry.py",
-      "line": 485,
+      "line": 486,
       "symbol": "main",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -355110,7 +355110,7 @@
     {
       "id": "oc-c261533dd10d88edd05a",
       "path": "scripts/central_registry.py",
-      "line": 488,
+      "line": 489,
       "symbol": "main",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -447310,7 +447310,7 @@
     {
       "id": "oc-75ed6c2d5c6e80150f96",
       "path": "scripts/tests/test_extension_pack.py",
-      "line": 71,
+      "line": 72,
       "symbol": "test_sbom_requires_the_exact_pack_relationships",
       "kind": "script-default",
       "role": "path",
@@ -447325,7 +447325,7 @@
     {
       "id": "oc-ffe9709b0756545d202f",
       "path": "scripts/tests/test_extension_pack.py",
-      "line": 72,
+      "line": 73,
       "symbol": "test_sbom_requires_the_exact_pack_relationships",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -447340,7 +447340,7 @@
     {
       "id": "oc-5cd1e84ebe9fa29bd241",
       "path": "scripts/tests/test_extension_pack.py",
-      "line": 75,
+      "line": 76,
       "symbol": "test_sbom_requires_the_exact_pack_relationships",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -447355,7 +447355,7 @@
     {
       "id": "oc-7ebf24f16b9ee5233793",
       "path": "scripts/tests/test_extension_pack.py",
-      "line": 82,
+      "line": 83,
       "symbol": "test_clean_consumer_tree_rejects_out_of_scope_ravenroot_artifacts",
       "kind": "script-default",
       "role": "path",
@@ -447370,7 +447370,7 @@
     {
       "id": "oc-63be928a3b0756b5f5a2",
       "path": "scripts/tests/test_extension_pack.py",
-      "line": 95,
+      "line": 96,
       "symbol": "test_clean_consumer_tree_rejects_out_of_scope_ravenroot_artifacts",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477585,7 +477585,7 @@
     {
       "id": "oc-f1ae67f15c6c9763e3fb",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 329,
+      "line": 330,
       "symbol": "test_release_configuration_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477601,7 +477601,7 @@
     {
       "id": "oc-ff5f97a79aa94da16197",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 341,
+      "line": 342,
       "symbol": "prior_promotion",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477621,7 +477621,7 @@
     {
       "id": "oc-488c9d6ea5efe7f2b49f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 375,
+      "line": 376,
       "symbol": "recovery",
       "kind": "script-default",
       "role": "path",
@@ -477637,7 +477637,7 @@
     {
       "id": "oc-3134b505c38f4a4aee1e",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 376,
+      "line": 377,
       "symbol": "recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477653,7 +477653,7 @@
     {
       "id": "oc-ad749bcd7411b877b745",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 392,
+      "line": 393,
       "symbol": "fake_git",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477669,7 +477669,7 @@
     {
       "id": "oc-f9d9cb73bd0b7efaf980",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 392,
+      "line": 393,
       "symbol": "fake_git",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477685,7 +477685,7 @@
     {
       "id": "oc-352ac0c4374bd12b552e",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 393,
+      "line": 394,
       "symbol": "fake_git",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477701,7 +477701,7 @@
     {
       "id": "oc-c7f8c5e98164da77ca7f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 394,
+      "line": 395,
       "symbol": "fake_git",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477717,7 +477717,7 @@
     {
       "id": "oc-6fdf6a8922b240e85295",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 395,
+      "line": 396,
       "symbol": "fake_git",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477733,7 +477733,7 @@
     {
       "id": "oc-d310d2331b07551ef295",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 406,
+      "line": 407,
       "symbol": "test_accepts_the_exact_unpublished_minor_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477749,7 +477749,7 @@
     {
       "id": "oc-933e25c84d719a7e77b2",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 409,
+      "line": 410,
       "symbol": "test_refuses_missing_prior_promotion_evidence",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477765,7 +477765,7 @@
     {
       "id": "oc-829b15db92c354520207",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 415,
+      "line": 416,
       "symbol": "test_refuses_an_existing_or_different_target_tag",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477781,7 +477781,7 @@
     {
       "id": "oc-f16ccc8caaa24542deba",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 418,
+      "line": 419,
       "symbol": "test_refuses_an_existing_or_different_target_tag",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477797,7 +477797,7 @@
     {
       "id": "oc-a34659dc3b5d0fd92465",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 421,
+      "line": 422,
       "symbol": "test_refuses_an_existing_or_different_target_tag",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477813,7 +477813,7 @@
     {
       "id": "oc-7a497a537ab4dee8d6c4",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 434,
+      "line": 435,
       "symbol": "test_refuses_wrong_expected_version_and_prior_promotion_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477829,7 +477829,7 @@
     {
       "id": "oc-3d5225b3b4e7dab4a35a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 436,
+      "line": 437,
       "symbol": "test_refuses_wrong_expected_version_and_prior_promotion_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477845,7 +477845,7 @@
     {
       "id": "oc-1d3801b92a133afe0c44",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 449,
+      "line": 450,
       "symbol": "test_refuses_wrong_target_versions_and_a_non_merge_base",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477861,7 +477861,7 @@
     {
       "id": "oc-a74475b969abe320a5f2",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 452,
+      "line": 453,
       "symbol": "test_refuses_wrong_target_versions_and_a_non_merge_base",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477877,7 +477877,7 @@
     {
       "id": "oc-3f92dce14ed072dedc7e",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 466,
+      "line": 467,
       "symbol": "test_accepts_a_second_recovery_after_an_intervening_main_merge",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477893,7 +477893,7 @@
     {
       "id": "oc-4d611e024649a5ef8500",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 496,
+      "line": 497,
       "symbol": "test_refuses_missing_ambiguous_or_off_first_parent_anchors",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477909,7 +477909,7 @@
     {
       "id": "oc-eea36cb5fcb7458fd49f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 508,
+      "line": 509,
       "symbol": "test_refuses_foreign_ambiguous_or_conflicting_historical_proof",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477925,7 +477925,7 @@
     {
       "id": "oc-1691c00495f502b8f148",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 509,
+      "line": 510,
       "symbol": "test_refuses_foreign_ambiguous_or_conflicting_historical_proof",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477941,7 +477941,7 @@
     {
       "id": "oc-459ecce77f786f1c9ba4",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 509,
+      "line": 510,
       "symbol": "test_refuses_foreign_ambiguous_or_conflicting_historical_proof",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477957,7 +477957,7 @@
     {
       "id": "oc-bd8988cfff6db0ec775c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 514,
+      "line": 515,
       "symbol": "test_refuses_foreign_ambiguous_or_conflicting_historical_proof",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477973,7 +477973,7 @@
     {
       "id": "oc-6a179e8f05cd4cd92094",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 520,
+      "line": 521,
       "symbol": "test_refuses_foreign_ambiguous_or_conflicting_historical_proof",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -477989,7 +477989,7 @@
     {
       "id": "oc-89b8896064b4ab663bad",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 525,
+      "line": 526,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478005,7 +478005,7 @@
     {
       "id": "oc-23558d19dd0851bcd209",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 525,
+      "line": 526,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478021,7 +478021,7 @@
     {
       "id": "oc-7c7bc0013a503b251322",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 530,
+      "line": 531,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478037,7 +478037,7 @@
     {
       "id": "oc-5073570da0a2899fb5f5",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 533,
+      "line": 534,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478053,7 +478053,7 @@
     {
       "id": "oc-5906cb2c92ddd6a577f8",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 534,
+      "line": 535,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478069,7 +478069,7 @@
     {
       "id": "oc-7406cd9c69cfc0166a1b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 537,
+      "line": 538,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478085,7 +478085,7 @@
     {
       "id": "oc-6f4022951c0669a61f8b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 537,
+      "line": 538,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478101,7 +478101,7 @@
     {
       "id": "oc-e7facccd436e01224f35",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 538,
+      "line": 539,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478117,7 +478117,7 @@
     {
       "id": "oc-7cbabb9caaabc450b711",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 542,
+      "line": 543,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478133,7 +478133,7 @@
     {
       "id": "oc-f531e32fa9adc31d0523",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 542,
+      "line": 543,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478149,7 +478149,7 @@
     {
       "id": "oc-3ab9b1e4ca7b6916340b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 542,
+      "line": 543,
       "symbol": "test_patch_minor_and_major_labels_follow_the_normal_transition_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478165,7 +478165,7 @@
     {
       "id": "oc-1c9d7fefb7fe24e22e83",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 549,
+      "line": 550,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478181,7 +478181,7 @@
     {
       "id": "oc-40a56d27f3c5afdfa148",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 549,
+      "line": 550,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478197,7 +478197,7 @@
     {
       "id": "oc-d0d8e3da9ce68fcef95d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 554,
+      "line": 555,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478213,7 +478213,7 @@
     {
       "id": "oc-4b6ffba0d3f6c56102d0",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 554,
+      "line": 555,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478229,7 +478229,7 @@
     {
       "id": "oc-570ca69074f79efeee1c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 555,
+      "line": 556,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478245,7 +478245,7 @@
     {
       "id": "oc-839bffe05508d4269ab6",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 556,
+      "line": 557,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478261,7 +478261,7 @@
     {
       "id": "oc-f5c410c545643d83db4c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 557,
+      "line": 558,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478277,7 +478277,7 @@
     {
       "id": "oc-a313263ef750599902a1",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 558,
+      "line": 559,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478293,7 +478293,7 @@
     {
       "id": "oc-f5a7e137261527eae2d8",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 561,
+      "line": 562,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478309,7 +478309,7 @@
     {
       "id": "oc-22eb0acf4bfa2df2db6f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 562,
+      "line": 563,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478325,7 +478325,7 @@
     {
       "id": "oc-80d5cd74b16c334793db",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 564,
+      "line": 565,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478341,7 +478341,7 @@
     {
       "id": "oc-a050b6bebbc142b87fcd",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 571,
+      "line": 572,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478357,7 +478357,7 @@
     {
       "id": "oc-ddf45d6cf22e0bbbf88b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 571,
+      "line": 572,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478373,7 +478373,7 @@
     {
       "id": "oc-09599062ae5a503067cc",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 571,
+      "line": 572,
       "symbol": "test_main_authorization_preserves_patch_minor_and_major_routing",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478389,7 +478389,7 @@
     {
       "id": "oc-e87bcb7eb3a6925da442",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 585,
+      "line": 586,
       "symbol": "git",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478405,7 +478405,7 @@
     {
       "id": "oc-85e8df57c4a06355877c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 591,
+      "line": 592,
       "symbol": "contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478421,7 +478421,7 @@
     {
       "id": "oc-2a84aacb87cf33231fda",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 597,
+      "line": 598,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478437,7 +478437,7 @@
     {
       "id": "oc-a2ffec102fdd26429fc5",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 598,
+      "line": 599,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478453,7 +478453,7 @@
     {
       "id": "oc-009b6145185e5f824424",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 598,
+      "line": 599,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478469,7 +478469,7 @@
     {
       "id": "oc-b0d41daea1bdf0c1e749",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 604,
+      "line": 605,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478485,7 +478485,7 @@
     {
       "id": "oc-a500474746bd3d8bfb3b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 604,
+      "line": 605,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478501,7 +478501,7 @@
     {
       "id": "oc-896a06909df8ddc433f2",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 606,
+      "line": 607,
       "symbol": "write_product",
       "kind": "script-default",
       "role": "package",
@@ -478517,7 +478517,7 @@
     {
       "id": "oc-7e46e5287acb7dfacc81",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 606,
+      "line": 607,
       "symbol": "write_product",
       "kind": "script-default",
       "role": "package",
@@ -478533,7 +478533,7 @@
     {
       "id": "oc-9b241704f3d3775a111a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 606,
+      "line": 607,
       "symbol": "write_product",
       "kind": "script-default",
       "role": "package",
@@ -478549,7 +478549,7 @@
     {
       "id": "oc-0aa903bfd4a8c4da2597",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 606,
+      "line": 607,
       "symbol": "write_product",
       "kind": "script-default",
       "role": "package",
@@ -478565,7 +478565,7 @@
     {
       "id": "oc-c2b09afb5355c47ed1c5",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 607,
+      "line": 608,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478581,7 +478581,7 @@
     {
       "id": "oc-8b41b0bfce5b8dbd1054",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 607,
+      "line": 608,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478597,7 +478597,7 @@
     {
       "id": "oc-f6a0f9694942088d006e",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 608,
+      "line": 609,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478613,7 +478613,7 @@
     {
       "id": "oc-a6a1c0c7b16cec775963",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 608,
+      "line": 609,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478629,7 +478629,7 @@
     {
       "id": "oc-95e227e41f5d1203ee96",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 609,
+      "line": 610,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478645,7 +478645,7 @@
     {
       "id": "oc-e99a998ef2260452a2aa",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 609,
+      "line": 610,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478661,7 +478661,7 @@
     {
       "id": "oc-f2b39eb3b7f18bcb4d21",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 609,
+      "line": 610,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478677,7 +478677,7 @@
     {
       "id": "oc-57a9a302617b450df868",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 614,
+      "line": 615,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478693,7 +478693,7 @@
     {
       "id": "oc-37912920ee3d65ccf8c8",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 614,
+      "line": 615,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478709,7 +478709,7 @@
     {
       "id": "oc-7600f7f0574e8562d3fc",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 614,
+      "line": 615,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478725,7 +478725,7 @@
     {
       "id": "oc-b6a381fe94cc15ed47be",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 616,
+      "line": 617,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478741,7 +478741,7 @@
     {
       "id": "oc-c810e6d7a4b5b45598a3",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 616,
+      "line": 617,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478757,7 +478757,7 @@
     {
       "id": "oc-ce1e721ef8e00503042e",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 618,
+      "line": 619,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478773,7 +478773,7 @@
     {
       "id": "oc-ef4c8832726085f57285",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 618,
+      "line": 619,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478789,7 +478789,7 @@
     {
       "id": "oc-1024dac1f6f78257e92d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 618,
+      "line": 619,
       "symbol": "write_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478805,7 +478805,7 @@
     {
       "id": "oc-0270aa0eeffd540fa735",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 622,
+      "line": 623,
       "symbol": "commit_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478821,7 +478821,7 @@
     {
       "id": "oc-103953e81013d38c574d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 622,
+      "line": 623,
       "symbol": "commit_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478837,7 +478837,7 @@
     {
       "id": "oc-90d185a94d12e2f40c26",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 623,
+      "line": 624,
       "symbol": "commit_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478853,7 +478853,7 @@
     {
       "id": "oc-878116f9dbd9ecbdba86",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 623,
+      "line": 624,
       "symbol": "commit_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478869,7 +478869,7 @@
     {
       "id": "oc-67b238b9df5d0ee81956",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 624,
+      "line": 625,
       "symbol": "commit_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478885,7 +478885,7 @@
     {
       "id": "oc-7a5e96d6d24bb5e8949f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 624,
+      "line": 625,
       "symbol": "commit_product",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478901,7 +478901,7 @@
     {
       "id": "oc-cec8aa29a25ec77c9d6b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 627,
+      "line": 628,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478917,7 +478917,7 @@
     {
       "id": "oc-1e47d815908923852a76",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 629,
+      "line": 630,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478933,7 +478933,7 @@
     {
       "id": "oc-2867f86b3a7a2c438805",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 636,
+      "line": 637,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478949,7 +478949,7 @@
     {
       "id": "oc-1e923f780aedc0f4cdad",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 636,
+      "line": 637,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478965,7 +478965,7 @@
     {
       "id": "oc-c7e93c0b3999d0d9ff4f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 636,
+      "line": 637,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478981,7 +478981,7 @@
     {
       "id": "oc-323c57f87e2147be4b5a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 640,
+      "line": 641,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -478997,7 +478997,7 @@
     {
       "id": "oc-5eaf079f06c78913c2fe",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 643,
+      "line": 644,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479013,7 +479013,7 @@
     {
       "id": "oc-458fd2ce15b14eac763d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 669,
+      "line": 670,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479029,7 +479029,7 @@
     {
       "id": "oc-1def00e98502347e05f9",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 669,
+      "line": 670,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479045,7 +479045,7 @@
     {
       "id": "oc-90818906ad20408b192f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 669,
+      "line": 670,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479061,7 +479061,7 @@
     {
       "id": "oc-ed7eed5d484afdae38e9",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 676,
+      "line": 677,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479077,7 +479077,7 @@
     {
       "id": "oc-4f69f0028cb0d53c959d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 676,
+      "line": 677,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479093,7 +479093,7 @@
     {
       "id": "oc-fdf4fdaf4111d3fa787b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 676,
+      "line": 677,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479109,7 +479109,7 @@
     {
       "id": "oc-e445d10840715f3ca220",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 678,
+      "line": 679,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "script-default",
       "role": "prior_path",
@@ -479125,7 +479125,7 @@
     {
       "id": "oc-493903914ea35fe22cd8",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 679,
+      "line": 680,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "script-default",
       "role": "current_path",
@@ -479141,7 +479141,7 @@
     {
       "id": "oc-ad5cac90c0efde4f8466",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 680,
+      "line": 681,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479157,7 +479157,7 @@
     {
       "id": "oc-5e2ff42432c842e17caa",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 681,
+      "line": 682,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479173,7 +479173,7 @@
     {
       "id": "oc-301ed03e26522be2ca2a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 695,
+      "line": 696,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479189,7 +479189,7 @@
     {
       "id": "oc-d0f1f4f84159ecb956a3",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 695,
+      "line": 696,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479205,7 +479205,7 @@
     {
       "id": "oc-3e46840c38f2ba55a9eb",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 696,
+      "line": 697,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479221,7 +479221,7 @@
     {
       "id": "oc-5a67df92bb1e2c844ef7",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 696,
+      "line": 697,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479237,7 +479237,7 @@
     {
       "id": "oc-50a78fadc7c43459e6d1",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 696,
+      "line": 697,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479253,7 +479253,7 @@
     {
       "id": "oc-7901108f2c459824f3f4",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 696,
+      "line": 697,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479269,7 +479269,7 @@
     {
       "id": "oc-5d13d3cb030ee4cc7644",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 700,
+      "line": 701,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479285,7 +479285,7 @@
     {
       "id": "oc-2e5be537aedab1ef89c1",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 703,
+      "line": 704,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479301,7 +479301,7 @@
     {
       "id": "oc-de046b68824f715476d0",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 703,
+      "line": 704,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479317,7 +479317,7 @@
     {
       "id": "oc-479d8955720b0ab50a17",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 703,
+      "line": 704,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479333,7 +479333,7 @@
     {
       "id": "oc-9550b651177b60eb7014",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 706,
+      "line": 707,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479349,7 +479349,7 @@
     {
       "id": "oc-448dcbb6e1055004899e",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 707,
+      "line": 708,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479365,7 +479365,7 @@
     {
       "id": "oc-1288bfca4d50a342e628",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 711,
+      "line": 712,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479381,7 +479381,7 @@
     {
       "id": "oc-a4df8fcc7538031133c2",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 711,
+      "line": 712,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479397,7 +479397,7 @@
     {
       "id": "oc-a9250f096854ba34183c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 711,
+      "line": 712,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479413,7 +479413,7 @@
     {
       "id": "oc-5a1a36cd1131d1a930ab",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 714,
+      "line": 715,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479429,7 +479429,7 @@
     {
       "id": "oc-9ec4ef8a9b50c198a266",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 714,
+      "line": 715,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479445,7 +479445,7 @@
     {
       "id": "oc-df237280c7977cb060c5",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 714,
+      "line": 715,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479461,7 +479461,7 @@
     {
       "id": "oc-419c390a2e4cbedbec4b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 717,
+      "line": 718,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479477,7 +479477,7 @@
     {
       "id": "oc-bf3a5e54ab2afdd36910",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 717,
+      "line": 718,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479493,7 +479493,7 @@
     {
       "id": "oc-a4b1edea15399eea71fe",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 724,
+      "line": 725,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479509,7 +479509,7 @@
     {
       "id": "oc-1bf913365ae807e36295",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 724,
+      "line": 725,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479525,7 +479525,7 @@
     {
       "id": "oc-702eeed37772d854fe83",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 730,
+      "line": 731,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479541,7 +479541,7 @@
     {
       "id": "oc-3322d5945cbbf8c6e334",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 741,
+      "line": 742,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479557,7 +479557,7 @@
     {
       "id": "oc-fb6cf5f824b9d5ec37ec",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 747,
+      "line": 748,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479573,7 +479573,7 @@
     {
       "id": "oc-8333256731f3d67797f4",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 747,
+      "line": 748,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479589,7 +479589,7 @@
     {
       "id": "oc-3cc73016dee63a64a235",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 747,
+      "line": 748,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479605,7 +479605,7 @@
     {
       "id": "oc-246404018a134e552184",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 753,
+      "line": 754,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479621,7 +479621,7 @@
     {
       "id": "oc-bfb395dd84077ed67779",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 759,
+      "line": 760,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479637,7 +479637,7 @@
     {
       "id": "oc-a7efcc80763ddcb5bfe0",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 759,
+      "line": 760,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479653,7 +479653,7 @@
     {
       "id": "oc-be84fcf1612f7008ed78",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 762,
+      "line": 763,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479669,7 +479669,7 @@
     {
       "id": "oc-411ef38213a5371fcfe9",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 762,
+      "line": 763,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479685,7 +479685,7 @@
     {
       "id": "oc-a8bbabfcac2fc8b55297",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 775,
+      "line": 776,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479701,7 +479701,7 @@
     {
       "id": "oc-92c6ed72d65a6b9807ca",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 775,
+      "line": 776,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479717,7 +479717,7 @@
     {
       "id": "oc-a6da9153d8b6c429f056",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 781,
+      "line": 782,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479733,7 +479733,7 @@
     {
       "id": "oc-61ce58ef190bb7014d1d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 781,
+      "line": 782,
       "symbol": "test_recovery_commands_fail_closed_against_a_real_isolated_git_fixture",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479749,7 +479749,7 @@
     {
       "id": "oc-660fa7b22bb3625c23fa",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 789,
+      "line": 790,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479765,7 +479765,7 @@
     {
       "id": "oc-9970866d5141851575a7",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 790,
+      "line": 791,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479781,7 +479781,7 @@
     {
       "id": "oc-3a690128e7d68d9e335a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 790,
+      "line": 791,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479797,7 +479797,7 @@
     {
       "id": "oc-369796bf15d084d9bf1d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 790,
+      "line": 791,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479813,7 +479813,7 @@
     {
       "id": "oc-beb2afe3e2812b8bfae8",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 791,
+      "line": 792,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479829,7 +479829,7 @@
     {
       "id": "oc-9ee02c5044380cd5052f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 791,
+      "line": 792,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479845,7 +479845,7 @@
     {
       "id": "oc-8c8033fb73ddf23bc1e1",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 791,
+      "line": 792,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479861,7 +479861,7 @@
     {
       "id": "oc-6befbce59b8150613b18",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 792,
+      "line": 793,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479877,7 +479877,7 @@
     {
       "id": "oc-8708f76d33a747bf54b0",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 792,
+      "line": 793,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479893,7 +479893,7 @@
     {
       "id": "oc-8c6795c9dedeb4fcf24b",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 793,
+      "line": 794,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479909,7 +479909,7 @@
     {
       "id": "oc-305df4f2acacf4d0ffba",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 793,
+      "line": 794,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479925,7 +479925,7 @@
     {
       "id": "oc-56e7f345b75ec1fa0765",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 794,
+      "line": 795,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479941,7 +479941,7 @@
     {
       "id": "oc-8f74833a4b62f0ffd147",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 795,
+      "line": 796,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479957,7 +479957,7 @@
     {
       "id": "oc-20eb7b54021738853efe",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 795,
+      "line": 796,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479973,7 +479973,7 @@
     {
       "id": "oc-32cdccc6a9a662238c8d",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 796,
+      "line": 797,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -479989,7 +479989,7 @@
     {
       "id": "oc-deada7de11e4849142ba",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 797,
+      "line": 798,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480005,7 +480005,7 @@
     {
       "id": "oc-29abdc108394e0383d11",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 798,
+      "line": 799,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480021,7 +480021,7 @@
     {
       "id": "oc-2f935be00742f1ad0074",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 798,
+      "line": 799,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480037,7 +480037,7 @@
     {
       "id": "oc-a57297cb00002827bc27",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 798,
+      "line": 799,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480053,7 +480053,7 @@
     {
       "id": "oc-d2b142c92a3340f32709",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 800,
+      "line": 801,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480069,7 +480069,7 @@
     {
       "id": "oc-34dc8537eafb023b4d29",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 800,
+      "line": 801,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480085,7 +480085,7 @@
     {
       "id": "oc-815506babea32a371236",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 800,
+      "line": 801,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480101,7 +480101,7 @@
     {
       "id": "oc-ddf065142e4ad20d4ec2",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 800,
+      "line": 801,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480117,7 +480117,7 @@
     {
       "id": "oc-4eb5ce4fadbbcd251d19",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 800,
+      "line": 801,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480133,7 +480133,7 @@
     {
       "id": "oc-18a400578bb5e538c6a8",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 800,
+      "line": 801,
       "symbol": "test_main_authorization_passes_prior_evidence_to_recovery",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480149,7 +480149,7 @@
     {
       "id": "oc-871b5923aedf5a7ed25a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 805,
+      "line": 806,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480165,7 +480165,7 @@
     {
       "id": "oc-b879737cf660c721795f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 806,
+      "line": 807,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480181,7 +480181,7 @@
     {
       "id": "oc-4ee5fc0ac5154a1a2dbd",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 806,
+      "line": 807,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480197,7 +480197,7 @@
     {
       "id": "oc-82ab8db118c4daf2c0a4",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 806,
+      "line": 807,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480213,7 +480213,7 @@
     {
       "id": "oc-4e66bfd931c83e7278dd",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 807,
+      "line": 808,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480229,7 +480229,7 @@
     {
       "id": "oc-fa7cb9f6ad1d9ffecf4a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 808,
+      "line": 809,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480245,7 +480245,7 @@
     {
       "id": "oc-f4832542d2c15641219a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 808,
+      "line": 809,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480261,7 +480261,7 @@
     {
       "id": "oc-d217585148da57559c81",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 808,
+      "line": 809,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480277,7 +480277,7 @@
     {
       "id": "oc-855ea5be0b48a0fe323c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 808,
+      "line": 809,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480293,7 +480293,7 @@
     {
       "id": "oc-a5c7b3483f5ad92c541a",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 808,
+      "line": 809,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480309,7 +480309,7 @@
     {
       "id": "oc-2b8b505296712c407f5f",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 808,
+      "line": 809,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480325,7 +480325,7 @@
     {
       "id": "oc-185c474496e1b4877917",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 810,
+      "line": 811,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -480341,7 +480341,7 @@
     {
       "id": "oc-0863ae51b077eff61d3c",
       "path": "scripts/tests/test_release_contract.py",
-      "line": 810,
+      "line": 811,
       "symbol": "test_tag_authorization_allows_only_the_tagged_recovery_head",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -835695,6 +835695,19 @@
           }
         }
       ],
+      "semanticReviews": []
+    },
+    {
+      "id": "issue-552-attempt4-publication-boundary-reconciliation-v1",
+      "issue": "#552",
+      "sourceRevision": "19dd3cbba4f081f7d1d7c1d97419b8c3a4454706",
+      "targetRevision": "fffd56f5284bee2afd31bff1bd8ccd04fd951072",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "a454684a8d406ac6fb6a3203b289261ed19a2365385c0509327710a9acabeece",
+      "targetCandidateDigest": "504cd12ee3004d8e8af7b6b40049f5d07b86de88b07d6ffa8e6916f37bfde955",
+      "mappings": [],
+      "retirements": [],
+      "additions": [],
       "semanticReviews": []
     }
   ],

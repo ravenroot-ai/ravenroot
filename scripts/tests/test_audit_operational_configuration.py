@@ -8355,6 +8355,13 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 encoding="utf-8",
             )
             unrelated.write_text("accepted after preparation\n", encoding="utf-8")
+            later_pom = root / "ravenroot/later-module/pom.xml"
+            later_pom.parent.mkdir()
+            later_pom.write_text(
+                "<project><parent><version>0.6.0-alpha.1</version></parent>"
+                "<description>accepted after preparation</description></project>\n",
+                encoding="utf-8",
+            )
             commit("amend prepared release evidence")
             reverse_release_preparation_delta(root, preparation, "0.6.0-alpha.1")
 
@@ -8365,6 +8372,11 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
             self.assertEqual("release-notes:\n  metadata: original\n",
                              navigation.read_text(encoding="utf-8"))
             self.assertEqual("accepted after preparation\n", unrelated.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "<project><parent><version>0.5.1-alpha.1</version></parent>"
+                "<description>accepted after preparation</description></project>\n",
+                later_pom.read_text(encoding="utf-8"),
+            )
 
             unexpected = root / "unexpected-runtime-policy.txt"
             unexpected.write_text("ordinary\n", encoding="utf-8")
@@ -8600,6 +8612,42 @@ def reverse_release_preparation_delta(
 
     if not any(path == notes for _, path in changes):
         raise AssertionError("release preparation did not add its release notes")
+
+    def revision_product_version(revision: str) -> str:
+        source = subprocess.run(
+            ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        project = re.sub(r"(?s)<parent>.*?</parent>", "", source)
+        match = re.search(r"<version>([^<]+)</version>", project)
+        if match is None:
+            raise AssertionError(f"{revision}: release source has no product version")
+        return match.group(1)
+
+    prepared_version = revision_product_version(preparation_revision)
+    source_version = revision_product_version(parent)
+    if prepared_version != target_version or prepared_version == source_version:
+        raise AssertionError("release preparation versions do not match the requested inverse")
+
+    # A module may be added after the historical preparation while the branch still carries the
+    # prepared product version. It is absent from the preparation diff, so reconstruct only its
+    # exact Ravenroot version coordinates and retain every other later source byte.
+    current_pom_paths = set(subprocess.run(
+        ["git", "ls-files", "*pom.xml"], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout.splitlines())
+    later_pom_updates: dict[str, str] = {}
+    for path in sorted(current_pom_paths - pom_paths):
+        source = (root / path).read_text(encoding="utf-8")
+        updated = source.replace(
+            f"<version>{prepared_version}</version>",
+            f"<version>{source_version}</version>",
+        ).replace(
+            f"<ravenroot.version>{prepared_version}</ravenroot.version>",
+            f"<ravenroot.version>{source_version}</ravenroot.version>",
+        )
+        if updated != source:
+            later_pom_updates[path] = updated
     if subprocess.run(
             ["git", "status", "--porcelain"], cwd=root, check=True,
             capture_output=True, text=True,
@@ -8614,6 +8662,13 @@ def reverse_release_preparation_delta(
         input=patch, check=True, capture_output=True,
     )
     subprocess.run(["git", "rm", "--", notes], cwd=root, check=True, capture_output=True)
+    for path, contents in later_pom_updates.items():
+        (root / path).write_text(contents, encoding="utf-8")
+    if later_pom_updates:
+        subprocess.run(
+            ["git", "add", "--", *later_pom_updates], cwd=root,
+            check=True, capture_output=True,
+        )
 
 
 if __name__ == "__main__":

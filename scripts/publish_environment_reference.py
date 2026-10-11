@@ -214,6 +214,12 @@ ROW_BOUNDARIES = {
         "not selected, while unset or malformed configuration refuses server startup when it is selected "
         "because startup prepares its ingress authority; restart or recreate to change it"
     ),
+    "RAVENROOT_SYSTEM_ONE_PROFILE_": (
+        "dynamic profile-name family; suffix is upper-case hexadecimal UTF-8 for an ASCII profile "
+        "name; each value is canonical padded Base64 of strict JSON owning endpoint, model, credential "
+        "binding, deadlines, limits, and capabilities; unset, blank, or malformed profiles fail the "
+        "selecting node as `PROFILE_UNKNOWN` before network I/O; restart or recreate to change it"
+    ),
     "RAVENROOT_ENABLED_PLUGINS": "unset enables no installed manifest bundles",
     "RAVENROOT_NODE_PACKAGES": "unset registers no optional classpath node packages",
     "RAVENROOT_NODE_PACKAGE_SERVICES_": (
@@ -321,6 +327,10 @@ GRAPH_AUTHORING_VARIABLES = frozenset({
     "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES",
 })
 
+SYSTEM_ONE_PROFILE_VARIABLES = frozenset({
+    "RAVENROOT_SYSTEM_ONE_PROFILE_",
+})
+
 
 def variables() -> dict[str, tuple[Path, ...]]:
     found: dict[str, set[Path]] = {}
@@ -370,6 +380,8 @@ def group(name: str) -> str:
         return "assistant"
     if name in INTERACTION_WEBSOCKET_VARIABLES:
         return "interaction-websocket"
+    if name in SYSTEM_ONE_PROFILE_VARIABLES:
+        return "bundle"
     if name.startswith(BUNDLE_PREFIXES):
         return "bundle"
     if name.startswith("RAVENROOT_AGENT_"):

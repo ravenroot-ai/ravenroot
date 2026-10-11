@@ -31,6 +31,7 @@ BUNDLES = {
     "ocr.extract": "ocr", "openapi.call": "openapi-client", "openapi.receive": "openapi-server",
     "openapi.request-reply": "openapi-server", "slack.events": "slack", "slack.commands": "slack",
     "slack.post-message": "slack", "spel.transform": "spel", "spel.decision": "spel",
+    "system-one-evaluate": "system-one",
     "telegram.send": "telegram", "telegram.answer.callback": "telegram",
     "telegram.edit.message": "telegram", "telegram.delete.message": "telegram",
     "teams.send": "teams", "teams.outgoing-webhook": "teams",

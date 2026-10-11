@@ -42,10 +42,15 @@ final class SystemOneTestSupport {
     }
 
     static SystemOneProfile profile(String model, int choiceOptions, int concurrency) {
+        return profile(model, choiceOptions, concurrency, 0.001);
+    }
+
+    static SystemOneProfile profile(String model, int choiceOptions, int concurrency,
+                                    double probabilityTolerance) {
         return new SystemOneProfile("local", URI.create("https://system-one.example.test/v1/systemone"),
                 model, Optional.empty(), 5_000, 1024 * 1024, 1024 * 1024, concurrency,
                 256 * 1024, 32, 8 * 1024, choiceOptions, 10,
-                SystemOneProfile.PORTABLE_TYPES, 0.001, null);
+                SystemOneProfile.PORTABLE_TYPES, probabilityTolerance, null);
     }
 
     static SystemOneProfileResolver resolving(SystemOneProfile profile) {

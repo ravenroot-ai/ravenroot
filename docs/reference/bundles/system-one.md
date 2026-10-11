@@ -66,6 +66,15 @@ Use `maxChoiceOptions: 26` for Rizzo Flow's current Choice limit. A Jev profile 
 server/model revision being operated. An oversized or unsupported specification fails before a
 network call; options are never truncated, regrouped, or silently discarded.
 
+Kev server revision
+[`2ecafc49fe1e8945cd600443e6c04c1cf0b3a78f`](https://github.com/jaredpalmer/kev/blob/2ecafc49fe1e8945cd600443e6c04c1cf0b3a78f/kev/api.py)
+rounds every probability to four decimal places and documents an absolute distribution-sum error
+below `0.02` at 255 options. Set `probabilityTolerance: 0.02` only on a profile pinned to that server
+revision (or one whose serialization contract an operator has independently verified). Keep tighter
+profiles at their smallest compatible value and revalidate the setting when the server revision
+changes. Ravenroot validates the reported sum against the profile value and preserves the reported
+probabilities; it never normalizes them.
+
 ## Node contract
 
 The node has three properties:

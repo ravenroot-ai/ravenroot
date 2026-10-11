@@ -8365,7 +8365,7 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 "<groupId>ai.ravenroot.extensions</groupId><artifactId>later-module</artifactId>"
                 "<version>0.6.0-alpha.1</version>"
                 "<description>accepted after preparation</description>"
-                "<dependencies><dependency><groupId>example.external</groupId>"
+                "<dependencies><dependency><groupId>ai.ravenrooted.partner</groupId>"
                 "<artifactId>coincidental-version</artifactId>"
                 "<version>0.6.0-alpha.1</version></dependency>"
                 "<dependency><groupId>ai.ravenroot</groupId>"
@@ -8375,6 +8375,25 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 "<external.version>0.6.0-alpha.1</external.version></properties></project>\n",
                 encoding="utf-8",
             )
+            external_project_pom = root / "ravenroot/external-project/pom.xml"
+            external_project_pom.parent.mkdir()
+            external_project_source = (
+                "<project><groupId>ai.ravenrooted.partner</groupId>"
+                "<artifactId>external-project</artifactId>"
+                "<version>0.6.0-alpha.1</version>"
+                "<description>preserve every external project byte</description></project>\n"
+            )
+            external_project_pom.write_text(external_project_source, encoding="utf-8")
+            external_parent_pom = root / "ravenroot/external-parent/pom.xml"
+            external_parent_pom.parent.mkdir()
+            external_parent_source = (
+                "<project><parent><groupId>ai.ravenrooted.partner</groupId>"
+                "<artifactId>external-parent</artifactId>"
+                "<version>0.6.0-alpha.1</version></parent>"
+                "<artifactId>external-child</artifactId><version>0.6.0-alpha.1</version>"
+                "<description>preserve inherited external ownership</description></project>\n"
+            )
+            external_parent_pom.write_text(external_parent_source, encoding="utf-8")
             commit("amend prepared release evidence")
             reverse_release_preparation_delta(root, preparation, "0.6.0-alpha.1")
 
@@ -8392,7 +8411,7 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 "<groupId>ai.ravenroot.extensions</groupId><artifactId>later-module</artifactId>"
                 "<version>0.5.1-alpha.1</version>"
                 "<description>accepted after preparation</description>"
-                "<dependencies><dependency><groupId>example.external</groupId>"
+                "<dependencies><dependency><groupId>ai.ravenrooted.partner</groupId>"
                 "<artifactId>coincidental-version</artifactId>"
                 "<version>0.6.0-alpha.1</version></dependency>"
                 "<dependency><groupId>ai.ravenroot</groupId>"
@@ -8402,6 +8421,10 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 "<external.version>0.6.0-alpha.1</external.version></properties></project>\n",
                 later_pom.read_text(encoding="utf-8"),
             )
+            self.assertEqual(external_project_source,
+                             external_project_pom.read_text(encoding="utf-8"))
+            self.assertEqual(external_parent_source,
+                             external_parent_pom.read_text(encoding="utf-8"))
 
             unexpected = root / "unexpected-runtime-policy.txt"
             unexpected.write_text("ordinary\n", encoding="utf-8")
@@ -8590,6 +8613,10 @@ RELEASE_PREPARATION_PATHS = {
 }
 
 
+def is_ravenroot_maven_group(group: str | None) -> bool:
+    return group == "ai.ravenroot" or (group is not None and group.startswith("ai.ravenroot."))
+
+
 def rewrite_ravenroot_pom_version(
         source: str, prepared_version: str, source_version: str, path: str) -> str:
     """Rewrite only Maven version elements owned by Ravenroot coordinates."""
@@ -8657,7 +8684,7 @@ def rewrite_ravenroot_pom_version(
     parent = parents[0] if parents else None
     project_group = scalar(project, "groupId")
     inherited_group = scalar(parent, "groupId") if parent is not None else None
-    ravenroot_project = (project_group or inherited_group or "").startswith("ai.ravenroot")
+    ravenroot_project = is_ravenroot_maven_group(project_group or inherited_group)
 
     targets: list[dict[str, object]] = []
 
@@ -8665,7 +8692,7 @@ def rewrite_ravenroot_pom_version(
         group = scalar(element, "groupId")
         artifact = scalar(element, "artifactId")
         version = scalar(element, "version")
-        if (group is not None and group.startswith("ai.ravenroot") and artifact
+        if (is_ravenroot_maven_group(group) and artifact
                 and version == prepared_version):
             targets.extend(children(element, "version"))
         elif (coordinate == "project" and ravenroot_project and artifact

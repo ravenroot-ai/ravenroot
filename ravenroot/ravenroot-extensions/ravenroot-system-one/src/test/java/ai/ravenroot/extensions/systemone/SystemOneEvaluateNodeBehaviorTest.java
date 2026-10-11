@@ -96,6 +96,53 @@ class SystemOneEvaluateNodeBehaviorTest {
     }
 
     @Test
+    void kevMaximumChoiceRoundingUsesOnlyItsPinnedProfileTolerance() throws Exception {
+        var options = new LinkedHashMap<String, Object>();
+        var rounded = new LinkedHashMap<String, Object>();
+        for (int index = 0; index < 255; index++) {
+            String option = "o%03d".formatted(index);
+            options.put(option, null);
+            rounded.put(option, 0.0039);
+        }
+        String specification = json(Map.of("contract", SystemOneSpecification.CONTRACT,
+                "id", "kev-rounding/v1", "questions", Map.of("category", Map.of(
+                        "type", "choice", "instructions", "Choose.", "criteria", options))));
+        String withinKevTolerance = json(Map.of("model", "kev-pinned-revision", "answers", Map.of(
+                "category", Map.of("type", "choice", "choice", "o000",
+                        "probabilities", rounded))));
+
+        var strictServices = new SystemOneTestSupport.HttpDouble();
+        strictServices.response = CompletableFuture.completedFuture(new OutboundHttpResponse(
+                200, Map.of(), withinKevTolerance.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(SystemOneException.Code.RESPONSE_MISMATCH,
+                failureOf(action(SystemOneTestSupport.profile("kev-pinned-revision"),
+                        specification, strictServices)).code());
+
+        SystemOneProfile kev = SystemOneTestSupport.profile("kev-pinned-revision", 255, 2, 0.02);
+        var kevServices = new SystemOneTestSupport.HttpDouble();
+        kevServices.response = CompletableFuture.completedFuture(new OutboundHttpResponse(
+                200, Map.of(), withinKevTolerance.getBytes(StandardCharsets.UTF_8)));
+        NodeResult result = action(kev, specification, kevServices)
+                .handle(SystemOneTestSupport.message(Map.of("body", "hello")))
+                .toCompletableFuture().get();
+        Map<String, Object> answer = map(map(map(result.payload()).get("answers")).get("category"));
+        assertEquals("o000", answer.get("choice"));
+        assertEquals(rounded, answer.get("probabilities"),
+                "accepted rounded evidence must not be normalized");
+
+        var outside = new LinkedHashMap<>(rounded);
+        for (int index = 0; index < 4; index++) outside.put("o%03d".formatted(index), 0.0);
+        String outsideKevTolerance = json(Map.of("model", "kev-pinned-revision", "answers", Map.of(
+                "category", Map.of("type", "choice", "choice", "o004",
+                        "probabilities", outside))));
+        var outsideServices = new SystemOneTestSupport.HttpDouble();
+        outsideServices.response = CompletableFuture.completedFuture(new OutboundHttpResponse(
+                200, Map.of(), outsideKevTolerance.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(SystemOneException.Code.RESPONSE_MISMATCH,
+                failureOf(action(kev, specification, outsideServices)).code());
+    }
+
+    @Test
     void responseQuestionTypeMembershipDistributionAndUsageAreValidated() {
         for (String body : List.of(
                 "{\"model\":\"m\",\"answers\":{}}",

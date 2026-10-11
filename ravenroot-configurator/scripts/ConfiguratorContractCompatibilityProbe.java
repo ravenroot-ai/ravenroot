@@ -142,6 +142,27 @@ public final class ConfiguratorContractCompatibilityProbe {
 
     private static void verifyAssertion(String assertion, Object accepted, String id) throws Exception {
         if (assertion.isEmpty()) return;
+        if (assertion.startsWith("system-one-tolerance:")) {
+            double expected = Double.parseDouble(assertion.substring("system-one-tolerance:".length()));
+            require(((Number) accepted.getClass().getMethod("probabilityTolerance").invoke(accepted)).doubleValue() == expected,
+                    id + " changed the configured fractional probability tolerance");
+            return;
+        }
+        if ("system-one-defaults".equals(assertion)) {
+            Map<String, Number> defaults = Map.of("timeoutMs", 60_000, "maxRequestBytes", 1_048_576,
+                    "maxResponseBytes", 1_048_576, "maxConcurrency", 4, "maxStateBytes", 262_144,
+                    "maxQuestions", 32, "maxInstructionBytes", 8_192, "maxChoiceOptions", 255,
+                    "maxScoreLevels", 10, "probabilityTolerance", 0.001);
+            for (var entry : defaults.entrySet()) {
+                require(((Number) accepted.getClass().getMethod(entry.getKey()).invoke(accepted)).doubleValue()
+                        == entry.getValue().doubleValue(), id + " drifted from runtime default " + entry.getKey());
+            }
+            require(((Optional<?>) accepted.getClass().getMethod("credentialBinding").invoke(accepted)).isEmpty(),
+                    id + " fabricated an omitted credential");
+            require(java.util.Set.of("choice", "noul", "score").equals(
+                    accepted.getClass().getMethod("supportedTypes").invoke(accepted)), id + " changed default primitive types");
+            return;
+        }
         if ("openapi-spec-2mib".equals(assertion)) {
             Method specification = accepted.getClass().getMethod("specification");
             require(((byte[]) specification.invoke(accepted)).length == 2_097_152,

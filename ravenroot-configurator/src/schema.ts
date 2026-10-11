@@ -120,8 +120,9 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     if (schema.format === "absolute-path" && !value.startsWith("/")) fail(path, "must be an absolute path");
     return;
   }
-  if (schema.kind === "integer") {
-    if (!Number.isSafeInteger(value)) fail(path, "must be an integer");
+  if (schema.kind === "integer" || schema.kind === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) fail(path, "must be a finite number");
+    if (schema.kind === "integer" && !Number.isSafeInteger(value)) fail(path, "must be an integer");
     if (schema.minimum !== undefined && (value as number) < schema.minimum) fail(path, `must be at least ${schema.minimum}`);
     if (schema.maximum !== undefined && (value as number) > schema.maximum) fail(path, `must be at most ${schema.maximum}`);
     return;
@@ -150,7 +151,7 @@ export function validateValue(schema: ValueSchema, value: unknown, path = "value
     return;
   }
   const optional = new Set(schema.optional ?? []);
-  for (const key of Object.keys(record)) if (!(key in schema.properties)) fail(`${path}.${key}`, "is not supported");
+  for (const key of Object.keys(record)) if (!Object.hasOwn(schema.properties, key)) fail(`${path}.${key}`, "is not supported");
   for (const [key, childSchema] of Object.entries(schema.properties)) {
     if (!(key in record)) { if (!optional.has(key)) fail(`${path}.${key}`, "is required"); }
     else validateValue(childSchema, record[key], `${path}.${key}`);

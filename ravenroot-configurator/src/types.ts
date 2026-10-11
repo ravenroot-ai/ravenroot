@@ -21,6 +21,7 @@ export interface FieldSpec {
 export type ValueSchema =
   | { readonly kind: "string"; readonly minimumLength?: number; readonly maximumLength?: number; readonly maximumUtf8Bytes?: number; readonly maximumDecodedBytes?: number; readonly pattern?: string; readonly allowed?: readonly string[]; readonly format?: "uri" | "absolute-path" | "base64" | "sha256" | "duration" | "http-header-name" | "http-header-value"; readonly schemes?: readonly string[]; readonly exactScheme?: boolean; readonly requireHost?: boolean; readonly javaCompatibleHost?: boolean; readonly forbidIpv6Host?: boolean; readonly allowFragment?: boolean; readonly authorityOnly?: boolean; readonly allowRootPath?: boolean; readonly nonBlank?: boolean }
   | { readonly kind: "integer"; readonly minimum?: number; readonly maximum?: number }
+  | { readonly kind: "number"; readonly minimum?: number; readonly maximum?: number }
   | { readonly kind: "boolean" }
   | { readonly kind: "null" }
   | { readonly kind: "nullable"; readonly value: ValueSchema }
@@ -50,7 +51,7 @@ export interface ConfigurationContract {
   readonly externalRequirements?: readonly string[];
   readonly restartRequired: boolean;
   readonly credentialResolver: "none" | "shared" | "family";
-  readonly crossFieldRules?: readonly ("credential-pair" | "credential-requires-tls" | "mcp-tools-bound" | "jdbc-total-cell" | "storage-virtual-host")[];
+  readonly crossFieldRules?: readonly ("credential-pair" | "credential-requires-tls" | "mcp-tools-bound" | "jdbc-total-cell" | "storage-virtual-host" | "system-one-limits")[];
 }
 
 export interface ContractIdentity {

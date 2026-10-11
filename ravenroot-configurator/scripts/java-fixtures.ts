@@ -13,6 +13,7 @@ interface Runtime {
 }
 
 const RUNTIMES: Readonly<Record<string, Runtime>> = {
+  "system-one.profile": { className: "ai.ravenroot.extensions.systemone.EnvironmentSystemOneProfileResolver", mode: "resolver" },
   "ai.llm-profile": { className: "ai.ravenroot.extensions.ai.EnvironmentLlmProfileResolver", mode: "resolver" },
   "ai.mcp-profile": { className: "ai.ravenroot.extensions.ai.EnvironmentMcpProfileResolver", mode: "resolver" },
   "amqp.profile": { className: "ai.ravenroot.extensions.amqp091.EnvironmentAmqpProfileResolver", mode: "resolver" },
@@ -79,6 +80,8 @@ function distinctValidValues(schema: ValueSchema, seed: unknown, count: number):
         add(`x${suffix}`);
       }
     }
+  } else if (schema.kind === "number") {
+    [schema.minimum ?? 0, schema.maximum ?? 1, ((schema.minimum ?? 0) + (schema.maximum ?? 1)) / 2].forEach(add);
   } else if (schema.kind === "integer") {
     const minimum = schema.minimum ?? 0;
     const maximum = schema.maximum ?? Number.MAX_SAFE_INTEGER;
@@ -112,7 +115,7 @@ function distinctValidValues(schema: ValueSchema, seed: unknown, count: number):
 
 function boundaryMutations(schema: ValueSchema, value: unknown, path = "document"): Mutation[] {
   const result: Mutation[] = [];
-  if (schema.kind === "integer" && typeof value === "number") {
+  if ((schema.kind === "integer" || schema.kind === "number") && typeof value === "number") {
     if (schema.minimum !== undefined) result.push({ value: schema.minimum - 1, label: `${path}:minimum` });
     // MAX_SAFE_INTEGER is the browser representation ceiling for Java long fields, not a
     // resolver ceiling. There is no exact JSON number above it that the UI can round-trip.
@@ -123,7 +126,10 @@ function boundaryMutations(schema: ValueSchema, value: unknown, path = "document
     if (schema.maximumLength !== undefined) result.push({ value: "x".repeat(schema.maximumLength + 1), label: `${path}:maximumLength` });
     if (schema.maximumUtf8Bytes !== undefined) result.push({ value: "é".repeat(Math.floor(schema.maximumUtf8Bytes / 2) + 1), label: `${path}:maximumUtf8Bytes` });
     if (schema.allowed) result.push({ value: "not-an-allowed-value", label: `${path}:allowed` });
-    if (schema.pattern) result.push({ value: " ", label: `${path}:pattern` });
+    if (schema.pattern) {
+      const invalid = new RegExp(`^(?:${schema.pattern})$`).test(" ") ? "bad\u0001token" : " ";
+      result.push({ value: invalid, label: `${path}:pattern` });
+    }
     if (schema.nonBlank) result.push({ value: "   ", label: `${path}:nonBlank` });
     if (schema.schemes) result.push({ value: `ftp://${new URL(value).host}/invalid`, label: `${path}:scheme` });
     if (schema.exactScheme && schema.format === "uri") result.push({ value: value.replace(/^[^:]+:/, (scheme) => scheme.toUpperCase()), label: `${path}:exactScheme` });
@@ -221,6 +227,62 @@ for (const [id, runtime] of Object.entries(RUNTIMES)) {
     if (contract.crossFieldRules?.includes("mcp-tools-bound")) mutations.push({ value: { ...(selection.values.document as object), maxDiscoveredTools: 1, allowedTools: ["search", "lookup"] }, label: "cross-field:mcp-tools-bound" });
     if (contract.crossFieldRules?.includes("jdbc-total-cell")) mutations.push({ value: { ...(selection.values.document as object), maxTotalBytes: 1 }, label: "cross-field:jdbc-total-cell" });
     if (contract.crossFieldRules?.includes("storage-virtual-host")) mutations.push({ value: { ...(selection.values.document as object), addressingStyle: "virtual-hosted" }, label: "cross-field:storage-virtual-host" });
+    if (id === "system-one.profile") {
+      const original = selection.values.document as Record<string, unknown>;
+      const positive = (document: Record<string, unknown>, label: string, assertion = ""): void => {
+        positives.push({ value: Object.values(serializeSelection({ ...selection, values: { document } }))[0]!, args: "", label, assertion });
+      };
+      positive({ endpoint: original.endpoint, model: original.model }, "resolver-defaults", "system-one-defaults");
+      positive({ ...original, probabilityTolerance: 0.02 }, "pinned-kev-tolerance", "system-one-tolerance:0.02");
+      for (const tolerance of [0, 0.001, 0.05]) positive({ ...original, probabilityTolerance: tolerance }, `tolerance:${tolerance}`, `system-one-tolerance:${tolerance}`);
+      positive(Object.fromEntries(Object.entries(original).map(([key, value]) => [key,
+        key === "endpoint" || key === "model" ? value : null])), "explicit-null-defaults", "system-one-defaults");
+      positive({ ...original, maxChoiceOptions: 26, supportedTypes: ["CHOICE", "noul", "score", "choice"] }, "rizzo-limit-and-normalized-types");
+      positive({ ...original, endpoint: "http://[::1]:8080/v1/systemone", credentialBindingId: "", credentialReference: "" }, "uncredentialed-ipv6-http");
+      const sizedProfile = (size: number): Record<string, unknown> => {
+        const document = { ...original, endpoint: `${original.endpoint}?padding=` };
+        document.endpoint += "a".repeat(size - Buffer.byteLength(JSON.stringify(document), "utf8"));
+        return document;
+      };
+      positive(sizedProfile(65536), "profile-at-65536-bytes");
+      mutations.push({ value: sizedProfile(65537), label: "profile:65537-bytes" });
+      positive({ ...original, supportedTypes: Array(64).fill("choice") }, "types-at-collection-limit");
+      mutations.push({ value: { ...original, supportedTypes: Array(65).fill("choice") }, label: "types:collection-limit" });
+      for (const key of ["constructor", "toString", "__proto__"]) mutations.push({ value: { ...original, [key]: true }, label: `unknown-field:${key}` });
+      const integerBounds: Readonly<Record<string, readonly [number, number]>> = {
+        timeoutMs: [1, 600000], maxRequestBytes: [1, 67108864], maxResponseBytes: [1, 67108864],
+        maxConcurrency: [1, 1024], maxStateBytes: [1, 67108864], maxQuestions: [1, 1000],
+        maxInstructionBytes: [1, 67108864], maxChoiceOptions: [1, 255], maxScoreLevels: [2, 255]
+      };
+      for (const [field, boundaries] of Object.entries(integerBounds)) for (const value of boundaries) {
+        positive({ ...original, maxRequestBytes: 67108864, maxStateBytes: 1, maxInstructionBytes: 1, [field]: value }, `${field}:inclusive:${value}`);
+      }
+      for (const field of ["maxStateBytes", "maxInstructionBytes"]) {
+        mutations.push({ value: { ...original, [field]: Number(original.maxRequestBytes) + 1 }, label: `cross-field:${field}` });
+        const defaults = { ...original, maxRequestBytes: 1, maxStateBytes: 1, maxInstructionBytes: 1 };
+        delete (defaults as Record<string, unknown>)[field];
+        mutations.push({ value: defaults, label: `cross-field:${field}:omitted-default` });
+      }
+      for (const field of ["timeoutMs", "maxRequestBytes", "maxResponseBytes", "maxConcurrency", "maxStateBytes", "maxQuestions", "maxInstructionBytes", "maxChoiceOptions", "maxScoreLevels"]) {
+        for (const value of [1.5, "2", true]) mutations.push({ value: { ...original, [field]: value }, label: `${field}:wrong-type:${typeof value}` });
+      }
+      for (const [field, value] of [
+        ["endpoint", "https://user@example.test/v1"], ["endpoint", "https://@example.test/v1"],
+        ["endpoint", "https://example.test/v1#"], ["endpoint", "https://example.123/v1"],
+        ["endpoint", "https://127.1/v1"], ["endpoint", "https://example.test/[abc]"], ["endpoint", "https://invalid_host/v1"],
+        ["endpoint", "https://example.test/%bad%"], ["endpoint", "https://example.test/a b"],
+        ["endpoint", "http://system-one.example.test/v1/systemone"],
+        ["endpoint", 2], ["model", null], ["model", false], ["model", "\u001c"],
+        ["credentialBindingId", "bad\u007ftoken"], ["credentialReference", true],
+        ["credentialBindingId", null], ["probabilityTolerance", "0.02"], ["probabilityTolerance", true],
+        ["supportedTypes", "choice"], ["supportedTypes", [1]], ["supportedTypes", ["numerical"]]
+      ] as const) mutations.push({ value: { ...original, [field]: value }, label: `${field}:invalid:${JSON.stringify(value)}` });
+      for (const token of ["NaN", "Infinity", "1e309"]) {
+        negatives.push({ value: Buffer.from(JSON.stringify(original).replace('"probabilityTolerance":0.001', `"probabilityTolerance":${token}`), "utf8").toString("base64"), args: "", label: `probabilityTolerance:nonfinite:${token}` });
+      }
+      mutations.push({ value: { ...original, credentialBindingId: "\u00a0", credentialReference: "" }, label: "credential-pair:java-whitespace" });
+      negatives.push({ value: `${valid}\n`, args: "", label: "noncanonical-base64" });
+    }
     if (id === "matrix.config") {
       const candidate = structuredClone(selection.values.document) as { profiles: Record<string, { limits: Record<string, unknown> }> };
       const profile = Object.values(candidate.profiles)[0]!;

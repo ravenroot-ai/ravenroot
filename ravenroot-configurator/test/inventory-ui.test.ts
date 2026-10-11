@@ -46,6 +46,22 @@ describe("guided registry", () => {
     expect((globalThis as typeof globalThis & { uiInjected?: boolean }).uiInjected).not.toBe(true);
   });
 
+  test("edits System One fractional tolerance with a bounded decimal control", () => {
+    const selector = document.querySelector<HTMLSelectElement>("#contract")!;
+    selector.value = "system-one.profile";
+    document.querySelector<HTMLButtonElement>("#add-contract")!.click();
+    const tolerance = [...document.querySelectorAll<HTMLLabelElement>("#configurations label")]
+      .find((label) => label.textContent?.startsWith("probabilityTolerance") && label.querySelector('input[type="number"]'))!
+      .querySelector<HTMLInputElement>('input[type="number"]')!;
+    expect(tolerance.value).toBe("0.001");
+    expect(tolerance.step).toBe("any"); expect(tolerance.min).toBe("0"); expect(tolerance.max).toBe("0.05");
+    tolerance.value = "0.02"; tolerance.dispatchEvent(new Event("input"));
+    expect(tolerance.checkValidity()).toBe(true);
+    document.querySelector<HTMLButtonElement>("#add-contract")!.click();
+    expect([...document.querySelectorAll<HTMLInputElement>('#configurations input[type="number"]')]
+      .some((input) => input.value === "0.02" && input.step === "any")).toBe(true);
+  });
+
   test("provides guided controls for every contract and target including separate Kubernetes Secret coordinates", () => {
     const contract = document.querySelector<HTMLSelectElement>("#contract") as HTMLSelectElement;
     const add = document.querySelector<HTMLButtonElement>("#add-contract") as HTMLButtonElement;

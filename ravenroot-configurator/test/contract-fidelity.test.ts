@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { CONTRACTS, serializeSelection, templateSelection } from "../src/registry.js";
 
 const RUNTIME_SOURCES: Readonly<Record<string, string>> = {
+  "system-one.profile": "ravenroot-extensions/ravenroot-system-one/src/main/java/ai/ravenroot/extensions/systemone/EnvironmentSystemOneProfileResolver.java",
   "bundle.service-grant": "ravenroot-server/src/main/java/ai/ravenroot/server/plugin/EnvironmentNodePackageServiceGrants.java",
   "ai.llm-profile": "ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentLlmProfileResolver.java",
   "ai.mcp-profile": "ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentMcpProfileResolver.java",

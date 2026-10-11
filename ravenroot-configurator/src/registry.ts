@@ -53,7 +53,8 @@ const jsonContract = (
   restartRequired: true,
   credentialResolver: requiredCapabilities.includes("credential-resolution") || requiredCapabilities.includes("outbound-http")
     ? "shared" : "none",
-  crossFieldRules: ["ai.llm-profile", "ai.mcp-profile", "git-workspace.profile", "openapi-client.profile", "websocket.profile"].includes(id)
+  crossFieldRules: id === "system-one.profile" ? ["credential-pair", "credential-requires-tls", "system-one-limits"]
+    : ["ai.llm-profile", "ai.mcp-profile", "git-workspace.profile", "openapi-client.profile", "websocket.profile"].includes(id)
     ? ["credential-pair", "credential-requires-tls", ...(id === "ai.mcp-profile" ? ["mcp-tools-bound" as const] : [])]
     : id === "jdbc.profile" ? ["jdbc-total-cell"] : id === "object-storage.profile" ? ["storage-virtual-host"] : []
 });
@@ -179,6 +180,16 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
       timeoutMs: 30000, maxRequestBytes: 1048576, maxResponseBytes: 1048576, maxConcurrency: 4,
       maxDiscoveredTools: 128, allowedTools: ["search"]
     }, ["outbound-http", "tool-authorization", "agent-resources"]),
+  jsonContract("system-one.profile", "System One evaluation profile", "System One", "ai.ravenroot.extensions.systemone",
+    ["system-one-evaluate"], "RAVENROOT_SYSTEM_ONE_PROFILE_", ["profile"], {
+      endpoint: "https://system-one.example.test/v1/systemone", model: "operator-pinned-model",
+      credentialBindingId: "system-one", credentialReference: "system-one-token",
+      timeoutMs: 60000, maxRequestBytes: 1048576, maxResponseBytes: 1048576, maxConcurrency: 4,
+      maxStateBytes: 262144, maxQuestions: 32, maxInstructionBytes: 8192, maxChoiceOptions: 255,
+      maxScoreLevels: 10, supportedTypes: ["choice", "noul", "score"], probabilityTolerance: 0.001
+    }, ["outbound-http"], ["A separately operated System One endpoint and pinned model; no model is installed by this contract.",
+      "The default probability tolerance is 0.001; use 0.02 only for the pinned Kev revision documented by the System One bundle.",
+      "Credential-bearing profiles use HTTPS here; any runtime trusted-network plaintext exception requires separate operator policy."]),
   delimitedContract("amqp.profile", "AMQP publisher profile", "AMQP 0-9-1", "ai.ravenroot.extensions.amqp091",
     ["amqp.publish"], "RAVENROOT_AMQP091_PROFILE_", [
       requiredString("host"), requiredInt("port", 1, 65535), requiredBoolean("tls"), requiredPossiblyEmptyString("vhost"),
@@ -566,6 +577,11 @@ function validateCoreDocumentRelations(contractId: string, values: Readonly<Reco
   }
 }
 
+// java.lang.String.strip uses Character.isWhitespace, which excludes non-breaking spaces.
+function stripJavaWhitespace(value: string): string {
+  return value.replace(/^[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+$/g, "");
+}
+
 export function serializeSelection(selection: ConfigurationSelection): Readonly<Record<string, string>> {
   const contract = CONTRACT_BY_ID.get(selection.contractId);
   if (!contract) throw new Error(`Unknown configuration contract: ${selection.contractId}`);
@@ -597,13 +613,36 @@ export function serializeSelection(selection: ConfigurationSelection): Readonly<
       const record = document as Record<string, unknown>;
       const leftName = "credentialBindingId" in record || "credentialReference" in record ? "credentialBindingId" : "credentialRef";
       const rightName = leftName === "credentialBindingId" ? "credentialReference" : "credentialUsername";
-      const binding = typeof record[leftName] === "string" && record[leftName].trim().length > 0;
-      const reference = typeof record[rightName] === "string" && record[rightName].trim().length > 0;
+      const present = (value: unknown): boolean => typeof value === "string"
+        && (contract.id === "system-one.profile" ? stripJavaWhitespace(value) : value.trim()).length > 0;
+      const binding = present(record[leftName]);
+      const reference = present(record[rightName]);
       if (binding !== reference) throw new Error(`${contract.id}.document ${leftName} and ${rightName} must be supplied together`);
       const endpoint = record.endpoint ?? record.origin ?? record.remote ?? record.destination;
       if (binding && contract.crossFieldRules.includes("credential-requires-tls") && !/^(?:https|wss):\/\//i.test(String(endpoint))) {
         throw new Error(`${contract.id}.document credentials require an https endpoint`);
       }
+    }
+    if (contract.crossFieldRules?.includes("system-one-limits")) {
+      const record = document as Record<string, unknown>;
+      if (stripJavaWhitespace(String(record.model)).length === 0) throw new Error(`${contract.id}.document model must contain non-whitespace text`);
+      const request = Number(record.maxRequestBytes ?? 1048576);
+      if (Number(record.maxStateBytes ?? 262144) > request) throw new Error(`${contract.id}.document maxStateBytes exceeds maxRequestBytes`);
+      if (Number(record.maxInstructionBytes ?? 8192) > request) throw new Error(`${contract.id}.document maxInstructionBytes exceeds maxRequestBytes`);
+      // WHATWG URL accepts inputs that java.net.URI rejects or assigns no host.
+      const endpoint = String(record.endpoint);
+      const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]+)/.exec(endpoint)?.[1] ?? "";
+      const host = authority.replace(/:\d*$/, "");
+      const dnsHost = host.replace(/\.$/, "");
+      const ipv4 = /^\d+\.\d+\.\d+\.\d+$/.test(dnsHost) && dnsHost.split(".").every((part) => Number(part) <= 255);
+      const numericTopLevel = dnsHost.includes(".") && !/^[A-Za-z]/.test(dnsHost.split(".").at(-1)!);
+      const path = endpoint.slice(endpoint.indexOf(authority) + authority.length).split("?")[0]!;
+      if (!authority || authority.includes("@") || /[\s\u0000-\u0020\u007f-\u009f\\<>"{}|^`]/.test(endpoint) || /%(?![0-9a-fA-F]{2})/.test(endpoint)
+          || endpoint.includes("#") || /[\[\]]/.test(path) || (!host.startsWith("[") && (numericTopLevel && !ipv4 || dnsHost.split(".").some((label) =>
+            !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label))))) {
+        throw new Error(`${contract.id}.document endpoint must be a Java-compatible HTTP URI without user information or fragment`);
+      }
+      if (new TextEncoder().encode(JSON.stringify(document)).length > 65536) throw new Error(`${contract.id}.document exceeds 65536 bytes`);
     }
     if (contract.crossFieldRules?.includes("mcp-tools-bound")) {
       const record = document as Record<string, unknown>; const tools = record.allowedTools;

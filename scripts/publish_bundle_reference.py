@@ -75,6 +75,7 @@ BUNDLES = (
         "slack.events", "slack.commands", "slack.post-message",
     )),
     Bundle("spel", "ai.ravenroot.extensions.spel", ("spel.transform", "spel.decision")),
+    Bundle("system-one", "ai.ravenroot.extensions.systemone", ("system-one-evaluate",)),
     Bundle("teams", "ai.ravenroot.extensions.teams", ("teams.send", "teams.outgoing-webhook")),
     Bundle("telegram", "ai.ravenroot.extensions.telegram", (
         "telegram.send", "telegram.answer.callback", "telegram.edit.message", "telegram.delete.message",

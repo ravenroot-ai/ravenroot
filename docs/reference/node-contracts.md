@@ -49,8 +49,8 @@ Each property table may scroll horizontally on a narrow viewport. Jump directly 
 - [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move) · [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook)
 - [`mattermost.send`](#node-mattermost-send) · [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call)
 - [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events)
-- [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message)
-- [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`timer`](#node-timer) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
+- [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`system-one-evaluate`](#node-system-one-evaluate) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback)
+- [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`timer`](#node-timer) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
 
 ## `agent` {#node-agent}
 
@@ -1746,6 +1746,31 @@ Canonical runtime rules: [spel bundle reference](bundles/spel.md).
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `expression` | Expression | Restricted SpEL expression; its bounded canonical result becomes the payload. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## `system-one-evaluate` {#node-system-one-evaluate}
+
+Canonical runtime rules: [system-one bundle reference](bundles/system-one.md).
+[Complete GraphML example](../examples/nodes/system-one-evaluate.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | System One evaluate |
+| Category | AI |
+| Description | Evaluates typed Choice, Noul, and Score questions against the incoming payload through an operator-owned TypeSafe-compatible service. |
+| Visual type | decision |
+| Agentic | false |
+| Capabilities | credential-reference,external-provider,network,probabilistic-evaluation |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The service returned a validated typed evidence envelope. Routing remains the responsibility of a deterministic downstream decision node. |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Profile | Name of an operator-owned System One profile (RAVENROOT_SYSTEM_ONE_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
+| `specification` | Evaluation specification | Strict ravenroot.system-one/specification/1 JSON containing an id and typed questions. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1048576 |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | min 1; max 600000 |
 
 ## `teams.outgoing-webhook` {#node-teams-outgoing-webhook}
 

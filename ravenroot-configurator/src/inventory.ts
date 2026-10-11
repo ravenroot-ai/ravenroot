@@ -73,6 +73,7 @@ export const NODE_COVERAGE: readonly NodeCoverage[] = [
   covered("slack.post-message", "Slack", ["slack.config"]),
   { ...authorOnly("spel.decision"), bundle: "Restricted SpEL", rationale: "The bundle declares no profile, credential, service grant, egress, or external-file contract." },
   { ...authorOnly("spel.transform"), bundle: "Restricted SpEL", rationale: "The bundle declares no profile, credential, service grant, egress, or external-file contract." },
+  covered("system-one-evaluate", "System One", ["system-one.profile"]),
   covered("teams.outgoing-webhook", "Microsoft Teams", ["teams.config"]),
   covered("teams.send", "Microsoft Teams", ["teams.config"]),
   covered("telegram.answer.callback", "Telegram", ["telegram.profile"]),
@@ -113,6 +114,7 @@ export const BUNDLE_COVERAGE: readonly BundleCoverage[] = [
   { label: "OpenAPI server", manifestId: "ai.ravenroot.extensions.openapi.server", contracts: ["openapi-server.config"] },
   { label: "Slack", manifestId: "ai.ravenroot.extensions.slack", contracts: ["slack.config"] },
   { label: "Restricted SpEL", manifestId: "ai.ravenroot.extensions.spel", contracts: [] },
+  { label: "System One", manifestId: "ai.ravenroot.extensions.systemone", contracts: ["system-one.profile"] },
   { label: "Microsoft Teams", manifestId: "ai.ravenroot.extensions.teams", contracts: ["teams.config"] },
   { label: "Telegram", manifestId: "ai.ravenroot.extensions.telegram", contracts: ["telegram.profile"] },
   { label: "WebSocket", manifestId: "ai.ravenroot.extensions.websocket", contracts: ["websocket.profile"] }

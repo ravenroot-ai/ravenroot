@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Runnable email-triage example for the optional System One bundle.
+     Supply an email-like map with subject, sender, and body, and replace the profile placeholder.
+     The thresholds are illustrative policy, not a claim of calibrated production accuracy.
+     Provider/schema/transport failures reach ERROR; valid uncertainty reaches review. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/>
+  <key id="profile" for="node" attr.name="profile" attr.type="string"/>
+  <key id="specification" for="node" attr.name="specification" attr.type="string"/>
+  <key id="trueOutcome" for="node" attr.name="trueOutcome" attr.type="string"/>
+  <key id="falseOutcome" for="node" attr.name="falseOutcome" attr.type="string"/>
+  <graph id="system-one-email-triage" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="project-email">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">cel-transform</data>
+      <data key="expression">{"subject": payload.subject, "sender": payload.sender, "body": payload.body}</data>
+    </node>
+    <node id="evaluate">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">system-one-evaluate</data>
+      <data key="profile">replace-with-operator-profile</data>
+      <data key="specification">{"contract":"ravenroot.system-one/specification/1","id":"email-triage/v1","questions":{"category":{"type":"choice","instructions":"Classify the email.","criteria":{"notify":"Needs prompt attention","archive":"No action is needed","review":"A person should decide"}},"action_required":{"type":"noul","instructions":"Does the email require action?"},"importance":{"type":"score","instructions":"Rate importance from low to high.","criteria":["low","medium","high"]}}}</data>
+    </node>
+    <node id="notify-policy">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload.answers.category.choice == "notify" &amp;&amp; payload.answers.category.probabilities.notify &gt;= 0.75 &amp;&amp; payload.answers.action_required.noul &gt;= 0.70</data>
+      <data key="trueOutcome">notify</data><data key="falseOutcome">continue</data>
+    </node>
+    <node id="archive-policy">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload.answers.category.choice == "archive" &amp;&amp; payload.answers.category.probabilities.archive &gt;= 0.80 &amp;&amp; payload.answers.action_required.noul &lt;= 0.25</data>
+      <data key="trueOutcome">archive</data><data key="falseOutcome">review</data>
+    </node>
+    <node id="notify">
+      <data key="kind">BEHAVIOR</data><data key="behavior">cel-transform</data>
+      <data key="expression">{"route": "notification", "evidence": payload}</data>
+    </node>
+    <node id="archive">
+      <data key="kind">BEHAVIOR</data><data key="behavior">cel-transform</data>
+      <data key="expression">{"route": "archive", "evidence": payload}</data>
+    </node>
+    <node id="review">
+      <data key="kind">BEHAVIOR</data><data key="behavior">cel-transform</data>
+      <data key="expression">{"route": "review", "evidence": payload}</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="start-project" source="start" target="project-email"><data key="outcome">continue</data></edge>
+    <edge id="project-evaluate" source="project-email" target="evaluate"><data key="outcome">continue</data></edge>
+    <edge id="project-error" source="project-email" target="error"/>
+    <edge id="evaluate-policy" source="evaluate" target="notify-policy"><data key="outcome">continue</data></edge>
+    <edge id="evaluate-error" source="evaluate" target="error"/>
+    <edge id="policy-notify" source="notify-policy" target="notify"><data key="outcome">notify</data></edge>
+    <edge id="policy-next" source="notify-policy" target="archive-policy"><data key="outcome">continue</data></edge>
+    <edge id="notify-policy-error" source="notify-policy" target="error"/>
+    <edge id="policy-archive" source="archive-policy" target="archive"><data key="outcome">archive</data></edge>
+    <edge id="policy-review" source="archive-policy" target="review"><data key="outcome">review</data></edge>
+    <edge id="archive-policy-error" source="archive-policy" target="error"/>
+    <edge id="notify-end" source="notify" target="end"><data key="outcome">continue</data></edge>
+    <edge id="notify-error" source="notify" target="error"/>
+    <edge id="archive-end" source="archive" target="end"><data key="outcome">continue</data></edge>
+    <edge id="archive-error" source="archive" target="error"/>
+    <edge id="review-end" source="review" target="end"><data key="outcome">continue</data></edge>
+    <edge id="review-error" source="review" target="error"/>
+  </graph>
+</graphml>

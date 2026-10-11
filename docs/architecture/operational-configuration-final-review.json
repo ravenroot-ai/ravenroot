@@ -8378,8 +8378,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "9768ba354f75ac3317c17ebd14b69c59dd7e0c3c53599fc96464b7c70d332be1",
-          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged."
+          "digest": "deb55a1a30a4c2ee162d0bf2a3a9197e5edb08747c5850879861ec7513f872bf",
+          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity."
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -11503,8 +11503,8 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "055362cdb67a8ca72e5a704f6bdee56447d19e455c0baea98818ed25cf67c6f5",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
+          "digest": "381b6fb2bd04f853dc1eccebe79dfb4073ee246c6181eb86c34df863959dd22a",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged."
         }
       ],
       "candidateCount": 4,
@@ -11577,8 +11577,8 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "055362cdb67a8ca72e5a704f6bdee56447d19e455c0baea98818ed25cf67c6f5",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
+          "digest": "381b6fb2bd04f853dc1eccebe79dfb4073ee246c6181eb86c34df863959dd22a",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged."
         }
       ],
       "candidateCount": 1,
@@ -11648,8 +11648,8 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "055362cdb67a8ca72e5a704f6bdee56447d19e455c0baea98818ed25cf67c6f5",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged."
+          "digest": "381b6fb2bd04f853dc1eccebe79dfb4073ee246c6181eb86c34df863959dd22a",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged."
         }
       ],
       "candidateCount": 1,

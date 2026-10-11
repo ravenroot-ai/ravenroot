@@ -4,6 +4,30 @@ import type { ValueSchema } from "./types.js";
 
 export const CONTRACT_SCHEMA_VERSION = 1 as const;
 export const EXPLICIT_CONTRACT_SCHEMAS = {
+  "system-one.profile": {
+    kind: "object",
+    optional: ["credentialBindingId", "credentialReference", "timeoutMs", "maxRequestBytes", "maxResponseBytes",
+      "maxConcurrency", "maxStateBytes", "maxQuestions", "maxInstructionBytes", "maxChoiceOptions",
+      "maxScoreLevels", "supportedTypes", "probabilityTolerance"],
+    properties: {
+      endpoint: { kind: "string", format: "uri", schemes: ["http", "https"], requireHost: true, allowFragment: false },
+      model: { kind: "string", minimumLength: 1, maximumLength: 256, nonBlank: true },
+      credentialBindingId: { kind: "nullable", value: { kind: "string", maximumLength: 256, pattern: "[^\\x00-\\x1f\\x7f-\\x9f]*" } },
+      credentialReference: { kind: "nullable", value: { kind: "string", maximumLength: 256, pattern: "[^\\x00-\\x1f\\x7f-\\x9f]*" } },
+      timeoutMs: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 600000 } },
+      maxRequestBytes: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 67108864 } },
+      maxResponseBytes: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 67108864 } },
+      maxConcurrency: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 1024 } },
+      maxStateBytes: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 67108864 } },
+      maxQuestions: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 1000 } },
+      maxInstructionBytes: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 67108864 } },
+      maxChoiceOptions: { kind: "nullable", value: { kind: "integer", minimum: 1, maximum: 255 } },
+      maxScoreLevels: { kind: "nullable", value: { kind: "integer", minimum: 2, maximum: 255 } },
+      supportedTypes: { kind: "nullable", value: { kind: "array", minimumItems: 1, maximumItems: 64,
+        items: { kind: "string", pattern: "[cC][hH][oO][iI][cC][eE]|[nN][oO][uU][lL]|[sS][cC][oO][rR][eE]" } } },
+      probabilityTolerance: { kind: "nullable", value: { kind: "number", minimum: 0, maximum: 0.05 } }
+    }
+  },
   "bundle.service-grant": {
     "kind": "object",
     "optional": [

@@ -241,6 +241,20 @@ Complete admission-ready graphs:
 With `{"customer":{"name":"Ada"}}`, transform emits `Ada`; decision preserves the payload and
 follows `true`. Both are deterministic and side-effect free.
 
+## System One
+
+See the [`system-one` reference](bundles/system-one.md).
+
+Complete admission-ready graph:
+
+- [`system-one-evaluate`](../examples/nodes/system-one-evaluate.graphml)
+
+The descriptor example exercises the mixed-question node. The separate runnable
+[email-triage workflow](../examples/system-one/email-triage.graphml) first projects `subject`,
+`sender`, and `body`, evaluates all questions in one shared-state call, then applies illustrative
+deterministic CEL policy. Confident matches end at notification or archive; valid uncertainty ends
+at review; provider and schema failures reach the error terminal.
+
 ## Microsoft Teams
 
 See the [`teams` reference](bundles/teams.md).

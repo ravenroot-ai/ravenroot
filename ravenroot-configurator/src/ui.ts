@@ -81,6 +81,7 @@ function renderTargetOptions(): void {
 function emptyValue(schema: ValueSchema): unknown {
   switch (schema.kind) {
     case "string": return schema.allowed?.[0] ?? "";
+    case "number":
     case "integer": return schema.minimum ?? 0;
     case "boolean": return false;
     case "null": return null;
@@ -115,7 +116,7 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
     if (schema.format === "duration") constraints.push("positive ISO-8601 duration");
     if (schema.format === "http-header-name") constraints.push("safe HTTP header name; forbidden credential and hop-by-hop names excluded");
     if (schema.format === "http-header-value") constraints.push("no CR or LF");
-  } else if (schema.kind === "integer") constraints.push(`range ${schema.minimum ?? "unbounded"}–${schema.maximum ?? "unbounded"}`);
+  } else if (schema.kind === "integer" || schema.kind === "number") constraints.push(`range ${schema.minimum ?? "unbounded"}–${schema.maximum ?? "unbounded"}`);
   else if (schema.kind === "array") constraints.push(`items ${schema.minimumItems ?? 0}–${schema.maximumItems ?? "unbounded"}${schema.unique ? ", unique" : ""}`);
   else if (schema.kind === "map") {
     constraints.push(`entries ${schema.minimumEntries ?? 0}–${schema.maximumEntries ?? "unbounded"}`);
@@ -189,9 +190,9 @@ function schemaControl(schema: ValueSchema, current: unknown, update: (value: un
     const input = document.createElement("select"); for (const allowed of schema.allowed) { const option = document.createElement("option"); option.value = allowed; option.textContent = allowed; input.append(option); }
     input.value = String(current ?? ""); input.addEventListener("input", () => update(input.value)); wrapper.append(input); return wrapper;
   }
-  const input = document.createElement("input"); input.type = schema.kind === "integer" ? "number" : "text"; input.value = String(current ?? "");
-  if (schema.kind === "integer") { if (schema.minimum !== undefined) input.min = String(schema.minimum); if (schema.maximum !== undefined) input.max = String(schema.maximum); }
-  input.addEventListener("input", () => update(schema.kind === "integer" ? Number(input.value) : input.value)); wrapper.append(input);
+  const input = document.createElement("input"); input.type = (schema.kind === "integer" || schema.kind === "number") ? "number" : "text"; input.value = String(current ?? "");
+  if (schema.kind === "integer" || schema.kind === "number") { input.step = schema.kind === "number" ? "any" : "1"; if (schema.minimum !== undefined) input.min = String(schema.minimum); if (schema.maximum !== undefined) input.max = String(schema.maximum); }
+  input.addEventListener("input", () => update((schema.kind === "integer" || schema.kind === "number") ? (input.value === "" ? NaN : Number(input.value)) : input.value)); wrapper.append(input);
   if (schema.kind === "string" && schema.format === "base64") {
     const file = document.createElement("input"); file.type = "file"; file.addEventListener("change", async () => {
       const selected = file.files?.[0]; if (!selected) return; const bytes = new Uint8Array(await selected.arrayBuffer());

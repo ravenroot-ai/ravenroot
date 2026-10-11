@@ -149,6 +149,7 @@ Detailed contract: [Bundle profile](bundles/).
 | `RAVENROOT_OPENAPI_CLIENT_PROFILE_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_OPENAPI_SERVER_CONFIG` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_SLACK_CONFIG` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_SYSTEM_ONE_PROFILE_` | dynamic profile-name family; suffix is upper-case hexadecimal UTF-8 for an ASCII profile name; each value is canonical padded Base64 of strict JSON owning endpoint, model, credential binding, deadlines, limits, and capabilities; unset, blank, or malformed profiles fail the selecting node as `PROFILE_UNKNOWN` before network I/O; restart or recreate to change it |
 | `RAVENROOT_TEAMS_CONFIG` | canonical padded Base64 of strict JSON containing ingress `authority`, request `projection`, bounded `store` settings, and a nonempty tenant/profile map; ignored when the Teams package is not selected, while unset or malformed configuration refuses server startup when it is selected because startup prepares its ingress authority; restart or recreate to change it |
 | `RAVENROOT_TELEGRAM_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_TELEGRAM_PROFILE_` | See the linked contract for exact type, default, and applicability. |

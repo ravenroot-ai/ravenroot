@@ -14,6 +14,7 @@ import ai.ravenroot.extensions.openapi.client.OpenApiClientNodePackage;
 import ai.ravenroot.extensions.openapi.server.OpenApiServerNodePackage;
 import ai.ravenroot.extensions.spel.SpelNodePackage;
 import ai.ravenroot.extensions.storage.StorageNodePackage;
+import ai.ravenroot.extensions.systemone.SystemOneNodePackage;
 import ai.ravenroot.extensions.telegram.TelegramNodePackage;
 import ai.ravenroot.extensions.websocket.WebSocketNodePackage;
 
@@ -36,6 +37,7 @@ public final class ExtensionPackProbe {
             OpenApiClientNodePackage.class,
             OpenApiServerNodePackage.class,
             SpelNodePackage.class,
+            SystemOneNodePackage.class,
             TelegramNodePackage.class,
             WebSocketNodePackage.class);
 
@@ -43,7 +45,7 @@ public final class ExtensionPackProbe {
     }
 
     public static void main(String[] arguments) {
-        if (PACKAGE_TYPES.size() != 15) {
+        if (PACKAGE_TYPES.size() != 16) {
             throw new IllegalStateException("the complete first-party extension set was not compiled");
         }
         if (ServiceLoader.load(NodePackage.class).stream().findAny().isPresent()) {

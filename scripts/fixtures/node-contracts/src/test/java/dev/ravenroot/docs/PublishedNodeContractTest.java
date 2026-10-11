@@ -38,6 +38,7 @@ import ai.ravenroot.extensions.openapi.server.OpenApiServerNodePackage;
 import ai.ravenroot.extensions.slack.SlackNodePackage;
 import ai.ravenroot.extensions.spel.SpelNodePackage;
 import ai.ravenroot.extensions.storage.StorageNodePackage;
+import ai.ravenroot.extensions.systemone.SystemOneNodePackage;
 import ai.ravenroot.extensions.teams.TeamsNodePackage;
 import ai.ravenroot.extensions.telegram.TelegramNodePackage;
 import ai.ravenroot.extensions.websocket.WebSocketNodePackage;
@@ -68,7 +69,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Runtime-backed publication gate for the public 62-node catalog and its admission-ready examples. */
+/** Runtime-backed publication gate for the public 63-node catalog and its admission-ready examples. */
 final class PublishedNodeContractTest {
     private static final String UPDATE_PROPERTY = "ravenroot.docs.update";
     private static final Path REPOSITORY = repositoryRoot();
@@ -79,7 +80,7 @@ final class PublishedNodeContractTest {
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
         List<NodeTypeDescriptor> descriptors = descriptors();
-        assertEquals(62, descriptors.size(), "the documented baseline must classify every supported node");
+        assertEquals(63, descriptors.size(), "the documented baseline must classify every supported node");
         String actual = snapshot(descriptors);
         update(SNAPSHOT, actual);
         assertEquals(Files.readString(SNAPSHOT), actual,
@@ -369,7 +370,7 @@ final class PublishedNodeContractTest {
                 new JdbcNodePackage(), new KafkaNodePackage(), new MailNodePackage(), new MatrixNodePackage(),
                 new MattermostNodePackage(), new StorageNodePackage(),
                 new OcrNodePackage(), new OpenApiClientNodePackage(), new OpenApiServerNodePackage(),
-                new SlackNodePackage(), new SpelNodePackage(), new TeamsNodePackage(),
+                new SlackNodePackage(), new SpelNodePackage(), new SystemOneNodePackage(), new TeamsNodePackage(),
                 new TelegramNodePackage(), new WebSocketNodePackage());
     }
 
@@ -634,6 +635,15 @@ final class PublishedNodeContractTest {
         if (property.name().equals("language")) return behavior.equals("ocr.extract") ? "eng" : "python";
         if (property.name().equals("source")) return "def main(payload): return payload";
         if (property.name().equals("operationId")) return "healthCheck";
+        if (behavior.equals("system-one-evaluate") && property.name().equals("specification")) {
+            return "{\"contract\":\"ravenroot.system-one/specification/1\",\"id\":\"example/v1\","
+                    + "\"questions\":{\"category\":{\"type\":\"choice\","
+                    + "\"instructions\":\"Classify the state.\",\"criteria\":{\"accept\":null,"
+                    + "\"review\":null}},\"uncertain\":{\"type\":\"noul\","
+                    + "\"instructions\":\"Is the state uncertain?\"},\"score\":{\"type\":\"score\","
+                    + "\"instructions\":\"Score from low to high.\","
+                    + "\"criteria\":[\"low\",\"high\"]}}}";
+        }
         if (property.name().equals("expression")) return "payload != null";
         if (property.name().equals("title")) return "Review request";
         if (property.name().equals("prompt")) return "Summarize the supplied payload.";

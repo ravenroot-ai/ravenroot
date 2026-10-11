@@ -1,0 +1,175 @@
+# Ravenroot System One node bundle
+
+The optional package identity is `ai.ravenroot.extensions.systemone`. It contributes one
+provider-neutral node, **`system-one-evaluate`**, which sends the incoming payload as shared state
+with a strict set of Choice, Noul, and Score questions to a TypeSafe-compatible
+`POST /v1/systemone` endpoint. It returns validated probabilistic evidence on `continue`; a
+deterministic node such as `cel-decision` decides what that evidence means for the workflow.
+
+This bundle embeds no model runtime, weights, Python interpreter, GPU library, or provider-specific
+question type. Build it independently with `./plugin.sh build system-one`, install it with
+`./plugin.sh install`, enable `ai.ravenroot.extensions.systemone`, and grant its managed outbound
+HTTP capability. It is absent from the default runtime dependency set. The optional
+`ravenroot-extensions-all` Maven pack includes the artifact for embedding applications that
+deliberately request every first-party extension; classpath presence does not discover, register, or
+activate the package.
+
+## Operator profile
+
+Set `RAVENROOT_SYSTEM_ONE_PROFILE_<PROFILE_UTF8_HEX>` to strict canonical Base64 of JSON. Profile
+names are 1–64 ASCII letters, digits, dots, underscores, or hyphens and begin with an alphanumeric.
+For profile `triage`, the suffix is `747269616765`.
+
+```json
+{
+  "endpoint": "https://system-one.example.com/v1/systemone",
+  "model": "pinned-model-revision",
+  "credentialBindingId": "system-one",
+  "credentialReference": "hosted-api-key",
+  "timeoutMs": 60000,
+  "maxRequestBytes": 1048576,
+  "maxResponseBytes": 1048576,
+  "maxConcurrency": 4,
+  "maxStateBytes": 262144,
+  "maxQuestions": 32,
+  "maxInstructionBytes": 8192,
+  "maxChoiceOptions": 255,
+  "maxScoreLevels": 10,
+  "supportedTypes": ["choice", "noul", "score"],
+  "probabilityTolerance": 0.001
+}
+```
+
+Only `endpoint` and `model` are required. The values above are the defaults. Pin `model` to an
+operator-approved revision rather than a moving alias. Credential binding ID and reference must be
+both present or both absent. Credentialed HTTP is refused unless the operator has also configured an
+exact trusted-network plaintext exception; HTTPS is the normal hosted configuration. The package
+requires an `outbound-http` service grant restricted to the profile origin, `POST`, the
+`content-type` request header, JSON responses, the configured byte limits, concurrency, and deadline.
+Ravenroot resolves and applies the credential inside that managed channel; this bundle cannot read
+the secret.
+
+Use `maxChoiceOptions: 26` for Rizzo Flow's current Choice limit. A Jev profile may declare up to
+255. Kev and other independently hosted compatible services should declare the limits of the exact
+server/model revision being operated. An oversized or unsupported specification fails before a
+network call; options are never truncated, regrouped, or silently discarded.
+
+## Node contract
+
+The node has three properties:
+
+- `profile` is the required operator profile name.
+- `specification` is required strict `ravenroot.system-one/specification/1` JSON, bounded to 1 MiB
+  and further bounded by the profile.
+- `timeoutMs` is optional and may only tighten the profile deadline. A malformed or out-of-range
+  value is `CONFIGURATION_INVALID`; it never falls back to a looser deadline.
+
+The incoming payload must be a string, map, or list and becomes the single shared `state` in one
+request. Project away irrelevant or sensitive fields first with a deterministic transform. A mixed
+specification looks like this:
+
+```json
+{
+  "contract": "ravenroot.system-one/specification/1",
+  "id": "email-triage/v1",
+  "questions": {
+    "category": {
+      "type": "choice",
+      "instructions": "Classify the message.",
+      "criteria": {
+        "notify": "Needs prompt attention",
+        "archive": "No action is needed",
+        "review": "A person should decide"
+      }
+    },
+    "action_required": {
+      "type": "noul",
+      "instructions": "Does the message require an action?"
+    },
+    "importance": {
+      "type": "score",
+      "instructions": "Rate importance from low to high.",
+      "criteria": ["low", "medium", "high"]
+    }
+  }
+}
+```
+
+Question and option IDs are preserved. Choice responses must select a declared option whose
+probability is maximal (ties are allowed). Noul stays a probability in `[0,1]`; Ravenroot does not
+turn it into a Boolean. Score stays a finite, possibly fractional number from zero through the last
+zero-based level, with an exact legend matching the declared level order. Choice and Score
+distributions must contain exactly the declared keys, contain only finite `[0,1]` values, and sum to
+one within `probabilityTolerance`. Provider-reported `confidence` is preserved when present. It is a
+distribution statistic, not a correctness guarantee.
+
+A success emits `continue` with this stable shape:
+
+```json
+{
+  "contract": "ravenroot.system-one/result/1",
+  "input": {"subject": "Payment failed", "sender": "billing@example.com", "body": "Please fix today"},
+  "specification": {
+    "contract": "ravenroot.system-one/specification/1",
+    "id": "email-triage/v1",
+    "digest": "sha256:..."
+  },
+  "model": {"requested": "pinned-model-revision", "reported": "pinned-model-revision"},
+  "answers": {
+    "category": {"type": "choice", "choice": "notify", "probabilities": {"notify": 0.72, "archive": 0.18, "review": 0.10}},
+    "action_required": {"type": "noul", "noul": 0.81},
+    "importance": {"type": "score", "score": 1.35, "legend": {"0": "low", "1": "medium", "2": "high"}, "probabilities": {"0": 0.1, "1": 0.45, "2": 0.45}}
+  }
+}
+```
+
+When the provider returns nonnegative integer usage fields, the envelope includes them under
+`usage`. When it does not, `usage` is absent. Ravenroot does not invent token counts, calibration,
+or confidence. Provider-specific top-level metadata can coexist on the wire but is not promoted into
+the portable result.
+
+The node records bounded `systemOne.*` audit attributes for profile, requested/reported model,
+specification digest, and state digest. It preserves inbound attributes and never writes a reserved
+`ravenroot.*` key. The descriptor deliberately does not claim `ai` or `agentic`: those catalog
+capabilities mark generated content, while this result is typed probabilistic evidence and may be
+produced with zero generated prose. The runtime can therefore invalidate an inbound synthetic marker
+when the payload changes; the bundle does not mint a replacement marker.
+
+## Failures, policy, and verification
+
+The closed failures are `PROFILE_UNKNOWN`, `CONFIGURATION_INVALID`, `SPECIFICATION_INVALID`,
+`CAPABILITY_UNSUPPORTED`, `STATE_INVALID`, `REQUEST_TOO_LARGE`, `CREDENTIAL_UNAVAILABLE`,
+`DESTINATION_REFUSED`, `ENDPOINT_REJECTED`, `RESPONSE_UNREADABLE`, `RESPONSE_MISMATCH`,
+`RESPONSE_TOO_LARGE`, `DEADLINE_EXCEEDED`, `CAPACITY_UNAVAILABLE`, and
+`TRANSPORT_UNAVAILABLE`. Failures carry no state, response body, or credential. A failed call does
+not choose a default category. Valid low-confidence or ambiguous evidence remains a success so that
+the graph can route it explicitly to review.
+
+The node makes one HTTP call and adds no SDK retry. Runtime retry can repeat billing and produce a
+different result. Cancellation cancels the managed call; deadlines and per-tenant/profile admission
+are bounded, and permits are released on success, refusal, failure, and cancellation.
+
+The [email-triage GraphML](../../../docs/examples/system-one/email-triage.graphml) projects three
+email fields, evaluates all three questions in one request, and uses illustrative CEL thresholds for
+notification, archive, and review. Those thresholds are examples, not validated production accuracy.
+Model revision, runtime, quantization, workload, and provider changes can all invalidate a threshold;
+operators must validate policy on data they are authorized to use.
+
+Hosted Jev uses its HTTPS `/v1/systemone` endpoint and credential binding. Rizzo Flow or Kev can run
+as a separately managed service; point the same profile shape at that service and declare its actual
+limits. Provisioning those services, downloading models, GPU setup, fine-tuning, and private-email
+benchmarking are outside Ravenroot.
+
+For an optional live smoke test, enable the bundle against a non-production profile, run the example
+with a synthetic email, and inspect the requested/reported model plus specification/state digests.
+The module's Jev, Rizzo, and Kev fixtures verify protocol parsing without credentials, downloads, or
+a model. They do not establish model quality, calibration, or production threshold validity.
+
+Primary external protocol references: [TypeSafe API](https://docs.typesafe.ai/api),
+[primitives](https://docs.typesafe.ai/primitives), [confidence](https://docs.typesafe.ai/confidence),
+[Rizzo Flow](https://github.com/Rizzo-AI-Academy/rizzo-flow), and
+[Kev](https://github.com/jaredpalmer/kev).
+
+```sh
+JAVA_HOME=/path/to/jdk21 mvn -f ../../pom.xml -pl ravenroot-extensions/ravenroot-system-one -am test
+```

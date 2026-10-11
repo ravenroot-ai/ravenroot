@@ -145,6 +145,7 @@ operator grant. The current package requirements are exact:
 | `ai.ravenroot.extensions.openapi.server` | None |
 | `ai.ravenroot.extensions.slack` | `credential-resolution`, `outbound-http` |
 | `ai.ravenroot.extensions.spel` | None |
+| `ai.ravenroot.extensions.systemone` | `outbound-http` |
 | `ai.ravenroot.extensions.teams` | `credential-resolution`, `outbound-http` |
 | `ai.ravenroot.extensions.telegram` | None |
 | `ai.ravenroot.extensions.websocket` | `outbound-websocket` |

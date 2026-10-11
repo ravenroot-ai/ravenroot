@@ -222,6 +222,8 @@
       url: /reference/bundles/slack.html
     - title: Restricted SpEL
       url: /reference/bundles/spel.html
+    - title: System One
+      url: /reference/bundles/system-one.html
     - title: Microsoft Teams
       url: /reference/bundles/teams.html
     - title: Telegram

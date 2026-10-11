@@ -102,6 +102,11 @@
         </dependency>
         <dependency>
             <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-system-one</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-telegram</artifactId>
             <version>${project.version}</version>
         </dependency>

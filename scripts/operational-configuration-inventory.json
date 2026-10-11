@@ -434079,7 +434079,7 @@
     {
       "id": "oc-7544f149f0969f902bfa",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8378,
+      "line": 8397,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434094,7 +434094,7 @@
     {
       "id": "oc-f1755d612c280a12cefe",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8379,
+      "line": 8398,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434109,7 +434109,7 @@
     {
       "id": "oc-58855d69731ba73c25a5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8383,
+      "line": 8402,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434124,7 +434124,7 @@
     {
       "id": "oc-485a64ef4535eed4855b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8383,
+      "line": 8402,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434139,7 +434139,7 @@
     {
       "id": "oc-f160272bb1a9028e0675",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8385,
+      "line": 8404,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434154,7 +434154,7 @@
     {
       "id": "oc-d0534d44d369911b8cf9",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8411,
+      "line": 8434,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434169,7 +434169,7 @@
     {
       "id": "oc-8c29d611ed18debacb8c",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8412,
+      "line": 8435,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434184,7 +434184,7 @@
     {
       "id": "oc-6af83f502f3992a8930f",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8455,
+      "line": 8478,
       "symbol": "normalize_prepared_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434199,7 +434199,7 @@
     {
       "id": "oc-fbbd0a73974f5d1034b6",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8466,
+      "line": 8489,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434214,7 +434214,7 @@
     {
       "id": "oc-d2617cf849f1a6b2cc86",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8466,
+      "line": 8489,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434229,7 +434229,7 @@
     {
       "id": "oc-1387f40b242c16411126",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8467,
+      "line": 8490,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434244,7 +434244,7 @@
     {
       "id": "oc-2e460af5e7f43b642189",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8469,
+      "line": 8492,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434259,7 +434259,7 @@
     {
       "id": "oc-87ddf21e5e551dd52aa8",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8470,
+      "line": 8493,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434274,7 +434274,7 @@
     {
       "id": "oc-99b2c89a8c485c586b10",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8470,
+      "line": 8493,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434289,7 +434289,7 @@
     {
       "id": "oc-1448703891bed698b355",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8472,
+      "line": 8495,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434304,7 +434304,7 @@
     {
       "id": "oc-d2fffb75a27018163385",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8472,
+      "line": 8495,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434319,7 +434319,7 @@
     {
       "id": "oc-a8683aafa4932c3b9d65",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8472,
+      "line": 8495,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434334,7 +434334,7 @@
     {
       "id": "oc-573c5efd3286534ebded",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8477,
+      "line": 8500,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434349,7 +434349,7 @@
     {
       "id": "oc-e19272f47b1842fb630d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8482,
+      "line": 8505,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434364,7 +434364,7 @@
     {
       "id": "oc-d29b0c8c7201023a1065",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8482,
+      "line": 8505,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434379,7 +434379,7 @@
     {
       "id": "oc-607e5afe9eef3c5c7566",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8490,
+      "line": 8513,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434394,7 +434394,7 @@
     {
       "id": "oc-f9da875529ef0bbea2f2",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8490,
+      "line": 8513,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434409,7 +434409,7 @@
     {
       "id": "oc-209d298b27c22380f2e6",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8490,
+      "line": 8513,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434424,7 +434424,7 @@
     {
       "id": "oc-078961be812b77ad29b5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8492,
+      "line": 8515,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434439,7 +434439,7 @@
     {
       "id": "oc-4679d420cd4cf41599b0",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8514,
+      "line": 8537,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434454,7 +434454,7 @@
     {
       "id": "oc-1ad7d52ad0173a6d94fc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8514,
+      "line": 8537,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434469,7 +434469,7 @@
     {
       "id": "oc-a9129cc49b255d25e625",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8519,
+      "line": 8542,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434484,7 +434484,7 @@
     {
       "id": "oc-fa215fc00430f7756484",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8519,
+      "line": 8542,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434499,7 +434499,7 @@
     {
       "id": "oc-8f4021a5b48c8aa65dec",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8520,
+      "line": 8543,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434514,7 +434514,7 @@
     {
       "id": "oc-21220af8169ff7cfc691",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8533,
+      "line": 8556,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434529,7 +434529,7 @@
     {
       "id": "oc-15671f9356ec8965a4dd",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8533,
+      "line": 8556,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434544,7 +434544,7 @@
     {
       "id": "oc-4cc65703bb2e549bfd21",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8533,
+      "line": 8556,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434559,7 +434559,7 @@
     {
       "id": "oc-1538c9b84753b9353224",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8533,
+      "line": 8556,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434574,7 +434574,7 @@
     {
       "id": "oc-3ed81b0760fbe65160b3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8557,
+      "line": 8580,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434589,7 +434589,7 @@
     {
       "id": "oc-9a2d05dc3372eeaf2517",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8563,
+      "line": 8586,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434604,7 +434604,7 @@
     {
       "id": "oc-b35d8b4455f59e4354f3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8564,
+      "line": 8587,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434619,7 +434619,7 @@
     {
       "id": "oc-51ac029db5455bb9b739",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8564,
+      "line": 8587,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434634,7 +434634,7 @@
     {
       "id": "oc-a9e152bcd0504a9cb6d4",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8565,
+      "line": 8588,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434649,7 +434649,7 @@
     {
       "id": "oc-c0349e9a1dc3f27afa42",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8588,
+      "line": 8611,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434664,7 +434664,7 @@
     {
       "id": "oc-b455160acb46b510814e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8588,
+      "line": 8611,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434679,7 +434679,7 @@
     {
       "id": "oc-bdb3d9854bb6dec1b68b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8589,
+      "line": 8612,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434694,7 +434694,7 @@
     {
       "id": "oc-6364fa822c0d4350a130",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8599,
+      "line": 8626,
       "symbol": "rewrite_ravenroot_pom_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434709,7 +434709,7 @@
     {
       "id": "oc-06738aa306d9f2ad9c55",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8614,
+      "line": 8641,
       "symbol": "rewrite_ravenroot_pom_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434724,7 +434724,7 @@
     {
       "id": "oc-f7c65dc5b33f2269afa5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8630,
+      "line": 8657,
       "symbol": "rewrite_ravenroot_pom_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434739,7 +434739,7 @@
     {
       "id": "oc-b84f1e30ca99b8f3d60b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8635,
+      "line": 8662,
       "symbol": "rewrite_ravenroot_pom_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434754,7 +434754,7 @@
     {
       "id": "oc-eb794c982dfcf335a2be",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8647,
+      "line": 8674,
       "symbol": "scalar",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434769,7 +434769,7 @@
     {
       "id": "oc-541f159e655c3fcfa5c1",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8651,
+      "line": 8678,
       "symbol": "scalar",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434784,7 +434784,7 @@
     {
       "id": "oc-85e64edd5910c70d52bc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8656,
+      "line": 8683,
       "symbol": "scalar",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434799,7 +434799,7 @@
     {
       "id": "oc-379532cf473e5a678110",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8697,
+      "line": 8724,
       "symbol": "add_coordinate_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434814,7 +434814,7 @@
     {
       "id": "oc-e040d373853b67c76bcd",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8708,
+      "line": 8735,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434829,7 +434829,7 @@
     {
       "id": "oc-92a60d8a44c02e422b23",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8708,
+      "line": 8735,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434844,7 +434844,7 @@
     {
       "id": "oc-3e78c0cb12c5531419d7",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8708,
+      "line": 8735,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434859,7 +434859,7 @@
     {
       "id": "oc-63691b8cf96b2d866445",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8714,
+      "line": 8741,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434874,7 +434874,7 @@
     {
       "id": "oc-74d3b265daa00ba7335e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8723,
+      "line": 8750,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434889,7 +434889,7 @@
     {
       "id": "oc-38225da72a9d7e20e4d1",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8726,
+      "line": 8753,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434904,7 +434904,7 @@
     {
       "id": "oc-d07b3365e32f42f5f70f",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8731,
+      "line": 8758,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434919,7 +434919,7 @@
     {
       "id": "oc-f07e09170a9a5722aba8",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8735,
+      "line": 8762,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434934,7 +434934,7 @@
     {
       "id": "oc-17dcd43aacdb7fe983a3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8735,
+      "line": 8762,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434949,7 +434949,7 @@
     {
       "id": "oc-8e961142c61bfd16e4bc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8736,
+      "line": 8763,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434964,7 +434964,7 @@
     {
       "id": "oc-682e7533765f4b0fb019",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8739,
+      "line": 8766,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434979,7 +434979,7 @@
     {
       "id": "oc-19b3d25c7679edc0ffb2",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8743,
+      "line": 8770,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434994,7 +434994,7 @@
     {
       "id": "oc-49dfbf4084af4fdf407e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8746,
+      "line": 8773,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435009,7 +435009,7 @@
     {
       "id": "oc-af1842bc5d82bf9e9b72",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8748,
+      "line": 8775,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435024,7 +435024,7 @@
     {
       "id": "oc-471ff4984d10c0709e07",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8752,
+      "line": 8779,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435039,7 +435039,7 @@
     {
       "id": "oc-bb68b11cbce2dbe210b3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8762,
+      "line": 8789,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435054,7 +435054,7 @@
     {
       "id": "oc-0687e8cebf5100ecc518",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8768,
+      "line": 8795,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435069,7 +435069,7 @@
     {
       "id": "oc-33c18d43316c34cedad9",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8779,
+      "line": 8806,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435084,7 +435084,7 @@
     {
       "id": "oc-c0f7ede126335fc66a98",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8787,
+      "line": 8814,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435103,7 +435103,7 @@
     {
       "id": "oc-4c927ff9f3ad99469f83",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8789,
+      "line": 8816,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435122,7 +435122,7 @@
     {
       "id": "oc-3ba80e822f023c3b6887",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8789,
+      "line": 8816,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435141,7 +435141,7 @@
     {
       "id": "oc-b4152d5488eae048263b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8789,
+      "line": 8816,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435160,7 +435160,7 @@
     {
       "id": "oc-6bcaf7c40aff8ec0936f",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8789,
+      "line": 8816,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -435179,7 +435179,7 @@
     {
       "id": "oc-0d1d4dfb54aadac3008a",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8798,
+      "line": 8825,
       "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -835704,6 +835704,19 @@
       "targetRevision": "fffd56f5284bee2afd31bff1bd8ccd04fd951072",
       "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
       "sourceInventoryDigest": "a454684a8d406ac6fb6a3203b289261ed19a2365385c0509327710a9acabeece",
+      "targetCandidateDigest": "504cd12ee3004d8e8af7b6b40049f5d07b86de88b07d6ffa8e6916f37bfde955",
+      "mappings": [],
+      "retirements": [],
+      "additions": [],
+      "semanticReviews": []
+    },
+    {
+      "id": "issue-552-attempt5-compatibility-boundaries-reconciliation-v1",
+      "issue": "#552",
+      "sourceRevision": "c3ad62a0dbaca175b0db577aa1d091d455c2197a",
+      "targetRevision": "fc7e040a6e09eb6ae394287afbac39fe76802858",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "386e773a873dd1d2d04fb01a5135f293160975453536cc94c51bfc04faf6681a",
       "targetCandidateDigest": "504cd12ee3004d8e8af7b6b40049f5d07b86de88b07d6ffa8e6916f37bfde955",
       "mappings": [],
       "retirements": [],

@@ -66,6 +66,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-server",
     "ravenroot-slack",
     "ravenroot-spel",
+    "ravenroot-system-one",
     "ravenroot-teams",
     "ravenroot-telegram",
     "ravenroot-websocket",

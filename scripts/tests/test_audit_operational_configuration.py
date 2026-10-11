@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from collections import Counter
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -8358,8 +8359,20 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
             later_pom = root / "ravenroot/later-module/pom.xml"
             later_pom.parent.mkdir()
             later_pom.write_text(
-                "<project><parent><version>0.6.0-alpha.1</version></parent>"
-                "<description>accepted after preparation</description></project>\n",
+                "<project><parent><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-parent</artifactId>"
+                "<version>0.6.0-alpha.1</version></parent>"
+                "<groupId>ai.ravenroot.extensions</groupId><artifactId>later-module</artifactId>"
+                "<version>0.6.0-alpha.1</version>"
+                "<description>accepted after preparation</description>"
+                "<dependencies><dependency><groupId>example.external</groupId>"
+                "<artifactId>coincidental-version</artifactId>"
+                "<version>0.6.0-alpha.1</version></dependency>"
+                "<dependency><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-application-api</artifactId>"
+                "<version>0.6.0-alpha.1</version></dependency></dependencies>"
+                "<properties><ravenroot.version>0.6.0-alpha.1</ravenroot.version>"
+                "<external.version>0.6.0-alpha.1</external.version></properties></project>\n",
                 encoding="utf-8",
             )
             commit("amend prepared release evidence")
@@ -8373,8 +8386,20 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                              navigation.read_text(encoding="utf-8"))
             self.assertEqual("accepted after preparation\n", unrelated.read_text(encoding="utf-8"))
             self.assertEqual(
-                "<project><parent><version>0.5.1-alpha.1</version></parent>"
-                "<description>accepted after preparation</description></project>\n",
+                "<project><parent><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-parent</artifactId>"
+                "<version>0.5.1-alpha.1</version></parent>"
+                "<groupId>ai.ravenroot.extensions</groupId><artifactId>later-module</artifactId>"
+                "<version>0.5.1-alpha.1</version>"
+                "<description>accepted after preparation</description>"
+                "<dependencies><dependency><groupId>example.external</groupId>"
+                "<artifactId>coincidental-version</artifactId>"
+                "<version>0.6.0-alpha.1</version></dependency>"
+                "<dependency><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-application-api</artifactId>"
+                "<version>0.5.1-alpha.1</version></dependency></dependencies>"
+                "<properties><ravenroot.version>0.5.1-alpha.1</ravenroot.version>"
+                "<external.version>0.6.0-alpha.1</external.version></properties></project>\n",
                 later_pom.read_text(encoding="utf-8"),
             )
 
@@ -8565,6 +8590,119 @@ RELEASE_PREPARATION_PATHS = {
 }
 
 
+def rewrite_ravenroot_pom_version(
+        source: str, prepared_version: str, source_version: str, path: str) -> str:
+    """Rewrite only Maven version elements owned by Ravenroot coordinates."""
+    try:
+        ET.fromstring(source)
+    except ET.ParseError as error:
+        raise AssertionError(f"{path}: later Maven module is not valid XML") from error
+
+    token_pattern = re.compile(
+        r"(?s)<!--.*?-->|<\?.*?\?>|<!\[CDATA\[.*?\]\]>|<![^>]*>|"
+        r"<(?P<close>/)?(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)(?P<tail>[^>]*)>"
+    )
+    elements: list[dict[str, object]] = []
+    stack: list[dict[str, object]] = []
+    for match in token_pattern.finditer(source):
+        name = match.group("name")
+        if name is None:
+            continue
+        local_name = name.rsplit(":", 1)[-1]
+        if match.group("close"):
+            if not stack or stack[-1]["name"] != local_name:
+                raise AssertionError(f"{path}: later Maven module has mismatched XML tags")
+            element = stack.pop()
+            element["close_start"] = match.start()
+            element["end"] = match.end()
+            continue
+        element = {
+            "name": local_name,
+            "parent": stack[-1] if stack else None,
+            "open_end": match.end(),
+            "close_start": match.end(),
+            "end": match.end(),
+        }
+        elements.append(element)
+        if not match.group("tail").rstrip().endswith("/"):
+            stack.append(element)
+    if stack:
+        raise AssertionError(f"{path}: later Maven module has unclosed XML tags")
+
+    projects = [element for element in elements if element["name"] == "project"
+                and element["parent"] is None]
+    if len(projects) != 1:
+        raise AssertionError(f"{path}: later Maven module must contain one project element")
+    project = projects[0]
+
+    def children(element: dict[str, object], name: str) -> list[dict[str, object]]:
+        return [candidate for candidate in elements
+                if candidate["parent"] is element and candidate["name"] == name]
+
+    def scalar(element: dict[str, object], name: str) -> str | None:
+        matches = children(element, name)
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise AssertionError(f"{path}: Maven {element['name']} has repeated {name}")
+        match = matches[0]
+        value = source[int(match["open_end"]):int(match["close_start"])].strip()
+        if "<" in value:
+            raise AssertionError(f"{path}: Maven {element['name']} has non-scalar {name}")
+        return value
+
+    parents = children(project, "parent")
+    if len(parents) > 1:
+        raise AssertionError(f"{path}: Maven project has repeated parent coordinates")
+    parent = parents[0] if parents else None
+    project_group = scalar(project, "groupId")
+    inherited_group = scalar(parent, "groupId") if parent is not None else None
+    ravenroot_project = (project_group or inherited_group or "").startswith("ai.ravenroot")
+
+    targets: list[dict[str, object]] = []
+
+    def add_coordinate_version(element: dict[str, object], coordinate: str) -> None:
+        group = scalar(element, "groupId")
+        artifact = scalar(element, "artifactId")
+        version = scalar(element, "version")
+        if (group is not None and group.startswith("ai.ravenroot") and artifact
+                and version == prepared_version):
+            targets.extend(children(element, "version"))
+        elif (coordinate == "project" and ravenroot_project and artifact
+              and version == prepared_version):
+            targets.extend(children(element, "version"))
+
+    add_coordinate_version(project, "project")
+    if parent is not None:
+        add_coordinate_version(parent, "parent")
+    for dependency in (element for element in elements if element["name"] == "dependency"):
+        add_coordinate_version(dependency, "dependency")
+    if ravenroot_project:
+        for properties in children(project, "properties"):
+            for version_property in children(properties, "ravenroot.version"):
+                value = source[
+                    int(version_property["open_end"]):int(version_property["close_start"])
+                ].strip()
+                if value == prepared_version:
+                    targets.append(version_property)
+
+    replacements: list[tuple[int, int]] = []
+    for target in targets:
+        start = int(target["open_end"])
+        end = int(target["close_start"])
+        raw = source[start:end]
+        value_start = start + len(raw) - len(raw.lstrip())
+        value_end = end - (len(raw) - len(raw.rstrip()))
+        if source[value_start:value_end] != prepared_version:
+            raise AssertionError(f"{path}: Ravenroot version coordinate is not an exact scalar")
+        replacements.append((value_start, value_end))
+
+    updated = source
+    for start, end in sorted(set(replacements), reverse=True):
+        updated = updated[:start] + source_version + updated[end:]
+    return updated
+
+
 def reverse_release_preparation_delta(
         root: Path, preparation_revision: str, target_version: str) -> None:
     """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
@@ -8639,13 +8777,7 @@ def reverse_release_preparation_delta(
     later_pom_updates: dict[str, str] = {}
     for path in sorted(current_pom_paths - pom_paths):
         source = (root / path).read_text(encoding="utf-8")
-        updated = source.replace(
-            f"<version>{prepared_version}</version>",
-            f"<version>{source_version}</version>",
-        ).replace(
-            f"<ravenroot.version>{prepared_version}</ravenroot.version>",
-            f"<ravenroot.version>{source_version}</ravenroot.version>",
-        )
+        updated = rewrite_ravenroot_pom_version(source, prepared_version, source_version, path)
         if updated != source:
             later_pom_updates[path] = updated
     if subprocess.run(

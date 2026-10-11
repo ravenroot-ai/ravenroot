@@ -434079,7 +434079,7 @@
     {
       "id": "oc-7544f149f0969f902bfa",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8358,
+      "line": 8365,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434094,7 +434094,7 @@
     {
       "id": "oc-f1755d612c280a12cefe",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8359,
+      "line": 8366,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434109,7 +434109,7 @@
     {
       "id": "oc-58855d69731ba73c25a5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8363,
+      "line": 8370,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434124,7 +434124,7 @@
     {
       "id": "oc-485a64ef4535eed4855b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8363,
+      "line": 8370,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434139,7 +434139,7 @@
     {
       "id": "oc-f160272bb1a9028e0675",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8365,
+      "line": 8372,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434154,7 +434154,7 @@
     {
       "id": "oc-d0534d44d369911b8cf9",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8374,
+      "line": 8386,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434169,7 +434169,7 @@
     {
       "id": "oc-8c29d611ed18debacb8c",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8375,
+      "line": 8387,
       "symbol": "commit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434184,7 +434184,7 @@
     {
       "id": "oc-6af83f502f3992a8930f",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8418,
+      "line": 8430,
       "symbol": "normalize_prepared_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434199,7 +434199,7 @@
     {
       "id": "oc-fbbd0a73974f5d1034b6",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8429,
+      "line": 8441,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434214,7 +434214,7 @@
     {
       "id": "oc-d2617cf849f1a6b2cc86",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8429,
+      "line": 8441,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434229,7 +434229,7 @@
     {
       "id": "oc-1387f40b242c16411126",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8430,
+      "line": 8442,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434244,7 +434244,7 @@
     {
       "id": "oc-2e460af5e7f43b642189",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8432,
+      "line": 8444,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434259,7 +434259,7 @@
     {
       "id": "oc-87ddf21e5e551dd52aa8",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8433,
+      "line": 8445,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434274,7 +434274,7 @@
     {
       "id": "oc-99b2c89a8c485c586b10",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8433,
+      "line": 8445,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434289,7 +434289,7 @@
     {
       "id": "oc-1448703891bed698b355",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8435,
+      "line": 8447,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434304,7 +434304,7 @@
     {
       "id": "oc-d2fffb75a27018163385",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8435,
+      "line": 8447,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434319,7 +434319,7 @@
     {
       "id": "oc-a8683aafa4932c3b9d65",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8435,
+      "line": 8447,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434334,7 +434334,7 @@
     {
       "id": "oc-573c5efd3286534ebded",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8440,
+      "line": 8452,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434349,7 +434349,7 @@
     {
       "id": "oc-e19272f47b1842fb630d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8445,
+      "line": 8457,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434364,7 +434364,7 @@
     {
       "id": "oc-d29b0c8c7201023a1065",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8445,
+      "line": 8457,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434379,7 +434379,7 @@
     {
       "id": "oc-607e5afe9eef3c5c7566",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8453,
+      "line": 8465,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434394,7 +434394,7 @@
     {
       "id": "oc-f9da875529ef0bbea2f2",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8453,
+      "line": 8465,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434409,7 +434409,7 @@
     {
       "id": "oc-209d298b27c22380f2e6",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8453,
+      "line": 8465,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434424,7 +434424,7 @@
     {
       "id": "oc-078961be812b77ad29b5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8455,
+      "line": 8467,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434439,7 +434439,7 @@
     {
       "id": "oc-4679d420cd4cf41599b0",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8477,
+      "line": 8489,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434454,7 +434454,7 @@
     {
       "id": "oc-1ad7d52ad0173a6d94fc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8477,
+      "line": 8489,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434469,7 +434469,7 @@
     {
       "id": "oc-a9129cc49b255d25e625",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8482,
+      "line": 8494,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434484,7 +434484,7 @@
     {
       "id": "oc-fa215fc00430f7756484",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8482,
+      "line": 8494,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434499,7 +434499,7 @@
     {
       "id": "oc-8f4021a5b48c8aa65dec",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8483,
+      "line": 8495,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434514,7 +434514,7 @@
     {
       "id": "oc-21220af8169ff7cfc691",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8496,
+      "line": 8508,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434529,7 +434529,7 @@
     {
       "id": "oc-15671f9356ec8965a4dd",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8496,
+      "line": 8508,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434544,7 +434544,7 @@
     {
       "id": "oc-4cc65703bb2e549bfd21",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8496,
+      "line": 8508,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434559,7 +434559,7 @@
     {
       "id": "oc-1538c9b84753b9353224",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8496,
+      "line": 8508,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434574,7 +434574,7 @@
     {
       "id": "oc-3ed81b0760fbe65160b3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8520,
+      "line": 8532,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434589,7 +434589,7 @@
     {
       "id": "oc-9a2d05dc3372eeaf2517",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8526,
+      "line": 8538,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434604,7 +434604,7 @@
     {
       "id": "oc-b35d8b4455f59e4354f3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8527,
+      "line": 8539,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434619,7 +434619,7 @@
     {
       "id": "oc-51ac029db5455bb9b739",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8527,
+      "line": 8539,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434634,7 +434634,7 @@
     {
       "id": "oc-a9e152bcd0504a9cb6d4",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8528,
+      "line": 8540,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434649,7 +434649,7 @@
     {
       "id": "oc-c0349e9a1dc3f27afa42",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8551,
+      "line": 8563,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434664,7 +434664,7 @@
     {
       "id": "oc-b455160acb46b510814e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8551,
+      "line": 8563,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434679,7 +434679,7 @@
     {
       "id": "oc-bdb3d9854bb6dec1b68b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8552,
+      "line": 8564,
       "symbol": "exercise_later_security_note",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434694,7 +434694,7 @@
     {
       "id": "oc-e040d373853b67c76bcd",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8558,
+      "line": 8570,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434709,7 +434709,7 @@
     {
       "id": "oc-92a60d8a44c02e422b23",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8558,
+      "line": 8570,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434724,7 +434724,7 @@
     {
       "id": "oc-3e78c0cb12c5531419d7",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8558,
+      "line": 8570,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434739,7 +434739,7 @@
     {
       "id": "oc-63691b8cf96b2d866445",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8564,
+      "line": 8576,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434754,7 +434754,7 @@
     {
       "id": "oc-74d3b265daa00ba7335e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8573,
+      "line": 8585,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434769,7 +434769,7 @@
     {
       "id": "oc-38225da72a9d7e20e4d1",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8576,
+      "line": 8588,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434784,7 +434784,7 @@
     {
       "id": "oc-d07b3365e32f42f5f70f",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8581,
+      "line": 8593,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434799,7 +434799,7 @@
     {
       "id": "oc-f07e09170a9a5722aba8",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8585,
+      "line": 8597,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434814,7 +434814,7 @@
     {
       "id": "oc-17dcd43aacdb7fe983a3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8585,
+      "line": 8597,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434829,7 +434829,7 @@
     {
       "id": "oc-8e961142c61bfd16e4bc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8586,
+      "line": 8598,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434844,7 +434844,7 @@
     {
       "id": "oc-682e7533765f4b0fb019",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8589,
+      "line": 8601,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434859,7 +434859,7 @@
     {
       "id": "oc-19b3d25c7679edc0ffb2",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8593,
+      "line": 8605,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434874,7 +434874,7 @@
     {
       "id": "oc-49dfbf4084af4fdf407e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8596,
+      "line": 8608,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434889,7 +434889,7 @@
     {
       "id": "oc-af1842bc5d82bf9e9b72",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8598,
+      "line": 8610,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434904,7 +434904,7 @@
     {
       "id": "oc-471ff4984d10c0709e07",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8602,
+      "line": 8614,
       "symbol": "reverse_release_preparation_delta",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -434917,10 +434917,55 @@
       "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority."
     },
     {
-      "id": "oc-fa6e43b14c9af61c201e",
+      "id": "oc-bb68b11cbce2dbe210b3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8607,
-      "symbol": "reverse_release_preparation_delta",
+      "line": 8624,
+      "symbol": "revision_product_version",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"{revision}: release source has no product version\"",
+      "expressionDigest": "70838f7a28629ffe3df289167e0daf4b48db67606f6c7e500a48eaad91cb3eb3",
+      "evidenceDigest": "5813c8be6ddbaa2c1f2fd1f61b8cda246c099195c1cad0be836ff15201963472",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
+    },
+    {
+      "id": "oc-0687e8cebf5100ecc518",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 8630,
+      "symbol": "revision_product_version",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"release preparation versions do not match the requested inverse\"",
+      "expressionDigest": "da82fa9e86b91f86a0b92a3a61b12b40ee7fa1d29b0e030e46fc570b7e99c4ef",
+      "evidenceDigest": "347a9b1f7150964fe068e004f3fc4df8d2dac70b5e6d0e01033136a41ebd1ee4",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
+    },
+    {
+      "id": "oc-33c18d43316c34cedad9",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 8641,
+      "symbol": "revision_product_version",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"utf-8\"",
+      "expressionDigest": "d98383a6cb0943d0f3b771d8bf29de73aac12e12bdcea69140c3cdc493f55b30",
+      "evidenceDigest": "5bf59ad910c724ceff436b8bd5d1088b9502aa9b3db589dfb15616daf04710b4",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
+    },
+    {
+      "id": "oc-c0f7ede126335fc66a98",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 8655,
+      "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"authoritative release fixture must start clean\"",
@@ -434929,13 +434974,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority."
+      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority.",
+      "identityMigration": {
+        "history": "issue-552-attempt3-release-fixture-reconciliation-v1",
+        "fromId": "oc-fa6e43b14c9af61c201e"
+      }
     },
     {
-      "id": "oc-162b5147a68a7597ff9a",
+      "id": "oc-4c927ff9f3ad99469f83",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8609,
-      "symbol": "reverse_release_preparation_delta",
+      "line": 8657,
+      "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"--\"",
@@ -434944,13 +434993,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority."
+      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority.",
+      "identityMigration": {
+        "history": "issue-552-attempt3-release-fixture-reconciliation-v1",
+        "fromId": "oc-162b5147a68a7597ff9a"
+      }
     },
     {
-      "id": "oc-cbb3fd43b0b07bbdf7ba",
+      "id": "oc-3ba80e822f023c3b6887",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8609,
-      "symbol": "reverse_release_preparation_delta",
+      "line": 8657,
+      "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"--binary\"",
@@ -434959,13 +435012,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority."
+      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority.",
+      "identityMigration": {
+        "history": "issue-552-attempt3-release-fixture-reconciliation-v1",
+        "fromId": "oc-cbb3fd43b0b07bbdf7ba"
+      }
     },
     {
-      "id": "oc-4fcd8d66769e8ce4fe94",
+      "id": "oc-b4152d5488eae048263b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8609,
-      "symbol": "reverse_release_preparation_delta",
+      "line": 8657,
+      "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"diff\"",
@@ -434974,13 +435031,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority."
+      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority.",
+      "identityMigration": {
+        "history": "issue-552-attempt3-release-fixture-reconciliation-v1",
+        "fromId": "oc-4fcd8d66769e8ce4fe94"
+      }
     },
     {
-      "id": "oc-5c02bf0a7692e753556a",
+      "id": "oc-6bcaf7c40aff8ec0936f",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 8609,
-      "symbol": "reverse_release_preparation_delta",
+      "line": 8657,
+      "symbol": "revision_product_version",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"git\"",
@@ -434989,7 +435050,26 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority."
+      "rationale": "Issue #535 bounded prepared-release history helper fixture value; it validates finite release-surface reconstruction and grants no production runtime authority.",
+      "identityMigration": {
+        "history": "issue-552-attempt3-release-fixture-reconciliation-v1",
+        "fromId": "oc-5c02bf0a7692e753556a"
+      }
+    },
+    {
+      "id": "oc-0d1d4dfb54aadac3008a",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 8666,
+      "symbol": "revision_product_version",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"utf-8\"",
+      "expressionDigest": "d98383a6cb0943d0f3b771d8bf29de73aac12e12bdcea69140c3cdc493f55b30",
+      "evidenceDigest": "21538e994202f643f5d683279b3ab61bf886c8a26f9fd29269a3378c9b54ceed",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
     },
     {
       "id": "oc-55ffb6c422fc576de77a",
@@ -548700,6 +548780,7 @@
     "21442ed61b43afa156aa903b8ced5f60862bf7d8d79b41002bb0892f5484e92c": "private static final List<String> PARENT_FIRST_ONLY_PREFIXES = List.of( \"javax.\");",
     "214ba1a4aab12af8b0c48b8bb6158e6ad8f93e3bc0dedb2ca93af93ad4983e56": "{\"pointer\":\"/properties/rateLimit/properties/submissionBurst/oneOf/1/$ref\",\"reference\":\"#/definitions/graphBlank\",\"required\":true,\"resolutionError\":null,\"resolved\":{\"pattern\":\"^[\\t-\\r\\u001c- \\u1680\\u2000-\\u2006\\u2008-\\u200a\\u2028-\\u2029\\u205f\\u3000]*$\",\"type\":\"string\"}}",
     "214c0a19e26d433f6a3809a340d94fd9a6aceafd0c40e3b630729dbaa9afbc54": "if (container[\"readinessProbe\"][\"initialDelaySeconds\"], container[\"readinessProbe\"][\"periodSeconds\"],",
+    "21538e994202f643f5d683279b3ab61bf886c8a26f9fd29269a3378c9b54ceed": "(root / path).write_text(contents, encoding=\"utf-8\")",
     "215ee49442ee65fa2d6f3978f86bc6af6b9055e569a9f106339352d5eb373c35": "DeploymentRegistry.Record acquired = registry.acquire(\"owner-one\", Duration.ofSeconds(10), command(made, \"acquire\", 'b')) .toCompletableFuture().join();",
     "2161b0a5cdde4d63a09dd4099f93b5be9c3ef08550d6f528997a792bfe977f18": "--reporter=json >\"$OUTDIR/run-$run.stdout\" 2>\"$OUTDIR/run-$run.stderr\"",
     "2162d25905a9c4840c2f305bb063c35530f317b2a5801ea3f562ec375344f4f8": "public static final int DEFAULT_EXECUTION_OWNERSHIP_LIMIT = 4_096;",
@@ -549469,6 +549550,7 @@
     "3471bd8db1727609586c898f6ceceb4c31f4782ac5d13fdb73d43774451946e3": "\"RAVENROOT_LOCAL_RUNNER_CONFIG\": \"/etc/ravenroot/local-runner/worker.json\",",
     "3472b0f88e98cb5ee6ab8e13973996b30a18e633ac113b3c5ad2c302da982b49": "maxReviewTextBytes: \"\"",
     "3479e54c21f8214d5ad2547656293dee16e4e560dfa4f392e029de0a173ea463": "\"x-ravenroot-environment\": \"RAVENROOT_GRAPH_MAX_FAN_OUT\",",
+    "347a9b1f7150964fe068e004f3fc4df8d2dac70b5e6d0e01033136a41ebd1ee4": "raise AssertionError(\"release preparation versions do not match the requested inverse\")",
     "347b85b2b0e75fe5966b8f5e680e1bebd874cff81454e9a92ccb15c0c1385771": "(\"authorized\", \"delegate.programAuthoringLimits().requireProgramCount(artifactIds.size());\", \"\"),",
     "347df7a24fccca4cbd7e0c2908bb62b2ea7f3ce9dc0b78ce2f2f077f313a4238": "if java_home_is_supported \"$found\"; then",
     "34803a9e9c3d4eeea67c03b88c24955ff0de42d8cd79f78a2cccf9657eefb705": "- name: RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID",
@@ -551053,6 +551135,7 @@
     "57fc3430a42a135a959cc69ff93433856525680e656f4ceeb8d675415c15a10d": "f\"Validated {PACK_ARTIFACT} with {len(expected)} explicit first-party NodePackage dependencies.\"",
     "57fd288a522f499cc5c9c3c85a63802948fbcf6ae7e11de0f8fefb1cc389e5cb": "parser.add_argument(\"--site-dir\", type=Path, default=Path(\"_site\"))",
     "580944cecaee104f2c893c06679f553b41d1d8fe66089e09f9b7a1c9caca39f8": "helm_schema=\"$PROJECT_DIR/deploy/helm/ravenroot/values.schema.json\"",
+    "5813c8be6ddbaa2c1f2fd1f61b8cda246c099195c1cad0be836ff15201963472": "raise AssertionError(f\"{revision}: release source has no product version\")",
     "58171ec49f421f83fb6c03ba883f834e5aefd4b299e691e240f3561a15d29664": "LOSSLESS_DIR=\"$TEMP_DIR/install-lossless-id\"",
     "581dde642cd9df4d705e85173ba5e8a7f65570c97d3bb7f40774dbc7d95e5e05": "deployment.start(TCK_IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);",
     "582582a38f50364300f447821e983321b7c752fa373d644355b6a8a9753bcb7d": "\"defaults.maxClockSkew(), true)\", \"defaults.maxClockSkew(), false)\")",
@@ -551221,6 +551304,7 @@
     "5bde3ffe00217b0d682a0f446f3dd84e35cdb6890768ab40ee8980327cd93a5f": "def run_of(self, event, conclusion=\"success\", sha=None, path=\".github/workflows/ci.yml\", branch=\"dev\"):",
     "5be829598c7301c52e8dcc4c2cd57f6457abe6ca952094702895da288042812f": "const checked = radios.find(control => control.getAttribute('aria-checked') === 'true'",
     "5be8d3110f76a0b2c53b8a275359ced3e77832f3fa4191ff72e420cd8a6cba34": "public static final int MAX_CHAIN_ENTRIES = 32;",
+    "5bf59ad910c724ceff436b8bd5d1088b9502aa9b3db589dfb15616daf04710b4": "source = (root / path).read_text(encoding=\"utf-8\")",
     "5bf7026266a8c97d61eb8494ade19d6ff805fc76fea7c0b10663022acf336d29": "\"assistantOperationalLimitsDefaultAndTightenIndependently\")",
     "5bf7f5a16c9bdaac5abba1dce717eee10f1e07e6d5332baabf56d04044797721": "static final AttributeKey<String> METRIC_ATTR_RUNNER_COUNTER = AttributeKey.stringKey(\"ravenroot.runner.counter\");",
     "5c02ce6cc0209e6a9c7512fee15b64be04792c1fcd186da2b040db3e36508610": "const undeployed = frame.reason === 'UNDEPLOYED';",
@@ -835285,6 +835369,123 @@
             "status": "retained",
             "classification": "security-ceiling-or-default",
             "rationale": "This fixed bound keeps System One profile, specification, response, or endpoint validation finite and fail-closed; operator profile values may narrow runtime limits."
+          }
+        }
+      ],
+      "semanticReviews": []
+    },
+    {
+      "id": "issue-552-attempt3-release-fixture-reconciliation-v1",
+      "issue": "#552",
+      "sourceRevision": "c5df253a0759bd5bdf487fd960281a02b6320831",
+      "targetRevision": "eb5131e669db0743f6597c67aef8dbe4ec41a38e",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "a3aa4816179623cf3b688c0c29d48d13843905b6338b6d006fd62a26151eb3ed",
+      "targetCandidateDigest": "78c7021ccf57c79bfe91d6fc4cf8dfb467cae2edf3a5ad7e70c9c7846088edac",
+      "mappings": [
+        {
+          "fromId": "oc-fa6e43b14c9af61c201e",
+          "toId": "oc-c0f7ede126335fc66a98",
+          "approved": true,
+          "rationale": "The exact test-fixture command or refusal atom remains at one source location after the reviewed nested version helper shifted its scanner symbol and line; its meaning and test-only scope are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 8607,
+            "afterLine": 8655,
+            "beforeEvidenceDigest": "6cedd0a6a0bc63dc81e5f50b00fb1ffb2d417750adb1ccece20ab997cfb9424f",
+            "afterEvidenceDigest": "6cedd0a6a0bc63dc81e5f50b00fb1ffb2d417750adb1ccece20ab997cfb9424f"
+          }
+        },
+        {
+          "fromId": "oc-4fcd8d66769e8ce4fe94",
+          "toId": "oc-b4152d5488eae048263b",
+          "approved": true,
+          "rationale": "The exact test-fixture command or refusal atom remains at one source location after the reviewed nested version helper shifted its scanner symbol and line; its meaning and test-only scope are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 8609,
+            "afterLine": 8657,
+            "beforeEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a",
+            "afterEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a"
+          }
+        },
+        {
+          "fromId": "oc-cbb3fd43b0b07bbdf7ba",
+          "toId": "oc-3ba80e822f023c3b6887",
+          "approved": true,
+          "rationale": "The exact test-fixture command or refusal atom remains at one source location after the reviewed nested version helper shifted its scanner symbol and line; its meaning and test-only scope are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 8609,
+            "afterLine": 8657,
+            "beforeEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a",
+            "afterEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a"
+          }
+        },
+        {
+          "fromId": "oc-162b5147a68a7597ff9a",
+          "toId": "oc-4c927ff9f3ad99469f83",
+          "approved": true,
+          "rationale": "The exact test-fixture command or refusal atom remains at one source location after the reviewed nested version helper shifted its scanner symbol and line; its meaning and test-only scope are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 8609,
+            "afterLine": 8657,
+            "beforeEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a",
+            "afterEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a"
+          }
+        },
+        {
+          "fromId": "oc-5c02bf0a7692e753556a",
+          "toId": "oc-6bcaf7c40aff8ec0936f",
+          "approved": true,
+          "rationale": "The exact test-fixture command or refusal atom remains at one source location after the reviewed nested version helper shifted its scanner symbol and line; its meaning and test-only scope are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 8609,
+            "afterLine": 8657,
+            "beforeEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a",
+            "afterEvidenceDigest": "90540458ea2555c2695853992ca8af62793c780f8b00df5b8f172d4a713ab00a"
+          }
+        }
+      ],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-0687e8cebf5100ecc518",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
+          }
+        },
+        {
+          "id": "oc-0d1d4dfb54aadac3008a",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
+          }
+        },
+        {
+          "id": "oc-33c18d43316c34cedad9",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
+          }
+        },
+        {
+          "id": "oc-bb68b11cbce2dbe210b3",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the release-preparation audit fixture and proves bounded historical version reconstruction or exact UTF-8 fixture I/O."
           }
         }
       ],

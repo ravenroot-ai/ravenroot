@@ -14718,6 +14718,8 @@ GRAPH_AUTHORING_SERVER_PATH = Path(
 GRAPH_AUTHORING_APPLICATION_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
 GRAPH_AUTHORING_UI_PATH = Path("ravenroot/ravenroot-ui/src/app.js")
+GRAPH_AUTHORING_GRAPH_PARSERS_PATH = Path("ravenroot/ravenroot-ui/src/graph-parsers.js")
+GRAPH_AUTHORING_STARTUP_IMPORT_PATH = Path("ravenroot/ravenroot-ui/src/startup-import.js")
 GRAPH_AUTHORING_CLIENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-authoring-client.js")
 GRAPH_AUTHORING_AUTHORIZATION_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/AuthorizationAction.java")
@@ -14753,6 +14755,8 @@ GRAPH_AUTHORING_FILE_PROOFS = {
         "89e3be9a469194d5efa1db7638fc88f97143692749918b668a408b23b4fc8d5c",
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
         "fc6894ee287b9c0913f5c64a3ef0c2404d85a738ea7e2d22b2a3a1f92b0f9612",
+    GRAPH_AUTHORING_STARTUP_IMPORT_PATH:
+        "fe40703b1b5dbb37dabba0015c1624b8e9110bc743cef56c18dfb67264543a70",
     GRAPH_AUTHORING_PUBLISHER_PATH:
         "d0419b38a9b27141904f35c58e589e88ed924fd6e746f088a57f86fd81511dc8",
 }
@@ -14792,6 +14796,8 @@ GRAPH_AUTHORING_TEST_PROOFS = {
         "1c50732ebcf54d29cad7c978339e0ec20afa99e353d0f1958f400ca63a75c10c",
     Path("ravenroot/ravenroot-ui/test/authoring-capability.test.js"):
         "356be89f7908295735b6cb1851ebd545a7fdfdcf934464ff19a37ab2e885a0ed",
+    Path("ravenroot/ravenroot-ui/test/startup-import.test.js"):
+        "ae01fbd27d8bcbe3cf6a34471e3081f2e5b6e453f174dc6f2b0d043e5f9c2197",
     Path("scripts/test_publish_graph_artifacts.py"):
         "ae2cdb72c8aade6e319e717eac8cf267cdb14f2d7af98bbf918e27476b159986",
 }
@@ -14827,7 +14833,15 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryDelete": "954a18af00d54b9aabaa5731898bf33cdd740f14831a382546ff15870d2049d7",
     "repositoryRelease": "def7c49bdc1e193b5b4303446a614ac288469056511210809886e932ca94b95f",
     "publishedArtifacts": "1c482b902b5dc8ec5ab654d5c7e886c3cff091856baa8ad1c4cb8ea298eb2908",
-    "connectRuntime": "e4fe0389ee111acff5f070c5d97ccfa1cb1ef2352fccda46df7c797f5e1db2fb",
+    "connectRuntime": "94e858eac5d4699d80d873075a0213c1335200c7b8f1401810f7c7c652c3165d",
+    "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
+    "startupImportBindingIsCurrent": "5b79d5f6babdfab051815044c3733970c2bb9cd701915b6ac68c098e7df150d4",
+    "startupImportPlaceholderIsUntouched": "ec85ae388382bb8b6f0c477a4467663543903cc189f422cb0a86716957e0d32d",
+    "startupImportFailure": "081e9af5a6a425f33f74d165d70f1537af97bb75e3d73d347b17691b0df7beaf",
+    "parsePreparedGraph": "bf35edb6a58f448772bc3436a73f545345837ca12a31b175fb4fe5095a00c7e9",
+    "runStartupImport": "72182103c86fe6e8194c29d11700d20a126f4ec0a63b74711f7424cb8040f051",
+    "renderStartupImport": "d68694e197928c9bc52a5b2d9060d24a8d0aac2e0bb3fd8488604333b72e7104",
+    "initializeStartupImport": "01940ba511198f4940e7635ec6ebeab9d7724f4d244a926d960c3ca107af890c",
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
@@ -14836,6 +14850,12 @@ GRAPH_AUTHORING_UI_SPAN_PROOFS = {
         "7d27998b71758692c6cf4c41f5eb9fbc77dfad1b872902d09112d5d8db844403",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):
         "19379383672efec4863430ab57099e9d66fee3995c35775804cb57b6db68e34f",
+    (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "fetchInputTextWithinByteLimit"):
+        "fbd7b5689ea65c82a2052c1ce3c98da84d5bdb266751053bc935ead5079fda26",
+    (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "readResponseTextWithinByteLimit"):
+        "70bcc2174e27bfe6fc474c4394b365cd7c0a4524ea09c313f553491a176dc05d",
+    (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "requireDocumentByteLimit"):
+        "33dae37154ff2b7db6a20132b41427155524b195e228b6dc0987973ed7d04156",
 }
 GRAPH_AUTHORING_SETTINGS = (
     ("graph.authoring.mode", "mode", "RAVENROOT_GRAPH_AUTHORING_MODE", "LOCAL", "LOCAL or GIT."),
@@ -15054,6 +15074,10 @@ def graph_authoring_authority_from_source(
         (ui, "AUTHORING_CAPABILITY_STATE.UNAVAILABLE"),
         (ui, "await graphAuthoringClient.importArtifact"),
         (ui, "await graphAuthoringClient.deploy"),
+        (ui, "runtimeConfiguration.configuration.graphDocumentMaxBytes"),
+        (ui, "fetchInputTextWithinByteLimit(target.url, maxBytes"),
+        (ui, "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })"),
+        (ui, "workspaceAuthority.state === 'ready'"),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "authoring-capability.js")],
          "A failed or pending request never reaches this branch"),
         (sources[GRAPH_AUTHORING_PUBLISHER_PATH],

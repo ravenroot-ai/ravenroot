@@ -6792,6 +6792,29 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
              ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);"),
             (audit.GRAPH_AUTHORING_UI_PATH,
              "applyAcceptedGraphMl(target.graph, result", "void applyAcceptedGraphMl(target.graph, result"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes;\n"
+             "  showLoading();",
+             "const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes + 1;\n"
+             "  showLoading();"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "if (signal.aborted || !startupImportBindingIsCurrent(binding)) {\n"
+             "    throw new StartupImportError('stale-authority',\n"
+             "      'The service or workspace changed during the import. Retry in the current workspace.');\n"
+             "  }\n  let graph;",
+             "if (signal.aborted) {\n"
+             "    throw new StartupImportError('stale-authority',\n"
+             "      'The service or workspace changed during the import. Retry in the current workspace.');\n"
+             "  }\n  let graph;"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })",
+             "parsePreparedGraph(text, target.filename, { automatic: true })"),
+            (audit.GRAPH_AUTHORING_GRAPH_PARSERS_PATH,
+             "total += value.byteLength;\n      if (total > maxBytes)",
+             "total += value.byteLength;\n      if (false)"),
+            (audit.GRAPH_AUTHORING_STARTUP_IMPORT_PATH,
+             "outcome.kind !== 'ready' || !sameBinding(flight?.binding, outcome.binding)",
+             "outcome.kind !== 'ready'"),
             (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
                   if path.name == "authoring-capability.js"),
              "return actions.blocked();", "return actions.local();"),

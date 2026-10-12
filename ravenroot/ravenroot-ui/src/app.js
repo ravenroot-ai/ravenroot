@@ -1032,7 +1032,7 @@ let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
 let graphAuthoringCapability = pendingAuthoringCapability();
 let runtimeConnectionGeneration = 0;
-const startupService = connectionService(document.getElementById('service-url').value, location.origin);
+const startupService = connectionService(document.getElementById('service-url').defaultValue, location.origin);
 const startupServerAuth = document.getElementById('service-url').dataset.serverAuth === 'true';
 const rememberedConnection = createRememberedConnection({
   origin: location.origin,
@@ -16647,7 +16647,7 @@ window.addEventListener('load', () => {
   // Resolve a remembered public connection ahead of the operator prefix. Task recovery locators
   // never override connection authority; an external service still needs fresh origin confirmation.
   const serviceInput = document.getElementById('service-url');
-  const defaultService = serviceInput.value;
+  const defaultService = serviceInput.defaultValue;
   // Preserve the existing service-only task recovery preference below an opted-in connection.
   // It carries no credential or trust decision, and must pass the same public binding validation.
   let legacyService = '';

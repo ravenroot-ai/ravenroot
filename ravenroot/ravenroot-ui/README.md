@@ -73,8 +73,10 @@ Then open `http://127.0.0.1:5173/`, or load an example directly:
 
 The `file` query parameter is a startup import. Ravenroot waits until service configuration and any
 stored workspace restoration finish, then imports GraphML, XML, or Graphify JSON without replacing
-restored documents, edits, or presentation choices made while it was waiting. An untouched initial document may be reused;
-otherwise the import opens as a new ordinary document. The status strip offers **Retry** after a
+restored documents, edits, presentation choices, or running work created while it was waiting. A
+canonical empty, untouched startup draft may be reused; any populated or changed draft is preserved
+and the import opens as a new ordinary document. Startup without `file` still opens the four-node
+Start → Do something → {End, Error} workflow. The status strip offers **Retry** after a
 download, validation, or readiness failure and **Cancel** while an import is pending. A same-origin
 URL starts when the workspace is ready. A cross-origin URL first shows only its origin and requires
 **Confirm origin**; its server must also satisfy the page's CSP and CORS policy. Access tokens are

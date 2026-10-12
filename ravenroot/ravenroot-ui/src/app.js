@@ -52,6 +52,7 @@ import {
   additionalProperties,
   classifyFailureRoutes,
   createEdge,
+  createEmptyWorkflowDocument,
   createNode,
   createWorkflowDocument,
   declaredJoinKind,
@@ -59,6 +60,7 @@ import {
   edgeFailureRouteKind,
   effectiveJoinArrival,
   hasDeclaredJoinSemantics,
+  isEmptyWorkflowDocument,
   JOIN_KIND_OPTIONS,
   JOIN_KIND_UNRECOGNIZED,
   JOIN_POLICY_PROPERTY,
@@ -10135,6 +10137,19 @@ function newWorkflow() {
   addActivityMessage('editor', 'Minimal Start → Do something → {End, Error} workflow created', 'completed');
 }
 
+function createStartupImportPlaceholder() {
+  setModifyMode(false);
+  activeDocumentIncarnation = createDocumentIncarnation();
+  graphData = createEmptyWorkflowDocument();
+  editHistory.reset();
+  updateHistoryUi();
+  graphName = 'untitled.graphml';
+  document.getElementById('graph-title').textContent = graphName;
+  document.title = graphName + ' — Ravenroot UI';
+  initCy(buildElements(graphData), graphData);
+  clearActivity();
+}
+
 function showAddNodeForm({ skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => showAddNodeForm({ skipDraftGuard: true }));
@@ -12512,6 +12527,7 @@ async function playGraph(mode = 'test') {
   if (!tenantAuthorityAllows(owner)) {
     return showInspectorMessage('Wait for this document workspace authority to be verified before execution.');
   }
+  owner.execution.intentGeneration += 1;
   if (programNodes(ownerGraph).length) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
@@ -14076,7 +14092,14 @@ function startupImportPlaceholderIsUntouched() {
   const initial = startupImportPlaceholder;
   const target = initial && workspace.find(initial.id);
   if (!target || target !== initial.document || workspace.documents.length !== 1) return false;
-  return target.incarnation === initial.incarnation && target.graph === initial.graph
+  const execution = target.execution;
+  const sourceSession = target.sourceSession;
+  const hasRuntimeActivity = Boolean(execution?.intentGeneration !== initial.runtimeIntentGeneration
+    || execution?.executionId || execution?.commandFlight
+    || execution?.reconciliationController || sourceSession?.sessionId
+    || sourceSession?.startPromise || sourceSession?.stopPromise || target.deploymentView);
+  return isEmptyWorkflowDocument(target.graph) && !hasRuntimeActivity
+    && target.incarnation === initial.incarnation && target.graph === initial.graph
     && target.history === initial.history && target.history.revision() === initial.revision
     && stableUserPresentationFingerprint(target) === initial.presentation
     && !target.history.isDirty() && target.mode === DOCUMENT_MODES.DRAFT
@@ -14161,6 +14184,7 @@ function initializeStartupImport(rawUrl) {
   startupImportPlaceholder = Object.freeze({
     id: document_.id, document: document_, incarnation: document_.incarnation,
     graph: document_.graph, history: document_.history, revision: document_.history.revision(),
+    runtimeIntentGeneration: document_.execution.intentGeneration,
     presentation: stableUserPresentationFingerprint(document_),
   });
   try {
@@ -16793,20 +16817,22 @@ window.addEventListener('load', () => {
   // origin before boot connection; the existing cross-origin gate still refuses to send a token
   // until the user explicitly confirms that origin again.
   restoreHumanTaskServiceOrigin();
+  const fileParam = params.get('file');
   // The workspace always holds at least one document; the editor has simply never had a way to open
   // a second one. Creating it here means `initCy` always has a document to draw into.
   addDocumentRecord();
-  // A real, editable placeholder exists while runtime configuration and workspace restoration are
-  // pending. The startup import may reuse only this exact untouched record; otherwise it opens a
-  // separate document and cannot overwrite restored or newly authored work.
-  newWorkflow();
+  // A startup import gets a canonical empty GraphML draft so successful replacement is provably
+  // content-free. Ordinary startup keeps the established four-node workflow. Any content, history,
+  // presentation, repository identity or runtime activity added while waiting makes the import open
+  // as a separate document instead.
+  if (fileParam) createStartupImportPlaceholder();
+  else newWorkflow();
   // Import from ?file= after validated configuration and workspace restoration. Supports .graphml,
   // .xml and Graphify .json without acquiring repository authoring identity.
   // Examples:
   // ?file=my-flow.graphml
   // ?file=/graphs/project/graph.json
   // ?file=examples/graph.json
-  const fileParam = params.get('file');
   if (fileParam) initializeStartupImport(fileParam);
   void connectRuntime(true);
   // Composed once at boot so the chips are truthful from the first paint rather than blank

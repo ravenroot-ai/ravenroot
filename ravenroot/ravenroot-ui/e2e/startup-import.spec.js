@@ -81,8 +81,14 @@ test('same-origin startup import waits for slow configuration and strips query a
   await expect(page.locator('#startup-import')).toBeVisible();
   await expect(page.locator('#startup-import-file')).toHaveText('startup flow.graphml');
   await expect(page.locator('#startup-import-status')).toContainText('Waiting for the service');
-  await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.documents.length)).toBe(1);
-  await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.active.name)).toBe('untitled.graphml');
+  const placeholder = await page.evaluate(() => ({
+    id: window.ravenroot.workspace.activeId,
+    name: window.ravenroot.workspace.active.name,
+    documents: window.ravenroot.workspace.documents.length,
+    nodes: window.ravenroot.workspace.active.graph.nodes.length,
+    edges: window.ravenroot.workspace.active.graph.edges.length,
+  }));
+  expect(placeholder).toMatchObject({ name: 'untitled.graphml', documents: 1, nodes: 0, edges: 0 });
 
   releaseConfiguration();
   await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
@@ -91,7 +97,24 @@ test('same-origin startup import waits for slow configuration and strips query a
     format: window.ravenroot.workspace.active.graph.format,
     nodes: window.ravenroot.workspace.active.graph.nodes.length,
     authoring: window.ravenroot.workspace.active.authoring.providerDocumentId,
-  }))).toEqual({ name: 'startup flow.graphml', format: 'graphml', nodes: 2, authoring: null });
+    documents: window.ravenroot.workspace.documents.length,
+    id: window.ravenroot.workspace.activeId,
+  }))).toEqual({ name: 'startup flow.graphml', format: 'graphml', nodes: 2, authoring: null,
+    documents: 1, id: placeholder.id });
+});
+
+test('ordinary startup keeps the established four-node starter workflow', async ({ page }) => {
+  await stubRuntimeNoise(page);
+  await page.goto('/');
+
+  await expect.poll(() => page.evaluate(() => ({
+    documents: window.ravenroot.workspace.documents.length,
+    name: window.ravenroot.workspace.active.name,
+    nodeKinds: window.ravenroot.workspace.active.graph.nodes.map(node => node.kind),
+    edges: window.ravenroot.workspace.active.graph.edges.length,
+    startupImportHidden: document.getElementById('startup-import').hidden,
+  }))).toEqual({ documents: 1, name: 'untitled.graphml',
+    nodeKinds: ['START', 'PASSTHROUGH', 'ERROR', 'END'], edges: 3, startupImportHidden: true });
 });
 
 test('unavailable configuration keeps the startup import recoverable until one deliberate Retry', async ({ page }) => {
@@ -253,6 +276,45 @@ test('work started while configuration loads is kept in its own document when im
   }))).toEqual({ documents: 2, active: 'separate.graphml', localWork: true });
 });
 
+test('a populated clean-history replacement cannot be reused as the startup placeholder', async ({ page }) => {
+  let releaseConfiguration;
+  const configurationGate = new Promise(resolve => { releaseConfiguration = resolve; });
+  await page.route('**/v1/configuration', async route => {
+    await configurationGate;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CONFIGURATION) });
+  });
+  await page.route(`${UI_ORIGIN}/after-clean-replacement.graphml`, route => route.fulfill({
+    status: 200, contentType: 'application/graphml+xml', body: GRAPHML,
+  }));
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/after-clean-replacement.graphml');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-runtime');
+  const originalId = await page.evaluate(() => {
+    const document_ = window.ravenroot.workspace.active;
+    const node = { id: 'local-scaffold', name: 'Local scaffold', kind: 'PASSTHROUGH',
+      behavior: '', nodeType: 'flow', isStart: false, isEnd: false, isActor: false,
+      classname: '', description: '', fillColor: '#21262d', shapeType: 'roundrectangle',
+      ox: 0, oy: 0, ow: 80, oh: 52, instances: 0, properties: {}, propertyTypes: {} };
+    document_.graph.nodes.push(node);
+    document_.graph.nodeMap[node.id] = node;
+    return window.ravenroot.workspace.activeId;
+  });
+  expect(await page.evaluate(() => window.ravenroot.workspace.active.history.isDirty())).toBe(false);
+
+  releaseConfiguration();
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+  await expect.poll(() => page.evaluate(id => {
+    const original = window.ravenroot.workspace.find(id);
+    return {
+      documents: window.ravenroot.workspace.documents.length,
+      originalName: original?.name,
+      originalNodes: original?.graph.nodes.length,
+      importedName: window.ravenroot.workspace.active.name,
+    };
+  }, originalId)).toEqual({ documents: 2, originalName: 'untitled.graphml', originalNodes: 1,
+    importedName: 'after-clean-replacement.graphml' });
+});
+
 test('a font choice made while configuration loads is preserved in a separate document', async ({ page }) => {
   let releaseConfiguration;
   const configurationGate = new Promise(resolve => { releaseConfiguration = resolve; });
@@ -303,7 +365,10 @@ test('restored workspace documents remain separate from the startup import', asy
   await page.evaluate(() => {
     const graph = structuredClone(window.ravenroot.activeDocument().graph);
     delete graph.nodeMap;
-    graph.nodes[0].name = 'Restored workspace work';
+    graph.nodes.push({ id: 'restored-work', name: 'Restored workspace work', kind: 'PASSTHROUGH',
+      behavior: '', nodeType: 'flow', isStart: false, isEnd: false, isActor: false,
+      classname: '', description: '', fillColor: '#21262d', shapeType: 'roundrectangle',
+      ox: 0, oy: 0, ow: 80, oh: 52, instances: 0, properties: {}, propertyTypes: {} });
     const restored = {
       documentId: 'restored-document', name: 'restored.graphml', displayName: 'restored.graphml',
       tenantId: 'tenant-restored', mode: 'draft', graph, authoring: null, presentation: null,
@@ -646,6 +711,87 @@ test('a font choice made during download preserves the original and imports sepa
     };
   }, originalId)).toEqual({ documents: 2, originalId, originalFont: 27,
     importedName: 'font-during-download.graphml', importedFont: 20 });
+});
+
+test('a Test started during download preserves its empty source document and imports separately', async ({ page }) => {
+  let releaseDownload;
+  let releaseInspection;
+  const downloadGate = new Promise(resolve => { releaseDownload = resolve; });
+  const inspectionGate = new Promise(resolve => { releaseInspection = resolve; });
+  let inspectionRequests = 0;
+  await page.route(`${UI_ORIGIN}/during-test.graphml`, async route => {
+    await downloadGate;
+    await route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+  });
+  await page.route('**/v1/graphs/inspect**', async route => {
+    inspectionRequests += 1;
+    await inspectionGate;
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ valid: false, findings: [{ phase: 'VALIDATION', reason: 'EMPTY_GRAPH' }] }) });
+  });
+  await page.route('**/v1/executions**', route => route.fulfill({
+    status: 500, contentType: 'application/json', body: '{"error":"unexpected execution"}',
+  }));
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/during-test.graphml');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'downloading');
+  const originalId = await page.evaluate(() => window.ravenroot.workspace.activeId);
+
+  await page.locator('#btn-play').click();
+  await expect.poll(() => inspectionRequests).toBe(1);
+  releaseDownload();
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+  await expect.poll(() => page.evaluate(id => {
+    const original = window.ravenroot.workspace.find(id);
+    return {
+      documents: window.ravenroot.workspace.documents.length,
+      originalId: original?.id,
+      originalNodes: original?.graph.nodes.length,
+      commandFlight: Boolean(original?.execution.commandFlight),
+      importedName: window.ravenroot.workspace.active.name,
+    };
+  }, originalId)).toEqual({ documents: 2, originalId, originalNodes: 0, commandFlight: true,
+    importedName: 'during-test.graphml' });
+  releaseInspection();
+});
+
+test('a failed Test still preserves its empty source document when the download finishes', async ({ page }) => {
+  let releaseDownload;
+  const downloadGate = new Promise(resolve => { releaseDownload = resolve; });
+  await page.route(`${UI_ORIGIN}/after-failed-test.graphml`, async route => {
+    await downloadGate;
+    await route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+  });
+  await page.route('**/v1/graphs/inspect**', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ valid: true, findings: [] }),
+  }));
+  await page.route('**/v1/executions**', route => route.fulfill({
+    status: 500, contentType: 'application/json', body: '{"error":"execution rejected"}',
+  }));
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/after-failed-test.graphml');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'downloading');
+  const originalId = await page.evaluate(() => window.ravenroot.workspace.activeId);
+
+  await page.locator('#btn-play').click();
+  await expect.poll(() => page.evaluate(() => ({
+    generation: window.ravenroot.workspace.active.execution.generation,
+    intentGeneration: window.ravenroot.workspace.active.execution.intentGeneration,
+    executionId: window.ravenroot.workspace.active.execution.executionId,
+    commandFlight: window.ravenroot.workspace.active.execution.commandFlight,
+  }))).toMatchObject({ generation: 2, intentGeneration: 1, executionId: null, commandFlight: null });
+  releaseDownload();
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+  await expect.poll(() => page.evaluate(id => ({
+    documents: window.ravenroot.workspace.documents.length,
+    originalGeneration: window.ravenroot.workspace.find(id)?.execution.generation,
+    originalIntentGeneration: window.ravenroot.workspace.find(id)?.execution.intentGeneration,
+    originalNodes: window.ravenroot.workspace.find(id)?.graph.nodes.length,
+    importedName: window.ravenroot.workspace.active.name,
+  }), originalId)).toEqual({ documents: 2, originalGeneration: 2, originalIntentGeneration: 1, originalNodes: 0,
+    importedName: 'after-failed-test.graphml' });
 });
 
 test('a service change aborts an old flight and Retry binds a fresh import to the new authority', async ({ page }) => {

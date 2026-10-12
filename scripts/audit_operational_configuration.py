@@ -14718,6 +14718,7 @@ GRAPH_AUTHORING_SERVER_PATH = Path(
 GRAPH_AUTHORING_APPLICATION_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
 GRAPH_AUTHORING_UI_PATH = Path("ravenroot/ravenroot-ui/src/app.js")
+GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-document.js")
 GRAPH_AUTHORING_GRAPH_PARSERS_PATH = Path("ravenroot/ravenroot-ui/src/graph-parsers.js")
 GRAPH_AUTHORING_STARTUP_IMPORT_PATH = Path("ravenroot/ravenroot-ui/src/startup-import.js")
 GRAPH_AUTHORING_CLIENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-authoring-client.js")
@@ -14834,22 +14835,27 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryRelease": "def7c49bdc1e193b5b4303446a614ac288469056511210809886e932ca94b95f",
     "publishedArtifacts": "1c482b902b5dc8ec5ab654d5c7e886c3cff091856baa8ad1c4cb8ea298eb2908",
     "connectRuntime": "94e858eac5d4699d80d873075a0213c1335200c7b8f1401810f7c7c652c3165d",
+    "createStartupImportPlaceholder": "8629a76a81d1669525f458040a9c14e4d2d886bba2b890a9b7974ca377e5211d",
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
     "startupImportBindingIsCurrent": "5b79d5f6babdfab051815044c3733970c2bb9cd701915b6ac68c098e7df150d4",
-    "startupImportPlaceholderIsUntouched": "ec85ae388382bb8b6f0c477a4467663543903cc189f422cb0a86716957e0d32d",
+    "startupImportPlaceholderIsUntouched": "c7250f2af0a9444f5a61fd6a92dfdcd77d960a2cf8b682effa17287487c4e176",
     "startupImportFailure": "081e9af5a6a425f33f74d165d70f1537af97bb75e3d73d347b17691b0df7beaf",
     "parsePreparedGraph": "bf35edb6a58f448772bc3436a73f545345837ca12a31b175fb4fe5095a00c7e9",
     "runStartupImport": "72182103c86fe6e8194c29d11700d20a126f4ec0a63b74711f7424cb8040f051",
     "renderStartupImport": "d68694e197928c9bc52a5b2d9060d24a8d0aac2e0bb3fd8488604333b72e7104",
-    "initializeStartupImport": "01940ba511198f4940e7635ec6ebeab9d7724f4d244a926d960c3ca107af890c",
+    "initializeStartupImport": "a06fe540103b1e659e771465ad4d4000939c324e5bd8bfc56208494641ed7758",
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
         "16b610ebfeb286315828985a1b15c8ca884ae03c879a1d50b8784f84b7bb7f08",
     (Path("ravenroot/ravenroot-ui/src/workspace.js"), "createDocumentRecord"):
-        "7d27998b71758692c6cf4c41f5eb9fbc77dfad1b872902d09112d5d8db844403",
+        "1f8b17e9993198666b5110ee681dc30f3260cef271569525b8449d28b9ba0609",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):
         "19379383672efec4863430ab57099e9d66fee3995c35775804cb57b6db68e34f",
+    (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "createEmptyWorkflowDocument"):
+        "97767dbd5de84c28e58797c2e3c29c385ebeabaf9f537947014c350366e3bc03",
+    (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "isEmptyWorkflowDocument"):
+        "b177d59c4954cb96984f9a6fae71ad693a127bb9a21d363c422a58c913281054",
     (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "fetchInputTextWithinByteLimit"):
         "fbd7b5689ea65c82a2052c1ce3c98da84d5bdb266751053bc935ead5079fda26",
     (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "readResponseTextWithinByteLimit"):

@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 const ALICE = 'alice-palette-token';
@@ -197,3 +198,6 @@ test('refuses duplicate terminals and clears private palette DOM on failure, rep
   await expect(page.locator('#node-palettes')).not.toContainText('Bob only');
   await expect(page.locator('#node-palettes')).toContainText('Create a palette to save reusable configured nodes.');
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

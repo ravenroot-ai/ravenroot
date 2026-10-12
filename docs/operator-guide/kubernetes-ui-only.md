@@ -84,12 +84,13 @@ server distribution is built through its existing commands.
 
 Copy [ui-only.yaml](../examples/kubernetes/ui-only.yaml). Set the image to the verified digest,
 replace the backend URL and public hostname, and use your existing HTTPS Gateway/listener.
-The manifest preserves `/ravenroot` in the request rather than rewriting it away. It has no PVC,
-backend secrets, service-account token or writable root filesystem.
+The manifest preserves `/ravenroot` in the request rather than rewriting it away. The baseline manifest has no PVC, backend secrets, service-account token or writable root filesystem.
+The optional shared backend token below adds only a deployment-injected UI server secret.
 
 | Runtime variable | Default/contract |
 |---|---|
 | `RAVENROOT_UI_BACKEND_URL` | Unset selects static-only mode (API/backend probes return `503`); operator-owned HTTP(S) URL with optional backend prefix; no credentials/query/fragment |
+| `RAVENROOT_UI_BACKEND_TOKEN` | Optional literal bearer value, nonempty RFC 6750 characters, at most 16,384 characters; requires backend URL; server memory only |
 | `RAVENROOT_UI_PREFIX` | Empty for root; otherwise slash-prefixed segments of letters/digits/underscore/hyphen, no trailing slash |
 | `RAVENROOT_UI_PORT` | `8080`, integer TCP port |
 | `RAVENROOT_UI_ROOT` | `/opt/ravenroot/ui`; absolute/relative operator-owned asset directory |
@@ -193,3 +194,101 @@ Record the prior UI digest and backend version. Check API compatibility, change 
 observe health and repeat authentication/SSE probes. Roll back to the previous UI digest if needed;
 this pod performs no data migration. Backend storage, credential rotation, audit and database
 backup/restore remain the backend operator's responsibilities.
+
+
+## Browser restore and shared operator token
+
+Service is resolved as current explicit user choice, valid saved browser connection, operator public
+prefix, then same origin. A saved connection wins over a changed startup prefix. After successful
+explicit authentication, the accessible confirmation offers Local Storage persistence of exactly
+that public service binding and token. Decline or Escape keeps memory-only access; automatic restore
+and retries never ask again. The empty password field says **saved in this browser** while a saved
+credential is active. It has no additional retention timeout; backend validity is unchanged.
+
+**Forget token** clears the active browser token and opt-in in both memory and storage, keeping
+Service. A definitive 401 invalidates that credential; 403 scope denial, network and CORS failure do
+not imply expiry. Unsupported or unreadable storage falls back to explicit memory-only access with
+feedback. Clearing this site's browser data removes its saved connection; clearing cached assets
+alone need not. Tokens in Local Storage are readable by page JavaScript. Tokens are never read from
+public URL parameters, frontend environment variables or compiled assets, nor included in graph or
+workspace exports. A remembered external service still requires fresh origin confirmation through
+**Authenticate**, with no need to repaste its saved token. The default standalone CSP blocks direct
+external services; such routing needs a separately reviewed serving policy.
+
+The browser binding includes normalized public scheme, host, port and API path prefix. It cannot
+identify changes to the private upstream behind a same-origin proxy: the operator owns that
+upstream and must preserve its intended identity when changing deployment configuration. No token
+is transferred to a different browser-selected service or prefix. An existing durable task's validated service-only recovery locator is a legacy remembered browser
+service, used only when no new connection record exists; it supplies no token or origin trust.
+
+For local development and standalone testing, keep UI and backend ports separate:
+
+```sh
+# Development: public UI is http://127.0.0.1:5173, API proxy targets backend 8081.
+# Run in ravenroot/ravenroot-ui. No server default token is supported by Vite.
+RAVENROOT_SERVICE_URL=http://127.0.0.1:8081 npm run dev
+
+# Standalone root UI on 5001, existing backend on 8080.
+RAVENROOT_UI_ROOT="$PWD/ui" RAVENROOT_UI_PORT=5001 \
+RAVENROOT_UI_BACKEND_URL=http://127.0.0.1:8080 node server.mjs
+
+# Standalone prefixed UI: browser opens http://127.0.0.1:5002/ravenroot/.
+# Browser Service is /ravenroot; backend API prefix remains /automation.
+RAVENROOT_UI_ROOT="$PWD/ui" RAVENROOT_UI_PORT=5002 RAVENROOT_UI_PREFIX=/ravenroot \
+RAVENROOT_UI_BACKEND_URL=http://127.0.0.1:8081/automation node server.mjs
+```
+
+In a container, `127.0.0.1` names that container, not a backend container or the browser's computer.
+Use a reachable container-network service name such as `http://ravenroot-backend:8081/automation`,
+or the backend's Kubernetes Service DNS. The browser continues to use the public same-origin prefix;
+it never needs to resolve that private hostname. No new public startup endpoint is introduced: the index exposes only the validated prefix and a
+`data-server-auth` boolean. The boolean is bound to that prefix and lets Forget reconnect to shared
+server access; it is not backend authorization. The private upstream and token stay on the server.
+
+To connect multiple authorized browsers without a local token, inject the effective backend-issued
+value into `RAVENROOT_UI_BACKEND_TOKEN` at UI server startup. For Kubernetes, add an environment entry
+to the existing UI container, backed by a Secret you manage separately:
+
+```yaml
+env:
+  - name: RAVENROOT_UI_BACKEND_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: ui-backend-access
+        key: token
+```
+
+For a local test, a literal assignment is also accepted:
+
+```sh
+RAVENROOT_UI_ROOT="$PWD/ui" RAVENROOT_UI_PORT=5001 \
+RAVENROOT_UI_BACKEND_URL=http://127.0.0.1:8081 \
+RAVENROOT_UI_BACKEND_TOKEN='replace-with-backend-issued-token' node server.mjs
+```
+
+This variable does not read a file, resolve a secret name or fetch a reference. Keep actual values
+out of image layers, source, command history and public logs; use deployment secret injection for
+real deployments. Rotate the value and restart the UI process when its authority changes or expires.
+
+Credential precedence is explicit browser token, saved browser token for that connection, then
+server token **only when Authorization is absent**. Malformed, duplicate, empty or non-Bearer client
+headers are refused. There is no retry of a rejected browser token with the shared identity. The
+server token never reaches HTML, assets, runtime configuration, logs or browser storage, and never
+triggers browser remember consent. Successful normal runtime authority enables connected features
+without requiring a locally held token or a public authentication-capability endpoint.
+
+All callers using the default share its backend identity and scopes. Access-control the UI deployment
+accordingly; do not substitute broad administrator scopes for the backend's ordinary policies.
+Ambient injection rejects cross-site Fetch Metadata and mismatched/null Origin. The public Host must
+be preserved by a TLS edge, and client-supplied Forwarded headers do not change this authority.
+Non-browser clients lacking these headers rely on deployment access control. Origin is still
+forwarded to the backend, whose existing allowlist and auth checks remain authoritative.
+
+The default attaches only to the fixed configured `/v1` upstream, never assets or health/readiness
+probes. Redirects are refused with a generic 502. Reflected secret bytes in upstream response headers
+and bodies are redacted across chunk boundaries without buffering ordinary SSE until completion;
+the proxy requests identity encoding and refuses a compressed response it cannot safely inspect.
+An expired default produces authentication-required feedback; only the operator can replace it.
+**Forget token** or browser data clearing cannot remove this server secret: forgetting a personal
+credential reconnects and may regain shared access. Neither action is global logout. Vite retains
+its existing backend routing and browser-token flow, with no standalone server-token behavior.

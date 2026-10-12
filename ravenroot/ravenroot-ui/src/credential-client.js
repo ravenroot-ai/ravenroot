@@ -1,3 +1,4 @@
+import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 // The credential routes, as this page reaches them (the UI half).
 //
 // ── WHY THIS IS A CLIENT OF ITS OWN AND NOT METHODS ON AN EXISTING ONE ───────────────────────────
@@ -237,17 +238,20 @@ export class RavenrootCredentialClient {
   // browser's own wording is not a diagnosis and is never passed through as if it were.
   async #send(path, options) {
     if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
-    const token = String(this.tokenProvider?.getAccessToken?.() || '');
+    const credential = await requestCredential(this.tokenProvider);
+    const { token } = credential;
     // OUTSIDE the try on purpose: a refused destination is a defect in this build, not a transport
     // failure, and dressing it up as one would hide the only bug this control exists to catch.
     const url = credentialUrl(this.baseUrl, path);
     try {
-      return await this.fetchImpl(url, {
+      const response = await this.fetchImpl(url, {
         ...options,
         credentials: 'omit',
         cache: 'no-store',
         headers: token ? { ...options.headers, Authorization: `Bearer ${token}` } : { ...options.headers },
       });
+      await invalidateRejectedCredential(response, this.tokenProvider, credential);
+      return response;
     } catch {
       throw new CredentialError(
         'The service could not be reached, and the browser does not say why: the request may never '

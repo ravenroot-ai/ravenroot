@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from '../memory-only-auth.mjs';
 import { writeFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
@@ -385,3 +386,6 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
       await stopPhase(request);
     });
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

@@ -1,3 +1,4 @@
+import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 function requiredText(value, name) {
   if (typeof value !== 'string' || !value.length) throw new TypeError(`${name} is missing`);
   return value;
@@ -71,6 +72,7 @@ export function validateGraphAuthoringCapability(value) {
 export class GraphAuthoringClient {
   constructor(baseUrl = '', { tokenProvider = () => null, fetchImpl = globalThis.fetch } = {}) {
     this.baseUrl = String(baseUrl).replace(/\/$/, '');
+    this.credentialProvider = typeof tokenProvider === 'object' ? tokenProvider : null;
     if (typeof tokenProvider === 'function') this.tokenProvider = tokenProvider;
     else if (typeof tokenProvider?.getAccessToken === 'function') {
       this.tokenProvider = () => tokenProvider.getAccessToken();
@@ -142,9 +144,12 @@ export class GraphAuthoringClient {
   async #json(path, options = {}) {
     const headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
-    const token = await this.tokenProvider();
+    const credential = this.credentialProvider ? await requestCredential(this.credentialProvider)
+      : { token: await this.tokenProvider(), snapshot: null };
+    const { token } = credential;
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, { ...options, headers });
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, { ...options, headers, credentials: 'omit', cache: 'no-store' });
+    await invalidateRejectedCredential(response, this.credentialProvider, credential);
     if (options.empty && response.status === 204) return null;
     const value = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(value.error || `Graph authoring request failed (${response.status})`);

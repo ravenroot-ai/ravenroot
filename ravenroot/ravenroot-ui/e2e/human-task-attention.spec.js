@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';
 
@@ -722,3 +723,6 @@ test('keyboard focus, screen-reader structure and reduced motion remain usable',
       fullPage: true });
   }
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

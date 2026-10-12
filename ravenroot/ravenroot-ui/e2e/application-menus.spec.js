@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 import { createAppCommands } from '../src/app-commands.js';
 
@@ -178,3 +179,6 @@ test.describe('application command menus', () => {
     });
   }
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 const CONFIGURATION = { schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 };
@@ -119,3 +120,6 @@ for (const status of [401, 403]) {
     }
   });
 }
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

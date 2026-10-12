@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 const SOURCE_CATALOG = JSON.stringify([{
@@ -668,3 +669,6 @@ test('another deployment traffic is still dropped rather than painted on whichev
     expect(await page.evaluate(() => window.ravenroot.activeDocument().cy
       .getElementById('source').data('runtimeState') || 'idle')).toBe('idle');
   });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

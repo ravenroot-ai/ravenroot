@@ -8393,7 +8393,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'c28fe3adcb2bb3111616649c959914aabc7d1969e38a716f9a59ef36ad96cf03',
+  'f720412a03658001b4c75fa1170814fd5b210b0a33a1b9208373cabc3b7df9bd',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -12909,8 +12909,8 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': 'deb55a1a30a4c2ee162d0bf2a3a9197e5edb08747c5850879861ec7513f872bf',
- 'scripts/tests/test_publish_environment_reference.py': '6ecbfead5149ca01890e85dd739e42313d144ee620b5b70debb71a7b049bb256',
+ 'scripts/publish_environment_reference.py': 'eb23759a29725c98b7b3481c62a9330b05613eb71e0602b908c0418104378857',
+ 'scripts/tests/test_publish_environment_reference.py': 'acee461bd299dfe27d89eecb2944af6438dd6ecc78492afd68ce7542220ada8d',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
@@ -14750,7 +14750,7 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphProgramDependency.java"):
         "02ca6b2a286e62a9cd18c213bf2c1e628d2c6f686b44fee922ec48bbc59db2b4",
     GRAPH_AUTHORING_CLIENT_PATH:
-        "89e3be9a469194d5efa1db7638fc88f97143692749918b668a408b23b4fc8d5c",
+        "cda9f74cc1bc4a587d8bcdaba6ebd92a6cd3b87cf77a22937970f36b603f9ddd",
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
         "fc6894ee287b9c0913f5c64a3ef0c2404d85a738ea7e2d22b2a3a1f92b0f9612",
     GRAPH_AUTHORING_PUBLISHER_PATH:
@@ -14760,6 +14760,7 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 # unrelated candidates retain their existing semantic authorities rather than being claimed by
 # graph authoring as a whole file.
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
+    Path("ravenroot/ravenroot-ui/src/credential-request.js"): "4e01a17b2b5e2d0b6259f7ba4831ad66e58d8773fddac7a7a55606a80f349c62",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
         "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
@@ -14827,7 +14828,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryDelete": "954a18af00d54b9aabaa5731898bf33cdd740f14831a382546ff15870d2049d7",
     "repositoryRelease": "def7c49bdc1e193b5b4303446a614ac288469056511210809886e932ca94b95f",
     "publishedArtifacts": "1c482b902b5dc8ec5ab654d5c7e886c3cff091856baa8ad1c4cb8ea298eb2908",
-    "connectRuntime": "e4fe0389ee111acff5f070c5d97ccfa1cb1ef2352fccda46df7c797f5e1db2fb",
+    "connectRuntime": "3ca29f4f0062ea41dac969822e3554ccbd565cfcbefd60a86030bdd27ef72048",
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):

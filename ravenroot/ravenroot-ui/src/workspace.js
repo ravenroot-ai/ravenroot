@@ -169,6 +169,9 @@ export function createDocumentRecord({
       reconciliationClient: null,
       // Monotonic binding identity and the synchronous command gate. Neither crosses a serializer.
       generation: 0,
+      // Monotonic user intent survives a fast refusal or terminal result that clears every live
+      // binding before an asynchronous workspace/import decision completes.
+      intentGeneration: 0,
       commandFlight: null,
       reconciliationController: null,
       // Exactly-once terminal reporting for only this generation; replaced bindings retire it.

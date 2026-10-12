@@ -14135,8 +14135,17 @@ async function runStartupImport({ target, binding, signal }) {
   showLoading();
   let text;
   try {
-    text = await fetchInputTextWithinByteLimit(target.url, maxBytes,
-      input => fetch(input, { signal }));
+    text = await fetchInputTextWithinByteLimit(target.url, maxBytes, async input => {
+      // Consent covers only the supplied origin. A followed redirect has already contacted its
+      // target before a final-response check can run. Manual browser redirects hide Location, so
+      // reject every redirect and let a new direct URL pass through the normal origin consent.
+      const response = await fetch(input, { signal, redirect: 'manual' });
+      if (response.type === 'opaqueredirect') {
+        throw new StartupImportError('redirect-not-allowed',
+          'The graph URL redirects to another location. Use the final file URL directly and confirm its origin if prompted.');
+      }
+      return response;
+    });
   } catch (error) {
     throw startupImportFailure(error, 'download');
   } finally {

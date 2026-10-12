@@ -6810,6 +6810,11 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
              "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })",
              "parsePreparedGraph(text, target.filename, { automatic: true })"),
             (audit.GRAPH_AUTHORING_UI_PATH,
+             "fetch(input, { signal, redirect: 'manual' })",
+             "fetch(input, { signal, redirect: 'follow' })"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "if (response.type === 'opaqueredirect')", "if (false)"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
              "return isEmptyWorkflowDocument(target.graph) && !hasRuntimeActivity",
              "return true && !hasRuntimeActivity"),
             (audit.GRAPH_AUTHORING_UI_PATH,
@@ -6846,6 +6851,27 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                     refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
                     self.assertIsNone(
                         audit.graph_authoring_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_redirect_policy_cannot_be_weakened_by_only_refreshing_the_method_digest(self) -> None:
+        path = self.root / audit.GRAPH_AUTHORING_UI_PATH
+        original = path.read_text(encoding="utf-8")
+        for before, after in (
+                ("redirect: 'manual'", "redirect: 'follow'"),
+                ("if (response.type === 'opaqueredirect')", "if (false)")):
+            with self.subTest(mutation=after):
+                self.assertEqual(1, original.count(before))
+                mutated = original.replace(before, after, 1)
+                span = audit._javascript_function_span(mutated, "runStartupImport")
+                self.assertIsNotNone(span)
+                digest = hashlib.sha256(audit.normalized(mutated[slice(*span)]).encode("utf-8")).hexdigest()
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_UI_METHOD_PROOFS,
+                                         {"runStartupImport": digest}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(
+                            self.root, self.discovered))
                 finally:
                     path.write_text(original, encoding="utf-8")
 

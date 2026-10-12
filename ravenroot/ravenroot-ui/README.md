@@ -79,7 +79,9 @@ and the import opens as a new ordinary document. Startup without `file` still op
 Start → Do something → {End, Error} workflow. The status strip offers **Retry** after a
 download, validation, or readiness failure and **Cancel** while an import is pending. A same-origin
 URL starts when the workspace is ready. A cross-origin URL first shows only its origin and requires
-**Confirm origin**; its server must also satisfy the page's CSP and CORS policy. Access tokens are
+**Confirm origin**; its server must also satisfy the page's CSP and CORS policy. Startup imports reject
+HTTP redirects before following them, including redirects within the same origin. Use the final file
+URL directly so its origin can be confirmed before downloading. Access tokens are
 never attached to the graph download. The displayed filename comes from the URL's final path segment,
 without its query or fragment; a path ending in `/` uses `imported.graphml`.
 

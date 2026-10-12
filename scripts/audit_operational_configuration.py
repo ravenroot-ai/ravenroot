@@ -14799,6 +14799,8 @@ GRAPH_AUTHORING_TEST_PROOFS = {
         "356be89f7908295735b6cb1851ebd545a7fdfdcf934464ff19a37ab2e885a0ed",
     Path("ravenroot/ravenroot-ui/test/startup-import.test.js"):
         "ae01fbd27d8bcbe3cf6a34471e3081f2e5b6e453f174dc6f2b0d043e5f9c2197",
+    Path("ravenroot/ravenroot-ui/e2e/startup-import-redirects.spec.js"):
+        "b1aefdd74aa56043c47d9b90a1bf1b31e58d747ec2aa7228522da18a2dac3c9a",
     Path("scripts/test_publish_graph_artifacts.py"):
         "ae2cdb72c8aade6e319e717eac8cf267cdb14f2d7af98bbf918e27476b159986",
 }
@@ -14841,7 +14843,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "startupImportPlaceholderIsUntouched": "c7250f2af0a9444f5a61fd6a92dfdcd77d960a2cf8b682effa17287487c4e176",
     "startupImportFailure": "081e9af5a6a425f33f74d165d70f1537af97bb75e3d73d347b17691b0df7beaf",
     "parsePreparedGraph": "bf35edb6a58f448772bc3436a73f545345837ca12a31b175fb4fe5095a00c7e9",
-    "runStartupImport": "72182103c86fe6e8194c29d11700d20a126f4ec0a63b74711f7424cb8040f051",
+    "runStartupImport": "ea1e0c6687de24f7da54a115df92593ff8d39695c022d64ec0dabe3cfa168c23",
     "renderStartupImport": "d68694e197928c9bc52a5b2d9060d24a8d0aac2e0bb3fd8488604333b72e7104",
     "initializeStartupImport": "a06fe540103b1e659e771465ad4d4000939c324e5bd8bfc56208494641ed7758",
 }
@@ -15082,6 +15084,9 @@ def graph_authoring_authority_from_source(
         (ui, "await graphAuthoringClient.deploy"),
         (ui, "runtimeConfiguration.configuration.graphDocumentMaxBytes"),
         (ui, "fetchInputTextWithinByteLimit(target.url, maxBytes"),
+        (ui, "await fetch(input, { signal, redirect: 'manual' })"),
+        (ui, "if (response.type === 'opaqueredirect') {\n"
+             "        throw new StartupImportError('redirect-not-allowed',"),
         (ui, "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })"),
         (ui, "workspaceAuthority.state === 'ready'"),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "authoring-capability.js")],

@@ -135,7 +135,7 @@ export function createServer(configuration) {
         if (req.rawHeaders[i].toLowerCase() === 'authorization') suppliedAuth.push(req.rawHeaders[i + 1]);
       }
       if (suppliedAuth.length > 1 || (suppliedAuth.length === 1
-          && !/^Bearer [A-Za-z0-9._~+/-]+=*$/i.test(suppliedAuth[0]))) {
+          && !/^Bearer +[A-Za-z0-9._~+/-]+=*$/i.test(suppliedAuth[0]))) {
         res.writeHead(400, { 'Cache-Control': 'no-store' }).end('Invalid Authorization header'); return;
       }
       const api = local === '/v1' || local.startsWith('/v1/');

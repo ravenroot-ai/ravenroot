@@ -188,9 +188,11 @@ for (const prefix of ['', '/ui']) test(`default bearer precedence, origin, confi
   let finishStream;
   const backend = http.createServer((req, res) => {
     seen.push({ path: req.url, auth: req.headers.authorization });
-    if (req.url.endsWith('/redirect')) {
-      res.writeHead(302, { Location: `https://external.invalid/${secret}`, 'X-Canary': secret }); res.end(secret); return;
+    const redirectStatus = /\/redirect\/(301|302|303|307|308)$/.exec(req.url)?.[1];
+    if (redirectStatus) {
+      res.writeHead(Number(redirectStatus), { Location: `https://external.invalid/${secret}`, 'X-Canary': secret }); res.end(secret); return;
     }
+    if (req.url.endsWith('/not-modified')) { res.writeHead(304, { ETag: 'public-version' }).end(); return; }
     if (req.url.endsWith('/events')) {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'X-Canary': secret });
       res.write('data: ready ☃\n\n');
@@ -223,16 +225,29 @@ for (const prefix of ['', '/ui']) test(`default bearer precedence, origin, confi
       assert.equal(response.status, 200); assert.equal(seen.at(-1).auth, 'Bearer ' + secret);
       assert.ok(!(await response.text()).includes(secret));
     }
-    await fetch(route + '/v1/runtime', { headers: { Authorization: 'Bearer personal-token', Connection: 'Authorization' } });
-    assert.equal(seen.at(-1).auth, 'Bearer personal-token');
-    for (const authorization of ['', 'Basic abc', 'Bearer bad token', 'Bearer secret, Bearer other']) {
-      const count = seen.length; assert.equal((await fetch(route + '/v1/runtime', { headers: { Authorization: authorization } })).status, 400); assert.equal(seen.length, count);
-    }
-    await new Promise((resolve, reject) => {
-      const request = http.request(route + '/v1/runtime', { headers: ['Authorization', 'Bearer a', 'Authorization', 'Bearer b'] }, response => {
-        assert.equal(response.statusCode, 400); response.resume(); response.on('end', resolve);
-      }); request.on('error', reject); request.end();
+    const rawRequest = (authorizationHeaders, path = '/v1/runtime') => new Promise((resolve, reject) => {
+      const request = http.request(route + path, { headers: ['Host', new URL(route).host, ...authorizationHeaders] }, response => {
+        response.resume(); response.on('end', () => resolve(response.statusCode)); response.on('error', reject);
+      });
+      request.setTimeout(5000, () => request.destroy(new Error('Raw proxy request timed out')));
+      request.on('error', reject); request.end();
     });
+    // RFC 6750 section 2.1 permits 1*SP. Use raw HTTP so a fetch implementation cannot normalize
+    // the field before the proxy sees it; preserve every valid field byte even after hop filtering.
+    for (const authorization of ['Bearer personal-token', 'Bearer  personal-token', 'bEaReR    personal-token']) {
+      const count = seen.length;
+      assert.equal(await rawRequest(['Authorization', authorization, 'Connection', 'Authorization']), 200);
+      assert.equal(seen.length, count + 1); assert.equal(seen.at(-1).auth, authorization);
+    }
+    for (const authorization of ['', 'Bearer', 'Bearer  ', 'Basic abc', 'Bearer\tpersonal-token',
+      'Bearer \tpersonal-token', 'Bearer bad token', 'Bearer secret, Bearer other', 'Bearer per:sonal']) {
+      const count = seen.length;
+      assert.equal(await rawRequest(['Authorization', authorization, 'Connection', 'Authorization']), 400);
+      assert.equal(seen.length, count); // Presence/malformed input must never select the server default.
+    }
+    const beforeDuplicate = seen.length;
+    assert.equal(await rawRequest(['Authorization', 'Bearer a', 'Authorization', 'Bearer  b']), 400);
+    assert.equal(seen.length, beforeDuplicate);
     for (const headers of [{ Origin: 'https://evil.invalid' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }]) {
       const count = seen.length; assert.equal((await fetch(route + '/v1/runtime', { headers })).status, 403); assert.equal(seen.length, count);
     }
@@ -240,10 +255,19 @@ for (const prefix of ['', '/ui']) test(`default bearer precedence, origin, confi
     await fetch(route + '/v1/runtime', { headers: { Origin: 'https://evil.invalid', Authorization: 'Bearer personal' } });
     assert.equal(seen.at(-1).auth, 'Bearer personal');
     const count = seen.length;
-    assert.equal((await fetch(route + '/v1/expired', { headers: { Authorization: 'Bearer rejected-personal' } })).status, 401);
-    assert.equal(seen.length, count + 1); assert.equal(seen.at(-1).auth, 'Bearer rejected-personal');
+    const rejectedAuthorization = 'Bearer  rejected-personal';
+    assert.equal(await rawRequest(['Authorization', rejectedAuthorization, 'Connection', 'Authorization'], '/v1/expired'), 401);
+    assert.equal(seen.length, count + 1); assert.equal(seen.at(-1).auth, rejectedAuthorization);
     assert.equal((await fetch(route + '/v1/expired')).status, 401); assert.equal(seen.at(-1).auth, 'Bearer ' + secret);
-    const redirect = await fetch(route + '/v1/redirect'); assert.equal(redirect.status, 502); assert.equal(redirect.headers.get('location'), null); assert.ok(!(await redirect.text()).includes(secret));
+    for (const status of [301, 302, 303, 307, 308]) {
+      const beforeRedirect = seen.length;
+      const redirect = await fetch(route + '/v1/redirect/' + status);
+      assert.equal(redirect.status, 502); assert.equal(redirect.headers.get('location'), null);
+      assert.equal(await redirect.text(), 'Backend redirect refused'); assert.equal(seen.length, beforeRedirect + 1);
+    }
+    const notModified = await fetch(route + '/v1/not-modified');
+    assert.equal(notModified.status, 304); assert.equal(notModified.headers.get('etag'), 'public-version');
+    assert.equal(await notModified.text(), '');
     const reflected = await fetch(route + '/v1/reflect'); assert.equal(reflected.status, 500);
     assert.equal(reflected.headers.get('x-canary'), '[redacted]'); assert.equal(await reflected.text(), '{"message":"[redacted]"}');
     const stream = await fetch(route + '/v1/events'); const reader = stream.body.getReader(); const decoder = new TextDecoder();

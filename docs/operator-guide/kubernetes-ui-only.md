@@ -121,9 +121,10 @@ is not supported by this proxy. UI REST and fetch-based SSE require no WebSocket
 `RAVENROOT_UI_BACKEND_URL` is the administrator-owned outbound authority for this standalone
 Node.js proxy: its scheme, hostname, finite port and optional path prefix are fixed at process
 startup. A browser request can add only the documented API path and query below that prefix; it
-cannot replace the upstream scheme, authority or port. Node's HTTP client does not follow upstream
-redirects, so a backend redirect is returned to the browser rather than becoming a second
-server-side outbound request. `http://` therefore explicitly authorizes a plaintext hop that may
+cannot replace the upstream scheme, authority or port. Backend redirects (301, 302, 303, 307 and
+308) are neither followed nor passed through: the proxy returns a generic 502 without Location,
+preventing a second destination or credential disclosure. A 304 retains normal response behavior.
+`http://` therefore explicitly authorizes a plaintext hop that may
 forward the browser's authorization header; use it only inside the operator-controlled network or
 authenticated mesh. `https://` uses Node's normal certificate-chain and hostname verification,
 with private roots supplied through `NODE_EXTRA_CA_CERTS`; disabling verification is refused.

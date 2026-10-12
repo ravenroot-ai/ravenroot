@@ -46,10 +46,10 @@ test('opt-in is accessible, bound, survives reopening, and Forget keeps only ser
   await expect(page.locator('#access-token')).toHaveValue(''); await expect(page.locator('#access-token')).toHaveAttribute('placeholder', 'saved in this browser');
   await assertStorageBoundary(page);
   const downloadPending = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save GraphML', exact: true }).click();
+  await page.locator('#btn-export').click();
   const download = await downloadPending;
   expect(await readFile(await download.path(), 'utf8')).not.toContain(TOKEN);
-  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.documents()))).not.toContain(TOKEN);
+  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.workspacePersistence()))).not.toContain(TOKEN);
   // The red control proves an unauthorized write is detected even with one legitimate stored token.
   await page.evaluate(token => localStorage.setItem('rr-control-token', token), TOKEN);
   await expect(assertStorageBoundary(page)).rejects.toThrow(); await page.evaluate(() => localStorage.removeItem('rr-control-token'));

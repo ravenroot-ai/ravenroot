@@ -124,12 +124,34 @@ describe('startup import orchestration', () => {
     controller.updateRuntime(ready(1));
     await tick();
     expect(run).not.toHaveBeenCalled();
-    expect(controller.snapshot().phase).toBe(STARTUP_IMPORT_PHASE.FAILED);
+    expect(controller.snapshot()).toMatchObject({
+      phase: STARTUP_IMPORT_PHASE.FAILED,
+      errorCode: 'configuration-unavailable',
+      canRetry: true,
+      canCancel: true,
+    });
     expect(controller.retry()).toBe(true);
     controller.runtimePending();
     controller.updateRuntime(ready(2));
     await tick();
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cancellation terminal after a configuration failure', async () => {
+    const run = vi.fn().mockResolvedValue(undefined);
+    const controller = createStartupImportController({ rawUrl: '/flow.graphml', pageUrl: PAGE, run });
+    controller.updateRuntime({ kind: 'error', code: 'configuration-unavailable',
+      message: 'Configuration is unavailable.' });
+    expect(controller.cancel()).toBe(true);
+    expect(controller.snapshot()).toMatchObject({
+      phase: STARTUP_IMPORT_PHASE.CANCELLED,
+      canRetry: false,
+      canCancel: false,
+    });
+    controller.runtimePending();
+    controller.updateRuntime(ready(1));
+    await tick();
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('aborts a stale flight and requires deliberate retry against the new binding', async () => {

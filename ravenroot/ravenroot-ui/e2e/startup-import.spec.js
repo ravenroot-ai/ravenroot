@@ -41,6 +41,24 @@ async function stubRuntimeNoise(page) {
   await page.route('**/v1/events**', route => route.fulfill({ status: 204, body: '' }));
 }
 
+async function startupWorkspaceEvidence(page) {
+  return page.evaluate(() => {
+    const documents = window.ravenroot.documents();
+    return {
+      activeId: window.ravenroot.workspace.activeId,
+      documents: documents.map(document_ => ({
+        id: document_.id,
+        incarnation: document_.incarnation,
+        name: document_.name,
+        graphMl: window.ravenroot.serializeGraphML(document_.graph),
+        revision: document_.history.revision(),
+        dirty: document_.history.isDirty(),
+        authoring: JSON.stringify(document_.authoring),
+      })),
+    };
+  });
+}
+
 test('same-origin startup import waits for slow configuration and strips query and fragment from its filename', async ({ page }) => {
   let releaseConfiguration;
   const configurationGate = new Promise(resolve => { releaseConfiguration = resolve; });
@@ -68,6 +86,107 @@ test('same-origin startup import waits for slow configuration and strips query a
     nodes: window.ravenroot.workspace.active.graph.nodes.length,
     authoring: window.ravenroot.workspace.active.authoring.providerDocumentId,
   }))).toEqual({ name: 'startup flow.graphml', format: 'graphml', nodes: 2, authoring: null });
+});
+
+test('unavailable configuration keeps the startup import recoverable until one deliberate Retry', async ({ page }) => {
+  let configurationReady = false;
+  let releaseInitialConfiguration;
+  const initialConfigurationGate = new Promise(resolve => { releaseInitialConfiguration = resolve; });
+  let firstConfiguration = true;
+  let graphRequests = 0;
+  await page.route('**/v1/configuration', async route => {
+    if (firstConfiguration) {
+      firstConfiguration = false;
+      await initialConfigurationGate;
+    }
+    return route.fulfill(configurationReady
+      ? { status: 200, contentType: 'application/json', body: JSON.stringify(CONFIGURATION) }
+      : { status: 503, contentType: 'application/json',
+        body: '{"error":"private upstream configuration detail"}' });
+  });
+  await page.route(`${UI_ORIGIN}/configuration-retry.graphml`, route => {
+    graphRequests += 1;
+    return route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+  });
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/configuration-retry.graphml');
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-runtime');
+  const beforeFailure = await startupWorkspaceEvidence(page);
+  releaseInitialConfiguration();
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'failed');
+  await expect(page.locator('#startup-import-status')).toContainText('valid graph-loading configuration');
+  await expect(page.locator('#startup-import-status')).not.toContainText('private upstream');
+  await expect(page.locator('#startup-import-retry')).toBeVisible();
+  await expect(page.locator('#startup-import-cancel')).toBeVisible();
+  expect(graphRequests).toBe(0);
+  expect(await startupWorkspaceEvidence(page)).toEqual(beforeFailure);
+  expect(beforeFailure.documents).toHaveLength(1);
+  expect(beforeFailure.documents[0]).toMatchObject({ name: 'untitled.graphml', dirty: false });
+
+  configurationReady = true;
+  await page.locator('#startup-import-retry').click();
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+  expect(graphRequests).toBe(1);
+  await expect.poll(() => page.evaluate(() => ({
+    documents: window.ravenroot.workspace.documents.length,
+    name: window.ravenroot.workspace.active.name,
+  }))).toEqual({ documents: 1, name: 'configuration-retry.graphml' });
+});
+
+test('malformed configuration leaves the startup workspace unchanged and Cancel is terminal', async ({ page }) => {
+  let configurationReady = false;
+  let releaseInitialConfiguration;
+  const initialConfigurationGate = new Promise(resolve => { releaseInitialConfiguration = resolve; });
+  let firstConfiguration = true;
+  let graphRequests = 0;
+  await page.route('**/v1/configuration', async route => {
+    if (firstConfiguration) {
+      firstConfiguration = false;
+      await initialConfigurationGate;
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(configurationReady ? CONFIGURATION : {
+        schemaVersion: 1, graphDocumentMaxBytes: 0, privateDetail: 'malformed-private-detail',
+      }),
+    });
+  });
+  await page.route(`${UI_ORIGIN}/malformed-configuration.graphml`, route => {
+    graphRequests += 1;
+    return route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+  });
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/malformed-configuration.graphml');
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-runtime');
+  const beforeCancel = await startupWorkspaceEvidence(page);
+  releaseInitialConfiguration();
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'failed');
+  await expect(page.locator('#startup-import-status')).toContainText('valid graph-loading configuration');
+  await expect(page.locator('#startup-import-status')).not.toContainText('malformed-private-detail');
+  await expect(page.locator('#startup-import-retry')).toBeVisible();
+  await expect(page.locator('#startup-import-cancel')).toBeVisible();
+  expect(graphRequests).toBe(0);
+  expect(await startupWorkspaceEvidence(page)).toEqual(beforeCancel);
+  expect(beforeCancel.documents).toHaveLength(1);
+  expect(beforeCancel.documents[0]).toMatchObject({ name: 'untitled.graphml', dirty: false });
+
+  await page.locator('#startup-import-cancel').click();
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'cancelled');
+  await expect(page.locator('#startup-import-retry')).toBeHidden();
+  await expect(page.locator('#startup-import-cancel')).toBeHidden();
+  configurationReady = true;
+  await page.locator('#service-url').evaluate(element => {
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.workspacePersistence().authority.state)).toBe('ready');
+  expect(graphRequests).toBe(0);
+  expect(await startupWorkspaceEvidence(page)).toEqual(beforeCancel);
 });
 
 test('cross-origin Graphify import waits for origin confirmation and sends no bearer token', async ({ page }, testInfo) => {

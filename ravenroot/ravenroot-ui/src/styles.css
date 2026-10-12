@@ -949,6 +949,7 @@
       background: var(--bg-2); color: var(--tx-1);
       box-shadow: var(--shadow-dialog);
     }
+    #remember-connection-service { overflow-wrap: anywhere; }
     .unsaved-document-dialog::backdrop { background: var(--dialog-backdrop); }
     .unsaved-document-dialog h2 { margin-bottom: 8px; font-size: 16px; }
     .unsaved-document-dialog p { color: var(--tx-2); font-size: 12px; line-height: 1.5; }

@@ -95,6 +95,8 @@ test('requires explicit acceptance before a bearer token can be sent cross-origi
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
   await expect.poll(() => catalogRequests).toBeGreaterThan(0);
+  await page.locator('#access-token').fill('external-browser-token');
+  await page.locator('#btn-authenticate').click();
   await expect.poll(() => preflights).toBeGreaterThan(0);
   await expect(page.locator('#node-catalog')).toContainText('Safe template');
 });
@@ -176,15 +178,17 @@ test('hostile GraphML and Graphify labels render as inert text rather than execu
 // proxy is replaced by a guard on what actually reaches storage in a real browser — which, unlike
 // a text search, cannot be evaded by moving the store into another module, and unlike a narrowed
 // text search does not have to guess which spellings of a token write to look for.
-test('persists presentation preferences and never the token', async ({ page }) => {
+test('persists presentation preferences but never a declined token', async ({ page }) => {
   const TOKEN = 'tok-must-never-be-persisted-4f2b9c';
 
   await page.goto('/');
 
-  // Give the UI a token the way a user would, and a layout change worth remembering.
+  await page.route('**/v1/node-types', route => route.fulfill({ json: [] }));
+  // Give the UI a token the way a user would, and deliberately decline storage after success.
   await page.locator('#access-token').fill(TOKEN);
   await page.locator('#btn-authenticate').click();
-  await page.waitForTimeout(300);
+  await expect(page.getByRole('dialog', { name: 'Remember this connection?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep in memory', exact: true }).click();
   await page.locator('.panel[data-panel-id="graph-stats"] [data-action="panel-close"]').click();
   await page.waitForTimeout(200);
   await page.locator('#menu-view').click();

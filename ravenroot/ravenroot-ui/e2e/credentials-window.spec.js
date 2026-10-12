@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 // The Credentials window.
@@ -279,3 +280,6 @@ test.describe('the node inspector chooses a credential and never takes one', () 
         .toBe(FOREIGN);
     });
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

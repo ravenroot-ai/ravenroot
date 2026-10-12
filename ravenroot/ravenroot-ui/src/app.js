@@ -178,7 +178,8 @@ import {
   natureRiskText,
 } from './node-nature.js';
 import { resolveOutcomes, unreachableOutcome } from './node-outcomes.js';
-import { RavenrootRuntimeClient, memoryTokenProvider } from './runtime-client.js';
+import { RavenrootRuntimeClient } from './runtime-client.js';
+import { createRememberedConnection, connectionService } from './remembered-connection.js';
 import {
   AUTHORING_CAPABILITY_STATE,
   loadAuthoringCapability,
@@ -1031,7 +1032,23 @@ let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
 let graphAuthoringCapability = pendingAuthoringCapability();
 let runtimeConnectionGeneration = 0;
-const runtimeTokenProvider = memoryTokenProvider();
+const startupService = connectionService(document.getElementById('service-url').defaultValue, location.origin);
+const startupServerAuth = document.getElementById('service-url').dataset.serverAuth === 'true';
+const rememberedConnection = createRememberedConnection({
+  origin: location.origin,
+  onRejection: () => { void revokeRuntimeAccess(true); },
+  onChange: state => {
+    hasRuntimeToken = state.hasToken;
+    const input = document.getElementById('access-token');
+    input.placeholder = state.remembered ? 'saved in this browser' : state.hasToken ? 'token in memory' : 'paste token';
+    if (state.notice) {
+      const status = document.getElementById('runtime-connection');
+      status.title = state.notice;
+      status.setAttribute('aria-label', `Runtime status: ${status.textContent}. ${state.notice}`);
+    }
+    refreshCommands();
+  },
+});
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;
 const PROGRAM_OUTPUT_DISPLAY_LIMIT = 8 * 1024;
@@ -1102,18 +1119,6 @@ function readHumanTaskSelection() {
 function sameHumanTaskSelection(left, right) {
   return Boolean(left && right && left.serviceOrigin === right.serviceOrigin
     && left.taskId === right.taskId && left.generation === right.generation);
-}
-
-function restoreHumanTaskServiceOrigin() {
-  const locator = readHumanTaskSelection();
-  if (!locator || typeof locator.serviceOrigin !== 'string' || !locator.serviceOrigin) return;
-  try {
-    const target = new URL(locator.serviceOrigin);
-    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
-    document.getElementById('service-url').value = locator.serviceOrigin;
-  } catch {
-    clearHumanTaskSelection();
-  }
 }
 
 function focusHumanTaskInspector() {
@@ -1248,7 +1253,7 @@ function receiveHumanTaskProjection(state) {
       + `${escalated ? `; ${escalated} escalated` : ''}.` : 'No Human Tasks need attention.');
   }
   if (state.kind === 'ready' && !humanTaskDecisionDialog?.selected()) {
-    void recoverHumanTaskSelection(owner);
+    if (!document.getElementById('remember-connection-dialog').open) void recoverHumanTaskSelection(owner);
   }
 }
 
@@ -1257,7 +1262,7 @@ function configureHumanTasks(owner = workspace.active) {
   const authorized = tenantAuthorityAllows(owner);
   const configured = humanTaskController?.configure(authorized ? runtimeClient : null,
     authorized ? currentHumanTaskCapability() : null, owner);
-  void recoverHumanTaskSelection(owner);
+  if (!document.getElementById('remember-connection-dialog').open) void recoverHumanTaskSelection(owner);
   return configured;
 }
 
@@ -11701,7 +11706,11 @@ async function connectRuntime(atBoot = false) {
   syncGraphModeLabel();
   const input = document.getElementById('service-url');
   const baseUrl = input.value.trim().replace(/\/$/, '');
+  try { rememberedConnection.select(baseUrl); } catch (error) {
+    return setRuntimeConnectionState('error', error.message);
+  }
   input.value = baseUrl;
+  const runtimeTokenProvider = rememberedConnection.provider(baseUrl);
   if (baseUrl) {
     let target;
     try {
@@ -11720,9 +11729,10 @@ async function connectRuntime(atBoot = false) {
       }
       const accepted = globalThis.confirm(
         `Connect Ravenroot UI to the external service origin exactly as shown?\n\n${target.origin}\n\n` +
-        'The in-memory bearer token will be sent to this origin.');
+        'The bearer token for this connection will be sent to this origin. Remembering a connection does not bypass this confirmation.');
       if (!accepted) {
         input.value = '';
+        rememberedConnection.select('');
         // Declining ends the previous connection as well. Every other path through this function
         // replaces the client; leaving it running here kept a connection alive that no longer
         // matched the now-empty field, and its transport retries overwrote the very message that
@@ -11804,21 +11814,25 @@ async function connectRuntime(atBoot = false) {
   });
   const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
-    atBoot ? 'Connecting to the service — the access token is kept in memory only'
-      : 'Connecting with an in-memory bearer token');
+    atBoot ? 'Connecting to the service' : 'Connecting to the selected service');
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
     runtimeDisconnect = runtimeClient.connect(
       event => deliverRuntimeEventAfterAuthority(event, connectedClient, connectedConfigurationRequest),
       (status, message) => {
+        if (runtimeClient !== connectedClient) return;
         setRuntimeConnectionState(status, message);
-        if (status === 'connected') void configureHumanTasks();
+        if (status === 'connected') {
+          void rememberedConnection.authenticated(confirmRememberConnection);
+          void configureHumanTasks();
+        }
       });
     connectedClient.nodeTypes().then(async catalog => {
       await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
+      void rememberedConnection.authenticated(confirmRememberConnection);
       nodeTypeCatalog = catalog;
       namedAgentCatalog = [];
       if (catalog.some(type => type.behavior === 'workspace')) {
@@ -11856,17 +11870,44 @@ async function connectRuntime(atBoot = false) {
   }
 }
 
+function confirmRememberConnection(service) {
+  // Consent and restored task confirmation must not compete in the native modal stack.
+  suspendHumanTaskRecovery();
+  const dialog = document.getElementById('remember-connection-dialog');
+  document.getElementById('remember-connection-service').textContent = service;
+  const origin = document.activeElement;
+  return new Promise(resolve => {
+    const finish = accepted => {
+      dialog.removeEventListener('close', close);
+      dialog.close();
+      if (origin?.isConnected) origin.focus({ preventScroll: true });
+      resolve(accepted);
+      void configureHumanTasks();
+    };
+    const close = () => finish(dialog.returnValue === 'remember');
+    dialog.returnValue = 'decline';
+    dialog.addEventListener('close', close, { once: true });
+    dialog.showModal();
+    dialog.querySelector('[value="decline"]').focus();
+  });
+}
+
 function authenticateRuntime() {
   const input = document.getElementById('access-token');
   const token = input.value.trim();
   input.value = '';
+  if (!token && hasRuntimeToken) {
+    // Authenticate also confirms a restored external connection whose password field stays blank.
+    void connectRuntime();
+    return;
+  }
   if (!token) {
     setRuntimeConnectionState('authentication-required', 'Paste an access token to authenticate');
     input.focus();
     return;
   }
-  runtimeTokenProvider.setAccessToken(token);
-  hasRuntimeToken = true;
+  try { rememberedConnection.authenticate(document.getElementById('service-url').value, token); }
+  catch (error) { setRuntimeConnectionState('error', error.message); return; }
   // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
   // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
   suspendHumanTaskRecovery();
@@ -11874,12 +11915,12 @@ function authenticateRuntime() {
   connectRuntime();
 }
 
-async function revokeRuntimeAccess() {
+async function revokeRuntimeAccess(rejected = false) {
   const connectionGeneration = ++runtimeConnectionGeneration;
   beginWorkspaceAuthority(null, 'revoked');
-  await flushWorkspacePersistence({ allowSuspended: true });
+  if (!rejected) await flushWorkspacePersistence({ allowSuspended: true });
   if (connectionGeneration !== runtimeConnectionGeneration) return;
-  runtimeTokenProvider.clearAccessToken();
+  if (!rejected) rememberedConnection.forget();
   hasRuntimeToken = false;
   runtimeDisconnect?.();
   runtimeDisconnect = null;
@@ -11913,14 +11954,23 @@ async function revokeRuntimeAccess() {
   nodeCatalogLoaded = false;
   nodeCatalogPending = false;
   renderNodeCatalog();
-  setRuntimeConnectionState('revoked', 'Access token removed from memory');
+  setRuntimeConnectionState(rejected ? 'authentication-required' : 'revoked', rejected
+    ? 'The service rejected its token; authenticate with a replacement token'
+    : 'Browser token forgotten; service retained. A configured server token may still apply.');
   refreshCommands();
+  if (!rejected && startupServerAuth && connectionService(document.getElementById('service-url').value, location.origin) === startupService) {
+    void connectRuntime();
+  }
 }
 
 function setRuntimeConnectionState(status, message) {
   const state = document.getElementById('runtime-connection');
   state.className = `connection-state ${status}`;
   state.textContent = status.replaceAll('-', ' ');
+  if (status === 'authentication-required' && !hasRuntimeToken) {
+    message += ' — Paste a service token. If the proxy uses an operator token, its operator must rotate it and restart the UI server.';
+  }
+  if (rememberedConnection.notice) message += ` — ${rememberedConnection.notice}`;
   state.title = message;
   state.setAttribute('aria-label', `Runtime status: ${status.replaceAll('-', ' ')}. ${message}`);
 }
@@ -16489,6 +16539,7 @@ document.getElementById('deployments-dialog').addEventListener('keydown', event 
 });
 // Wrapped, not passed by reference: `connectRuntime` now takes a flag, and a listener would hand it
 // the Event object, which is truthy.
+document.getElementById('remember-connection-dialog').addEventListener('keydown', event => event.stopPropagation());
 document.getElementById('service-url').addEventListener('change', () => connectRuntime());
 document.getElementById('access-token').addEventListener('keydown', event => {
   if (event.key === 'Enter') authenticateRuntime();
@@ -16593,10 +16644,21 @@ window.addEventListener('load', () => {
   // The attempt is unconditional: a build flag or an environment variable here would be the same
   // assumption behind a switch. It runs before the graph loads so the request departs immediately,
   // and a failure only fills the palette with a reason — the editor stays usable offline.
-  // A durable-task locator is the only browser state retained for recovery. Restore its service
-  // origin before boot connection; the existing cross-origin gate still refuses to send a token
-  // until the user explicitly confirms that origin again.
-  restoreHumanTaskServiceOrigin();
+  // Resolve a remembered public connection ahead of the operator prefix. Task recovery locators
+  // never override connection authority; an external service still needs fresh origin confirmation.
+  const serviceInput = document.getElementById('service-url');
+  const defaultService = serviceInput.defaultValue;
+  // Preserve the existing service-only task recovery preference below an opted-in connection.
+  // It carries no credential or trust decision, and must pass the same public binding validation.
+  let legacyService = '';
+  const locator = readHumanTaskSelection();
+  if (locator?.serviceOrigin) {
+    try { legacyService = connectionService(locator.serviceOrigin, location.origin); }
+    catch { clearHumanTaskSelection(); }
+  }
+  const selectedService = rememberedConnection.startup(defaultService, legacyService);
+  serviceInput.value = selectedService === connectionService(defaultService, location.origin)
+    && !rememberedConnection.hasSavedService ? defaultService : selectedService;
   connectRuntime(true);
   // Composed once at boot so the chips are truthful from the first paint rather than blank
   // until something happens. `connectRuntime` above has already asked the service what it offers.

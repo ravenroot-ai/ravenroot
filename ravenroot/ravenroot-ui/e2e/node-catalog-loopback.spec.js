@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
@@ -223,3 +224,6 @@ test('a boot attempt refused with 401 keeps today\'s state and today\'s message'
   await expect(page.locator('#cy-wrap')).toBeVisible();
   await expect(page.locator('#btn-play')).toBeEnabled();
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

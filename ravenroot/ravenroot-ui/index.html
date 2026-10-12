@@ -303,13 +303,13 @@
     </label>
     <label class="command-field token-field">
       <span>Service token</span>
-      <input id="access-token" type="password" value="" autocomplete="off" placeholder="memory only"
+      <input id="access-token" type="password" value="" autocomplete="off" placeholder="paste token"
              aria-label="Ravenroot service token — signs this editor in to your own service, not to a model provider">
     </label>
     <button class="btn" id="btn-authenticate" data-command-id="run.authenticate"
             title="Sign in to the Ravenroot service named above">Authenticate</button>
     <button class="btn" id="btn-revoke" data-command-id="run.forgetToken" disabled
-            title="Forget the service token held in memory">Forget token</button>
+            title="Forget the service token in memory and in this browser">Forget token</button>
     <span id="runtime-connection" class="connection-state authentication-required" role="status"
           aria-live="polite">authentication required</span>
     <label class="command-field payload-field">
@@ -857,6 +857,22 @@
 </div>
 
 <!-- Native modal focus containment. Copy and action labels are filled for Close or Replace. -->
+<dialog id="remember-connection-dialog" class="unsaved-document-dialog"
+        aria-labelledby="remember-connection-title" aria-describedby="remember-connection-disclosure">
+  <form method="dialog">
+    <h2 id="remember-connection-title">Remember this connection?</h2>
+    <p id="remember-connection-service"></p>
+    <p id="remember-connection-disclosure">Your service token will be stored in this browser’s Local Storage,
+      readable by page JavaScript. It will reconnect on reload or reopening, with no additional time limit.
+      The service still decides when it expires. Use Forget token to remove it. For a same-origin proxy,
+      the operator controls the upstream service.</p>
+    <div class="unsaved-document-actions">
+      <button class="btn" value="decline">Keep in memory</button>
+      <button class="btn" value="remember">Remember</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="unsaved-document-dialog" class="unsaved-document-dialog"
         aria-labelledby="unsaved-document-title" aria-describedby="unsaved-document-description">
   <h2 id="unsaved-document-title">Save changes?</h2>

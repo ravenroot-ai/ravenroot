@@ -442,7 +442,7 @@ export function validateProcessInventoryPage(value) {
 
 // Whether the service requires authentication is the SERVICE'S answer, never a constant compiled
 // into this bundle. The client sends the request and reacts to the status it gets back: a 401 or a
-// 403 is surfaced as a RuntimeAuthorizationError exactly as before, and a rejected credential is
+// 403 is surfaced as a RuntimeAuthorizationError exactly as before, and only a definitively rejected (401) credential is
 // cleared when its provider can atomically prove that the rejected snapshot is still current. What
 // was removed is only the client's refusal to ASK — which made a loopback service
 // that authorises everyone look like a service that had rejected us, and emptied the node palette
@@ -499,10 +499,10 @@ export class RavenrootRuntimeClient {
           }
         }
         if (response.status === 401 || response.status === 403) {
-          await this.#clearAccessTokenIfCurrent(credential);
+          if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
           if (signal.aborted) return;
           throw new RuntimeAuthorizationError(
-            response.status === 401 ? 'Authentication expired' : 'Access revoked', response.status);
+            response.status === 401 ? 'Authentication expired' : 'Insufficient permissions', response.status);
         }
         if (!response.ok || !response.body?.getReader) {
           throw new Error(`Live events failed with HTTP ${response.status}`);
@@ -734,7 +734,7 @@ export class RavenrootRuntimeClient {
           cache: 'no-store', signal,
         });
         if (response.status === 401 || response.status === 403) {
-          await this.#clearAccessTokenIfCurrent(credential);
+          if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
           throw new RuntimeAuthorizationError(response.status === 401
             ? 'Authentication expired' : 'Deployment observation was revoked', response.status);
         }
@@ -1564,8 +1564,8 @@ export class RavenrootRuntimeClient {
       throw new RuntimeRequestError('Service request failed', { method, path });
     }
     if (response.status === 401 || response.status === 403) {
-      await this.#clearAccessTokenIfCurrent(credential);
-      throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Access revoked',
+      if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
+      throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Insufficient permissions',
         response.status);
     }
     // The body is read as text, never with `.json()` directly. A base URL that lands on a proxy,
@@ -1815,7 +1815,7 @@ function executionEventCursor(value) {
  * commit atomically. A conditional refresh must also reject a stale snapshot before starting its
  * external work and check it again when committing the new credential. Legacy providers that only
  * expose `getAccessToken` remain usable for requests; the runtime deliberately does not call their
- * unconditional clear or refresh methods on 401/403.
+ * unconditional clear or refresh methods on 401.
  */
 export function memoryTokenProvider(initialToken = '') {
   let current = Object.freeze({ accessToken: String(initialToken || '') });

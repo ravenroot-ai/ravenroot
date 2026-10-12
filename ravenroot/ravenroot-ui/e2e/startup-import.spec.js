@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 import { SERVICE_ORIGIN, UI_ORIGIN } from './ports.mjs';
@@ -33,6 +34,12 @@ function repositoryEnvelope(documentId, source = 'draft') {
     graphMl: Buffer.from(authoredGraphMl(graphId, releaseVersion), 'utf8').toString('base64'),
   };
 }
+
+// Authentication now offers browser persistence. These import scenarios explicitly keep their
+// test credential in memory before interacting with the underlying import or workspace controls.
+test.beforeEach(async ({ page }) => {
+  await keepAuthenticationInMemory(page);
+});
 
 async function stubRuntimeNoise(page) {
   await page.route('**/v1/node-types', route => route.fulfill({
@@ -902,3 +909,35 @@ test('Git authoring keeps a URL import unbound while repository Open and Save re
   await page.locator('#menu-file').click();
   await expect(page.getByRole('menuitem', { name: 'Open repository draft' })).toBeVisible();
 });
+
+for (const rejected of [false, true]) {
+  test(`startup import with a ${rejected ? 'rejected' : 'valid'} remembered credential preserves readiness`, async ({ page }) => {
+    const requests = [];
+    await page.addInitScript(({ service, token }) => {
+      localStorage.setItem('ravenroot.ui.connection', JSON.stringify({ version: 1, service, token }));
+    }, { service: UI_ORIGIN, token: rejected ? 'expired-startup-token' : 'saved-startup-token' });
+    await page.route('**/v1/configuration', route => route.fulfill(
+      route.request().headers().authorization === 'Bearer saved-startup-token'
+        ? { status: 200, json: CONFIGURATION }
+        : { status: 401, json: { error: 'authentication required' } }));
+    await stubRuntimeNoise(page);
+    await page.route(`${UI_ORIGIN}/remembered-startup.graphml`, route => {
+      requests.push(route.request().headers().authorization || '');
+      return route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+    });
+    await page.goto('/?file=/remembered-startup.graphml');
+    if (rejected) {
+      await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-authentication');
+      expect(requests).toEqual([]);
+      await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('ravenroot.ui.connection')).token)).toBeNull();
+      await page.locator('#access-token').fill('saved-startup-token');
+      await page.locator('#btn-authenticate').click();
+    }
+    await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+    expect(requests).toEqual(['']);
+    expect(await page.evaluate(() => window.ravenroot.documents().length)).toBe(1);
+    await expect(page.locator('#remember-connection-dialog')).toBeHidden();
+    await page.locator('#service-url').press('Enter');
+    expect(requests).toEqual(['']);
+  });
+}

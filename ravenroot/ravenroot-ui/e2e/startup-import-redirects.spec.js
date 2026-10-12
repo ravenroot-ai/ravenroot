@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createServer } from 'node:http';
 
 import { expect, test as base } from '@playwright/test';
@@ -48,6 +49,12 @@ const test = base.extend({
         new Promise(resolve => server.close(resolve))]);
     }
   },
+});
+
+// Authentication now offers browser persistence. These import scenarios explicitly keep their
+// test credential in memory before interacting with the underlying import or workspace controls.
+test.beforeEach(async ({ page }) => {
+  await keepAuthenticationInMemory(page);
 });
 
 async function workspaceEvidence(page) {

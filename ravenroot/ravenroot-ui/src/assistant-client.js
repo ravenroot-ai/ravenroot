@@ -1,3 +1,4 @@
+import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 // The panel's only way out of the browser — and it goes to this product's own service, never to a
 // model provider (the per-author credential contract and the design record's §1).
 //
@@ -362,10 +363,11 @@ export class RavenrootAssistantClient {
     }
   }
 
-  #fetch(path, options) {
+  async #fetch(path, options) {
     if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
-    const token = String(this.tokenProvider?.getAccessToken?.() || '');
-    return this.fetchImpl(assistantUrl(this.baseUrl, path), {
+    const credential = await requestCredential(this.tokenProvider);
+    const { token } = credential;
+    const response = await this.fetchImpl(assistantUrl(this.baseUrl, path), {
       ...options,
       credentials: 'omit',
       cache: 'no-store',
@@ -373,6 +375,8 @@ export class RavenrootAssistantClient {
         ? { ...options.headers, Authorization: `Bearer ${token}` }
         : { ...options.headers },
     });
+    await invalidateRejectedCredential(response, this.tokenProvider, credential);
+    return response;
   }
 
 }

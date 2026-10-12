@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 async function installWorkspaceService(page, tenant) {
@@ -379,3 +380,6 @@ test('deployment registration persists the exact captured graph as an immutable 
     .toMatchObject({ originMode: 'deployed', sourceDocumentId: deployed.id,
       sourceGraphVersion: 'deployed-v1', deploymentId: null });
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

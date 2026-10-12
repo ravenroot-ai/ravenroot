@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 const EXECUTION_ID = '11111111-1111-4111-8111-111111111111';
@@ -156,3 +157,6 @@ test('a lost authoritative read leaves lifecycle state unknown and controls disa
   await expect(page.locator('#activity-log')).toContainText('no success state was assumed');
   expect(disconnected.readsAfterPauseResponse).toBeGreaterThan(0);
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

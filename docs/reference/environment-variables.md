@@ -527,6 +527,7 @@ These variables configure the optional UI-only static server, not the Java backe
 | Variable | Contract |
 |---|---|
 | `RAVENROOT_UI_BACKEND_URL` | Server-side HTTP(S) upstream; unset selects static-only mode with backend routes returning `503`; optional backend path prefix, no credentials/query/fragment |
+| `RAVENROOT_UI_BACKEND_TOKEN` | Optional literal bearer value, nonempty RFC 6750 characters, at most 16384 characters; requires backend URL; startup server memory only; missing-Authorization fallback, shared identity |
 | `RAVENROOT_UI_PREFIX` | Empty (root) or public slash-prefixed path without trailing slash |
 | `RAVENROOT_UI_PORT` | Integer TCP port, default `8080` |
 | `RAVENROOT_UI_ROOT` | Asset directory, default `/opt/ravenroot/ui` |

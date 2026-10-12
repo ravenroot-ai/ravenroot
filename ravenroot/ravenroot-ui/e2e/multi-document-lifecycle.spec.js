@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
@@ -352,3 +353,6 @@ test.describe('multi-document lifecycle', () => {
     expect(await records(page)).toEqual(before);
   });
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

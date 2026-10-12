@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   captureWorkspaceRestoreBaseline,
+  stableUserPresentationFingerprint,
   workspaceMatchesRestoreBaseline,
 } from '../src/workspace-restore-guard.js';
 
@@ -13,6 +14,19 @@ function record(id = 'placeholder') {
     incarnation: `${id}-incarnation`,
     graph: { id },
     authoring: { providerDocumentId: null, revision: null },
+    fontSize: 20,
+    renderMode: 'design',
+    layoutMode: 'cyto',
+    designArrangement: null,
+    visualStyle: 'cyto',
+    filterActive: false,
+    traceActive: false,
+    n8nActive: false,
+    monitoringForces: { repulsion: 115, attraction: 0.2 },
+    visualGroupState: { group: { collapsed: false } },
+    visualGroupPresentationDirty: false,
+    viewStates: { design: { visualGroupState: { group: { collapsed: false } },
+      layoutMode: 'cyto', canvasState: { positions: { volatile: { x: 1, y: 2 } } } } },
     history: {
       revision: () => revision,
       isDirty: () => dirty,
@@ -73,5 +87,38 @@ describe('workspace restoration guard', () => {
     const baseline = captureWorkspaceRestoreBaseline(workspace);
     workspace.activeId = second.id;
     expect(workspaceMatchesRestoreBaseline(workspace, baseline)).toBe(false);
+  });
+
+  it('rejects stable user presentation changes while restoration is pending', () => {
+    const factories = [
+      document_ => { document_.fontSize = 27; },
+      document_ => { document_.renderMode = 'monitoring'; },
+      document_ => { document_.layoutMode = 'elastic'; },
+      document_ => { document_.designArrangement = 'layered'; },
+      document_ => { document_.visualStyle = 'n8n4'; },
+      document_ => { document_.filterActive = true; },
+      document_ => { document_.traceActive = true; },
+      document_ => { document_.n8nActive = true; },
+      document_ => { document_.monitoringForces.repulsion = 240; },
+      document_ => { document_.visualGroupState.group.collapsed = true; },
+      document_ => { document_.visualGroupPresentationDirty = true; },
+    ];
+    for (const mutate of factories) {
+      const document_ = record();
+      const workspace = { documents: [document_] };
+      const baseline = captureWorkspaceRestoreBaseline(workspace);
+      mutate(document_);
+      expect(workspaceMatchesRestoreBaseline(workspace, baseline)).toBe(false);
+    }
+  });
+
+  it('ignores volatile renderer and automatic layout output', () => {
+    const document_ = record();
+    const baseline = stableUserPresentationFingerprint(document_);
+    document_.viewStates.design.canvasState.positions.volatile = { x: 900, y: 700 };
+    document_.canvasState = { zoom: 3, pan: { x: 10, y: 20 } };
+    document_.cursorId = 'automatic-focus';
+    document_.layoutBusy = true;
+    expect(stableUserPresentationFingerprint(document_)).toBe(baseline);
   });
 });

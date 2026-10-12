@@ -43,6 +43,7 @@ import {
 } from './startup-import.js';
 import {
   captureWorkspaceRestoreBaseline,
+  stableUserPresentationFingerprint,
   workspaceMatchesRestoreBaseline,
 } from './workspace-restore-guard.js';
 import {
@@ -14077,6 +14078,7 @@ function startupImportPlaceholderIsUntouched() {
   if (!target || target !== initial.document || workspace.documents.length !== 1) return false;
   return target.incarnation === initial.incarnation && target.graph === initial.graph
     && target.history === initial.history && target.history.revision() === initial.revision
+    && stableUserPresentationFingerprint(target) === initial.presentation
     && !target.history.isDirty() && target.mode === DOCUMENT_MODES.DRAFT
     && target.authoring.providerDocumentId === null && target.authoring.revision === null
     && target.authoring.graphId === null && target.authoring.releaseVersion === null;
@@ -14159,6 +14161,7 @@ function initializeStartupImport(rawUrl) {
   startupImportPlaceholder = Object.freeze({
     id: document_.id, document: document_, incarnation: document_.incarnation,
     graph: document_.graph, history: document_.history, revision: document_.history.revision(),
+    presentation: stableUserPresentationFingerprint(document_),
   });
   try {
     startupImportController = createStartupImportController({

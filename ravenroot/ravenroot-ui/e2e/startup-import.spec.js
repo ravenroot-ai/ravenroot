@@ -59,6 +59,12 @@ async function startupWorkspaceEvidence(page) {
   });
 }
 
+async function setActiveFontSize(page, value) {
+  await page.locator('#font-slider').fill(String(value));
+  await page.locator('#font-slider').dispatchEvent('input');
+  await expect(page.locator('#font-val')).toHaveText(String(value));
+}
+
 test('same-origin startup import waits for slow configuration and strips query and fragment from its filename', async ({ page }) => {
   let releaseConfiguration;
   const configurationGate = new Promise(resolve => { releaseConfiguration = resolve; });
@@ -247,6 +253,38 @@ test('work started while configuration loads is kept in its own document when im
   }))).toEqual({ documents: 2, active: 'separate.graphml', localWork: true });
 });
 
+test('a font choice made while configuration loads is preserved in a separate document', async ({ page }) => {
+  let releaseConfiguration;
+  const configurationGate = new Promise(resolve => { releaseConfiguration = resolve; });
+  await page.route('**/v1/configuration', async route => {
+    await configurationGate;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CONFIGURATION) });
+  });
+  await page.route(`${UI_ORIGIN}/after-font-choice.graphml`, route => route.fulfill({
+    status: 200, contentType: 'application/graphml+xml', body: GRAPHML,
+  }));
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/after-font-choice.graphml');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-runtime');
+  const originalId = await page.evaluate(() => window.ravenroot.workspace.activeId);
+
+  await setActiveFontSize(page, 27);
+  releaseConfiguration();
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+  await expect.poll(() => page.evaluate(id => {
+    const original = window.ravenroot.workspace.find(id);
+    return {
+      documents: window.ravenroot.workspace.documents.length,
+      originalId: original?.id,
+      originalFont: original?.fontSize,
+      importedName: window.ravenroot.workspace.active.name,
+      importedFont: window.ravenroot.workspace.active.fontSize,
+    };
+  }, originalId)).toEqual({ documents: 2, originalId, originalFont: 27,
+    importedName: 'after-font-choice.graphml', importedFont: 20 });
+});
+
 test('restored workspace documents remain separate from the startup import', async ({ page }) => {
   await page.route('**/v1/configuration', route => {
     const authenticated = route.request().headers().authorization === 'Bearer restored-token';
@@ -431,6 +469,50 @@ test('an edit made during slow workspace restoration remains open and the stored
   expect(await page.evaluate(() => window.__storedRestore.documents[0].documentId)).toBe('restored-document');
 });
 
+test('a font choice made during slow restoration preserves current and stored workspaces', async ({ page }) => {
+  await page.route('**/v1/configuration', route => {
+    const authenticated = route.request().headers().authorization === 'Bearer font-restore-token';
+    return route.fulfill(authenticated
+      ? { status: 200, contentType: 'application/json', body: JSON.stringify({
+        ...CONFIGURATION, workspace: { tenantId: 'tenant-font-restoring' },
+      }) }
+      : { status: 401, contentType: 'application/json', body: '{"error":"authentication required"}' });
+  });
+  let graphRequested = false;
+  await page.route(`${UI_ORIGIN}/font-after-restore.graphml`, route => {
+    graphRequested = true;
+    return route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+  });
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/font-after-restore.graphml');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-authentication');
+  const originalId = await page.evaluate(() => window.ravenroot.workspace.activeId);
+  await page.evaluate(() => {
+    window.__storedFontRestore = { documents: [{ documentId: 'stored-font-document', fontSize: 18 }],
+      activeDocumentId: 'stored-font-document' };
+    window.__fontRestorePromise = new Promise(resolve => { window.__resolveFontRestore = resolve; });
+    window.ravenroot._setWorkspaceSnapshotReaderForTest(() => window.__fontRestorePromise);
+  });
+  await page.locator('#access-token').fill('font-restore-token');
+  await page.locator('#btn-authenticate').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().restoring)).toBe(true);
+
+  await setActiveFontSize(page, 27);
+  await page.evaluate(() => window.__resolveFontRestore(window.__storedFontRestore));
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'failed');
+  await expect(page.locator('#startup-import-status')).toContainText('current documents changed');
+  expect(graphRequested).toBe(false);
+  await expect.poll(() => page.evaluate(id => ({
+    documents: window.ravenroot.workspace.documents.length,
+    id: window.ravenroot.workspace.activeId,
+    fontSize: window.ravenroot.workspace.active.fontSize,
+    stored: window.__storedFontRestore,
+  }), originalId)).toEqual({ documents: 1, id: originalId, fontSize: 27,
+    stored: { documents: [{ documentId: 'stored-font-document', fontSize: 18 }],
+      activeDocumentId: 'stored-font-document' } });
+});
+
 test('a failed stored-workspace read reports sanitized recovery guidance and changes no documents', async ({ page }) => {
   await page.route('**/v1/configuration', route => {
     const authenticated = route.request().headers().authorization === 'Bearer restore-token';
@@ -535,6 +617,35 @@ test('Cancel aborts a slow download and never mutates the workspace', async ({ p
     documents: window.ravenroot.workspace.documents.length })))
     .toEqual({ name: 'untitled.graphml', documents: 1 });
   await expect(page.locator('#startup-import-retry')).toBeHidden();
+});
+
+test('a font choice made during download preserves the original and imports separately', async ({ page }) => {
+  let releaseDownload;
+  const downloadGate = new Promise(resolve => { releaseDownload = resolve; });
+  await page.route(`${UI_ORIGIN}/font-during-download.graphml`, async route => {
+    await downloadGate;
+    await route.fulfill({ status: 200, contentType: 'application/graphml+xml', body: GRAPHML });
+  });
+  await stubRuntimeNoise(page);
+  await page.goto('/?file=/font-during-download.graphml');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'downloading');
+  const originalId = await page.evaluate(() => window.ravenroot.workspace.activeId);
+
+  await setActiveFontSize(page, 27);
+  releaseDownload();
+
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'completed');
+  await expect.poll(() => page.evaluate(id => {
+    const original = window.ravenroot.workspace.find(id);
+    return {
+      documents: window.ravenroot.workspace.documents.length,
+      originalId: original?.id,
+      originalFont: original?.fontSize,
+      importedName: window.ravenroot.workspace.active.name,
+      importedFont: window.ravenroot.workspace.active.fontSize,
+    };
+  }, originalId)).toEqual({ documents: 2, originalId, originalFont: 27,
+    importedName: 'font-during-download.graphml', importedFont: 20 });
 });
 
 test('a service change aborts an old flight and Retry binds a fresh import to the new authority', async ({ page }) => {

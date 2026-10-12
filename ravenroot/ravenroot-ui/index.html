@@ -317,6 +317,17 @@
       <input id="execution-payload" value="hello ravenroot" aria-label="Initial execution payload">
     </label>
   </div>
+  <section id="startup-import" class="startup-import" aria-labelledby="startup-import-title"
+           aria-describedby="startup-import-status" hidden>
+    <strong id="startup-import-title">Startup import</strong>
+    <span id="startup-import-file" class="startup-import-file"></span>
+    <span id="startup-import-status" role="status" aria-live="polite"></span>
+    <span class="startup-import-actions">
+      <button class="btn" id="startup-import-confirm" type="button" hidden>Confirm origin</button>
+      <button class="btn" id="startup-import-retry" type="button" hidden>Retry</button>
+      <button class="btn" id="startup-import-cancel" type="button">Cancel</button>
+    </span>
+  </section>
   <input type="file" id="replace-file-inp" accept=".graphml,.xml,.json" class="visually-hidden">
 </div>
 

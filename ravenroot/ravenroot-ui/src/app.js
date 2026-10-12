@@ -29,12 +29,22 @@ import {
 } from './additional-property-groups.js';
 import {
   detectAndParse,
+  fetchInputTextWithinByteLimit,
   GFY_MAX_WARN,
   GFY_SAMPLE,
+  GRAPH_INPUT_REJECTION_REASONS,
+  GraphInputRejection,
   loadLocalGraphInput,
-  loadUrlGraphInput,
   sampleLargeGraph,
 } from './graph-parsers.js';
+import {
+  createStartupImportController,
+  StartupImportError,
+} from './startup-import.js';
+import {
+  captureWorkspaceRestoreBaseline,
+  workspaceMatchesRestoreBaseline,
+} from './workspace-restore-guard.js';
 import {
   DEFAULT_EDGE_OUTCOME,
   NODE_KINDS,
@@ -804,6 +814,7 @@ let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scop
 const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
+  startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
   workspaceRestoreInProgress = false;
@@ -920,6 +931,10 @@ function removeAllWorkspaceDocuments() {
   projectWorkspaceAfterDocumentClose();
 }
 
+function workspaceSwitchFailure(code) {
+  return Object.freeze({ failed: true, code });
+}
+
 async function switchWorkspacePersistence(configuration, client) {
   const nextScope = configuration?.workspace
     ? workspaceScope(normalizedWorkspaceServiceUrl(client), configuration.workspace.tenantId) : null;
@@ -937,16 +952,19 @@ async function switchWorkspacePersistence(configuration, client) {
         && !editHistory.isDirty())) {
     workspacePersistenceReason = 'Session-only documents remain open and exportable. Close or export them before reconnecting to restore the authenticated workspace.';
     syncPaneHeaders();
-    return false;
+    return workspaceSwitchFailure('current-session-conflict');
   }
   if (activeWorkspaceScope) {
     if (!workspacePersistenceWritable) {
       workspacePersistenceReason = 'This workspace could not be saved, so it remains open to prevent data loss.';
       syncPaneHeaders();
-      return false;
+      return workspaceSwitchFailure('persistence-unavailable');
     }
     await flushWorkspacePersistence({ allowSuspended: true });
-    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
+    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) {
+      return workspaceSwitchFailure(transition !== workspacePersistenceGeneration
+        ? 'stale-transition' : 'persistence-unavailable');
+    }
   }
   if (!nextScope) {
     removeAllWorkspaceDocuments();
@@ -957,12 +975,23 @@ async function switchWorkspacePersistence(configuration, client) {
     return null;
   }
   workspaceRestoreInProgress = true;
+  captureActiveDocument();
+  const restoreBaseline = captureWorkspaceRestoreBaseline(workspace);
   try {
     const restored = await workspaceSnapshotReader(nextScope);
-    if (transition !== workspacePersistenceGeneration) return false;
+    if (transition !== workspacePersistenceGeneration) return workspaceSwitchFailure('stale-transition');
+    captureActiveDocument();
+    if (!workspaceMatchesRestoreBaseline(workspace, restoreBaseline)) {
+      workspacePersistenceReason = 'Stored documents are ready, but the current session changed while they were loading. Your current documents remain open; reconnect when you are ready to restore the stored workspace.';
+      syncActiveDocumentChrome();
+      return workspaceSwitchFailure('current-session-changed');
+    }
     if (activeWorkspaceScope) {
       await flushWorkspacePersistence({ allowSuspended: true });
-      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
+      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) {
+        return workspaceSwitchFailure(transition !== workspacePersistenceGeneration
+          ? 'stale-transition' : 'persistence-unavailable');
+      }
     }
     removeAllWorkspaceDocuments();
     activeWorkspaceScope = nextScope;
@@ -985,12 +1014,12 @@ async function switchWorkspacePersistence(configuration, client) {
     }
     workspacePersistenceWritable = true;
     return nextScope;
-  } catch (error) {
-    if (transition !== workspacePersistenceGeneration) return;
+  } catch {
+    if (transition !== workspacePersistenceGeneration) return workspaceSwitchFailure('stale-transition');
     // Keep both the unreadable snapshot and current visible workspace untouched. Writes never open
     // for the failed scope, so a recovery view cannot overwrite recoverable stored documents.
-    workspacePersistenceReason = `Stored documents could not be restored: ${error.message}`;
-    return false;
+    workspacePersistenceReason = 'Stored documents could not be restored. Current documents and stored data were left unchanged; reconnect to retry.';
+    return workspaceSwitchFailure('restore-failed');
   } finally {
     if (transition === workspacePersistenceGeneration) {
       workspaceRestoreInProgress = false;
@@ -1031,6 +1060,9 @@ let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
 let graphAuthoringCapability = pendingAuthoringCapability();
 let runtimeConnectionGeneration = 0;
+let startupImportController = null;
+let startupImportPlaceholder = null;
+let invalidStartupImportVisible = false;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;
@@ -2707,6 +2739,7 @@ window.ravenroot = {
   // editor would actually write rather than against a separately loaded copy of the module.
   serializeGraphML: graph => serializeGraphML(graph),
   graphDocumentByteLimit: currentGraphDocumentByteLimit,
+  startupImport: () => startupImportController?.snapshot() ?? null,
   flushWorkspacePersistence,
   workspacePersistence: () => ({
     scope: activeWorkspaceScope ? { serviceUrl: activeWorkspaceScope.serviceUrl,
@@ -11708,15 +11741,22 @@ async function connectRuntime(atBoot = false) {
       target = new URL(baseUrl, location.origin);
       if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
     } catch {
-      return setRuntimeConnectionState('error', 'Enter a valid HTTP(S) service URL');
+      setRuntimeConnectionState('error', 'Enter a valid HTTP(S) service URL');
+      const outcome = { kind: 'error', code: 'invalid-service-url',
+        message: 'Enter a valid Ravenroot service URL, then retry the import.' };
+      startupImportController?.updateRuntime(outcome);
+      return outcome;
     }
     if (target.origin !== location.origin && confirmedServiceOrigin !== target.origin) {
       // A page load must never raise a confirmation the user did not ask for. The field ships
       // empty, so this only happens when a browser restores a cross-origin value across a reload:
       // the token stays put and the decision waits for the user's next deliberate action.
       if (atBoot) {
-        return setRuntimeConnectionState('authentication-required',
+        setRuntimeConnectionState('authentication-required',
           'Confirm the external service origin to connect');
+        const outcome = { kind: 'service-confirmation-required' };
+        startupImportController?.updateRuntime(outcome);
+        return outcome;
       }
       const accepted = globalThis.confirm(
         `Connect Ravenroot UI to the external service origin exactly as shown?\n\n${target.origin}\n\n` +
@@ -11738,13 +11778,16 @@ async function connectRuntime(atBoot = false) {
         refreshCommands();
         syncGraphModeLabel();
         void configureHumanTasks();
-        return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
+        setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
+        const outcome = { kind: 'service-confirmation-required' };
+        startupImportController?.updateRuntime(outcome);
+        return outcome;
       }
       confirmedServiceOrigin = target.origin;
     }
   }
   await flushWorkspacePersistence({ allowSuspended: true });
-  if (connectionGeneration !== runtimeConnectionGeneration) return;
+  if (connectionGeneration !== runtimeConnectionGeneration) return { kind: 'superseded' };
   if (runtimeDisconnect) runtimeDisconnect();
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
@@ -11786,7 +11829,7 @@ async function connectRuntime(atBoot = false) {
       }
       runtimeConfiguration = result;
       const scope = await switchWorkspacePersistence(configuration, connectedClient);
-      if (scope !== false && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
+      if (!scope?.failed && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
         assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
         void refreshAssistantAvailability();
         void credentialsWindow?.setClient(
@@ -11796,9 +11839,10 @@ async function connectRuntime(atBoot = false) {
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
         void loadPersonalPalettes(connectedClient);
-      } else if (scope === false) {
+      } else if (scope?.failed) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
       }
+      if (scope?.failed) return Object.freeze({ ...result, workspaceFailure: scope.code });
     }
     return result;
   });
@@ -11853,7 +11897,39 @@ async function connectRuntime(atBoot = false) {
     renderNodeCatalog();
     setRuntimeConnectionState('error', error.message);
     addActivityMessage('connection', error.message, 'failed');
+    const outcome = { kind: 'error', code: 'connection-failed',
+      message: 'The Ravenroot service connection failed. Retry when the service is available.' };
+    startupImportController?.updateRuntime(outcome);
+    return outcome;
   }
+  const configurationResult = await connectedConfigurationRequest;
+  if (connectionGeneration !== runtimeConnectionGeneration || runtimeClient !== connectedClient) {
+    return { kind: 'superseded' };
+  }
+  let outcome;
+  if (configurationResult.error || !configurationResult.configuration) {
+    outcome = [401, 403].includes(configurationResult.error?.status)
+      ? { kind: 'authentication-required' }
+      : { kind: 'error', code: 'configuration-unavailable',
+        message: 'The service did not provide valid graph-loading configuration. Fix the connection and retry.' };
+  } else if (workspaceAuthority.state === 'ready' && workspaceAuthority.client === connectedClient
+      && workspaceAuthority.generation === authorityGeneration && !workspaceRestoreInProgress) {
+    outcome = { kind: 'ready', binding: startupImportBinding() };
+  } else {
+    const workspaceFailure = configurationResult.workspaceFailure;
+    const failures = {
+      'current-session-conflict': 'Current session documents must remain open. Close or export them, reconnect, and retry the import.',
+      'current-session-changed': 'The stored workspace was not replaced because the current documents changed. Reconnect when you are ready, then retry the import.',
+      'persistence-unavailable': 'The current workspace could not be saved safely. Keep or export the open documents, then retry the connection.',
+      'restore-failed': 'The stored workspace could not be restored. Current documents and stored data were left unchanged; retry the connection.',
+      'stale-transition': 'The service or workspace changed before restoration completed. Retry in the current workspace.',
+    };
+    outcome = { kind: 'error', code: workspaceFailure || 'workspace-not-ready',
+      message: failures[workspaceFailure]
+        || 'The workspace is not ready for an import. Reconnect when ready, then retry.' };
+  }
+  startupImportController?.updateRuntime(outcome);
+  return outcome;
 }
 
 function authenticateRuntime() {
@@ -13975,31 +14051,135 @@ async function loadReplacementFile(file) {
   });
 }
 
-async function autoLoadUrl(url) {
-  const name = url.split('/').pop();
-  let maxBytes;
-  try {
-    maxBytes = await graphDocumentByteLimitForLoad();
-  } catch (error) {
-    console.warn('Auto-load failed:', error.message);
-    return false;
-  }
-  return loadUrlGraphInput(url, maxBytes, {
-    fetchImpl: fetch,
-    onStart: showLoading,
-    parseAndRender: text => {
-      const gd = parsePreparedGraph(text, name, { automatic: true, maxBytes });
-      const active = workspace.active;
-      active.name = name;
-      active.displayName = allocateDocumentDisplayName(name);
-      graphName = name;
-      graphDisplayName = active.displayName;
-      initLoadedGraph(gd, visualStyle);
-      syncActiveDocumentChrome();
-    },
-    onError: err => console.warn('Auto-load failed:', err.message),
-    onComplete: hideLoading,
+function startupImportBinding() {
+  return Object.freeze({
+    connectionGeneration: runtimeConnectionGeneration,
+    authorityGeneration: workspaceAuthority.generation,
+    persistenceGeneration: workspacePersistenceGeneration,
+    client: runtimeClient,
   });
+}
+
+function startupImportBindingIsCurrent(binding) {
+  return Boolean(binding && runtimeClient === binding.client
+    && runtimeConnectionGeneration === binding.connectionGeneration
+    && workspaceAuthority.state === 'ready'
+    && workspaceAuthority.client === binding.client
+    && workspaceAuthority.generation === binding.authorityGeneration
+    && workspacePersistenceGeneration === binding.persistenceGeneration
+    && runtimeConfiguration?.client === binding.client);
+}
+
+function startupImportPlaceholderIsUntouched() {
+  captureActiveDocument();
+  const initial = startupImportPlaceholder;
+  const target = initial && workspace.find(initial.id);
+  if (!target || target !== initial.document || workspace.documents.length !== 1) return false;
+  return target.incarnation === initial.incarnation && target.graph === initial.graph
+    && target.history === initial.history && target.history.revision() === initial.revision
+    && !target.history.isDirty() && target.mode === DOCUMENT_MODES.DRAFT
+    && target.authoring.providerDocumentId === null && target.authoring.revision === null
+    && target.authoring.graphId === null && target.authoring.releaseVersion === null;
+}
+
+function startupImportFailure(error, stage) {
+  if (error?.name === 'AbortError' || error instanceof StartupImportError) return error;
+  if (error instanceof GraphInputRejection
+      && error.reason === GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE) {
+    return new StartupImportError('document-too-large',
+      'The graph is larger than the connected service allows. Choose a smaller file and retry.');
+  }
+  if (stage === 'download') {
+    const status = /^HTTP ([0-9]{3})$/.exec(error?.message || '')?.[1];
+    if (status === '404') {
+      return new StartupImportError('not-found', 'The graph file was not found. Check the source and retry.');
+    }
+    return new StartupImportError('download-failed',
+      'The graph could not be downloaded. Check browser access and retry.');
+  }
+  return new StartupImportError('invalid-graph',
+    'The downloaded file is not valid supported GraphML or Graphify JSON.');
+}
+
+async function runStartupImport({ target, binding, signal }) {
+  if (!startupImportBindingIsCurrent(binding)) {
+    throw new StartupImportError('stale-authority',
+      'The service or workspace changed before the import began. Retry in the current workspace.');
+  }
+  const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes;
+  showLoading();
+  let text;
+  try {
+    text = await fetchInputTextWithinByteLimit(target.url, maxBytes,
+      input => fetch(input, { signal }));
+  } catch (error) {
+    throw startupImportFailure(error, 'download');
+  } finally {
+    hideLoading();
+  }
+  if (signal.aborted || !startupImportBindingIsCurrent(binding)) {
+    throw new StartupImportError('stale-authority',
+      'The service or workspace changed during the import. Retry in the current workspace.');
+  }
+  let graph;
+  try {
+    graph = parsePreparedGraph(text, target.filename, { automatic: true, maxBytes });
+  } catch (error) {
+    throw startupImportFailure(error, 'parse');
+  }
+  if (signal.aborted || !startupImportBindingIsCurrent(binding)) {
+    throw new StartupImportError('stale-authority',
+      'The service or workspace changed during the import. Retry in the current workspace.');
+  }
+  if (startupImportPlaceholderIsUntouched()) {
+    completeReplaceActiveDocument(startupImportPlaceholder.document, graph, target.filename);
+  } else {
+    openDocument({ name: target.filename, graph,
+      tenantId: activeWorkspaceScope?.tenantId ?? null });
+    clearActivity();
+    addActivityMessage('editor', `Imported ${target.filename}`, 'completed');
+  }
+  scheduleWorkspacePersistence();
+}
+
+function renderStartupImport(state) {
+  const surface = document.getElementById('startup-import');
+  surface.hidden = false;
+  surface.dataset.phase = state.phase;
+  document.getElementById('startup-import-file').textContent = state.target.filename;
+  document.getElementById('startup-import-status').textContent = state.message;
+  document.getElementById('startup-import-confirm').hidden = !state.canConfirmOrigin;
+  document.getElementById('startup-import-retry').hidden = !state.canRetry;
+  document.getElementById('startup-import-cancel').hidden = !state.canCancel;
+}
+
+function initializeStartupImport(rawUrl) {
+  captureActiveDocument();
+  const document_ = workspace.active;
+  startupImportPlaceholder = Object.freeze({
+    id: document_.id, document: document_, incarnation: document_.incarnation,
+    graph: document_.graph, history: document_.history, revision: document_.history.revision(),
+  });
+  try {
+    startupImportController = createStartupImportController({
+      rawUrl,
+      pageUrl: location.href,
+      run: runStartupImport,
+      onChange: renderStartupImport,
+    });
+  } catch (error) {
+    startupImportController = null;
+    invalidStartupImportVisible = true;
+    const surface = document.getElementById('startup-import');
+    surface.hidden = false;
+    surface.dataset.phase = 'failed';
+    document.getElementById('startup-import-file').textContent = 'graph URL';
+    document.getElementById('startup-import-status').textContent = error instanceof StartupImportError
+      ? error.publicMessage : 'The graph URL is invalid.';
+    document.getElementById('startup-import-confirm').hidden = true;
+    document.getElementById('startup-import-retry').hidden = true;
+    document.getElementById('startup-import-cancel').hidden = false;
+  }
 }
 
 function showLoading() { document.getElementById('loading').classList.remove('off'); }
@@ -16562,6 +16742,19 @@ const drawingModelController = createDrawingModelController({
 });
 window.ravenroot.drawingModels = drawingModelController;
 
+document.getElementById('startup-import-confirm').addEventListener('click', () => {
+  startupImportController?.confirmOrigin();
+});
+document.getElementById('startup-import-retry').addEventListener('click', () => {
+  if (startupImportController?.retry()) void connectRuntime();
+});
+document.getElementById('startup-import-cancel').addEventListener('click', () => {
+  if (invalidStartupImportVisible) {
+    invalidStartupImportVisible = false;
+    document.getElementById('startup-import').hidden = true;
+  } else startupImportController?.cancel();
+});
+
 // ═══════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════
@@ -16591,26 +16784,30 @@ window.addEventListener('load', () => {
   // Whether authentication is required is the service's answer — a 401 still produces exactly the
   // state and message it produced before, because the gate lives on the server and is untouched.
   // The attempt is unconditional: a build flag or an environment variable here would be the same
-  // assumption behind a switch. It runs before the graph loads so the request departs immediately,
-  // and a failure only fills the palette with a reason — the editor stays usable offline.
+  // assumption behind a switch. A failure only fills the palette with a reason — the editor stays
+  // usable offline.
   // A durable-task locator is the only browser state retained for recovery. Restore its service
   // origin before boot connection; the existing cross-origin gate still refuses to send a token
   // until the user explicitly confirms that origin again.
   restoreHumanTaskServiceOrigin();
-  connectRuntime(true);
-  // Composed once at boot so the chips are truthful from the first paint rather than blank
-  // until something happens. `connectRuntime` above has already asked the service what it offers.
-  refreshAssistantContext();
   // The workspace always holds at least one document; the editor has simply never had a way to open
   // a second one. Creating it here means `initCy` always has a document to draw into.
   addDocumentRecord();
-  // Auto-load from ?file= query parameter. Supports .graphml, .xml, .json (graphify).
+  // A real, editable placeholder exists while runtime configuration and workspace restoration are
+  // pending. The startup import may reuse only this exact untouched record; otherwise it opens a
+  // separate document and cannot overwrite restored or newly authored work.
+  newWorkflow();
+  // Import from ?file= after validated configuration and workspace restoration. Supports .graphml,
+  // .xml and Graphify .json without acquiring repository authoring identity.
   // Examples:
   // ?file=my-flow.graphml
   // ?file=/graphs/project/graph.json
   // ?file=examples/graph.json
   const fileParam = params.get('file');
-  if (fileParam) autoLoadUrl(fileParam);
-  else newWorkflow();
+  if (fileParam) initializeStartupImport(fileParam);
+  void connectRuntime(true);
+  // Composed once at boot so the chips are truthful from the first paint rather than blank
+  // until something happens. The connection attempt above is already in flight.
+  refreshAssistantContext();
   void drawingModelController.reload();
 });

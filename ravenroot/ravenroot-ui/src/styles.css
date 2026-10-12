@@ -356,6 +356,31 @@
     .connection-state.error::before { background: var(--err); }
     .connection-state.revoked, .connection-state.authentication-required { color: var(--outcome-error-text); }
     .connection-state.revoked::before, .connection-state.authentication-required::before { background: var(--err); }
+    .startup-import {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+      padding: 6px 10px; border-top: 1px solid var(--bd);
+      background: color-mix(in srgb, var(--acc) 7%, var(--bg-1));
+      color: var(--tx-2); font-size: 11px;
+    }
+    .startup-import[hidden] { display: none; }
+    .startup-import [hidden] { display: none; }
+    .startup-import strong { color: var(--tx-1); white-space: nowrap; }
+    .startup-import-file {
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-family: 'SFMono-Regular', Consolas, monospace; color: var(--tx-1);
+    }
+    #startup-import-status { flex: 1; min-width: 12rem; }
+    .startup-import-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+    .startup-import[data-phase="failed"] {
+      background: color-mix(in srgb, var(--err) 8%, var(--bg-1));
+    }
+    .startup-import[data-phase="completed"] {
+      background: color-mix(in srgb, var(--ok) 8%, var(--bg-1));
+    }
+    @media (max-width: 900px) {
+      .startup-import { flex-wrap: wrap; }
+      #startup-import-status { flex-basis: calc(100% - 11rem); }
+    }
     .graph-stat-line { display: flex; justify-content: space-between; }
     .graph-stat-separator { color: var(--tx-3); }
 

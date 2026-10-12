@@ -16,4 +16,11 @@ The document heading shows the authored `vN`, short Git revision, draft or relea
 
 If another save, release merge, or publication changes the graph before your mutation completes, Ravenroot refuses the stale request. Reopen the graph, review the new version or diff, and apply your change again. Repeating an uncertain request is safe when the client uses the same request identity.
 
+A startup `?file=` URL remains a browser import when Git authoring is enabled. It does not inherit a
+repository filename, revision, graph identity, or released-source state. **Save draft to repository**
+therefore asks for a repository filename before its first save and applies the same revision conflict
+checks as any other repository draft. **Open from repository** continues to open managed draft or
+released sources separately; a released source stays read-only and offers **Open repository draft**.
+The source URL is not used as repository identity or changed by these actions.
+
 “Released” means the exact version exists on the configured reviewed branch. “Published” additionally means release CI validated and placed the immutable GraphML and digest manifest in the operator's artifact store. Only a published version can be deployed from this workflow.

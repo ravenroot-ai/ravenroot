@@ -101,3 +101,7 @@ behaviors.withActivityCapture(new ActivityCapture(policy, myActivityArchive));
 executor, validates a non-null acknowledgement for the same event ID, and applies the configured
 deadline. Embedded history uses `RavenrootApplication.activityAfter`; external adapters should use
 `AuthorizedRavenrootApplication.activityAfter` so tenant identity is sourced from `RequestContext`.
+
+For a complete external integration procedure, including a TypeScript page client, a JDK HTTP
+client, cursor-safe polling, a transactionally checkpointed analytics projection, and expected test
+observations, see [Build an activity archive client](../integrator-guide/activity-archive-client.md).

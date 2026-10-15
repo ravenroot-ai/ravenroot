@@ -17,12 +17,16 @@
       url: /user-guide/
     - title: Workspace and graph authoring
       url: /user-guide/workspace-authoring.html
+    - title: Illustrated workspace guide
+      url: /user-guide/illustrated-workspace.html
     - title: Repository-backed graph authoring
       url: /user-guide/repository-authoring.html
     - title: Payloads, outcomes, and routing
       url: /user-guide/payload-routing.html
     - title: Test, Run, and execution control
       url: /user-guide/test-run-observe.html
+    - title: Observe deployments and processes
+      url: /user-guide/process-monitoring.html
     - title: Human Task confirmations
       url: /user-guide/human-task-confirmations.html
     - title: Governed agents and runners
@@ -31,10 +35,10 @@
       url: /operator-guide/kubernetes-runners.html
     - title: Disposable Agent example repository
       url: /examples/governed-runner/disposable-repository/
-    - title: Register Machine example library
-      url: /examples/register-machine/
     - title: Intergraph call examples
       url: /examples/intergraph/
+    - title: Illustrated lakehouse scenario
+      url: /examples/lakehouse/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -83,6 +87,8 @@
       url: /integrator-guide/
     - title: Application, HTTP, SSE, and CLI
       url: /integrator-guide/application-http.html
+    - title: Activity archive client
+      url: /integrator-guide/activity-archive-client.html
     - title: Embed the read-only viewer quickstart
       url: /integrator-guide/embed-viewer-quickstart.html
     - title: Embedded-viewer protocol
@@ -137,10 +143,23 @@
     - title: Embed, privacy, and audit
       url: /security/embed-privacy.html
 
+- title: Education
+  items:
+    - title: Education pathway
+      url: /education/
+    - title: Execute a register-machine loop
+      url: /education/register-machine-exercise.html
+    - title: Visualize a two-state DFA
+      url: /education/finite-state-exercise.html
+    - title: Register-machine examples
+      url: /examples/register-machine/
+
 - title: Reference
   items:
     - title: Reference overview
       url: /reference/
+    - title: Platform comparison
+      url: /reference/platform-comparison.html
     - title: GraphML profile
       url: /reference/graphml.html
     - title: Register Machine Profile v1

@@ -162,8 +162,8 @@ names: [Temporal monitoring](https://docs.temporal.io/self-hosted-guide/monitori
 
 ## Licensing and education
 
-Ravenroot is Apache-2.0. Its education pathway includes executable register-machine graphs, exact
-expected results, a separate DFA drawing-model exercise and explicit evidence boundaries. See
+Ravenroot is Apache-2.0. Its guided education pathway includes a bounded executable register-machine
+exercise with an exact expected result and explicit evidence boundaries. See
 [Education](../education/) and [support and legal](../governance/support-legal.md).
 
 - The selected [Temporal server repository](https://github.com/temporalio/temporal/blob/main/LICENSE)
@@ -179,6 +179,6 @@ expected results, a separate DFA drawing-model exercise and explicit evidence bo
 - [Node-RED core](https://github.com/node-red/node-red/blob/main/LICENSE) uses Apache License 2.0;
   independently installed nodes can use different licenses.
 
-Education material across projects varies in goal and format. Ravenroot's exercises establish only
-the recorded structural, validation and execution results; they do not claim broader curriculum
-coverage or superiority.
+Education material across projects varies in goal and format. Ravenroot's register-machine exercise
+establishes only the recorded structural, validation and execution results; it does not claim broader
+curriculum coverage or superiority.

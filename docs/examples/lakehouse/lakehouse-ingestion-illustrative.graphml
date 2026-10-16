@@ -1,0 +1,383 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="name" for="node" attr.name="name" attr.type="string" />
+  <key id="kind" for="node" attr.name="kind" attr.type="string" />
+  <key id="classification" for="node" attr.name="classification" attr.type="string" />
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string" />
+  <key id="expression" for="node" attr.name="expression" attr.type="string" />
+  <key id="trueOutcome" for="node" attr.name="trueOutcome" attr.type="string" />
+  <key id="falseOutcome" for="node" attr.name="falseOutcome" attr.type="string" />
+  <key id="layoutX" for="node" attr.name="layoutX" attr.type="double" />
+  <key id="layoutY" for="node" attr.name="layoutY" attr.type="double" />
+  <key id="layoutWidth" for="node" attr.name="layoutWidth" attr.type="double" />
+  <key id="layoutHeight" for="node" attr.name="layoutHeight" attr.type="double" />
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string" />
+  <key id="visualGroups" for="graph" attr.name="ravenroot.ui.visualGroups" attr.type="string" />
+  <graph id="lakehouse-ingestion-functional" edgedefault="directed">
+    <node id="start">
+      <data key="name">START</data>
+      <data key="kind">START</data>
+      <data key="classification">flow</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="ingress">
+      <data key="name">NiFi event listener</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">consumer</data>
+      <data key="layoutX">285</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="event_key">
+      <data key="name">Event identity</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="layoutX">570</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="log_ingress">
+      <data key="name">Record receipt</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">trace</data>
+      <data key="layoutX">855</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="fingerprint">
+      <data key="name">Raw file hash</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="layoutX">1140</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="file_duplicate">
+      <data key="name">Duplicate in Bronze?</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">actor</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload.fileDuplicate == true</data>
+      <data key="trueOutcome">yes</data>
+      <data key="falseOutcome">no</data>
+      <data key="layoutX">1425</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="duplicate_discard">
+      <data key="name">Duplicate disposition</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">workspace</data>
+      <data key="layoutX">1710</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="duplicate_warning">
+      <data key="name">Duplicate warning</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">trace</data>
+      <data key="layoutX">1995</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="preprocess">
+      <data key="name">Preprocessing</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="admissible">
+      <data key="name">Admissible?</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">actor</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload.admissible == true</data>
+      <data key="trueOutcome">yes</data>
+      <data key="falseOutcome">no</data>
+      <data key="layoutX">285</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="quarantine">
+      <data key="name">Quarantine</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">workspace</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">620</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="remediation">
+      <data key="name">AI remediation</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">agent</data>
+      <data key="layoutX">285</data>
+      <data key="layoutY">620</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="human_task">
+      <data key="name">Human review</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">human-task</data>
+      <data key="layoutX">570</data>
+      <data key="layoutY">620</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="approved">
+      <data key="name">Approved?</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">actor</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload.remediationApproved == true</data>
+      <data key="trueOutcome">yes</data>
+      <data key="falseOutcome">no</data>
+      <data key="layoutX">855</data>
+      <data key="layoutY">620</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="landing">
+      <data key="name">Landing zone</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">workspace</data>
+      <data key="layoutX">1140</data>
+      <data key="layoutY">620</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="rejected">
+      <data key="name">Reject and audit</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">trace</data>
+      <data key="layoutX">1425</data>
+      <data key="layoutY">620</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="mapping">
+      <data key="name">Pseudonymization</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="layoutX">570</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="semantic">
+      <data key="name">AI review</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">agent</data>
+      <data key="layoutX">855</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="nifi_bronze">
+      <data key="name">Promote to Bronze</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="layoutX">1140</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="bronze_event">
+      <data key="name">Bronze event</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">flow</data>
+      <data key="layoutX">1425</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="catalog">
+      <data key="name">Catalog record</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">workspace</data>
+      <data key="layoutX">1710</data>
+      <data key="layoutY">310</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="validate">
+      <data key="name">Spark validation</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="valid">
+      <data key="name">Valid?</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">actor</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload.valid == true</data>
+      <data key="trueOutcome">yes</data>
+      <data key="falseOutcome">no</data>
+      <data key="layoutX">285</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="validation_alert">
+      <data key="name">Alert Bronze</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">trace</data>
+      <data key="layoutX">570</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="silver_write">
+      <data key="name">Parquet in Iceberg</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="layoutX">855</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="silver_event">
+      <data key="name">Silver event</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">flow</data>
+      <data key="layoutX">1140</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="silver_lineage">
+      <data key="name">Lineage Silver</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">workspace</data>
+      <data key="layoutX">1425</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="business_identity">
+      <data key="name">Record identity</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="layoutX">1710</data>
+      <data key="layoutY">930</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="gold_transform">
+      <data key="name">Spark aggregation</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">1240</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="gold_unique">
+      <data key="name">Gold uniqueness</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="layoutX">285</data>
+      <data key="layoutY">1240</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="gold_event">
+      <data key="name">Gold event</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">flow</data>
+      <data key="layoutX">570</data>
+      <data key="layoutY">1240</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="gold_lineage">
+      <data key="name">Lineage Gold</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">workspace</data>
+      <data key="layoutX">855</data>
+      <data key="layoutY">1240</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <node id="end">
+      <data key="name">END</data>
+      <data key="kind">END</data>
+      <data key="classification">flow</data>
+      <data key="layoutX">1140</data>
+      <data key="layoutY">1240</data>
+      <data key="layoutWidth">210</data>
+      <data key="layoutHeight">72</data>
+    </node>
+    <edge id="start-ingress" source="start" target="ingress" />
+    <edge id="ingress-event_key" source="ingress" target="event_key" />
+    <edge id="event_key-log_ingress" source="event_key" target="log_ingress" />
+    <edge id="log_ingress-fingerprint" source="log_ingress" target="fingerprint" />
+    <edge id="fingerprint-file_duplicate" source="fingerprint" target="file_duplicate" />
+    <edge id="file_duplicate-duplicate_discard" source="file_duplicate" target="duplicate_discard">
+      <data key="outcome">yes</data>
+    </edge>
+    <edge id="duplicate_discard-duplicate_warning" source="duplicate_discard" target="duplicate_warning" />
+    <edge id="duplicate_warning-end" source="duplicate_warning" target="end" />
+    <edge id="file_duplicate-preprocess" source="file_duplicate" target="preprocess">
+      <data key="outcome">no</data>
+    </edge>
+    <edge id="preprocess-admissible" source="preprocess" target="admissible" />
+    <edge id="admissible-mapping" source="admissible" target="mapping">
+      <data key="outcome">yes</data>
+    </edge>
+    <edge id="admissible-quarantine" source="admissible" target="quarantine">
+      <data key="outcome">no</data>
+    </edge>
+    <edge id="quarantine-remediation" source="quarantine" target="remediation" />
+    <edge id="remediation-human_task" source="remediation" target="human_task" />
+    <edge id="human_task-approved" source="human_task" target="approved" />
+    <edge id="approved-landing" source="approved" target="landing">
+      <data key="outcome">yes</data>
+    </edge>
+    <edge id="approved-rejected" source="approved" target="rejected">
+      <data key="outcome">no</data>
+    </edge>
+    <edge id="landing-end" source="landing" target="end" />
+    <edge id="rejected-end" source="rejected" target="end" />
+    <edge id="mapping-semantic" source="mapping" target="semantic" />
+    <edge id="semantic-nifi_bronze" source="semantic" target="nifi_bronze" />
+    <edge id="nifi_bronze-bronze_event" source="nifi_bronze" target="bronze_event" />
+    <edge id="bronze_event-catalog" source="bronze_event" target="catalog" />
+    <edge id="catalog-validate" source="catalog" target="validate" />
+    <edge id="validate-valid" source="validate" target="valid" />
+    <edge id="valid-validation_alert" source="valid" target="validation_alert">
+      <data key="outcome">no</data>
+    </edge>
+    <edge id="validation_alert-end" source="validation_alert" target="end" />
+    <edge id="valid-silver_write" source="valid" target="silver_write">
+      <data key="outcome">yes</data>
+    </edge>
+    <edge id="silver_write-silver_event" source="silver_write" target="silver_event" />
+    <edge id="silver_event-silver_lineage" source="silver_event" target="silver_lineage" />
+    <edge id="silver_lineage-business_identity" source="silver_lineage" target="business_identity" />
+    <edge id="business_identity-gold_transform" source="business_identity" target="gold_transform" />
+    <edge id="gold_transform-gold_unique" source="gold_transform" target="gold_unique" />
+    <edge id="gold_unique-gold_event" source="gold_unique" target="gold_event" />
+    <edge id="gold_event-gold_lineage" source="gold_event" target="gold_lineage" />
+    <edge id="gold_lineage-end" source="gold_lineage" target="end" />
+    </graph>
+</graphml>

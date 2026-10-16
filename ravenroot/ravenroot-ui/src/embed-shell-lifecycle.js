@@ -1,24 +1,7 @@
-const STATE_COPY = Object.freeze({
-  idle: '',
-  loading: 'Loading graph…',
-  ready: 'Graph ready.',
-  empty: 'This graph is empty.',
-  error: 'The graph could not be displayed.',
-  expired: 'This viewing session has expired.',
-  offline: 'The graph service is unavailable.',
-  incompatible: 'This graph requires a newer viewer.',
-  destroyed: 'Viewer closed.',
-});
+import { uiText } from './ui-text.js';
 
 const FAILURE_STATES = new Set(['error', 'expired', 'offline', 'incompatible']);
 const NODE_KINDS = new Set(['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR']);
-const KIND_LABELS = Object.freeze({
-  START: 'Start',
-  PASSTHROUGH: 'Step',
-  BEHAVIOR: 'Behavior',
-  END: 'End',
-  ERROR: 'Error',
-});
 
 function requiredElement(value, name) {
   if (!(value instanceof Element)) throw new TypeError(`${name} must be an element.`);
@@ -53,7 +36,7 @@ function failureState(failure) {
  * Copies only the viewer allowlist needed by a text alternative. Unknown
  * projection fields cannot enter the returned structure or later reach the DOM.
  */
-export function createEmbedTextAlternative(snapshot) {
+export function createEmbedTextAlternative(snapshot, t = uiText) {
   if (!Array.isArray(snapshot?.nodes) || !Array.isArray(snapshot?.edges)) {
     throw new TypeError('Invalid text alternative projection.');
   }
@@ -82,21 +65,21 @@ export function createEmbedTextAlternative(snapshot) {
   return Object.freeze(nodes.map(node => Object.freeze({
     id: node.id,
     kind: node.kind,
-    label: `${KIND_LABELS[node.kind]} node ${node.id}`,
+    label: t('embed.alternative.node', { kind: t(`embed.kind.${node.kind}`), id: node.id }),
     outgoing: Object.freeze(outgoing.get(node.id)),
     incoming: Object.freeze(incoming.get(node.id)),
   })));
 }
 
 /** Render an allowlisted relationship list without interpreting markup. */
-export function renderEmbedTextAlternative(list, snapshot) {
+export function renderEmbedTextAlternative(list, snapshot, t = uiText) {
   requiredElement(list, 'alternative');
-  const alternative = createEmbedTextAlternative(snapshot);
+  const alternative = createEmbedTextAlternative(snapshot, t);
   const fragment = list.ownerDocument.createDocumentFragment();
 
   if (alternative.length === 0) {
     const empty = list.ownerDocument.createElement('li');
-    empty.textContent = 'No nodes in this graph.';
+    empty.textContent = t('embed.alternative.empty');
     fragment.append(empty);
   }
 
@@ -107,12 +90,12 @@ export function renderEmbedTextAlternative(list, snapshot) {
     item.append(label);
 
     const relationships = [
-      ...node.outgoing.map(edge => `Connects to ${edge.target}`),
-      ...node.incoming.map(edge => `Receives from ${edge.source}`),
+      ...node.outgoing.map(edge => t('embed.alternative.connects', { id: edge.target })),
+      ...node.incoming.map(edge => t('embed.alternative.receives', { id: edge.source })),
     ];
     if (relationships.length > 0) {
       const relationshipList = list.ownerDocument.createElement('ul');
-      relationshipList.setAttribute('aria-label', `Relationships for ${node.id}`);
+      relationshipList.setAttribute('aria-label', t('embed.alternative.relationships', { id: node.id }));
       for (const relationship of relationships) {
         const relationshipItem = list.ownerDocument.createElement('li');
         relationshipItem.textContent = relationship;
@@ -135,7 +118,7 @@ function rememberAttribute(element, name) {
  * Marks the two in-document boundary stops. Native sequential focus navigation
  * then leaves the iframe after either edge; no parent protocol is involved.
  */
-export function installLocalFocusBoundary({ before, after }) {
+export function installLocalFocusBoundary({ before, after, t = uiText }) {
   requiredElement(before, 'before sentinel');
   requiredElement(after, 'after sentinel');
   if (before.ownerDocument !== after.ownerDocument) {
@@ -149,8 +132,8 @@ export function installLocalFocusBoundary({ before, after }) {
     role: rememberAttribute(element, 'role'),
   }));
   for (const [element, boundary, label] of [
-    [before, 'before', 'Start of embedded graph'],
-    [after, 'after', 'End of embedded graph'],
+    [before, 'before', t('embed.boundary.start')],
+    [after, 'after', t('embed.boundary.end')],
   ]) {
     element.setAttribute('tabindex', '0');
     element.setAttribute('role', 'navigation');
@@ -197,6 +180,7 @@ export function createEmbedShellLifecycle({
   before,
   after,
   timeoutMilliseconds = 5_000,
+  t = uiText,
 }) {
   requiredElement(root, 'root');
   requiredElement(status, 'status');
@@ -206,16 +190,17 @@ export function createEmbedShellLifecycle({
     throw new RangeError('Embed shell timeout is out of bounds.');
   }
 
-  const removeFocusBoundary = installLocalFocusBoundary({ before, after });
+  const removeFocusBoundary = installLocalFocusBoundary({ before, after, t });
   let state = 'idle';
   let destroyed = false;
   let generation = 0;
   let active = null;
+  let lastSnapshot = null;
 
   const transition = next => {
     state = next;
     root.dataset.viewerState = next;
-    status.textContent = STATE_COPY[next];
+    status.textContent = t(`embed.state.${next}`);
   };
 
   const cancelActive = reason => {
@@ -257,7 +242,8 @@ export function createEmbedShellLifecycle({
         if (destroyed || operation !== generation) {
           throw new DOMException('Viewer operation superseded.', 'AbortError');
         }
-        renderEmbedTextAlternative(alternative, snapshot);
+        lastSnapshot = snapshot;
+        renderEmbedTextAlternative(alternative, snapshot, t);
         if (controller.signal.aborted || performance.now() >= deadline) {
           throw controller.signal.reason ?? new Error('Viewer operation timed out.');
         }
@@ -288,6 +274,12 @@ export function createEmbedShellLifecycle({
       alternative.replaceChildren();
       removeFocusBoundary();
       if (!preserveState) transition('destroyed');
+    },
+    refreshLocale() {
+      status.textContent = t(`embed.state.${state}`);
+      if (lastSnapshot) renderEmbedTextAlternative(alternative, lastSnapshot, t);
+      before.setAttribute('aria-label', t('embed.boundary.start'));
+      after.setAttribute('aria-label', t('embed.boundary.end'));
     },
   });
 }

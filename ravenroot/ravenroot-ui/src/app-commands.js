@@ -15,11 +15,10 @@ export const NODE_ACTION_DEFINITIONS = Object.freeze([
   Object.freeze({ id: 'delete', glyph: '⌫', capability: 'delete', handler: 'delete' }),
 ]);
 
-export function createNodeActionCatalog({ targetLabel, capabilities, handlers }) {
+export function createNodeActionCatalog({ targetLabel, capabilities, handlers, t = uiText }) {
   return NODE_ACTION_DEFINITIONS.map(definition => ({
     ...definition,
-    label: definition.id === 'trace' ? `Trace full path from ${targetLabel}`
-      : definition.id === 'duplicate' ? `Duplicate ${targetLabel}` : `Delete ${targetLabel}`,
+    label: t(`nodeActions.${definition.id}`, { name: targetLabel }),
     enabled: Boolean(capabilities?.[definition.capability]),
     run: handlers?.[definition.handler] || (() => false),
   }));
@@ -125,13 +124,15 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'edit.undo', group: 'history', order: 10,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.undo,
       isEnabled: context => context.documentEditable && context.canUndo,
-      describe: context => (context.undoLabel ? `Undo ${context.undoLabel}` : 'Nothing to undo'),
+      describe: context => (context.undoLabel
+        ? t('commands.edit.undo.named', { name: context.undoLabel }) : t('commands.edit.undo.empty')),
       shortcuts: [global({ key: 'z', primary: true })],
     },
     { id: 'edit.redo', group: 'history', order: 20,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.redo,
       isEnabled: context => context.documentEditable && context.canRedo,
-      describe: context => (context.redoLabel ? `Redo ${context.redoLabel}` : 'Nothing to redo'),
+      describe: context => (context.redoLabel
+        ? t('commands.edit.redo.named', { name: context.redoLabel }) : t('commands.edit.redo.empty')),
       shortcuts: [global({ key: 'z', primary: true, shift: true }), global({ key: 'y', ctrl: true })],
     },
     { id: 'edit.modify', group: 'mode', order: 30, kind: 'checkbox',
@@ -218,6 +219,8 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'view.themeLight', group: 'application-theme', order: 66, kind: 'radio',
       placements: ['menu.view'], execute: () => actions.setTheme('light'),
       isChecked: context => context.applicationTheme === 'light' },
+    { id: 'view.language', group: 'application-language', order: 68,
+      placements: ['menu.view'], execute: actions.openLanguage },
     { id: 'view.keyboardShortcuts', group: 'help', order: 70,
       placements: ['menu.view', 'toolbar.view', 'help'], execute: actions.toggleHelp,
       shortcuts: [global({ key: '/', keyAliases: ['?'], shift: true })] },

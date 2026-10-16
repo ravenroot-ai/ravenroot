@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TERMINAL = new Set(['COMPLETED', 'CANCELLED', 'DEADLINE_EXCEEDED']);
 
@@ -7,32 +8,32 @@ export function createRunnerWindow({ dialog }) {
   let client = null, generation = 0;
   let auditOffset = 0, healthCursor = null;
   const element = (name, text = '') => { const node = doc.createElement(name); node.textContent = text; return node; };
-  const heading = element('h2', 'Workspaces, named Agents and runners'); heading.id = 'runner-title';
-  const status = element('p', 'Connect to a service to inspect governed agents and runners.');
+  const heading = element('h2', uiText("workspace.runner.panel.workspaces.named.agents.and.runners")); heading.id = 'runner-title';
+  const status = element('p', uiText("workspace.runner.panel.connect.to.a.service.to.inspect.governed"));
   status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const catalog = element('div');
-  const editorLabel = element('label', 'Versioned definition or runner profile (JSON)');
+  const editorLabel = element('label', uiText("workspace.runner.panel.versioned.definition.or.runner.profile.json"));
   const editor = element('textarea'); editor.id = 'runner-resource-editor'; editor.rows = 14; editor.maxLength = 1_048_576;
   editorLabel.htmlFor = editor.id;
-  const processLabel = element('label', 'Process instance ID');
+  const processLabel = element('label', uiText("workspace.runner.panel.process.instance.id"));
   const process = element('input'); process.id = 'runner-process-id'; processLabel.htmlFor = process.id;
   const jobs = element('div'); const evidence = element('pre');
-  const operations = element('pre'); operations.setAttribute('aria-label', 'Runner health and audit page');
-  evidence.setAttribute('aria-label', 'Bounded artifact preview');
+  const operations = element('pre'); operations.setAttribute('aria-label', uiText("workspace.runner.panel.runner.health.and.audit.page"));
+  evidence.setAttribute('aria-label', uiText("workspace.runner.panel.bounded.artifact.preview"));
   const button = (text, action) => {
     const node = element('button', text); node.type = 'button'; node.className = 'btn';
     node.addEventListener('click', action); return node;
   };
   const request = async action => {
     const owner = client, version = generation;
-    if (!owner) { status.textContent = 'Connect to a service before using the runner plane.'; return; }
-    status.textContent = 'Loading…';
+    if (!owner) { status.textContent = uiText("workspace.runner.panel.connect.to.a.service.before.using.the"); return; }
+    status.textContent = uiText("workspace.runner.panel.loading");
     try {
       const render = await action(owner);
       if (version !== generation || owner !== client) return;
-      render?.(); status.textContent = 'Updated from the authenticated tenant control plane.';
+      render?.(); status.textContent = uiText("workspace.runner.panel.updated.from.the.authenticated.tenant.control.plane");
     } catch (error) {
-      if (version === generation && owner === client) status.textContent = error.message || 'Runner request failed.';
+      if (version === generation && owner === client) status.textContent = error.message || uiText("workspace.runner.panel.runner.request.failed");
     }
   };
   const refresh = () => request(async owner => {
@@ -47,7 +48,7 @@ export function createRunnerWindow({ dialog }) {
           const selected = await selectedClient.runnerResource(resource.kind + ':' + resource.name + ':' + resource.version);
           return () => { editor.value = JSON.stringify({ ...selected, expectedRevision: selected.revision }, null, 2); };
         })));
-        row.append(element('span', ' Revision ' + resource.revision + ' · ' + resource.actor + ' · ' + resource.updatedAt));
+        row.append(element('span', uiText("workspace.runner.panel.revision") + resource.revision + ' · ' + resource.actor + ' · ' + resource.updatedAt));
         catalog.append(row);
       }
     };
@@ -58,7 +59,7 @@ export function createRunnerWindow({ dialog }) {
     const workspace = await owner.runnerWorkspace(id);
     if (!Array.isArray(workspace?.jobs)) throw new Error('Unsupported runner workspace');
     return () => {
-      jobs.replaceChildren(element('h3', 'Process Workspaces'));
+      jobs.replaceChildren(element('h3', uiText("workspace.runner.panel.process.workspaces")));
       for (const resource of workspace.workspaces || []) {
         const section = element('section');
         section.append(element('h4', resource.nodeId + ' · ' + resource.state),
@@ -79,28 +80,28 @@ export function createRunnerWindow({ dialog }) {
       }
       for (const job of workspace.jobs) {
         const section = element('section');
-        section.append(element('h4', job.command + ' · ' + job.state + ' · fence ' + job.fence),
-          element('p', job.definition + ' v' + job.definitionVersion + ' · ' + (job.readOnly ? 'Read-only' : 'Governed write authority')));
-        if (job.kubernetes) section.append(element('p', 'Kubernetes · ' + job.kubernetes.cluster + ' / '
+        section.append(element('h4', job.command + ' · ' + job.state + uiText("workspace.runner.panel.fence") + job.fence),
+          element('p', job.definition + ' v' + job.definitionVersion + ' · ' + (job.readOnly ? uiText("workspace.runner.panel.read.only") : uiText("workspace.runner.panel.governed.write.authority"))));
+        if (job.kubernetes) section.append(element('p', uiText("workspace.runner.panel.kubernetes") + job.kubernetes.cluster + ' / '
           + job.kubernetes.namespace + ' · ' + job.kubernetes.phase + ' · ' + job.kubernetes.reason),
-          element('p', 'Pod ' + (job.kubernetes.podName || 'creating') + ' · PVC ' + job.kubernetes.claimName),
-          element('p', 'Model turns: ' + job.kubernetes.modelTurns + ' · Tool calls: ' + job.kubernetes.toolCalls
-            + ' · Observed model tokens: ' + job.kubernetes.modelTokens));
-        if (job.result != null) section.append(element('h5', 'Agent result'), element('pre', JSON.stringify(job.result, null, 2)));
+          element('p', uiText("workspace.runner.panel.pod") + (job.kubernetes.podName || uiText("workspace.runner.panel.creating")) + uiText("workspace.runner.panel.pvc") + job.kubernetes.claimName),
+          element('p', uiText("workspace.runner.panel.model.turns") + job.kubernetes.modelTurns + uiText("workspace.runner.panel.tool.calls") + job.kubernetes.toolCalls
+            + uiText("workspace.runner.panel.observed.model.tokens") + job.kubernetes.modelTokens));
+        if (job.result != null) section.append(element('h5', uiText("workspace.runner.panel.agent.result")), element('pre', JSON.stringify(job.result, null, 2)));
         const technical = element('details');
-        technical.append(element('summary', 'Technical job identity and authority'),
+        technical.append(element('summary', uiText("workspace.runner.panel.technical.job.identity.and.authority")),
           element('pre', JSON.stringify({ processInstanceId: id, traversalId: job.traversalId,
             invocationId: job.invocationId, attemptId: job.attemptId, runnerJobId: job.runnerJobId,
             workspaceRef: job.workspaceRef, deadline: job.deadline, leaseUntil: job.leaseUntil,
             authority: job.authority, outcome: job.outcome, driver: job.driver, kubernetes: job.kubernetes }, null, 2)));
         section.append(technical);
         if (job.state === 'UNKNOWN') section.append(element('p',
-          'Effect unknown. The workspace remains owned. Reconciliation is report-only; this action does not retry the agent.'));
+          uiText("workspace.runner.panel.effect.unknown.the.workspace.remains.owned.reconciliation")));
         if (job.continuationUncertain) {
-          section.append(element('p', 'Successor delivery is uncertain. Inspect graph state and audit before resolving revision '
-            + workspace.revision + '. Resume requires zero recorded successors; acknowledge requires the complete successor set; abandon fails the unfinished traversal. No action replays runner effects.'));
+          section.append(element('p', uiText("workspace.runner.panel.successor.delivery.is.uncertain.inspect.graph.state")
+            + workspace.revision + uiText("workspace.runner.panel.resume.requires.zero.recorded.successors.acknowledge.requires")));
           const confirmation = element('input'); confirmation.type = 'checkbox';
-          const confirmationLabel = element('label', 'I reviewed graph state and understand the selected disposition.');
+          const confirmationLabel = element('label', uiText("workspace.runner.panel.i.reviewed.graph.state.and.understand.the"));
           confirmationLabel.prepend(confirmation); section.append(confirmationLabel);
           for (const [resolution, label] of [['RESUME', 'Resume undispatched successors'],
             ['ACKNOWLEDGE', 'Acknowledge complete successors'], ['ABANDON', 'Abandon unfinished traversal']]) {
@@ -119,10 +120,13 @@ export function createRunnerWindow({ dialog }) {
           })));
         }
         for (const artifact of job.artifacts || []) section.append(button(
-          artifact.kind + ' · ' + artifact.sizeBytes + ' bytes · SHA-256 ' + artifact.sha256,
+          uiText("workspace.runner.panel.artifact.summary", {
+            kind: artifact.kind, size: artifact.sizeBytes, sha256: artifact.sha256,
+          }),
           () => request(async current => {
             const preview = await current.runnerArtifact(id, job.runnerJobId, artifact.artifactId);
-            return () => { evidence.textContent = preview.content + (preview.truncated ? '\n[Preview truncated]' : ''); };
+            return () => { evidence.textContent = preview.content
+              + (preview.truncated ? uiText("workspace.runner.panel.preview.truncated") : ''); };
           })));
         jobs.append(section);
       }
@@ -149,12 +153,12 @@ export function createRunnerWindow({ dialog }) {
     return () => { operations.textContent = JSON.stringify(result, null, 2); };
   });
   dialog.replaceChildren(heading, button('Close', () => dialog.close()), status,
-    element('p', 'An Agent without workspaceRef remains unchanged. Named Agents reference explicit Workspaces and approved versions; graph instructions cannot grant authority.'),
-    element('p', 'The approved profile pins Docker or Kubernetes. Native metadata reports Pod/PVC identity, generation, lifecycle and budgets separately from Agent output. UNKNOWN is report-only; it never offers an effect retry or driver fallback.'),
+    element('p', uiText("workspace.runner.panel.an.agent.without.workspaceref.remains.unchanged.named")),
+    element('p', uiText("workspace.runner.panel.the.approved.profile.pins.docker.or.kubernetes")),
     button('Refresh catalogue', refresh), catalog, editorLabel, editor,
-    element('p', 'Changing a body requires a new version. Set approved explicitly to approve or retire; an operator scope is required.'),
+    element('p', uiText("workspace.runner.panel.changing.a.body.requires.a.new.version")),
     button('Save version / approval', save), processLabel, process, button('Inspect workspace', inspect), jobs, evidence,
-    element('p', 'Health and metrics are cursor-paged observations, not global totals. Worker availability is valid only until its advertised lease expires.'),
+    element('p', uiText("workspace.runner.panel.health.and.metrics.are.cursor.paged.observations")),
     button('Worker capacity / availability', availability), button('Next health / metrics page', health), button('Next audit page', audit), operations);
   return {
     open() { dialog.showModal(); if (client) void refresh(); },
@@ -163,8 +167,8 @@ export function createRunnerWindow({ dialog }) {
       generation++; client = value; editor.value = ''; process.value = '';
       auditOffset = 0; healthCursor = null; operations.textContent = '';
       catalog.replaceChildren(); jobs.replaceChildren(); evidence.textContent = '';
-      status.textContent = client ? 'Refresh the catalogue or inspect an exact process ID.'
-        : 'Connect to a service to inspect governed agents and runners.';
+      status.textContent = client ? uiText("workspace.runner.panel.refresh.the.catalogue.or.inspect.an.exact")
+        : uiText("workspace.runner.panel.connect.to.a.service.to.inspect.governed");
     },
   };
 }

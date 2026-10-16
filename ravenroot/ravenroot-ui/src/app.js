@@ -396,7 +396,9 @@ import {
 import { createCommandRegistry } from './command-registry.js';
 import { requestExecutionLifecycle, UNAVAILABLE_LIFECYCLE_REASONS } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
-import { uiText } from './ui-text.js';
+import { initializeUiLocalization } from './ui-localization.js';
+import { uiDateTime, useUiLocalization } from './ui-text.js';
+import { createLanguageDialog } from './language-dialog.js';
 import {
   edgePatchChanged,
   nodePatchChanged,
@@ -422,6 +424,12 @@ import {
 } from './program-language.js';
 
 'use strict';
+
+const uiLocalizationController = await initializeUiLocalization();
+const uiLocalization = uiLocalizationController.localization;
+useUiLocalization(uiLocalization);
+const uiText = (key, params) => uiLocalization.text(key, params);
+const languageDialog = createLanguageDialog({ document, controller: uiLocalizationController });
 
 let applicationTheme = normalizeTheme(document.documentElement.dataset.theme) || 'dark';
 let rendererPalette = getRendererPalette(applicationTheme);
@@ -805,7 +813,7 @@ const DEFAULT_FONT_SIZE = 20;
 const workspace = createWorkspace();
 let activeWorkspaceScope = null;
 let workspacePersistenceWritable = false;
-let workspacePersistenceReason = 'Connect to a workspace-aware Ravenroot service to persist documents.';
+let workspacePersistenceReason = uiText("workspace.persistence.connect");
 let workspacePersistenceGeneration = 0;
 let workspacePersistenceTimer = null;
 let workspaceWriteChain = Promise.resolve();
@@ -1053,6 +1061,7 @@ let traceActive  = false;  // true while a downstream trace is pinned
 // exactly like `layoutMode` two lines up — captured and applied the same way, and defaulted the
 // same way. See `DEFAULT_FONT_SIZE` and `workspace.js`'s `createDocumentRecord` for why 20.
 let fontSize = DEFAULT_FONT_SIZE;
+// i18n-audit-exempt: protocol-token - this stable default is a portable document filename.
 let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
@@ -1075,11 +1084,11 @@ const rememberedConnection = createRememberedConnection({
   onChange: state => {
     hasRuntimeToken = state.hasToken;
     const input = document.getElementById('access-token');
-    input.placeholder = state.remembered ? 'saved in this browser' : state.hasToken ? 'token in memory' : 'paste token';
+    input.placeholder = state.remembered ? uiText("workspace.app.saved.in.this.browser") : state.hasToken ? uiText("workspace.app.token.in.memory") : uiText("workspace.app.paste.token");
     if (state.notice) {
       const status = document.getElementById('runtime-connection');
       status.title = state.notice;
-      status.setAttribute('aria-label', `Runtime status: ${status.textContent}. ${state.notice}`);
+      status.setAttribute('aria-label', uiText("workspace.app.runtime.status", { textContent: status.textContent, notice: state.notice }));
     }
     refreshCommands();
   },
@@ -1284,8 +1293,11 @@ function receiveHumanTaskProjection(state) {
   if (changed && owner === workspace.active && state.kind === 'ready') {
     const total = [...state.nodeCounts.values()].reduce((sum, count) => sum + count.pending, 0);
     const escalated = [...state.nodeCounts.values()].reduce((sum, count) => sum + count.escalated, 0);
-    announceGraph(total ? `${total} Human Task${total === 1 ? '' : 's'} need attention`
-      + `${escalated ? `; ${escalated} escalated` : ''}.` : 'No Human Tasks need attention.');
+    const escalation = escalated
+      ? uiText("workspace.notice.humanTasks.escalated", { count: escalated }) : '';
+    announceGraph(total ? uiText("workspace.notice.humanTasks.attention", {
+      count: total, escalation,
+    }) : uiText("workspace.notice.no.human.tasks.need.attention"));
   }
   if (state.kind === 'ready' && !humanTaskDecisionDialog?.selected()) {
     if (!document.getElementById('remember-connection-dialog').open) void recoverHumanTaskSelection(owner);
@@ -1932,7 +1944,7 @@ function refreshVisualGroups(owner = workspace.active, { animate = false, select
   }
   if (metadata.warning && owner.visualGroupWarning !== metadata.warning) {
     owner.visualGroupWarning = metadata.warning;
-    addActivityMessage('editor', metadata.warning, 'failed');
+    addActivityMessage(uiText("workspace.notice.editor"), metadata.warning, 'failed');
   }
   if (owner === workspace.active) { updateStats(); refreshCommands(); }
 }
@@ -1971,10 +1983,10 @@ function visualGroupDialog(title, { value = null, detail = '', submit = 'Save', 
   const heading = document.createElement('h2'); heading.textContent = title;
   const explanation = document.createElement('p'); explanation.textContent = detail;
   const input = document.createElement('input'); input.type = 'text'; input.maxLength = 160;
-  input.setAttribute('aria-label', 'Group name'); input.value = value ?? ''; input.required = true;
+  input.setAttribute('aria-label', uiText("workspace.app.group.name")); input.value = value ?? ''; input.required = true;
   const error = document.createElement('p'); error.setAttribute('role', 'alert');
   const actions = document.createElement('div'); actions.className = 'visual-group-dialog-actions';
-  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = uiText("workspace.app.cancel");
   const save = document.createElement('button'); save.type = 'submit'; save.textContent = submit;
   cancel.className = 'btn'; save.className = 'btn primary';
   actions.append(cancel, save); form.append(heading, explanation);
@@ -2052,7 +2064,7 @@ function showVisualGroupInfo(group, owner = workspace.active) {
   document.getElementById('info-title').textContent = group.name;
   const body = document.createElement('section'); body.className = 'visual-group-inspector';
   document.getElementById('info-body').replaceChildren(body);
-  const label = document.createElement('p'); label.textContent = `Visual group · ${group.memberNodeIds.length} members`;
+  const label = document.createElement('p'); label.textContent = uiText("workspace.app.visual.group.members", { count: group.memberNodeIds.length });
   body.append(label);
   const actions = document.createElement('div'); actions.className = 'visual-group-actions'; body.append(actions);
   const action = (text, handler, enabled = true, reason = '') => {
@@ -2070,13 +2082,13 @@ function showVisualGroupInfo(group, owner = workspace.active) {
     'Select at least two real nodes in editable Design');
   action('Ungroup', () => manageVisualGroup('ungroup', group), editable, 'Available in editable Design documents');
   const help = document.createElement('p'); help.id = 'visual-group-edit-help'; help.className = 'visual-group-help';
-  help.textContent = editable ? 'To replace membership, select at least two real nodes, then choose Edit → Replace members with selection.'
-    : 'Rename, membership changes and ungrouping are available in editable Design documents.';
+  help.textContent = editable ? uiText("workspace.app.to.replace.membership.select.at.least.two")
+    : uiText("workspace.app.rename.membership.changes.and.ungrouping.are.available");
   body.append(help);
   const list = document.createElement('ul'); list.className = 'visual-group-members'; body.append(list);
   group.memberNodeIds.forEach(id => {
     const item = document.createElement('li'); const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
-    const node = graphData.nodeMap[id]; button.textContent = `${node?.name || id} (${id})`;
+    const node = graphData.nodeMap[id]; button.textContent = uiText("workspace.app.text", { id: node?.name || id, id2: id });
     button.addEventListener('click', () => {
       if (workspace.active === owner && owner.incarnation === incarnation) revealVisualGroupMember(id, owner);
     }); item.append(button); list.append(item);
@@ -2110,6 +2122,7 @@ function nodeActionCatalog(owner, instance, nodeId) {
   const authoring = owned && groupAuthoringAllowed(owner);
   const actions = createNodeActionCatalog({
     targetLabel: label,
+    t: uiText,
     capabilities: {
       trace: Boolean(owned && node && !node.empty()),
       duplicate: Boolean(owned && modifyEnabled && canDuplicateNode(ownerGraph, nodeId, ownerLayoutMode)),
@@ -2287,8 +2300,11 @@ function deleteNodeFromActionOverlay(owner, instance, nodeId, { skipDraftGuard =
   scheduleMinimap();
   updateHistoryUi();
   refreshCommands();
-  addActivityMessage('editor',
-    `Deleted ${removed.nodeIds.length} node(s) and ${removed.edgeIds.length} edge(s)`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.2"),
+    uiText("workspace.notice.deleted.graphElements", {
+      nodeSummary: uiText("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
+      edgeSummary: uiText("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
+    }), 'completed');
   return true;
 }
 
@@ -2338,7 +2354,7 @@ function openNodeActionMenu(owner, instance, node, { x, y, focus = true } = {}) 
     item.textContent = action.label;
     return item;
   }));
-  overlay.menu.setAttribute('aria-label', `Actions for ${nodeActionLabel(node)}`);
+  overlay.menu.setAttribute('aria-label', uiText("workspace.app.actions.for", { node: nodeActionLabel(node) }));
   overlay.root.hidden = false;
   overlay.menu.hidden = false;
   positionNodeActionMenu(overlay, { x, y });
@@ -2360,7 +2376,7 @@ function installNodeActionOverlay(owner, instance, container) {
   const bar = document.createElement('div');
   bar.className = 'graph-node-actions';
   bar.setAttribute('role', 'toolbar');
-  bar.setAttribute('aria-label', 'Node actions');
+  bar.setAttribute('aria-label', uiText("workspace.app.node.actions"));
   bar.setAttribute('aria-orientation', 'vertical');
   bar.hidden = true;
   const bridge = document.createElement('div');
@@ -2382,8 +2398,8 @@ function installNodeActionOverlay(owner, instance, container) {
   const duplicateButton = actionButton('duplicate', '⧉');
   const deleteButton = actionButton('delete', '⌫');
   const moreButton = actionButton('more', '…');
-  moreButton.setAttribute('aria-label', 'More node actions');
-  moreButton.dataset.tooltip = 'More node actions';
+  moreButton.setAttribute('aria-label', uiText("workspace.app.more.node.actions"));
+  moreButton.dataset.tooltip = uiText("workspace.app.more.node.actions");
   bar.append(traceButton, deleteButton, duplicateButton, actionButton('group', '▦'), actionButton('toggleGroup', '↔'), moreButton);
   root.append(bridge, bar, menu);
   container.append(root);
@@ -2713,9 +2729,9 @@ function syncSourceSessionChrome(owner = workspace.active) {
   const availability = session.observationUnavailable ? ' · status unavailable, retrying' : '';
   output.hidden = false;
   output.className = `source-session-status ${session.state.toLowerCase()}`;
-  output.textContent = `${label} · ${session.sourceCount} local source${session.sourceCount === 1 ? '' : 's'}${availability}`;
-  output.setAttribute('aria-label', `${label}. Process-local source session with ${session.sourceCount} source nodes.`
-    + (session.observationUnavailable ? ' Status is unavailable; the editor is retrying.' : ''));
+  output.textContent = uiText("workspace.app.local.source", { label, count: session.sourceCount, availability });
+  output.setAttribute('aria-label', uiText("workspace.app.value1.process.local.source.session.with.value2", { label: label, sourceCount: session.sourceCount })
+    + (session.observationUnavailable ? uiText("workspace.app.status.is.unavailable.the.editor.is.retrying") : ''));
 }
 
 // The seam driven by both the tiling panes and the isolation tests.
@@ -2882,11 +2898,13 @@ function syncGraphModeLabel() {
   const mode = window.document.getElementById('graph-mode-label');
   if (!mode) return;
   const active = workspace.active;
-  mode.textContent = active
-    ? `${documentModeLabel(active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  mode.textContent = active ? uiText("workspace.document.mode", {
+    mode: documentModeLabel(active),
+    editing: uiText(modifyEnabled ? "workspace.document.editing" : "workspace.document.readOnly"),
+  }) : uiText("workspace.app.no.document");
   if (active?.authoring?.providerDocumentId) {
     const revision = active.authoring.revision || {};
-    mode.title = `Draft revision: ${revision.draft || 'absent'}; release revision: ${revision.release || 'absent'}; publication revision: ${revision.publication || 'absent'}`;
+    mode.title = uiText("workspace.app.draft.revision.release.revision.publication.revision", { absent: revision.draft || 'absent', absent2: revision.release || 'absent', absent3: revision.publication || 'absent' });
   } else mode.removeAttribute('title');
 }
 
@@ -2911,8 +2929,8 @@ function setGraphDocumentMaximized(document_, maximized) {
     entry.pane?.classList.toggle('doc-pane--maximized', active);
     const control = entry.pane?.querySelector('[data-pane-document-maximize]');
     control?.setAttribute('aria-pressed', String(active));
-    control?.setAttribute('aria-label', active ? `Restore ${entry.displayName}` : `Maximize ${entry.displayName}`);
-    if (control) control.title = active ? 'Restore graph document' : 'Maximize graph document';
+    control?.setAttribute('aria-label', active ? uiText("workspace.app.restore.value1", { displayName: entry.displayName }) : uiText("workspace.app.maximize.value1", { displayName: entry.displayName }));
+    if (control) control.title = active ? uiText("workspace.app.restore.graph.document") : uiText("workspace.app.maximize.graph.document");
   });
   window.requestAnimationFrame(() => {
     if (generation !== document_.maximizeGeneration || workspace.find(document_.id) !== document_) return;
@@ -2983,8 +3001,8 @@ function documentPane(document_) {
   maximize.type = 'button';
   maximize.dataset.paneDocumentMaximize = document_.id;
   maximize.setAttribute('aria-pressed', 'false');
-  maximize.setAttribute('aria-label', `Maximize ${document_.displayName}`);
-  maximize.title = 'Maximize graph document';
+  maximize.setAttribute('aria-label', uiText("workspace.app.maximize", { displayName: document_.displayName }));
+  maximize.title = uiText("workspace.app.maximize.graph.document");
   maximize.append(window.document.createElement('span'));
   maximize.addEventListener('pointerdown', event => event.stopPropagation());
   maximize.addEventListener('click', event => {
@@ -3064,9 +3082,10 @@ function syncPaneHeaders() {
     const name = paneDisplayName(document_);
     const dirty = paneIsDirty(document_);
     const deployment = document_.deploymentView;
-    const deploymentStatus = deployment
-      ? `read-only deployment ${deployment.state.lifecycle.toLowerCase()}, ${deployment.state.continuity.toLowerCase()}`
-      : '';
+    const deploymentStatus = deployment ? uiText("workspace.document.deploymentStatus", {
+      lifecycle: deployment.state.lifecycle.toLowerCase(),
+      continuity: deployment.state.continuity.toLowerCase(),
+    }) : '';
 
     const label = header.querySelector('.doc-pane-name');
     label.textContent = name;
@@ -3080,10 +3099,10 @@ function syncPaneHeaders() {
     }
     origin.textContent = documentModeLabel(document_);
     origin.title = document_.tenantId === null ? workspacePersistenceReason
-      : `${documentModeLabel(document_)} document. ${workspacePersistenceReason}`;
+      : uiText("workspace.app.value1.document.value2", { document: documentModeLabel(document_), reason: workspacePersistenceReason });
     const close = header.querySelector('.doc-pane-close');
-    close.title = `Close ${name}`;
-    close.setAttribute('aria-label', `Close ${name}`);
+    close.title = uiText("workspace.app.close", { name: name });
+    close.setAttribute('aria-label', uiText("workspace.app.close", { name: name }));
 
     // The `*` an editor puts next to a modified file: a character, not a tint.
     let modified = header.querySelector('.doc-pane-modified');
@@ -3105,9 +3124,14 @@ function syncPaneHeaders() {
     pane.classList.toggle('doc-pane--active', active);
     if (active) pane.setAttribute('aria-current', 'true');
     else pane.removeAttribute('aria-current');
-    pane.setAttribute('aria-label', `${name}, ${documentModeLabel(document_)}${dirty ? ', modified' : ''}`
-      + `${document_.layoutBusy ? ', layout in progress' : ''}`
-      + `${deploymentStatus ? `, ${deploymentStatus}` : ''}`);
+    pane.setAttribute('aria-label', uiText("workspace.document.ariaLabel", {
+      name,
+      mode: documentModeLabel(document_),
+      modified: dirty ? uiText("workspace.document.modified") : '',
+      layout: document_.layoutBusy ? uiText("workspace.document.layoutInProgress") : '',
+      deployment: deploymentStatus
+        ? uiText("workspace.document.deploymentSuffix", { status: deploymentStatus }) : '',
+    }));
     if (deployment) {
       pane.dataset.viewerSource = 'deployment';
       pane.dataset.deploymentLifecycle = deployment.state.lifecycle;
@@ -3175,7 +3199,7 @@ function syncPaneSeparators(plan, visible) {
     separator.hidden = false;
     separator.tabIndex = 0;
     separator.setAttribute('aria-controls', panes.map(document_ => document_.pane.id).join(' '));
-    separator.setAttribute('aria-label', `${axis === 'column' ? 'Column' : 'Row'} ${boundary + 1} size`);
+    separator.setAttribute('aria-label', uiText("workspace.app.size", { row: axis === 'column' ? 'Column' : 'Row', boundary: boundary + 1 }));
     if ((plan.rows === 1 && axis === 'column') || (plan.columns === 1 && axis === 'row')) {
       const nextPane = visible[boundary + 1]?.pane;
       if (nextPane && separator.nextSibling !== nextPane) {
@@ -3661,9 +3685,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
     syncPaneHeaders();
     if (workspace.active === owner) {
-      addActivityMessage('deployment', result.reason === 'execution'
-        ? `Observed ${frame.event.type} on ${deploymentId}`
-        : `Deployment ${deploymentId}: ${state.continuity.toLowerCase()}`,
+      addActivityMessage(uiText("workspace.notice.deployment"), result.reason === 'execution' ? uiText("workspace.notice.observed.on", { type: frame.event.type, deploymentId: deploymentId }) : uiText("workspace.notice.deployment.2", { deploymentId: deploymentId, detail2: state.continuity.toLowerCase() }),
       result.terminal ? 'failed' : 'completed');
     }
   };
@@ -3678,7 +3700,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     }
     if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
     syncPaneHeaders();
-    if (workspace.active === owner) addActivityMessage('deployment', message,
+    if (workspace.active === owner) addActivityMessage(uiText("workspace.notice.deployment.3"), message,
       ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
   });
   owner.deploymentView = { envelope, state, disconnect };
@@ -3714,7 +3736,7 @@ function forkActiveDocument() {
       layoutMode: fork.layoutMode, designArrangement: fork.designArrangement,
       visualStyle: fork.visualStyle, fontSize: fork.fontSize },
   });
-  addActivityMessage('editor', `Forked immutable ${source.mode} snapshot as an editable draft`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.3"), uiText("workspace.notice.forked.immutable.snapshot.as.an.editable.draft", { mode: source.mode }), 'completed');
   scheduleWorkspacePersistence();
   return id;
 }
@@ -3789,7 +3811,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   initLoadedGraph(graph, visualStyle);
   if (renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   clearActivity();
-  addActivityMessage('editor', `Loaded ${name}`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.4"), uiText("workspace.notice.loaded", { name: name }), 'completed');
   captureActiveDocument();
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(target);
@@ -3800,7 +3822,7 @@ function requestReplaceActiveDocument(graph, name, origin = document.activeEleme
   captureActiveDocument();
   const target = workspace.active;
   if (target && target.mode !== DOCUMENT_MODES.DRAFT) {
-    showInspectorMessage('Only Draft documents can be replaced. Fork this read-only document first.');
+    showInspectorMessage(uiText("workspace.notice.only.draft.documents.can.be.replaced.fork.this.read"));
     return false;
   }
   if (!target || !paneIsDirty(target)) return completeReplaceActiveDocument(target, graph, name);
@@ -3981,8 +4003,8 @@ function syncActiveDocumentChrome() {
   // holding the closed document as a stale record (workspace rule 5). The chrome therefore needs an
   // Empty state: shared chrome must stop describing the document that was just closed.
   const hasDocument = Boolean(workspace.active);
-  window.document.getElementById('graph-title').textContent = hasDocument ? graphDisplayName : 'No graph loaded';
-  window.document.title = hasDocument ? `${graphDisplayName} — Ravenroot UI` : 'Ravenroot UI';
+  window.document.getElementById('graph-title').textContent = hasDocument ? graphDisplayName : uiText("workspace.app.no.graph.loaded");
+  window.document.title = hasDocument ? uiText("workspace.app.value1.ravenroot.ui", { graphDisplayName: graphDisplayName }) : uiText("workspace.app.ravenroot.ui");
   syncGraphModeLabel();
   // Play is shared chrome and has to describe the document in front of the user: with one button and
   // several documents, a run still in flight in one of them must not lock the others out.
@@ -4014,15 +4036,15 @@ function syncExecutionReconciliationChrome(hasDocument) {
   const summary = document.getElementById('activity-summary');
   if (hasDocument && activeExecutionReconciliation === 'unknown' && activeExecutionId) {
     summary.dataset.executionReconciliation = 'unknown';
-    summary.textContent = `Status unknown · execution ${shortId(activeExecutionId)} · Test/Run will check first`;
+    summary.textContent = uiText("workspace.app.status.unknown.execution.test.run.will.check", { activeExecutionId: shortId(activeExecutionId) });
     summary.setAttribute('aria-label',
-      `Execution ${activeExecutionId} status is unknown. Test and Run will check it before submitting.`);
+      uiText("workspace.app.execution.status.is.unknown.test.and.run", { activeExecutionId: activeExecutionId }));
     return;
   }
   if (summary.dataset.executionReconciliation) {
     delete summary.dataset.executionReconciliation;
     summary.removeAttribute('aria-label');
-    summary.textContent = 'Waiting for events';
+    summary.textContent = uiText("workspace.app.waiting.for.events");
   }
 }
 
@@ -5295,7 +5317,7 @@ function scheduleLayeredEdgeRoutes(owner, target, token, complete = null) {
     owner.layoutDeferredRaf = null;
     if (layoutRequestIsCurrent(token)) {
       if (!layeredDrawingOf(target) && owner === workspace.active) {
-        announceGraph('The layered arrangement could not be computed. Node positions are unchanged.');
+        announceGraph(uiText("workspace.notice.the.layered.arrangement.could.not.be.computed.node.positions"));
       }
       applyLayeredRoutes(target, owner);
     }
@@ -5573,9 +5595,7 @@ function syncOwnedLayoutBusy(owner) {
   else owner.pane?.removeAttribute('aria-busy');
   syncPaneHeaders();
   if (workspace.active === owner) {
-    announceGraph(busy
-      ? `${renderModeLabel(owner.layoutMode)} layout in progress. Graph editing is available when it finishes.`
-      : `${renderModeLabel(owner.layoutMode)} layout complete.`);
+    announceGraph(busy ? uiText("workspace.notice.layout.in.progress.graph.editing.is.available.when.it", { renderModeLabel: renderModeLabel(owner.layoutMode) }) : uiText("workspace.notice.layout.complete", { renderModeLabel: renderModeLabel(owner.layoutMode) }));
     refreshCommands();
   }
 }
@@ -6302,7 +6322,11 @@ function traceDownstream(startNode) {
   startNode.addClass('trace-start');
 
   document.getElementById('b-sel').textContent =
-    `↓ Trace from «${startNode.data('name')}» — ${visitedNodes.length} nodes, ${visitedEdges.length} edges  (click canvas or press Esc to exit)`;
+    uiText("workspace.app.trace.summary", {
+      name: startNode.data('name'),
+      nodeSummary: uiText("workspace.app.trace.nodes", { count: visitedNodes.length }),
+      edgeSummary: uiText("workspace.app.trace.edges", { count: visitedEdges.length }),
+    });
 }
 
 function clearTrace() {
@@ -6335,7 +6359,7 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
   const visualGroup = nodes.length === 1 && edges.empty() ? groupForVisibleNode(nodes.first().id()) : null;
   if (visualGroup) { showVisualGroupInfo(visualGroup); return; }
   if (nodes.some(node => groupProjection()?.syntheticIds.has(node.id()))) {
-    showInspectorMessage('Mixed visual groups and real elements. Select one group to manage it, or real nodes to edit.');
+    showInspectorMessage(uiText("workspace.notice.mixed.visual.groups.and.real.elements.select.one.group"));
     return;
   }
   if (nodes.length > 1 && edges.empty()) {
@@ -6346,9 +6370,9 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
     showEdgeInfo(edges.first());
   } else if (nodes.nonempty() || edges.nonempty()) {
     revealInspector();
-    document.getElementById('info-title').textContent = `${nodes.length + edges.length} elements selected`;
-    document.getElementById('info-body').innerHTML =
-      '<div class="info-empty">Select nodes only to inspect common properties as a batch.</div>';
+  document.getElementById('info-title').textContent = uiText("workspace.app.elements.selected", { count: nodes.length + edges.length });
+  document.getElementById('info-body').innerHTML =
+      `<div class="info-empty">${escapeHtml(uiText("workspace.app.select.nodes.only"))}</div>`;
   } else {
     // Ctrl-click can now remove the final selected element. The renderer selection is already
     // empty, so clear the inspector in the same tap task without cancelling the guarded selection
@@ -6367,7 +6391,7 @@ function showMultiNodeInfo(nodeIds) {
   const editing = modifyEnabled && canModifyGraph(graphData, layoutMode);
   const properties = graphData.format === 'graphml'
     ? commonMultiSelectionProperties(nodes, nodeTypeCatalog) : [];
-  document.getElementById('info-title').textContent = `${nodes.length} nodes selected`;
+  document.getElementById('info-title').textContent = uiText("workspace.app.nodes.selected", { count: nodes.length });
   document.getElementById('info-body').innerHTML = multiNodeInspectorHtml(nodes, properties, editing);
   if (editing && properties.length) bindMultiNodeEditor(nodes, properties);
 }
@@ -6377,26 +6401,25 @@ function multiNodeInspectorHtml(nodes, properties, editing) {
   const fields = properties.map((property, index) =>
     multiNodePropertyHtml(property, index, editing)).join('');
   const empty = properties.length ? '' : `<div class="info-empty" data-multi-selection-empty>
-    No catalog property is compatible, visible, and editable across every selected node.
-    Custom and unknown behaviors are not batch edited without a trusted schema.
+    ${escapeHtml(uiText("workspace.template.app.no.catalog.property.is.compatible.visible.and.editable"))}
   </div>`;
   const body = fields
     ? `<div class="editor-grid multi-selection-properties">${fields}</div>` : empty;
   const actions = editing && fields ? `<div class="editor-actions">
-    <button class="btn primary" type="submit" data-apply-multi-properties>Apply to ${count} nodes</button>
+    <button class="btn primary" type="submit" data-apply-multi-properties>${escapeHtml(uiText("workspace.app.apply.to.nodes", { count }))}</button>
   </div>` : '';
   const content = `<div class="multi-selection-summary">
-    <div class="editor-label-row"><strong data-multi-selection-count>${count} nodes selected</strong>
-      ${contextualHelpButtonHtml('Batch editing', 'Only catalog properties with the same schema and current visibility on every selected node are shown. Other node data remains unchanged.')}</div>
+    <div class="editor-label-row"><strong data-multi-selection-count>${escapeHtml(uiText("workspace.app.nodes.selected", { count }))}</strong>
+      ${contextualHelpButtonHtml(uiText("workspace.app.batch.editing"), uiText("workspace.app.only.catalog.properties.with.the.same.schema.and"))}</div>
   </div>${body}${actions}`;
   return editing
     ? `<form id="multi-node-editor" class="editor-form" data-multi-node-inspector
         data-mode="edit" data-selection-count="${count}" role="region"
-        aria-label="${count} selected nodes inspector" data-tooltip-exempt="persistent-form-labels">
+        aria-label="${escapeAttribute(uiText('workspace.app.multiNode.region', { count }))}" data-tooltip-exempt="persistent-form-labels">
         ${content}</form>`
     : `<div class="editor-form" data-multi-node-inspector data-mode="view"
         data-selection-count="${count}" role="region"
-        aria-label="${count} selected nodes inspector">${content}</div>`;
+        aria-label="${escapeAttribute(uiText('workspace.app.multiNode.region', { count }))}">${content}</div>`;
 }
 
 function multiNodePropertyHtml(property, index, editing) {
@@ -6441,7 +6464,7 @@ function multiNodePropertyControl(property, controlId) {
     const options = choices.map(value => `<option value="${escapeAttribute(value)}"
       ${state === MULTI_PROPERTY_STATE.SAME && value === current ? 'selected' : ''}>${escapeHtml(value)}</option>`)
       .join('');
-    return `<select ${common}>${unchanged}${options}<option value="" data-batch-action="clear">Clear from all</option></select>`;
+    return `<select ${common}>${unchanged}${options}<option value="" data-batch-action="clear">${escapeHtml(uiText("workspace.template.app.clear.from.all"))}</option></select>`;
   }
 
   const placeholder = property.type === 'SECRET_REFERENCE'
@@ -6492,7 +6515,7 @@ function bindMultiNodeEditor(nodes, properties) {
     const plan = planMultiPropertyUpdate(currentNodes, properties, changes, nodeTypeCatalog);
     if (plan.errors.length) return showFormError(form, plan.errors.join('. '));
     if (!plan.entries.length) return showFormError(form, 'Change at least one common property first');
-    if (!globalThis.confirm(`Apply changes to ${nodes.length} selected nodes?`)) return;
+    if (!globalThis.confirm(uiText("workspace.app.apply.changes.to.selected.nodes", { count: nodes.length }))) return;
     try {
       updateNodePropertiesBatch(graphData, plan.entries, editHistory);
     } catch (error) {
@@ -6503,17 +6526,17 @@ function bindMultiNodeEditor(nodes, properties) {
     cy.batch(() => ids.forEach(id => cy.getElementById(id).select()));
     updateHistoryUi();
     showMultiNodeInfo(ids);
-    announceGraph(`Applied common property changes to ${ids.length} selected nodes. One undo restores them.`);
+    announceGraph(uiText("workspace.notice.applied.commonProperties", { count: ids.length }));
   });
 }
 
 function showReadOnlyProgramReadiness(model, state) {
-  document.getElementById('info-title').textContent = `Program readiness · ${model.id}`;
+  document.getElementById('info-title').textContent = uiText("workspace.app.program.readiness", { id: model.id });
   document.getElementById('info-body').innerHTML = `<div class="program-workspace"
       data-node-id="${escapeAttribute(model.id)}">
-    <div class="editor-section-title"><span>Server readiness result</span></div>
+    <div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.server.readiness.result"))}</span></div>
     <div class="program-status"></div>
-    <ol class="program-timeline" aria-label="Program build phases"></ol>
+    <ol class="program-timeline" aria-label="${escapeHtml(uiText("workspace.template.app.program.build.phases"))}"></ol>
     <output class="program-output" hidden></output>
   </div>`;
   renderProgramPanelState(
@@ -6577,12 +6600,12 @@ function showEdgeInfo(edge) {
   const projected = groupProjection();
   if (projected?.syntheticIds.has(edge.id())) {
     retireInspectorDraft(); revealInspector();
-    document.getElementById('info-title').textContent = 'Original connections';
+    document.getElementById('info-title').textContent = uiText("workspace.app.original.connections");
     const body = document.getElementById('info-body'); body.replaceChildren();
     for (const id of projected.originalEdgeIdsByVisibleId.get(edge.id()) || []) {
       const real = graphData.edges.find(item => item.id === id);
       const line = document.createElement('p');
-      line.textContent = `${id}: ${real?.source} → ${real?.target} · ${real?.outcome || ''}`;
+      line.textContent = uiText("workspace.app.text.2", { id: id, source: real?.source, target: real?.target, outcome: real?.outcome || '' });
       body.append(line);
     }
     return;
@@ -6598,7 +6621,7 @@ function showEdgeInfo(edge) {
   const descriptor = model.edgeName
     || (edgeFailureRouteKind(model, graphData) ? 'failure' : model.outcome);
   document.getElementById('info-title').textContent =
-    `${edgeEndpointLabel(edge)}${descriptor ? ` · ${descriptor}` : ''}`;
+    uiText("workspace.app.text.3", { edge: edgeEndpointLabel(edge), detail: descriptor ? ` · ${descriptor}` : '' });
   if (graphData.format === 'graphify') {
     showReadOnlyElement(model, 'Graphify relation');
     return;
@@ -6613,9 +6636,9 @@ function showEdgeInfo(edge) {
 function resetInfoContents() {
   contextualHelp.dismiss();
   humanTaskController?.selectNode(null);
-  document.getElementById('info-title').textContent = 'Inspector';
+  document.getElementById('info-title').textContent = uiText("workspace.app.inspector");
   document.getElementById('info-body').innerHTML =
-    '<div class="info-empty">Select a node or edge, or create a new one.</div>';
+    `<div class="info-empty">${escapeHtml(uiText("workspace.app.select.graph.element"))}</div>`;
 }
 
 function closeInfo() {
@@ -7107,20 +7130,20 @@ function renderNodeForm(model, creating) {
   const catalogOptions = nodeTypeCatalog.map(type =>
     `<option value="${escapeAttribute(type.behavior)}" ${type.behavior === model.behavior ? 'selected' : ''}>${escapeHtml(type.category)} · ${escapeHtml(type.displayName)}</option>`).join('');
   const catalogDescription = descriptor?.description
-    || 'Unknown behavior names are valid: the runtime reports fallback and executes pass-through.';
+    || uiText("workspace.catalog.unknownBehavior");
   document.getElementById('info-body').innerHTML = `
     <form id="node-editor" class="editor-form" data-tooltip-exempt="persistent-form-labels">
       <div class="editor-grid">
-        <div class="editor-field full"><label>ID</label><input name="id" value="${escapeAttribute(model.id)}" ${creating ? '' : 'readonly'} required></div>
-        <div class="editor-field full"><label>Name</label><input name="name" value="${escapeAttribute(model.name)}" required></div>
-        <div class="editor-field"><label>Kind</label><select name="kind">${kindOptions}</select></div>
-        <div class="editor-field"><label>Visual type</label><select name="nodeType">${visualTypes}</select></div>
-        <div class="editor-field full"><div class="editor-label-row"><label>Catalog type</label>
-          ${contextualHelpButtonHtml('Catalog type', catalogDescription)}</div>
-          <select name="catalogBehavior"><option value="">Custom / unknown behavior</option>${catalogOptions}</select></div>
-        <div class="editor-field full behavior-field"><label>Behavior</label><input name="behavior" value="${escapeAttribute(model.behavior || '')}" placeholder="registered-name or future behavior"></div>
-        <div class="editor-field full"><label>Class name</label><input name="classname" value="${escapeAttribute(model.classname || '')}" placeholder="optional metadata"></div>
-        <div class="editor-field full"><label>Description</label><textarea name="description">${escapeHtml(model.description || '')}</textarea></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.id"))}</label><input name="id" value="${escapeAttribute(model.id)}" ${creating ? '' : 'readonly'} required></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.name"))}</label><input name="name" value="${escapeAttribute(model.name)}" required></div>
+        <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.kind"))}</label><select name="kind">${kindOptions}</select></div>
+        <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.visual.type"))}</label><select name="nodeType">${visualTypes}</select></div>
+        <div class="editor-field full"><div class="editor-label-row"><label>${escapeHtml(uiText("workspace.template.app.catalog.type"))}</label>
+          ${contextualHelpButtonHtml(uiText("workspace.app.catalog.type"), catalogDescription)}</div>
+          <select name="catalogBehavior"><option value="">${escapeHtml(uiText("workspace.template.app.custom.unknown.behavior"))}</option>${catalogOptions}</select></div>
+        <div class="editor-field full behavior-field"><label>${escapeHtml(uiText("workspace.template.app.behavior"))}</label><input name="behavior" value="${escapeAttribute(model.behavior || '')}" placeholder="${escapeHtml(uiText("workspace.template.app.registered.name.or.future.behavior"))}"></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.class.name"))}</label><input name="classname" value="${escapeAttribute(model.classname || '')}" placeholder="${escapeHtml(uiText("workspace.template.app.optional.metadata"))}"></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.description"))}</label><textarea name="description">${escapeHtml(model.description || '')}</textarea></div>
       </div>
       <div id="node-bypass-section">${bypassFieldHtml(descriptor, model, graphData)}</div>
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
@@ -7132,8 +7155,8 @@ function renderNodeForm(model, creating) {
       <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
-        ${creating ? '' : '<button class="btn danger" type="button" id="delete-node">Delete</button>'}
-        <button class="btn primary" type="submit">${creating ? 'Add node' : 'Save node'}</button>
+        ${creating ? '' : `<button class="btn danger" type="button" id="delete-node">${escapeHtml(uiText("workspace.app.delete.node"))}</button>`}
+        <button class="btn primary" type="submit">${escapeHtml(uiText(creating ? "workspace.app.add.node" : "workspace.app.save.node"))}</button>
       </div>
     </form>`;
   const form = document.getElementById('node-editor');
@@ -7276,7 +7299,7 @@ function secretReferenceOptionsHtml(stringValue) {
   // native-`required` select reports itself missing while it is selected, so the fail-closed
   // guarantee holds here for the same reason and by the same mechanism as it does for a closed
   // choice.
-  const notSelected = `<option value="" ${stringValue === '' ? 'selected' : ''}>Not selected</option>`;
+  const notSelected = `<option value="" ${stringValue === '' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.not.selected"))}</option>`;
   // Carries the RAW stored reference as its own option's value, selected, exactly as
   // `mismatchedOption` does for a closed choice: left untouched the control round-trips it verbatim,
   // so saving a form cannot silently drop a reference this build did not recognise — an imported
@@ -7445,9 +7468,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // control was a text box that would have taken one; the control now cannot, so the hint says
     // where the choices come from and what the document actually stores instead.
     const secretHint = property.type === 'SECRET_REFERENCE'
-      ? ' The list holds the credentials you have stored. The value itself is entered in the'
-        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
-      : '';
+      ? uiText("workspace.catalog.secretReferenceHelp") : '';
     // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
     // still be prompted to fill the property in. What changes is only whether the browser blocks
     // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
@@ -7540,9 +7561,9 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // `String(value) === ''` reads as "not declared" here before and after the container is
       // rerendered, regardless of what `present` says after that rerender.
       const undeclaredOption = undeclarable
-        ? `<option value="" ${!declared && (!present || String(value) === '') ? 'selected' : ''}>Not declared</option>` : '';
+        ? `<option value="" ${!declared && (!present || String(value) === '') ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.not.declared"))}</option>` : '';
       const mismatchedOption = !declared && present && String(value) !== ''
-        ? `<option value="${escapeAttribute(value)}" selected>Current value not among the declared alternatives: ${escapeHtml(value)}</option>` : '';
+        ? `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.among.the.declared.alternatives"))} ${escapeHtml(value)}</option>` : '';
       // a non-empty, non-conforming value deliberately leaves the fail-closed
       // guarantee behind for THIS control. Once `mismatchedOption` is selected, the control's own
       // value IS that raw string -- not `''`, not the first (placeholder label) option -- so the
@@ -7563,8 +7584,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       const choices = (graphData?.nodes || []).filter(node => node.kind === 'BEHAVIOR' && node.behavior === 'workspace');
       const missing = String(value) !== '' && !choices.some(node => node.id === String(value));
       control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="WORKSPACE_REFERENCE"${accessibility} ${nativeRequired ? 'required' : ''}>`
-        + `<option value="" ${String(value) === '' ? 'selected' : ''}>No Workspace (ordinary Agent)</option>`
-        + (missing ? `<option value="${escapeAttribute(value)}" selected>Missing Workspace: ${escapeHtml(value)}</option>` : '')
+        + `<option value="" ${String(value) === '' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.no.workspace.ordinary.agent"))}</option>`
+        + (missing ? `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.missing.workspace"))} ${escapeHtml(value)}</option>` : '')
         + choices.map(node => `<option value="${escapeAttribute(node.id)}" ${node.id === String(value) ? 'selected' : ''}>${escapeHtml(node.label || node.id)} · ${escapeHtml(node.id)}</option>`).join('')
         + '</select>';
     } else if (property.type === 'SECRET_REFERENCE') {
@@ -7609,8 +7630,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       const stringValue = String(value);
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
-        : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
+        : `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(value)}</option>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
@@ -7633,7 +7654,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
         ? ' <span aria-hidden="true">*</span>' : ''}</label>
         ${contextualHelpButtonHtml(title, helpText)}</div>${control}${hint}${state}</div>`;
   }).join('');
-  return `<div class="editor-section-title"><span>${escapeHtml(descriptor.displayName)} properties</span></div><div class="editor-grid">${fields}</div>`;
+  return `<div class="editor-section-title"><span>${escapeHtml(descriptor.displayName)} ${escapeHtml(uiText("workspace.template.app.properties"))}</span></div><div class="editor-grid">${fields}</div>`;
 }
 
 /**
@@ -7801,8 +7822,8 @@ function bypassFieldHtml(descriptor, model, graph) {
   const propertyName = bypassPropertyName(descriptor, nodeTypeCatalog);
   const declared = declaredBypass(model.properties, propertyName);
   const help = 'The node does not run its behaviour. The traversal continues past it with the payload it received, unchanged. Everything downstream executes normally.';
-  const title = `<div class="editor-section-title"><span>Execution</span>
-    ${contextualHelpButtonHtml('Execution bypass', help)}</div>`;
+  const title = `<div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.execution"))}</span>
+    ${contextualHelpButtonHtml(uiText("workspace.app.execution.bypass"), help)}</div>`;
   if (!nodeAcceptsBypass(model.kind)) {
     // The control must not merely be disabled here: `NodeBypassValidator` refuses the KEY on a
     // non-behavior node, `false` included, so an offered checkbox would make switching it back off
@@ -7814,10 +7835,8 @@ function bypassFieldHtml(descriptor, model, graph) {
     return `${title}
       <div class="node-bypass-fixed">
         <div class="bypass-refused" role="status">
-          <strong>This node carries ${escapeHtml(propertyName)}.</strong> The runtime refuses that
-          property on a ${escapeHtml(String(model.kind || 'non-behavior'))} node — even set to
-          <code>false</code> — because there is no behaviour to skip, and will not load this graph.
-          Saving this node removes the property.
+          <strong>${escapeHtml(uiText("workspace.template.app.this.node.carries"))} ${escapeHtml(propertyName)}.</strong> ${escapeHtml(uiText("workspace.template.app.the.runtime.refuses.that.property.on.a"))} ${escapeHtml(String(model.kind || 'non-behavior'))} ${escapeHtml(uiText("workspace.template.app.node.even.set.to"))}
+          <code>${escapeHtml(uiText("workspace.template.app.false"))}</code> ${escapeHtml(uiText("workspace.template.app.because.there.is.no.behaviour.to.skip.and"))}
         </div>
       </div>`;
   }
@@ -7828,9 +7847,8 @@ function bypassFieldHtml(descriptor, model, graph) {
     : 'Executing normally.';
   const unreadable = declared.state === 'unreadable'
     ? `<div class="bypass-refused" role="status">
-        <strong>The document declares ${escapeHtml(propertyName)} = ${escapeHtml(declared.raw)}.</strong>
-        Only <code>true</code> and <code>false</code> are legal, so the runtime refuses to load this
-        graph rather than guess. The box below shows what saving this node will write.
+        <strong>${escapeHtml(uiText("workspace.template.app.the.document.declares"))} ${escapeHtml(propertyName)} = ${escapeHtml(declared.raw)}.</strong>
+        ${escapeHtml(uiText("workspace.template.app.only"))} <code>${escapeHtml(uiText("workspace.template.app.true"))}</code> ${escapeHtml(uiText("workspace.template.app.and"))} <code>${escapeHtml(uiText("workspace.template.app.false"))}</code> ${escapeHtml(uiText("workspace.template.app.are.legal.so.the.runtime.refuses.to.load"))}
       </div>`
     : '';
   // The stable behavior explanation now lives behind the adjacent contextual-help button. The
@@ -7844,7 +7862,7 @@ function bypassFieldHtml(descriptor, model, graph) {
           data-bypass-property="${escapeAttribute(propertyName)}"
           aria-describedby="bypass-consequence"
           ${declared.state === 'on' ? 'checked' : ''}>
-        <span>Bypass this node</span>
+        <span>${escapeHtml(uiText("workspace.template.app.bypass.this.node"))}</span>
         <span class="bypass-state" data-bypass-state>${escapeHtml(stateText)}</span>
       </label>
       ${unreadable}
@@ -7875,8 +7893,8 @@ function bindBypassField() {
     const state = event.target.closest('.node-bypass')?.querySelector('[data-bypass-state]');
     if (state) {
       state.textContent = event.target.checked
-        ? 'Switched off. This node does not execute.'
-        : 'Executing normally.';
+        ? uiText("workspace.app.switched.off.this.node.does.not.execute")
+        : uiText("workspace.app.executing.normally");
     }
     if (box) box.hidden = !(event.target.checked && box.dataset.bypassConsequence);
   });
@@ -7918,14 +7936,14 @@ function readBypassEditor(form) {
 
 function natureFieldHtml(descriptor, model) {
   const help = 'Runtime nature controls this node\'s lifecycle — when a runtime instance exists and how many may be authoritative. It does not control concurrency or replica count.';
-  const title = `<div class="editor-section-title"><span>Runtime nature</span>
-    ${contextualHelpButtonHtml('Runtime nature', help)}</div>`;
+  const title = `<div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.runtime.nature"))}</span>
+    ${contextualHelpButtonHtml(uiText("workspace.app.runtime.nature"), help)}</div>`;
   const declarable = model.kind === 'BEHAVIOR' && Boolean(descriptor);
   if (!declarable) {
     return `${title}
       <div class="node-nature-fixed">
         <span class="nature-value">${escapeHtml(natureLabel(DEFAULT_NATURE))}</span>
-        <span class="nature-state">Fixed default · not configurable for this node.</span>
+        <span class="nature-state">${escapeHtml(uiText("workspace.template.app.fixed.default.not.configurable.for.this.node"))}</span>
       </div>`;
   }
   const natureProperty = descriptor.natureProperty || DEFAULT_NATURE_PROPERTY;
@@ -7945,11 +7963,11 @@ function natureFieldHtml(descriptor, model) {
   // the consequence that currently applies stay programmatically associated.
   return `${title}
     <div class="editor-field full node-nature">
-      <label for="node-nature-select">Runtime nature <span class="nature-state" data-nature-state>${stateText}</span></label>
+      <label for="node-nature-select">${escapeHtml(uiText("workspace.template.app.runtime.nature"))} <span class="nature-state" data-nature-state>${stateText}</span></label>
       <select id="node-nature-select" name="runtimeNature" data-nature-property="${escapeAttribute(natureProperty)}"
         data-default-nature="${escapeAttribute(defaultIdentifier)}"
         aria-describedby="nature-risk">
-        <option value="" ${resolved.declared ? '' : 'selected'}>Inherit default (${escapeHtml(natureLabel(defaultIdentifier))})</option>
+        <option value="" ${resolved.declared ? '' : 'selected'}>${escapeHtml(uiText("workspace.template.app.inherit.default"))}${escapeHtml(natureLabel(defaultIdentifier))})</option>
         ${options}
       </select>
       <div id="nature-risk" class="nature-risk" role="status" aria-live="polite"${riskText ? '' : ' hidden'}>${escapeHtml(riskText)}</div>
@@ -7973,8 +7991,8 @@ function updateNatureFieldState(select) {
   const value = declared ? select.value : select.dataset.defaultNature;
   const stateEl = select.closest('.node-nature')?.querySelector('[data-nature-state]');
   if (stateEl) {
-    stateEl.textContent = declared ? 'Declared on this node.'
-      : `Inherited default (${natureLabel(select.dataset.defaultNature)}).`;
+    stateEl.textContent = declared ? uiText("workspace.app.declared.on.this.node")
+      : uiText("workspace.app.inherited.default.value1", { defaultNature: natureLabel(select.dataset.defaultNature) });
   }
   const riskEl = document.getElementById('nature-risk');
   if (riskEl) {
@@ -8000,9 +8018,9 @@ function maxConcurrencyFieldHtml(descriptor, model) {
   const resolved = declarable ? effectiveMaxConcurrency(descriptor,
     (model.properties || {})[descriptor.maxConcurrencyProperty || DEFAULT_MAX_CONCURRENCY_PROPERTY]) : null;
   if (!resolved) {
-    return `<div class="editor-section-title"><span>Runtime concurrency</span>
-        ${contextualHelpButtonHtml('Runtime concurrency', 'This catalog type does not authorize a graph-selectable runtime limit. Runtime concurrency is independent of runtime nature.')}</div>
-      <div class="node-max-concurrency-fixed">Not configurable for this catalog type.</div>`;
+    return `<div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.runtime.concurrency"))}</span>
+        ${contextualHelpButtonHtml(uiText("workspace.app.runtime.concurrency"), uiText("workspace.app.this.catalog.type.does.not.authorize.a.graph"))}</div>
+      <div class="node-max-concurrency-fixed">${escapeHtml(uiText("workspace.template.app.not.configurable.for.this.catalog.type"))}</div>`;
   }
   const property = descriptor.maxConcurrencyProperty || DEFAULT_MAX_CONCURRENCY_PROPERTY;
   const raw = (model.properties || {})[property];
@@ -8015,10 +8033,10 @@ function maxConcurrencyFieldHtml(descriptor, model) {
   // back to, so they need the catalog default, never the value about to be cleared.
   const inheritedDefault = effectiveMaxConcurrency(descriptor, null).value;
   const help = `Positive, per node and per traversal. The trusted catalog ceiling is ${resolved.ceiling}; stricter plugin or profile limits still apply.`;
-  return `<div class="editor-section-title"><span>Runtime concurrency</span>
-      ${contextualHelpButtonHtml('Runtime concurrency', help)}</div>
+  return `<div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.runtime.concurrency"))}</span>
+      ${contextualHelpButtonHtml(uiText("workspace.app.runtime.concurrency"), help)}</div>
     <div class="editor-field full node-max-concurrency">
-      <label for="node-max-concurrency">Maximum concurrent arrivals
+      <label for="node-max-concurrency">${escapeHtml(uiText("workspace.template.app.maximum.concurrent.arrivals"))}
         <span class="nature-state" data-max-concurrency-state>${escapeHtml(state)}</span></label>
       <input id="node-max-concurrency" name="runtimeMaxConcurrency" type="number" inputmode="numeric"
         min="1" max="${resolved.ceiling}" value="${escapeAttribute(inputValue)}"
@@ -8034,8 +8052,8 @@ function bindMaxConcurrencyField() {
     const state = input.closest('.node-max-concurrency')?.querySelector('[data-max-concurrency-state]');
     if (!state) return;
     state.textContent = input.value === ''
-      ? `Inherited default (${input.dataset.defaultMaxConcurrency}).`
-      : `Declared (${input.value}).`;
+      ? uiText("workspace.app.inherited.default.value1", { defaultNature: input.dataset.defaultMaxConcurrency })
+      : uiText("workspace.app.declared.value1", { input: input.value });
   });
 }
 
@@ -8070,8 +8088,8 @@ function describeEffectiveJoin(state) {
 function joinFieldHtml(graph, model) {
   const state = effectiveJoinArrival(graph, model);
   const help = 'No join writes nothing to the document. A declared choice writes exactly one property. A join needs at least two distinct incoming edges; START arrivals are always external.';
-  const title = `<div class="editor-section-title"><span>Kind of arrival</span>
-    ${contextualHelpButtonHtml('Kind of arrival', help)}</div>`;
+  const title = `<div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.kind.of.arrival"))}</span>
+    ${contextualHelpButtonHtml(uiText("workspace.app.kind.of.arrival"), help)}</div>`;
   if (!state.applicable) {
     const reason = model.kind === 'START'
       ? 'Not a join · START receives externally.'
@@ -8101,15 +8119,12 @@ function joinFieldHtml(graph, model) {
     `<option value="${option.value}" ${!unrecognized && option.value === declared.kind ? 'selected' : ''}`
     + `${option.value === 'quorum' && quorumCollides ? ' disabled' : ''}>${escapeHtml(option.label)}</option>`).join('')
     + (unrecognized
-      ? `<option value="${JOIN_KIND_UNRECOGNIZED}" selected>Current value not recognized: ${escapeHtml(String(declared.raw))}</option>`
+      ? `<option value="${JOIN_KIND_UNRECOGNIZED}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(String(declared.raw))}</option>`
       : '');
   const quorumValue = declared.kind === 'quorum' && declared.quorum ? declared.quorum : Math.min(2, state.branchCount);
   const timeoutRaw = (model.properties || {})[JOIN_TIMEOUT_PROPERTY] || '';
   const quorumCollisionNote = quorumCollides
-    ? `<small class="join-quorum-collision-note">"K of N" is unavailable on this legacy state-machine
-        document: it would declare joinQuorum while save keeps stamping joinPolicy=each on this
-        fan-in, a combination the engine refuses to load. Migrate this document to declared join
-        semantics first (Edit menu), or choose "Wait for all branches" instead.</small>`
+    ? `<small class="join-quorum-collision-note">${escapeHtml(uiText("workspace.template.app.k.of.n.is.unavailable.on.this.legacy"))}</small>`
     : '';
   // The END terminal is precisely the node an author would never think to open, and
   // an undeclared fan-in into it returns a DIFFERENT result payload shape on different runs (measured
@@ -8137,22 +8152,19 @@ function joinFieldHtml(graph, model) {
   const endWarning = model.kind === 'END' && state.applicable
     && (state.source === 'undeclared' || state.source === 'each')
     ? `<div class="join-end-warning" role="status">
-        <strong>This END node has no declared join.</strong> With two or more branches converging here
-        and nothing declared, the recorded result varies between runs — sometimes the merged list of
-        every branch's payload, sometimes one branch's payload alone. Choose “Wait for all branches”
-        for a consistent merged result.
+        <strong>${escapeHtml(uiText("workspace.template.app.this.end.node.has.no.declared.join"))}</strong> ${escapeHtml(uiText("workspace.template.app.with.two.or.more.branches.converging.here.and"))}
       </div>`
     : '';
   return `${title}
     <div class="editor-field full node-join">
-      <label for="node-join-kind">Kind of arrival <span class="join-state" data-join-state>${escapeHtml(describeEffectiveJoin(state))}</span></label>
+      <label for="node-join-kind">${escapeHtml(uiText("workspace.template.app.kind.of.arrival"))} <span class="join-state" data-join-state>${escapeHtml(describeEffectiveJoin(state))}</span></label>
       <select id="node-join-kind" name="joinKind" data-branch-count="${state.branchCount}">${options}</select>
       <div class="join-quorum-field" ${declared.kind === 'quorum' && !unrecognized ? '' : 'hidden'}>
-        <label for="node-join-quorum">Branches required</label>
+        <label for="node-join-quorum">${escapeHtml(uiText("workspace.template.app.branches.required"))}</label>
         <input id="node-join-quorum" name="joinQuorum" type="number" min="1" max="${state.branchCount}" value="${quorumValue}">
       </div>
       <div class="join-timeout-field" ${declared.kind === 'none' || unrecognized ? 'hidden' : ''}>
-        <label for="node-join-timeout">Timeout (ISO-8601 duration, optional)</label>
+        <label for="node-join-timeout">${escapeHtml(uiText("workspace.template.app.timeout.iso.8601.duration.optional"))}</label>
         <input id="node-join-timeout" name="joinTimeout" placeholder="PT30S" value="${escapeAttribute(timeoutRaw)}">
       </div>
       ${quorumCollisionNote}
@@ -8378,7 +8390,7 @@ function renderProgramPanelState(panel, state = {}) {
     const boundedOutput = rawOutput.length > PROGRAM_OUTPUT_DISPLAY_LIMIT
       ? `${rawOutput.slice(0, PROGRAM_OUTPUT_DISPLAY_LIMIT)}… (output truncated)` : rawOutput;
     output.hidden = !rawOutput;
-    output.textContent = rawOutput ? `Smoke output: ${boundedOutput}` : '';
+    output.textContent = rawOutput ? uiText("workspace.app.smoke.output.value1", { boundedOutput: boundedOutput }) : '';
   }
 }
 
@@ -8392,7 +8404,7 @@ function ensureProgramReadinessChrome() {
   button.id = 'btn-program-approve';
   button.type = 'button';
   button.hidden = true;
-  button.textContent = 'Approve program batch';
+  button.textContent = uiText("workspace.app.approve.program.batch");
   button.addEventListener('click', () => {
     if (workspace.active) void approveProgramGraph(workspace.active);
   });
@@ -8423,10 +8435,12 @@ function syncProgramReadinessChrome(owner = workspace.active) {
     || value?.transportError).length;
   const checking = nodes.length - ready - approvals - failed;
   summary.hidden = false;
-  summary.textContent = `Programs ${ready}/${nodes.length} ready`
-    + `${approvals ? ` · ${approvals} awaiting approval` : ''}`
-    + `${failed ? ` · ${failed} failed` : ''}`
-    + `${checking ? ` · ${checking} checking` : ''}`;
+  summary.textContent = uiText("workspace.program.summary", {
+    readySummary: uiText("workspace.program.ready", { count: ready }),
+    approvalSummary: approvals ? uiText("workspace.program.awaitingApproval", { count: approvals }) : '',
+    failedSummary: failed ? uiText("workspace.program.failed", { count: failed }) : '',
+    checkingSummary: checking ? uiText("workspace.program.checking", { count: checking }) : '',
+  });
   button.hidden = approvals === 0;
   button.disabled = Boolean(programReadiness(owner).inFlight);
   button.setAttribute('aria-disabled', String(button.disabled));
@@ -8469,9 +8483,12 @@ function syncProgramReadinessOverlay(owner) {
     return `<li><span>${escapeHtml(node.id)}</span><strong>${escapeHtml(phase)}</strong></li>`;
   }).join('');
   const settled = nodes.filter(node => Boolean(state.phases.get(node.id)?.phase)).length;
+  const buildContext = state.activeBuildId
+    ? uiText("workspace.app.program.readiness.buildContext", {
+      buildId: escapeHtml(state.activeBuildId), revision: state.activeRevision,
+    }) : '';
   overlay.innerHTML = `<div class="program-readiness-card"><div class="program-readiness-spinner" aria-hidden="true"></div>`
-    + `<h3>Preparing program artifacts</h3><p>${settled}/${nodes.length} server phases received`
-    + `${state.activeBuildId ? ` · build ${escapeHtml(state.activeBuildId)} · revision ${state.activeRevision}` : ''}</p>`
+    + `<h3>${escapeHtml(uiText("workspace.template.app.preparing.program.artifacts"))}</h3><p>${escapeHtml(uiText("workspace.app.program.readiness.progress", { settled, count: nodes.length, buildContext }))}</p>`
     + `<ul>${rows}</ul></div>`;
   positionProgramReadinessOverlay(owner);
 }
@@ -8578,8 +8595,8 @@ function applyProgramServerResult(owner, node, result) {
   programPhase(owner, node.id, result);
   if ((result.phase === 'FAILED' || result.phase === 'RETIRED') && owner === workspace.active
       && (previous?.phase !== result.phase || previous?.diagnostic !== result.diagnostic)) {
-    addActivityMessage(`program build · ${node.id}`,
-      `${result.phase}: ${result.diagnostic || 'the server supplied no diagnostic'}`, 'failed');
+    addActivityMessage(uiText("workspace.notice.program.build", { id: node.id }),
+      `${result.phase}: ${result.diagnostic || uiText("workspace.program.noDiagnostic")}`, 'failed');
   }
 }
 
@@ -8788,29 +8805,29 @@ function programWorkspaceContentHtml(descriptor, model) {
   const artifactId = model?.properties?.artifactId || '';
   const storedSource = model?.properties?.source || '';
   const testPayload = model?.properties?.testPayload ?? PROGRAM_TEST_PAYLOAD_DEFAULT;
-  const artifactHelp = 'Source and language are saved in this node\'s own properties, next to Artifact ID — the server accepts source on creation but never returns it afterward (ADR 0005), so this document is the only place that can show it back to you. The local control API must be explicitly enabled.\n\nArtifacts are stored by the connected service. This document keeps source, language and test payload, and reuses a matching ACTIVE artifact after restart.';
+  const artifactHelp = uiText("workspace.program.artifactHelp");
   return `<div class="program-workspace" data-node-id="${escapeAttribute(model?.id || '')}"
       data-artifact-id="${escapeAttribute(artifactId)}">
-    <div class="editor-section-title"><span>Governed artifact</span>
-      ${contextualHelpButtonHtml('Governed artifact', artifactHelp)}</div>
-    <div class="editor-field"><div class="editor-label-row"><label>Language</label>
-      ${contextualHelpButtonHtml('Program language', 'Languages come from the connected runtime adapter. Changing language offers its starter example and never replaces non-empty source without confirmation.')}</div>
+    <div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.governed.artifact"))}</span>
+      ${contextualHelpButtonHtml(uiText("workspace.app.governed.artifact"), artifactHelp)}</div>
+    <div class="editor-field"><div class="editor-label-row"><label>${escapeHtml(uiText("workspace.template.app.language"))}</label>
+      ${contextualHelpButtonHtml(uiText("workspace.app.program.language"), uiText("workspace.app.languages.come.from.the.connected.runtime.adapter.changing"))}</div>
       <select class="program-language" data-catalog-property="language" data-catalog-type="STRING" required disabled></select>
-      <small class="program-language-status">Loading the languages this runtime supports…</small>
+      <small class="program-language-status">${escapeHtml(uiText("workspace.template.app.loading.the.languages.this.runtime.supports"))}</small>
     </div>
-    <div class="editor-field full"><div class="editor-label-row"><label>Source</label>
-      ${contextualHelpButtonHtml('Program source', 'Receives executionId, nodeId, payload and attributes and must return serializable data. Saved with this node on Save. Changing the language offers to replace this with that language\'s starter example; it only fills an empty field on its own, and replacing text you wrote always asks first.')}</div>
+    <div class="editor-field full"><div class="editor-label-row"><label>${escapeHtml(uiText("workspace.template.app.source"))}</label>
+      ${contextualHelpButtonHtml(uiText("workspace.app.program.source"), uiText("workspace.app.receives.executionid.nodeid.payload.and.attributes.and.must"))}</div>
       <textarea class="program-source" data-catalog-property="source" data-catalog-type="TEXT"
         spellcheck="false" required>
 ${escapeHtml(storedSource)}</textarea>
     </div>
     <div class="editor-grid program-test-fields">
-      <div class="editor-field full"><div class="editor-label-row"><label>Test payload</label>
-        ${contextualHelpButtonHtml('Test payload', 'Saved with this node. The server interprets strict JSON as structured smoke input; all other text remains literal.')}</div><input class="program-test-payload"
+      <div class="editor-field full"><div class="editor-label-row"><label>${escapeHtml(uiText("workspace.template.app.test.payload"))}</label>
+        ${contextualHelpButtonHtml(uiText("workspace.app.test.payload"), uiText("workspace.app.saved.with.this.node.the.server.interprets.strict"))}</div><input class="program-test-payload"
         data-catalog-property="testPayload" data-catalog-type="TEXT"
         value="${escapeAttribute(testPayload)}"></div>
-      <div class="editor-field full"><div class="editor-label-row"><label>Artifact ID</label>
-        ${contextualHelpButtonHtml('Artifact ID', 'Server-provided audit reference. Source identity and lifecycle remain server-owned.')}</div><input class="program-artifact-id"
+      <div class="editor-field full"><div class="editor-label-row"><label>${escapeHtml(uiText("workspace.template.app.artifact.id"))}</label>
+        ${contextualHelpButtonHtml(uiText("workspace.app.artifact.id"), uiText("workspace.app.server.provided.audit.reference.source.identity.and.lifecycle"))}</div><input class="program-artifact-id"
         data-catalog-property="artifactId" data-catalog-type="STRING" value="${escapeAttribute(artifactId)}"
         readonly></div>
     </div>
@@ -8822,7 +8839,7 @@ ${escapeHtml(storedSource)}</textarea>
     <div class="program-status">${artifactId
       ? `Artifact ${escapeHtml(artifactId)} · readiness is checked graph-wide`
       : 'Not checked by the server yet.'}</div>
-    <ol class="program-timeline" aria-label="Program build phases"></ol>
+    <ol class="program-timeline" aria-label="${escapeHtml(uiText("workspace.template.app.program.build.phases"))}"></ol>
     <output class="program-output" hidden></output>
   </div>`;
 }
@@ -8836,7 +8853,7 @@ function bindProgramWorkspace(form, model) {
     const build = panel.querySelector('[data-program-operation="build"]');
     if (build) build.disabled = false;
     panel.querySelector('.program-status').textContent = error.message;
-    addActivityMessage('program artifact', error.message, 'failed');
+    addActivityMessage(uiText("workspace.notice.program.artifact"), error.message, 'failed');
   };
 
   // The language selector is populated from the runtime's own declared catalog -- never
@@ -8857,8 +8874,8 @@ function bindProgramWorkspace(form, model) {
   const applyLanguageCatalog = languages => {
     loadedLanguages = languages;
     if (!languages.length) {
-      languageStatus.textContent = 'This runtime declares no program languages, so nothing can be '
-        + 'created here yet.';
+      languageStatus.textContent = uiText("workspace.app.this.runtime.declares.no.program.languages.so")
+        + uiText("workspace.app.created.here.yet");
       return;
     }
     const preferred = languageSelect.value || storedLanguage;
@@ -8877,18 +8894,18 @@ function bindProgramWorkspace(form, model) {
     languageSelect.value = selected;
     languageSelect.disabled = false;
     if (preferred && !preferredKnown) {
-      languageStatus.textContent = `This document names the language "${preferred}", which this `
-        + 'runtime’s programming adapter no longer declares support for. Showing '
-        + `${selected} instead -- confirm or change the language before creating a new artifact `
-        + 'from the source below.';
+      languageStatus.textContent = uiText("workspace.app.this.document.names.the.language.value1.which", { preferred: preferred })
+        + uiText("workspace.app.runtime.s.programming.adapter.no.longer.declares")
+        + uiText("workspace.app.value1.instead.confirm.or.change.the.language", { selected: selected })
+        + uiText("workspace.app.from.the.source.below");
     } else {
       // This reports only what the ADAPTER declares -- GraalVmProgramRuntime
       // returns both descriptors unconditionally, without consulting the launcher. Executing one
       // (Validate onward) additionally needs an operator-configured sandbox supervisor, which is a
       // separate, unchecked precondition (SEC-11) -- this panel does not probe for it, and
       // must not claim readiness it has not observed.
-      languageStatus.textContent = `${languages.length} runtime language${languages.length === 1 ? '' : 's'} available · `
-        + 'execution also requires a configured sandbox supervisor.';
+      languageStatus.textContent = uiText("workspace.app.value1.runtime.language.value2.available", { count: languages.length })
+        + uiText("workspace.app.execution.also.requires.a.configured.sandbox.supervisor");
     }
     // This promise resolves whenever the network happens to answer -- typically well after
     // the author has already started typing, since a program node's whole workflow is "pick a
@@ -8913,14 +8930,14 @@ function bindProgramWorkspace(form, model) {
     // different languages) rather than this handler silently reverting the author's own select
     // choice, which would be a second decision made on their behalf in the same breath as the first.
     if (sourceField.value.trim() && !globalThis.confirm(
-      'Replace the current source with the starter example for this language? What you have written will be lost.',
+      uiText("workspace.app.replace.the.current.source.with.the.starter"),
     )) return;
     sourceField.value = exampleSourceForLanguage(loadedLanguages, languageSelect.value);
   });
   if (!runtimeClient) connectRuntime();
   runtimeClient.programLanguages().then(applyLanguageCatalog).catch(error => {
-    languageStatus.textContent = `Could not load the languages this runtime supports: ${error.message}`;
-    addActivityMessage('program artifact', error.message, 'failed');
+    languageStatus.textContent = uiText("workspace.app.could.not.load.the.languages.this.runtime", { reason: error.message });
+    addActivityMessage(uiText("workspace.notice.program.artifact.2"), error.message, 'failed');
   });
 
   panel.querySelector('[data-program-operation="build"]').addEventListener('click', async () => {
@@ -8950,7 +8967,7 @@ function bindProgramWorkspace(form, model) {
       });
       const result = settled?.programs.find(program => program.nodeId === draft.id);
       if (result) {
-        addActivityMessage('program build', `${draft.id} · ${result.phase.toLowerCase()}`,
+        addActivityMessage(uiText("workspace.notice.program.build.2"), `${draft.id} · ${result.phase.toLowerCase()}`,
           result.ready ? 'completed' : result.phase === 'APPROVAL_REQUIRED' ? 'running' : 'failed');
       }
     } catch (error) { fail(error); }
@@ -8976,7 +8993,7 @@ function applyProgramBuildResult(form, panel, result) {
   panel.programBuildState = { ...result, detail, output: result.smokeOutput, history };
   renderProgramPanelState(panel, panel.programBuildState);
   const build = panel.querySelector('[data-program-operation="build"]');
-  if (build && result.artifactId) build.textContent = 'Rebuild';
+  if (build && result.artifactId) build.textContent = uiText("workspace.app.rebuild");
 }
 
 function readEdgeEditorPatch(form, model) {
@@ -9022,30 +9039,30 @@ function renderEdgeForm(model, creating) {
   document.getElementById('info-body').innerHTML = `
     <form id="edge-editor" class="editor-form" data-tooltip-exempt="persistent-form-labels">
       <div class="editor-grid">
-        <div class="editor-field full"><label>ID</label><input name="id" value="${escapeAttribute(model.id)}" ${creating ? '' : 'readonly'} required></div>
-        <div class="editor-field"><label>Source</label><select name="source">${nodeOptions}</select></div>
-        <div class="editor-field"><label>Target</label><select name="target">${nodeOptions}</select></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.id"))}</label><input name="id" value="${escapeAttribute(model.id)}" ${creating ? '' : 'readonly'} required></div>
+        <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.source"))}</label><select name="source">${nodeOptions}</select></div>
+        <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.target"))}</label><select name="target">${nodeOptions}</select></div>
         <div class="editor-field full" data-edge-kind><div class="editor-label-row edge-kind-row">
           <p class="edge-kind" id="edge-kind-state" role="status" aria-live="polite"></p>
-          ${contextualHelpButtonHtml('Edge routing', 'An edge is either an outcome edge or a failure route, never both. Outcome edges match a value returned by the source node. Failure routes run when the source throws; an unnamed edge into an Error node is a failure route by default.')}</div>
-          <label data-failure-route-control><input name="failureRoute" type="checkbox" ${declared ? 'checked' : ''}> Failure route</label></div>
-        <div class="editor-field full"><label>Outcome</label><input name="outcome" list="edge-outcome-options" value="${escapeAttribute(model.outcome || DEFAULT_EDGE_OUTCOME)}" required ${failureRoute ? 'readonly aria-describedby="edge-kind-state"' : ''}><small id="edge-outcome-hint"></small><p class="edge-outcome-warning" id="edge-outcome-warning" role="status" aria-live="polite" hidden></p></div>
+          ${contextualHelpButtonHtml(uiText("workspace.app.edge.routing"), uiText("workspace.app.an.edge.is.either.an.outcome.edge.or"))}</div>
+          <label data-failure-route-control><input name="failureRoute" type="checkbox" ${declared ? 'checked' : ''}> ${escapeHtml(uiText("workspace.template.app.failure.route"))}</label></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.outcome"))}</label><input name="outcome" list="edge-outcome-options" value="${escapeAttribute(model.outcome || DEFAULT_EDGE_OUTCOME)}" required ${failureRoute ? 'readonly aria-describedby="edge-kind-state"' : ''}><small id="edge-outcome-hint"></small><p class="edge-outcome-warning" id="edge-outcome-warning" role="status" aria-live="polite" hidden></p></div>
         <datalist id="edge-outcome-options"></datalist>
-        <div class="editor-field full"><div class="editor-label-row"><label>Command</label>
-          ${contextualHelpButtonHtml('Edge command', 'Optional command delivered to the target node. Values are lowercase.')}</div>
-          <input name="command" list="edge-command-options" value="${escapeAttribute(model.command || '')}" placeholder="passthrough"></div>
+        <div class="editor-field full"><div class="editor-label-row"><label>${escapeHtml(uiText("workspace.template.app.command"))}</label>
+          ${contextualHelpButtonHtml(uiText("workspace.app.edge.command"), uiText("workspace.app.optional.command.delivered.to.the.target.node.values"))}</div>
+          <input name="command" list="edge-command-options" value="${escapeAttribute(model.command || '')}" placeholder="${escapeHtml(uiText("workspace.template.app.passthrough"))}"></div>
         <datalist id="edge-command-options">${commandOptions.map(command => `<option value="${escapeAttribute(command)}"></option>`).join('')}</datalist>
-        <div class="editor-field full"><label>Name</label><input name="edgeName" value="${escapeAttribute(model.edgeName || '')}"></div>
-        <div class="editor-field"><label>Status</label><input name="status" type="number" value="${Number(model.status) || 0}"></div>
-        <div class="editor-field"><label>Traffic weight</label><input name="trafficWeight" type="number" step="any" value="${model.trafficWeight ?? ''}"></div>
-        <div class="editor-field full"><label><input name="parallel" type="checkbox" ${model.parallel ? 'checked' : ''}> Parallel branch metadata</label></div>
-        <div class="editor-field full"><label>Description</label><textarea name="description">${escapeHtml(model.description || '')}</textarea></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.name"))}</label><input name="edgeName" value="${escapeAttribute(model.edgeName || '')}"></div>
+        <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.status"))}</label><input name="status" type="number" value="${Number(model.status) || 0}"></div>
+        <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.traffic.weight"))}</label><input name="trafficWeight" type="number" step="any" value="${model.trafficWeight ?? ''}"></div>
+        <div class="editor-field full"><label><input name="parallel" type="checkbox" ${model.parallel ? 'checked' : ''}> ${escapeHtml(uiText("workspace.template.app.parallel.branch.metadata"))}</label></div>
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.description"))}</label><textarea name="description">${escapeHtml(model.description || '')}</textarea></div>
       </div>
       ${propertyEditorHtml('edge-properties', extras)}
       <div id="edge-validation" class="editor-validation" role="status" aria-live="polite"></div>
       <div class="editor-actions">
-        ${creating ? '' : '<button class="btn danger" type="button" id="delete-edge">Delete</button>'}
-        <button class="btn primary" type="submit">${creating ? 'Add edge' : 'Save edge'}</button>
+        ${creating ? '' : `<button class="btn danger" type="button" id="delete-edge">${escapeHtml(uiText("workspace.app.delete.edge"))}</button>`}
+        <button class="btn primary" type="submit">${escapeHtml(uiText(creating ? "workspace.app.add.edge" : "workspace.app.save.edge"))}</button>
       </div>
     </form>`;
   const form = document.getElementById('edge-editor');
@@ -9148,11 +9165,11 @@ function renderEdgeForm(model, creating) {
       : 'outcome';
     kindState.textContent = isFailureRoute
       ? (errorTarget
-        ? 'Failure route · Error target; an unnamed outcome carries failure. Name an outcome for an outcome edge.'
-        : `Failure route · runs when the source throws; Outcome stays ${DEFAULT_EDGE_OUTCOME}.`)
+        ? uiText("workspace.app.failure.route.error.target.an.unnamed.outcome")
+        : uiText("workspace.app.failure.route.runs.when.the.source.throws", { oUTCOME: DEFAULT_EDGE_OUTCOME }))
       : (errorTarget
-        ? `Outcome edge · fires on ${outcomeField.value || DEFAULT_EDGE_OUTCOME}, not failure; explicit outcome overrides the Error-target default.`
-        : `Outcome edge · fires on ${outcomeField.value || DEFAULT_EDGE_OUTCOME}, not failure.`);
+        ? uiText("workspace.app.outcome.edge.fires.on.value1.not.failure", { oUTCOME: outcomeField.value || DEFAULT_EDGE_OUTCOME })
+        : uiText("workspace.app.outcome.edge.fires.on.value1.not.failure.2", { oUTCOME: outcomeField.value || DEFAULT_EDGE_OUTCOME }));
   }
   failureRouteBox.addEventListener('change', () => {
     applyFailureRouteCoupling();
@@ -9191,8 +9208,8 @@ function renderEdgeForm(model, creating) {
     if (form.elements.outcome.readOnly) {
       outcomeList.innerHTML = '';
       if (outcomeHint) {
-        outcomeHint.textContent = 'A failure route carries this node\'s failure, not one of its'
-          + ' outcomes, so it selects on none of them.';
+        outcomeHint.textContent = uiText("workspace.app.a.failure.route.carries.this.node.s")
+          + uiText("workspace.app.outcomes.so.it.selects.on.none.of");
       }
       return;
     }
@@ -9207,8 +9224,8 @@ function renderEdgeForm(model, creating) {
       // Said plainly rather than left blank: an empty list here means the catalog entry declares no
       // outcomes, not that the node produces none.
       outcomeHint.textContent = source
-        ? `${source.name || source.id} declares no outcomes in the catalog.`
-        : 'Select a source node to see the outcomes it can produce.';
+        ? uiText("workspace.app.value1.declares.no.outcomes.in.the.catalog", { id: source.name || source.id })
+        : uiText("workspace.app.select.a.source.node.to.see.the");
       return;
     }
     const named = resolved.map(entry => entry.outcome).join(', ');
@@ -9216,9 +9233,9 @@ function renderEdgeForm(model, creating) {
     outcomeHint.textContent = parameterized.length
       // Naming the property is the point: these values are the author's own, read out of the source
       // node, so the way to change a suggestion is to edit that node rather than to retype this field.
-      ? `${source.name || source.id} produces ${named} — from its `
+      ? uiText("workspace.app.value1.produces.value2.from.its", { id: source.name || source.id, named: named })
         + `${parameterized.map(entry => entry.property).join(' and ')}.`
-      : `${source.name || source.id} produces ${named}.`;
+      : uiText("workspace.app.value1.produces.value2", { id: source.name || source.id, named: named });
   }
 
   // The suggestions above say what the source CAN emit; this says when the
@@ -9303,8 +9320,8 @@ function renderEdgeForm(model, creating) {
     // confirms what was drawn would repeat exactly the thing the panel above it just denied.
     feedback.textContent = verdict.ok
       ? (kindState.dataset.edgeKind === 'outcome'
-        ? `From ${source} to ${target}, outcome ${outcomeField.value || DEFAULT_EDGE_OUTCOME}.`
-        : `From ${source} to ${target} on failure.`)
+        ? uiText("workspace.app.from.value1.to.value2.outcome.value3", { source: source, target: target, oUTCOME: outcomeField.value || DEFAULT_EDGE_OUTCOME })
+        : uiText("workspace.app.from.value1.to.value2.on.failure", { source: source, target: target }))
       : verdict.reason;
     feedback.classList.toggle('invalid', !verdict.ok);
     if (submit) submit.disabled = !verdict.ok;
@@ -9367,8 +9384,8 @@ function renderEdgeForm(model, creating) {
 }
 
 function propertyEditorHtml(id, properties) {
-  return `<div class="editor-section-title"><span>Additional properties</span>
-      <button class="property-add" type="button" data-add-property="${escapeAttribute(id)}">＋ Add property</button></div>
+  return `<div class="editor-section-title"><span>${escapeHtml(uiText("workspace.template.app.additional.properties"))}</span>
+      <button class="property-add" type="button" data-add-property="${escapeAttribute(id)}">${escapeHtml(uiText("workspace.template.app.add.property"))}</button></div>
     <div id="${id}" class="property-editor">${properties.map(propertyRowHtml).join('')}</div>`;
 }
 
@@ -9376,7 +9393,7 @@ function additionalPropertyGroupsHtml(groups) {
   return groups.map(group => `<section class="additional-property-group"
       data-additional-group="${escapeAttribute(group.definition.name)}">
     <div class="editor-section-title"><span>${escapeHtml(group.definition.displayName || group.definition.name)}</span>
-      <button class="property-add" type="button" data-add-additional-group>＋ Add</button></div>
+      <button class="property-add" type="button" data-add-additional-group>${escapeHtml(uiText("workspace.template.app.add"))}</button></div>
     ${group.definition.description ? `<p>${escapeHtml(group.definition.description)}</p>` : ''}
     <div data-additional-group-items>${group.items.map(item => additionalPropertyGroupItemHtml(
       group.definition, item)).join('')}</div>
@@ -9391,7 +9408,7 @@ function additionalPropertyGroupItemHtml(definition, item) {
       return `<label class="editor-field">${escapeHtml(field.displayName || field.name)}
         ${additionalPropertyGroupFieldControlHtml(field, entry)}</label>`;
     }).join('')}
-    <button type="button" class="property-remove" data-remove-additional-group>Remove group</button>
+    <button type="button" class="property-remove" data-remove-additional-group>${escapeHtml(uiText("workspace.template.app.remove.group"))}</button>
   </fieldset>`;
 }
 
@@ -9416,7 +9433,7 @@ function additionalPropertyGroupFieldControlHtml(field, entry) {
     const undeclared = value === ''
       ? '<option value="" selected>Not declared</option>' : '';
     const mismatched = value !== '' && !declared
-      ? `<option value="${escapeAttribute(value)}" selected>Current value not among the declared alternatives: ${escapeHtml(value)}</option>` : '';
+      ? `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.among.the.declared.alternatives"))} ${escapeHtml(value)}</option>` : '';
     return `<select${data}${required}>${undeclared}${mismatched}${field.allowedValues.map(option =>
       `<option value="${escapeAttribute(option)}" ${String(option) === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
   }
@@ -9430,10 +9447,10 @@ function additionalPropertyGroupFieldControlHtml(field, entry) {
     const recognized = value === '' || value === 'true' || value === 'false';
     const undeclared = value === '' ? '<option value="" selected>Not declared</option>' : '';
     const mismatched = recognized ? ''
-      : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
+      : `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(value)}</option>`;
     return `<select${data}${required}>${undeclared}${mismatched}`
-      + `<option value="false" ${value === 'false' ? 'selected' : ''}>false</option>`
-      + `<option value="true" ${value === 'true' ? 'selected' : ''}>true</option></select>`;
+      + `<option value="false" ${value === 'false' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option>`
+      + `<option value="true" ${value === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
   }
   const inputType = type === 'INTEGER' || type === 'DECIMAL' ? 'number' : 'text';
   const step = type === 'DECIMAL' ? ' step="any"' : '';
@@ -9483,7 +9500,7 @@ function propertyRowHtml(property = { name: '', type: 'string', value: '' }) {
     <select data-property-type>${types.map(type => `<option ${type === property.type ? 'selected' : ''}>${type}</option>`).join('')}</select>
     <input data-property-value placeholder="value" value="${escapeAttribute(property.value)}">
     <button class="property-remove" type="button" data-remove-property
-      aria-label="Remove property" data-tooltip="Remove property">×</button>
+      aria-label="${escapeHtml(uiText("workspace.template.app.remove.property"))}" data-tooltip="Remove property">×</button>
   </div>`;
 }
 
@@ -9519,9 +9536,9 @@ function showReadOnlyElement(model, label) {
     .filter((field, index, all) => all.findIndex(candidate => candidate.label === field.label) === index);
   document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(label)}</h4>
     ${fields.map(field => `<div class="info-row"><span class="info-k">${escapeHtml(field.label)}</span><span class="info-v info-mono">${escapeHtml(field.value === '' ? '—' : field.value)}</span></div>`).join('')}
-    </div><div class="info-empty">${graphData?.format === 'graphify'
-      ? 'Graphify JSON remains view-only. Export or execute a Ravenroot GraphML workflow.'
-      : 'Inspect mode is active. Turn Modify ON to edit this element.'}</div>`;
+    </div><div class="info-empty">${escapeHtml(uiText(graphData?.format === 'graphify'
+      ? "workspace.app.graphify.inspectOnly"
+      : "workspace.app.inspectMode.active"))}</div>`;
 }
 
 function showFormError(form, message) {
@@ -9658,7 +9675,7 @@ function renderPersonalPalettes() {
         () => runtimeClient.renameNodePalette(palette.id, palette.version, name));
     },
     onDelete: palette => {
-      if (globalThis.confirm(`Delete “${palette.name}” and its saved nodes?`)) void paletteMutation(
+      if (globalThis.confirm(uiText("workspace.app.delete.and.its.saved.nodes", { name: palette.name }))) void paletteMutation(
         () => runtimeClient.deleteNodePalette(palette.id, palette.version));
     },
     onInsert: template => insertSavedTemplate(template),
@@ -9676,7 +9693,7 @@ function renderPersonalPalettes() {
         template.id, template.version, paletteId, template.name));
     },
     onDeleteTemplate: template => {
-      if (globalThis.confirm(`Delete saved node “${template.name}”?`)) void paletteMutation(
+      if (globalThis.confirm(uiText("workspace.app.delete.saved.node", { name: template.name }))) void paletteMutation(
         () => runtimeClient.deleteNodeTemplate(template.id, template.version));
     },
   });
@@ -9710,15 +9727,15 @@ async function paletteMutation(operation) {
     await operation();
     await loadPersonalPalettes(runtimeClient);
   } catch (error) {
-    showInspectorMessage(error.message || 'Personal palette update failed.');
-    addActivityMessage('palette', error.message || 'Personal palette update failed', 'failed');
+    showInspectorMessage(error.message || uiText("workspace.notice.personal.palette.update.failed"));
+    addActivityMessage(uiText("workspace.notice.palette"), error.message || uiText("workspace.notice.personal.palette.update.failed.2"), 'failed');
   }
 }
 
 function saveSelectedNodeTemplate(palette) {
   const selected = cy?.nodes(':selected');
   if (!modifyEnabled || !selected || selected.length !== 1) {
-    showInspectorMessage('Select exactly one node in Editing before saving it.');
+    showInspectorMessage(uiText("workspace.notice.select.exactly.one.node.in.editing.before.saving.it"));
     return;
   }
   const node = graphData.nodeMap[selected.first().id()];
@@ -9737,7 +9754,7 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
   if (!skipDraftGuard) return runAfterInspectorDraft(() =>
     insertSavedTemplate(template, position, { skipDraftGuard: true }));
   if (!modifyEnabled || !canModifyGraph(graphData, layoutMode) || layoutBusy) {
-    showInspectorMessage('Switch to Editing before inserting a saved node.');
+    showInspectorMessage(uiText("workspace.notice.switch.to.editing.before.inserting.a.saved.node"));
     return null;
   }
   const owner = workspace.active;
@@ -9746,19 +9763,19 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
   const revision = history.revision();
   const client = runtimeClient;
   if (!client) {
-    showInspectorMessage('Connect to the service before inserting a saved node.');
+    showInspectorMessage(uiText("workspace.notice.connect.to.the.service.before.inserting.a.saved.node"));
     return null;
   }
   try {
     await client.validateNodeTemplate(template.id);
   } catch (error) {
-    showInspectorMessage(error.message || 'The saved node is no longer valid for this tenant.');
-    addActivityMessage('palette', error.message || 'Saved node validation failed', 'failed');
+    showInspectorMessage(error.message || uiText("workspace.notice.the.saved.node.is.no.longer.valid.for.this"));
+    addActivityMessage(uiText("workspace.notice.palette.2"), error.message || uiText("workspace.notice.saved.node.validation.failed"), 'failed');
     return null;
   }
   if (runtimeClient !== client || workspace.active !== owner || graphData !== graph
       || editHistory !== history || history.revision() !== revision) {
-    showInspectorMessage('The workflow changed while the saved node was being validated. Try again.');
+    showInspectorMessage(uiText("workspace.notice.the.workflow.changed.while.the.saved.node.was.being"));
     return null;
   }
   if (!position) {
@@ -9769,7 +9786,7 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
   }
   const result = addTemplateNodeAt(graph, position, template, history);
   if (!result.node) {
-    showInspectorMessage(`Cannot insert saved node: ${result.reason}.`);
+    showInspectorMessage(uiText("workspace.notice.cannot.insert.saved.node", { reason: result.reason }));
     announceGraph(result.reason);
     return null;
   }
@@ -9777,7 +9794,7 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
   cy.batch(() => applyVisualStyle(visualStyle, cy, workspace.active));
   updateStats(); scheduleMinimap(); updateHistoryUi();
   showNodeInfo(cy.getElementById(result.node.id));
-  addActivityMessage('editor', `Inserted saved node ${template.name}`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.5"), uiText("workspace.notice.inserted.saved.node", { name: template.name }), 'completed');
   return result.node;
 }
 
@@ -9813,8 +9830,8 @@ function toggleLegendFilter(elType, type) {
     ? NODE_TYPES.find(entry => entry.type === type)?.label
     : EDGE_TYPES.find(entry => entry.type === type)?.label;
   if (label) {
-    liEl.setAttribute('aria-label', `Clear ${label} filter`);
-    liEl.dataset.tooltip = `Clear ${label} filter`;
+    liEl.setAttribute('aria-label', uiText("workspace.app.clear.filter", { label: label }));
+    liEl.dataset.tooltip = uiText("workspace.app.clear.filter.2", { label });
     visualTooltip.refresh();
   }
 
@@ -9853,7 +9870,7 @@ function updateStats() {
   renderGraphStatistics(document.getElementById('graph-stats'), graphData.nodes.length, graphData.edges.length, nc, ec);
   const summaries = groupProjection()?.groups.filter(group => group.collapsed).length || 0;
   if (summaries) {
-    const visible = document.createElement('p'); visible.textContent = `${summaries} visible group summaries · ${cy.nodes(':visible').length} visible nodes and headers`;
+    const visible = document.createElement('p'); visible.textContent = uiText("workspace.app.visible.group.summaries.visible.nodes.and.headers", { summaries: summaries, itemCount: cy.nodes(':visible').length });
     document.getElementById('graph-stats').append(visible);
   }
   // The graph's content just changed, so what the assistant would attach changed with it.
@@ -9982,8 +9999,8 @@ function paintMinimap(expectedDocumentId = workspace.activeId) {
   const label = `Overview — ${displayName}`;
   const labelElement = document.getElementById('minimap-label');
   labelElement.textContent = label;
-  labelElement.title = `${label} · ${rendererName}`;
-  mmCanvas.setAttribute('aria-label', `${label}; ${rendererName} renderer; arrow keys pan graph, Home fits graph, Escape returns to canvas`);
+  labelElement.title = uiText("workspace.app.text.4", { label: label, rendererName: rendererName });
+  mmCanvas.setAttribute('aria-label', uiText("workspace.app.renderer.arrow.keys.pan.graph.home.fits", { label: label, rendererName: rendererName }));
   host.dataset.documentId = owner.id;
   host.dataset.rendererKind = state.kind;
   minimapPaintCount += 1;
@@ -10134,12 +10151,12 @@ function newWorkflow() {
   updateHistoryUi();
   graphName = 'untitled.graphml';
   document.getElementById('graph-title').textContent = graphName;
-  document.title = graphName + ' — Ravenroot UI';
+  document.title = graphName + uiText("workspace.app.ravenroot.ui.2");
   initCy(buildElements(graphData), graphData);
   clearActivity();
   // The message must describe the START -> Do something -> {End, Error} shape that
   // createWorkflowDocument() actually builds.
-  addActivityMessage('editor', 'Minimal Start → Do something → {End, Error} workflow created', 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.6"), uiText("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
 }
 
 function createStartupImportPlaceholder() {
@@ -10150,7 +10167,7 @@ function createStartupImportPlaceholder() {
   updateHistoryUi();
   graphName = 'untitled.graphml';
   document.getElementById('graph-title').textContent = graphName;
-  document.title = graphName + ' — Ravenroot UI';
+  document.title = graphName + uiText("workspace.app.ravenroot.ui.2");
   initCy(buildElements(graphData), graphData);
   clearActivity();
 }
@@ -10163,11 +10180,11 @@ function showAddNodeForm({ skipDraftGuard = false } = {}) {
   // because a panel is closed is worse than a panel reappearing.
   revealInspector();
   if (!graphData) newWorkflow();
-  if (!modifyEnabled) return showInspectorMessage('Turn Modify ON before adding a node.');
+  if (!modifyEnabled) return showInspectorMessage(uiText("workspace.notice.turn.modify.on.before.adding.a.node"));
   if (graphData.format === 'graphify') return showInspectorMessage(
-    'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
+    uiText("workspace.notice.graphify.json.is.view.only.create.or.load.a"));
   const id = uniqueId('node', graphData.nodes);
-  document.getElementById('info-title').textContent = 'Add node';
+  document.getElementById('info-title').textContent = uiText("workspace.app.add.node");
   renderNodeForm(createNode(id, 'New node', 'PASSTHROUGH'), true);
 }
 
@@ -10176,13 +10193,13 @@ function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}
     return runAfterInspectorDraft(() => showRegisterMachinePresetForm(presetId, { skipDraftGuard: true }));
   }
   if (!graphData) newWorkflow();
-  if (!modifyEnabled) return showInspectorMessage('Turn Modify ON before inserting a register-machine preset.');
+  if (!modifyEnabled) return showInspectorMessage(uiText("workspace.notice.turn.modify.on.before.inserting.a.register.machine.preset"));
   if (graphData.format === 'graphify') return showInspectorMessage(
-    'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
+    uiText("workspace.notice.graphify.json.is.view.only.create.or.load.a.2"));
   const preset = availableRegisterMachinePresets(nodeTypeCatalog).find(candidate => candidate.presetId === presetId);
-  if (!preset) return showInspectorMessage('Unknown register-machine preset.');
+  if (!preset) return showInspectorMessage(uiText("workspace.notice.unknown.register.machine.preset"));
   revealInspector();
-  document.getElementById('info-title').textContent = `Insert ${preset.displayName}`;
+  document.getElementById('info-title').textContent = uiText("workspace.app.insert", { displayName: preset.displayName });
   const needsBoolean = presetId === 'register-zero-test' || presetId === 'register-decjz';
   const needsValue = presetId === 'register-set';
   const needsTargets = presetId === 'register-decjz';
@@ -10190,16 +10207,16 @@ function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}
     `<option value="${escapeAttribute(node.id)}">${escapeHtml(node.name || node.id)} · ${escapeHtml(node.id)}</option>`).join('');
   document.getElementById('info-body').innerHTML = `
     <form id="register-machine-preset-editor" class="editor-form" data-tooltip-exempt="persistent-form-labels">
-      <p>${escapeHtml(preset.description)} The expansion remains ordinary editable GraphML.</p>
+      <p>${escapeHtml(preset.description)} ${escapeHtml(uiText("workspace.template.app.the.expansion.remains.ordinary.editable.graphml"))}</p>
       <div class="editor-grid">
-        <div class="editor-field full"><label>Register</label><input name="register" value="counter"
+        <div class="editor-field full"><label>${escapeHtml(uiText("workspace.template.app.register"))}</label><input name="register" value="counter"
           pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>
-        ${needsValue ? '<div class="editor-field full"><label>Exact decimal value</label><textarea name="decimal" spellcheck="false" required>0</textarea></div>' : ''}
-        ${needsBoolean ? '<div class="editor-field full"><label>Boolean temporary</label><input name="boolean" value="isZero" pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>' : ''}
-        ${needsTargets ? `<div class="editor-field"><label>Zero destination</label><select name="zeroTarget" required>${targetOptions}</select></div>
-          <div class="editor-field"><label>Nonzero destination</label><select name="nonzeroTarget" required>${targetOptions}</select></div>` : ''}
+        ${needsValue ? `<div class="editor-field full"><label>${escapeHtml(uiText("workspace.app.expansion.exactDecimal"))}</label><textarea name="decimal" spellcheck="false" required>0</textarea></div>` : ''}
+        ${needsBoolean ? `<div class="editor-field full"><label>${escapeHtml(uiText("workspace.app.expansion.booleanTemporary"))}</label><input name="boolean" value="isZero" pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>` : ''}
+        ${needsTargets ? `<div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.zero.destination"))}</label><select name="zeroTarget" required>${targetOptions}</select></div>
+          <div class="editor-field"><label>${escapeHtml(uiText("workspace.template.app.nonzero.destination"))}</label><select name="nonzeroTarget" required>${targetOptions}</select></div>` : ''}
       </div>
-      <div class="editor-actions"><button class="btn primary" type="submit">Insert expansion</button></div>
+      <div class="editor-actions"><button class="btn primary" type="submit">${escapeHtml(uiText("workspace.template.app.insert.expansion"))}</button></div>
     </form>`;
   const form = document.getElementById('register-machine-preset-editor');
   form.addEventListener('submit', event => {
@@ -10218,7 +10235,7 @@ function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}
     rebuildGraph({ syncPositions: false });
     updateHistoryUi();
     showNodeInfo(cy.getElementById(inserted.primary.id));
-    addActivityMessage('editor', `Inserted ${preset.displayName} as ordinary nodes and edges`, 'completed');
+    addActivityMessage(uiText("workspace.notice.editor.7"), uiText("workspace.notice.inserted.as.ordinary.nodes.and.edges", { displayName: preset.displayName }), 'completed');
   });
 }
 
@@ -10228,7 +10245,7 @@ function showAddCatalogNodeForm(behavior, { skipDraftGuard = false } = {}) {
   }
   if (!graphData) newWorkflow();
   if (graphData.format === 'graphify') return showInspectorMessage(
-    'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
+    uiText("workspace.notice.graphify.json.is.view.only.create.or.load.a.3"));
   const descriptor = catalogDescriptor(behavior);
   if (!descriptor) return showAddNodeForm();
   const id = uniqueId(behavior.replace(/[^a-zA-Z0-9_-]/g, '-') || 'node', graphData.nodes);
@@ -10241,7 +10258,7 @@ function showAddCatalogNodeForm(behavior, { skipDraftGuard = false } = {}) {
   model.propertyTypes = Object.fromEntries((descriptor.properties || [])
     .filter(catalogPropertyHasDeclaredDefault)
     .map(property => [property.name, catalogTypeToGraphMl(property.type)]));
-  document.getElementById('info-title').textContent = `Add ${descriptor.displayName}`;
+  document.getElementById('info-title').textContent = uiText("workspace.app.add", { displayName: descriptor.displayName });
   renderNodeForm(model, true);
 }
 
@@ -10253,12 +10270,12 @@ function showAddEdgeForm({ skipDraftGuard = false } = {}) {
   // because a panel is closed is worse than a panel reappearing.
   revealInspector();
   if (!graphData) newWorkflow();
-  if (!modifyEnabled) return showInspectorMessage('Turn Modify ON before adding an edge.');
+  if (!modifyEnabled) return showInspectorMessage(uiText("workspace.notice.turn.modify.on.before.adding.an.edge"));
   if (graphData.format === 'graphify') return showInspectorMessage(
-    'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
-  if (graphData.nodes.length < 2) return showInspectorMessage('At least two nodes are required to add an edge.');
+    uiText("workspace.notice.graphify.json.is.view.only.create.or.load.a.4"));
+  if (graphData.nodes.length < 2) return showInspectorMessage(uiText("workspace.notice.at.least.two.nodes.are.required.to.add.an"));
   const id = uniqueId('edge', graphData.edges);
-  document.getElementById('info-title').textContent = 'Add edge';
+  document.getElementById('info-title').textContent = uiText("workspace.app.add.edge");
   renderEdgeForm(createEdge(id, graphData.nodes[0].id, graphData.nodes[1].id), true);
 }
 
@@ -10269,7 +10286,7 @@ function prepareDocumentDownload(id) {
   if (target && id === workspace.activeId) captureActiveDocument();
   if (!target?.graph || target.graph.format === 'graphify') {
     if (id === workspace.activeId) showInspectorMessage(
-      'Only Ravenroot workflow documents can be exported as executable GraphML.');
+      uiText("workspace.notice.only.ravenroot.workflow.documents.can.be.exported.as.executable"));
     return null;
   }
   if (id === workspace.activeId && documentIsEditable(target)) {
@@ -10310,7 +10327,7 @@ function markDocumentDownloaded(prepared, { announce = true } = {}) {
   if (target.id === workspace.activeId) {
     editHistory.markSaved();
     updateHistoryUi();
-    if (announce) addActivityMessage('editor', `Saved ${prepared.filename}`, 'completed');
+    if (announce) addActivityMessage(uiText("workspace.notice.editor.8"), uiText("workspace.notice.saved", { filename: prepared.filename }), 'completed');
   } else {
     syncPaneHeaders();
     syncDocumentSwitcher();
@@ -10411,7 +10428,7 @@ function applyHistoryStep(command, verb) {
   selectCommandTargets(command);
   refreshVisualGroups();
   updateHistoryUi();
-  addActivityMessage('editor', `${verb}: ${command.label}`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.9"), `${verb}: ${command.label}`, 'completed');
 }
 
 // Undo restores the document; the renderer follows. Selecting whatever the step touched — when it
@@ -10440,7 +10457,7 @@ function updateHistoryUi() {
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
     indicator.classList.toggle('dirty', dirty);
-    indicator.textContent = dirty ? 'unsaved changes' : presentationDirty ? 'local presentation' : 'saved';
+    indicator.textContent = dirty ? uiText("workspace.app.unsaved.changes") : presentationDirty ? uiText("workspace.app.local.presentation") : uiText("workspace.app.saved");
   }
   const exportButton = document.getElementById('btn-export');
   if (exportButton) {
@@ -10471,10 +10488,10 @@ function updateModifyAvailability() {
   if (!button) return;
   const available = canModifyGraph(graphData, layoutMode);
   button.title = graphData?.format === 'graphify'
-    ? 'Graphify JSON is always view-only'
+    ? uiText("workspace.app.graphify.json.is.always.view.only")
     : layoutMode === 'elastic'
-      ? 'Monitoring view is read-only'
-      : 'Enable graph editing';
+      ? uiText("workspace.app.monitoring.view.is.read.only")
+      : uiText("workspace.app.enable.graph.editing");
   if (!available && modifyEnabled) setModifyMode(false);
   updateConnectButton();
   refreshCommands();
@@ -10491,7 +10508,7 @@ function setModifyMode(enabled) {
   if (button) {
     button.setAttribute('aria-pressed', String(modifyEnabled));
     button.classList.toggle('active', modifyEnabled);
-    button.setAttribute('aria-label', modifyEnabled ? 'Editing mode active' : 'Switch to Editing mode');
+    button.setAttribute('aria-label', modifyEnabled ? uiText("workspace.app.editing.mode.active") : uiText("workspace.app.switch.to.editing.mode"));
   }
   syncGraphModeLabel();
   document.getElementById('cy-wrap')?.classList.toggle('modify-on', modifyEnabled);
@@ -10508,9 +10525,7 @@ function toggleNavigation() {
   navigationEnabled = !navigationEnabled;
   cancelEdgeGesture();
   applyCanvasInteraction();
-  announceGraph(navigationEnabled
-    ? 'Navigation enabled. Drag the empty stage to pan. Press H again to return to selection.'
-    : 'Navigation disabled. Drag the empty stage to select nodes and edges.');
+  announceGraph(navigationEnabled ? uiText("workspace.notice.navigation.enabled.drag.the.empty.stage.to.pan.press") : uiText("workspace.notice.navigation.disabled.drag.the.empty.stage.to.select.nodes"));
   refreshCommands();
 }
 
@@ -10551,7 +10566,7 @@ function cancelNodeMoveGesture({ announce = false } = {}) {
     }));
     applyNodeGrabPolicy(snapshot.cy);
   }
-  if (announce) announceGraph('Node move cancelled.');
+  if (announce) announceGraph(uiText("workspace.notice.node.move.cancelled"));
   return true;
 }
 
@@ -10647,9 +10662,7 @@ function clearStageInteraction(targetCy) {
 
 function toggleModify({ skipDraftGuard = false } = {}) {
   if (!canModifyGraph(graphData, layoutMode)) {
-    showInspectorMessage(graphData?.format === 'graphify'
-      ? 'Graphify JSON is always view-only.'
-      : 'Monitoring view is read-only. Choose Design to modify the workflow.');
+    showInspectorMessage(graphData?.format === 'graphify' ? uiText("workspace.notice.graphify.json.is.always.view.only") : uiText("workspace.notice.monitoring.view.is.read.only.choose.design.to.modify"));
     return;
   }
   const next = nextModifyState(modifyEnabled, graphData, layoutMode);
@@ -10681,9 +10694,7 @@ function toggleConnect({ skipDraftGuard = false } = {}) {
   if (!connectArmed) resetConnectGesture();
   updateConnectButton();
   if (connectArmed) {
-    showInspectorMessage('Connect: select a source node, then a target node. '
-      + 'Or drag from a node onto another. With the keyboard, focus the graph, '
-      + 'move with the arrow keys and press E then Enter.', { skipDraftGuard: true });
+    showInspectorMessage(uiText("workspace.notice.connect.select.a.source.node.then.a.target.node"), { skipDraftGuard: true });
   }
 }
 
@@ -10711,7 +10722,7 @@ function handleConnectTap(owner, node, originalEvent) {
 function edgeSourceIsAvailable(node) {
   if (!node || node.empty()) return false;
   if (!node.visible() || !Object.hasOwn(graphData?.nodeMap || {}, node.id())) {
-    announceGraph('Expand the visual group and select a real node for edge authoring.');
+    announceGraph(uiText("workspace.notice.expand.the.visual.group.and.select.a.real.node"));
     return false;
   }
   if (nodeCanSourceEdge(node.selected())) return true;
@@ -10787,7 +10798,7 @@ function startEdgeGesture(owner, gesture, {
   }
   if (!prepareEdgeGestureOwner(owner) || !modifyEnabled
       || !canModifyGraph(graphData, layoutMode) || gesture.mode === 'idle') {
-    if (gesture.mode === 'idle') announceGraph('That element cannot start an edge.');
+    if (gesture.mode === 'idle') announceGraph(uiText("workspace.notice.that.element.cannot.start.an.edge"));
     return false;
   }
   if (edgeGestureSession) cancelEdgeGesture({ clearMessage: true });
@@ -10854,7 +10865,7 @@ function commitEdgeGestureAt(candidateId, { skipDraftGuard = false } = {}) {
     const refusal = `Cannot connect: ${candidate.reason}.`;
     showInspectorMessage(refusal);
     announceGraph(refusal);
-    addActivityMessage('editor', refusal, 'failed');
+    addActivityMessage(uiText("workspace.notice.editor.10"), refusal, 'failed');
     return false;
   }
   if (!skipDraftGuard) {
@@ -10893,11 +10904,12 @@ function commitEdgeGestureAt(candidateId, { skipDraftGuard = false } = {}) {
   const edge = session.graph.edges.find(candidate2 => candidate2.id === edgeId);
   showEdgeInfo(session.owner.cy.getElementById(edgeId));
   setGraphCursor(edge ? edge.target : candidateId);
-  const done = gesture.mode === 'connect'
-    ? `Connected. ${describeEdge(edge, session.graph)}`
-    : `Reconnected. ${describeEdge(edge, session.graph)}`;
+  const done = uiText(gesture.mode === 'connect'
+    ? "workspace.edge.connected" : "workspace.edge.reconnected", {
+    edge: describeEdge(edge, session.graph),
+  });
   announceGraph(done);
-  addActivityMessage('editor', done, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.11"), done, 'completed');
   return true;
 }
 
@@ -10914,8 +10926,8 @@ function cancelEdgeGesture({ announce = false, clearMessage = false } = {}) {
   resetConnectGesture(session?.cy);
   setEdgeGestureSemanticState('idle');
   if (wasActive && announce) {
-    announceGraph('Edge gesture cancelled.');
-    showInspectorMessage('Edge gesture cancelled.');
+    announceGraph(uiText("workspace.app.edgeGesture.cancelled"));
+    showInspectorMessage(uiText("workspace.app.edgeGesture.cancelled"));
   } else if (wasActive && clearMessage) {
     clearEdgeGestureMessages();
   }
@@ -10943,9 +10955,9 @@ function clearEdgeGestureMessages() {
   if (live) live.textContent = '';
   // Pointer previews temporarily own the inspector. A cancelled drop returns it to a neutral,
   // accurate state without changing the graph selection or adding an activity entry.
-  document.getElementById('info-title').textContent = 'Inspector';
+  document.getElementById('info-title').textContent = uiText("workspace.app.inspector");
   document.getElementById('info-body').innerHTML =
-    '<div class="info-empty">Select a node or edge, or create a new one.</div>';
+    `<div class="info-empty">${escapeHtml(uiText("workspace.app.select.graph.element"))}</div>`;
 }
 
 // ── The ghost edge ─────────────────────────────────────────────
@@ -11477,7 +11489,7 @@ function moveGraphCursor(direction) {
     if (!best || score < best.score) best = { id: node.id(), score };
   });
   if (!best) {
-    announceGraph(`No node to the ${direction}.`);
+    announceGraph(uiText("workspace.notice.no.node.to.the", { direction: direction }));
     return;
   }
   setGraphCursor(best.id);
@@ -11491,7 +11503,7 @@ function cycleIncidentEdge(step, { skipDraftGuard = false } = {}) {
   if (!cursor || !graphData) return;
   const incident = graphData.edges.filter(edge => edge.source === cursor || edge.target === cursor);
   if (!incident.length) {
-    announceGraph(`${cursor} has no edges.`);
+    announceGraph(uiText("workspace.notice.has.no.edges", { cursor: cursor }));
     return;
   }
   const selectedId = cy.edges(':selected').first()?.id();
@@ -11507,7 +11519,7 @@ function cycleIncidentEdge(step, { skipDraftGuard = false } = {}) {
   const visibleId = projectedEdge?.id || next.id;
   cy.getElementById(visibleId).select();
   showEdgeInfo(cy.getElementById(visibleId));
-  announceGraph(`${describeEdge(next, graphData)} Press R to move its target, Shift plus R for its source.`);
+  announceGraph(uiText("workspace.notice.press.r.to.move.its.target.shift.plus.r", { describeEdge: describeEdge(next, graphData) }));
 }
 
 function announceCursor() {
@@ -11526,7 +11538,9 @@ function announceCursor() {
   }
   const degree = graphData.edges.filter(edge =>
     edge.source === graphCursorId || edge.target === graphCursorId).length;
-  announceGraph(`${node.name} (${node.id}), ${node.kind}, ${degree} connected edge(s).`);
+  announceGraph(uiText("workspace.notice.connectedEdges", {
+    name: node.name, id: node.id, kind: node.kind, count: degree,
+  }));
 }
 
 function updateGhostToCursor() {
@@ -11578,7 +11592,7 @@ function handleGraphKeydown(event) {
     invalidateStableSelection();
     cy.getElementById(cursor).select();
     showSelectionInfo();
-    announceGraph(`Selected ${cursor}. It now moves in Editing. Move to an unselected node and press E to start an edge.`);
+    announceGraph(uiText("workspace.notice.selected.it.now.moves.in.editing.move.to.an", { cursor: cursor }));
     return;
   }
   if (!modifyEnabled) return;
@@ -11596,7 +11610,7 @@ function handleGraphKeydown(event) {
     event.preventDefault();
     const selected = cy.edges(':selected').first();
     if (!selected || selected.empty()) {
-      announceGraph('Select an edge first, then press R to reconnect it.');
+      announceGraph(uiText("workspace.notice.select.an.edge.first.then.press.r.to.reconnect"));
       return;
     }
     // Shift picks the end that is usually the harder one to reach with a pointer.
@@ -11612,7 +11626,7 @@ function createNodeFromStage(position, behavior = selectedCatalogBehavior, sourc
       createNodeFromStage(position, behavior, sourceId, { skipDraftGuard: true }));
   }
   if (layoutBusy) {
-    announceGraph('Layout in progress. Graph editing is available when it finishes.');
+    announceGraph(uiText("workspace.notice.layout.in.progress.graph.editing.is.available.when.it.2"));
     return null;
   }
   const descriptor = behavior ? catalogDescriptor(behavior) : null;
@@ -11623,7 +11637,7 @@ function createNodeFromStage(position, behavior = selectedCatalogBehavior, sourc
     const refusal = `Cannot add and connect node: ${connected.reason}.`;
     showInspectorMessage(refusal);
     announceGraph(refusal);
-    addActivityMessage('editor', refusal, 'failed');
+    addActivityMessage(uiText("workspace.notice.editor.12"), refusal, 'failed');
     return null;
   }
   const node = connected?.node || addNodeAt(graphData, position, editHistory, { descriptor });
@@ -11636,9 +11650,7 @@ function createNodeFromStage(position, behavior = selectedCatalogBehavior, sourc
   scheduleMinimap();
   updateHistoryUi();
   showNodeInfo(cy.getElementById(node.id));
-  addActivityMessage('editor', edge
-    ? `Created ${node.id} and connected ${sourceId} → ${node.id}`
-    : `Created ${node.id}`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.13"), edge ? uiText("workspace.notice.created.and.connected", { id: node.id, sourceId: sourceId, id2: node.id }) : uiText("workspace.notice.created", { id: node.id }), 'completed');
   return node;
 }
 
@@ -11655,7 +11667,7 @@ function deleteCurrentSelection({ skipDraftGuard = false } = {}) {
   if (synthetic.length) {
     const group = selectedNodes.length === 1 && !selectedEdges.length ? groupForVisibleNode(selectedNodes[0]) : null;
     if (group) return manageVisualGroup('ungroup', group);
-    showInspectorMessage('Cannot delete a mixed selection of visual groups and graph elements. Ungroup first, or select only the intended real elements.');
+    showInspectorMessage(uiText("workspace.notice.cannot.delete.a.mixed.selection.of.visual.groups.and"));
     return false;
   }
   finishVisualGroups();
@@ -11666,8 +11678,11 @@ function deleteCurrentSelection({ skipDraftGuard = false } = {}) {
   updateStats();
   scheduleMinimap();
   updateHistoryUi();
-  addActivityMessage('editor',
-    `Deleted ${removed.nodeIds.length} node(s) and ${removed.edgeIds.length} edge(s)`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.14"),
+    uiText("workspace.notice.deleted.graphElements", {
+      nodeSummary: uiText("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
+      edgeSummary: uiText("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
+    }), 'completed');
   return true;
 }
 
@@ -11682,24 +11697,21 @@ function migrateJoinSemanticsAction({ skipDraftGuard = false } = {}) {
   if (!graphData || !modifyEnabled || !canModifyGraph(graphData, layoutMode)) return false;
   const plan = planJoinSemanticsMigration(graphData);
   if (plan.alreadyDeclared) {
-    addActivityMessage('editor', 'This document already declares join.semantics=declared', 'completed');
+    addActivityMessage(uiText("workspace.notice.editor.15"), uiText("workspace.app.joinMigration.alreadyDeclared"), 'completed');
     return false;
   }
   const summary = plan.changes.length
     ? plan.changes.map(change => `${change.nodeId}: ${change.property}=${change.value}`).join('\n')
-    : '(no existing fan-in needs a materialised property)';
-  const confirmed = globalThis.confirm(
-    'Migrate this document to declared join semantics?\n\n'
-    + 'This writes join.semantics=declared and materialises the currently-inferred policy onto every '
-    + `existing join, so nothing about how the document runs changes today:\n\n${summary}\n\n`
-    + 'It is an ordinary authored edit -- a new version, a new hash -- and can be undone.');
+    : uiText("workspace.app.joinMigration.noFanIn");
+  const confirmed = globalThis.confirm(uiText("workspace.app.joinMigration.prompt", { summary }));
   if (!confirmed) return false;
   migrateJoinSemantics(graphData, editHistory);
   rebuildGraph();
   updateHistoryUi();
   refreshCommands();
-  addActivityMessage('editor',
-    `Migrated to declared join semantics: ${plan.changes.length} node(s) updated`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.16"), uiText("workspace.app.joinMigration.completed", {
+    count: plan.changes.length,
+  }), 'completed');
   const selected = cy?.nodes(':selected');
   if (selected?.length === 1) showNodeInfo(selected.first());
   return true;
@@ -11727,7 +11739,7 @@ function duplicateNodeInDocument(owner, instance, nodeId, { skipDraftGuard = fal
   refreshCommands();
   showNodeInfo(added);
   owner.pane?.focus({ preventScroll: true });
-  addActivityMessage('editor', `Duplicated ${nodeId} as ${copy.id}`, 'completed');
+  addActivityMessage(uiText("workspace.notice.editor.17"), uiText("workspace.notice.duplicated.as", { nodeId: nodeId, id: copy.id }), 'completed');
   return true;
 }
 
@@ -11788,8 +11800,8 @@ async function connectRuntime(atBoot = false) {
         return outcome;
       }
       const accepted = globalThis.confirm(
-        `Connect Ravenroot UI to the external service origin exactly as shown?\n\n${target.origin}\n\n` +
-        'The bearer token for this connection will be sent to this origin. Remembering a connection does not bypass this confirmation.');
+        uiText("workspace.app.connect.ravenroot.ui.to.the.external.service", { origin: target.origin }) +
+        uiText("workspace.app.the.bearer.token.for.this.connection.will"));
       if (!accepted) {
         input.value = '';
         rememberedConnection.select('');
@@ -11921,7 +11933,7 @@ async function connectRuntime(atBoot = false) {
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
       renderNodeCatalog();
-      addActivityMessage('catalog', catalogEmptyState(error, []).message, 'failed');
+      addActivityMessage(uiText("workspace.notice.catalog"), catalogEmptyState(error, []).message, 'failed');
     });
   } catch (error) {
     graphAuthoringCapability = unavailableAuthoringCapability(error);
@@ -11930,7 +11942,7 @@ async function connectRuntime(atBoot = false) {
     nodeCatalogPending = false;
     renderNodeCatalog();
     setRuntimeConnectionState('error', error.message);
-    addActivityMessage('connection', error.message, 'failed');
+    addActivityMessage(uiText("workspace.notice.connection"), error.message, 'failed');
     const outcome = { kind: 'error', code: 'connection-failed',
       message: 'The Ravenroot service connection failed. Retry when the service is available.' };
     startupImportController?.updateRuntime(outcome);
@@ -12069,16 +12081,16 @@ function setRuntimeConnectionState(status, message) {
   }
   if (rememberedConnection.notice) message += ` — ${rememberedConnection.notice}`;
   state.title = message;
-  state.setAttribute('aria-label', `Runtime status: ${status.replaceAll('-', ' ')}. ${message}`);
+  state.setAttribute('aria-label', uiText("workspace.app.runtime.status", { textContent: status.replaceAll('-', ' '), notice: message }));
 }
 
 function stopCurrentSourceSession() {
-  if (!workspace.active || !graphData) return showInspectorMessage('Create or load a workflow first.');
+  if (!workspace.active || !graphData) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first"));
   if (!tenantAuthorityAllows(workspace.active)) {
-    return showInspectorMessage('Wait for this document workspace authority to be verified.');
+    return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified"));
   }
   if (!sourceSessionIsActive(activeSourceSession)) {
-    return showInspectorMessage('No process-local source session is active for this document.');
+    return showInspectorMessage(uiText("workspace.notice.no.process.local.source.session.is.active.for.this"));
   }
   void stopActiveSourceSession(workspace.active);
   return true;
@@ -12086,21 +12098,21 @@ function stopCurrentSourceSession() {
 
 function showUnavailableLifecycle(reason) {
   showInspectorMessage(reason);
-  addActivityMessage('Lifecycle control unavailable', reason, 'failed');
+  addActivityMessage(uiText("workspace.notice.lifecycle.control.unavailable"), reason, 'failed');
   return false;
 }
 
 async function executionLifecycleCommand(action) {
   const owner = workspace.active;
-  if (!owner || !graphData) return showInspectorMessage('Create or load a workflow first.');
+  if (!owner || !graphData) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first.2"));
   if (!tenantAuthorityAllows(owner)) {
-    return showInspectorMessage('Wait for this document workspace authority to be verified.');
+    return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified.2"));
   }
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight || !flight.executionId || flight.executionId === PENDING_EXECUTION) {
     if (flight) releaseExecutionCommand(flight);
-    addActivityMessage('Execution control unavailable',
-      'Another command is already in flight, or this execution has not received its runtime ID.', 'failed');
+    addActivityMessage(uiText("workspace.notice.execution.control.unavailable"),
+      uiText("workspace.notice.another.command.is.already.in.flight.or.this.execution"), 'failed');
     refreshCommands();
     return false;
   }
@@ -12108,7 +12120,7 @@ async function executionLifecycleCommand(action) {
     && executionCommandIsCurrent(flight);
   if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
   refreshCommands();
-  addActivityMessage(action, `${action[0].toUpperCase()}${action.slice(1)} requested for execution ${shortId(flight.executionId)}…`);
+  addActivityMessage(action, uiText("workspace.notice.requested.for.execution", { detail1: action[0].toUpperCase(), detail2: action.slice(1), shortId: shortId(flight.executionId) }));
   try {
     const result = await requestExecutionLifecycle(action, {
       client: flight.client,
@@ -12122,9 +12134,8 @@ async function executionLifecycleCommand(action) {
       if (workspace.activeId === owner.id) {
         const reason = result.observationError?.message || result.commandError?.message
           || 'the runtime returned no readable reason';
-        addActivityMessage(`${action} status unknown`,
-          `Execution ${shortId(flight.executionId)} could not be authoritatively read after the command: ${reason}. `
-          + 'Automatic reconciliation continues; no success state was assumed.', 'failed');
+        addActivityMessage(uiText("workspace.notice.status.unknown", { action: action }),
+          uiText("workspace.notice.execution.could.not.be.authoritatively.read.after.the.command", { shortId: shortId(flight.executionId), reason: reason }), 'failed');
         syncExecutionReconciliationChrome(true);
       }
       return false;
@@ -12141,13 +12152,13 @@ async function executionLifecycleCommand(action) {
       const status = String(outcome?.status || 'active').toLowerCase();
       const paused = outcome?.paused ? 'paused' : 'not paused';
       addActivityMessage(action,
-        `${commandOutcome} · authoritative state ${status}, ${paused} · execution ${shortId(flight.executionId)}`,
+        uiText("workspace.notice.authoritative.state.execution", { commandOutcome: commandOutcome, status: status, paused: paused, shortId: shortId(flight.executionId) }),
         result.commandError ? 'failed' : 'completed');
-      if (result.commandError) addActivityMessage(`${action} request response unavailable`,
-        `${result.commandError.message}. The displayed lifecycle state comes from the authoritative execution read.`,
+      if (result.commandError) addActivityMessage(uiText("workspace.notice.request.response.unavailable", { action: action }),
+        uiText("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: result.commandError.message }),
         'failed');
       document.getElementById('activity-summary').textContent =
-        `${action[0].toUpperCase()}${action.slice(1)} · ${status} · execution ${shortId(flight.executionId)}`;
+        uiText("workspace.app.execution", { action: action[0].toUpperCase(), action2: action.slice(1), status: status, executionId: shortId(flight.executionId) });
       document.getElementById('activity-summary').removeAttribute('aria-label');
     }
     return true;
@@ -12188,10 +12199,8 @@ function updateSourceSession(owner, status, token = null,
     // an unexplained blank canvas is exactly the symptom this binding exists to remove.
     session.deploymentUnreported = true;
     if (owner === workspace.active) {
-      addActivityMessage('Source activity not attributable',
-        'This runtime reported no deployment identity for the session, so its runtime events cannot '
-        + 'be attributed to this graph. The lifecycle state remains accurate; node activity, '
-        + 'monitoring and log output will stay empty.', 'failed');
+      addActivityMessage(uiText("workspace.notice.source.activity.not.attributable"),
+        uiText("workspace.notice.this.runtime.reported.no.deployment.identity.for.the.session"), 'failed');
     }
   }
   session.state = status.state;
@@ -12211,7 +12220,7 @@ function updateSourceSession(owner, status, token = null,
       void presentRuntimeRefusal(owner, status.failure, 'Source session refused');
     } else if (changed && !silentActivity) {
       const detail = status.diagnostic || `${status.sourceCount} source node${status.sourceCount === 1 ? '' : 's'} · local process only`;
-      addActivityMessage(`Source session ${status.state.toLowerCase()}`, detail,
+      addActivityMessage(uiText("workspace.notice.source.session", { detail1: status.state.toLowerCase() }), detail,
         status.state === 'FAILED' || status.state === 'DEGRADED' || status.state === 'UNKNOWN'
           ? 'failed' : 'completed');
     }
@@ -12258,8 +12267,8 @@ async function observeSourceSession(owner, token) {
         state: recoverSourceSessionState(owner.sourceSession.state),
         sourceCount: owner.sourceSession.sourceCount, diagnostic: '',
       }, token, { observationUnavailable: true });
-      if (!wasUnavailable && owner === workspace.active) addActivityMessage('Source session status unavailable',
-        'The local session may still be running. The editor will keep checking; Stop remains available.', 'failed');
+      if (!wasUnavailable && owner === workspace.active) addActivityMessage(uiText("workspace.notice.source.session.status.unavailable"),
+        uiText("workspace.notice.the.local.session.may.still.be.running.the.editor"), 'failed');
     }
   }
   if (owner.sourceSession.pollController === controller) owner.sourceSession.pollController = null;
@@ -12304,10 +12313,8 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
       diagnostic: explicitFailure ? 'The server rejected the source session start.' : '',
       failure: error?.finding || null,
     }, token, { observationUnavailable: !explicitFailure, silentActivity: explicitFailure });
-    if (owner === workspace.active && !error?.finding) addActivityMessage('Source session request failed',
-      explicitFailure
-        ? `The server rejected the local listener start${error?.incidentId ? ` · incident ${error.incidentId}` : ''}.`
-        : 'The start response was lost. The editor will observe the existing id before allowing another Run.', 'failed');
+    if (owner === workspace.active && !error?.finding) addActivityMessage(uiText("workspace.notice.source.session.request.failed"),
+      explicitFailure ? uiText("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? ` · incident ${error.incidentId}` : '' }) : uiText("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
     if (!explicitFailure && !session.stopRequested) void observeSourceSession(owner, token);
     return false;
   } finally {
@@ -12363,8 +12370,8 @@ async function stopActiveSourceSession(owner) {
       updateSourceSession(owner, {
         state: recoverSourceSessionState(stateBeforeStop), sourceCount: session.sourceCount, diagnostic: '',
       }, token, { observationUnavailable: true });
-      if (owner === workspace.active) addActivityMessage('Source session stop failed',
-        'The stop response was unavailable. The editor will keep checking and Stop can be retried.', 'failed');
+      if (owner === workspace.active) addActivityMessage(uiText("workspace.notice.source.session.stop.failed"),
+        uiText("workspace.notice.the.stop.response.was.unavailable.the.editor.will.keep"), 'failed');
       void observeSourceSession(owner, token);
       return false;
     } finally {
@@ -12427,11 +12434,11 @@ function settleReconciledExecution(owner, executionId, client, generation, outco
   if (fetchOutcome) void fetchAndReportExecutionOutcome(owner, token);
   else reportExecutionOutcomeOnce(owner, token, outcome);
   if (workspace.activeId === owner.id && recoveredFromUnknown) {
-    addActivityMessage('Execution status recovered',
-      `Execution ${shortId(executionId)} is ${String(outcome.status).toLowerCase()}. Test and Run are available again.`,
+    addActivityMessage(uiText("workspace.notice.execution.status.recovered"),
+      uiText("workspace.notice.execution.is.test.and.run.are.available.again", { shortId: shortId(executionId), detail2: String(outcome.status).toLowerCase() }),
       'completed');
     document.getElementById('activity-summary').textContent =
-      `Reconciled ${outcome.status} · execution ${shortId(executionId)}`;
+      uiText("workspace.app.reconciled.execution", { status: outcome.status, executionId: shortId(executionId) });
     document.getElementById('activity-summary').dataset.executionReconciliation = 'recovered';
     document.getElementById('activity-summary').removeAttribute('aria-label');
   }
@@ -12451,25 +12458,22 @@ async function reconcileTestCompletion(owner, executionId, client) {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
         const reason = error?.message || 'the runtime returned no readable reason';
-        addActivityMessage('Execution status unknown',
-          `Execution ${shortId(executionId)} could not be reconciled after ${failureCount} checks: ${reason}. `
-          + 'Test and Run now perform a status check before they can submit. Reconnect to the runtime '
-          + 'or inspect this execution; automatic reconciliation continues.',
+        addActivityMessage(uiText("workspace.notice.execution.status.unknown"),
+          uiText("workspace.notice.execution.could.not.be.reconciled.after.checks.test.and", { shortId: shortId(executionId), failureCount: failureCount, reason: reason }),
           'failed');
         document.getElementById('activity-summary').textContent =
-          `Status unknown · execution ${shortId(executionId)} · Test/Run will check first`;
+          uiText("workspace.app.status.unknown.execution.test.run.will.check", { activeExecutionId: shortId(executionId) });
         document.getElementById('activity-summary').dataset.executionReconciliation = 'unknown';
         document.getElementById('activity-summary').setAttribute('aria-label',
-          `Execution ${executionId} status is unknown. Test and Run will check it before submitting.`);
+          uiText("workspace.app.execution.status.is.unknown.test.and.run", { activeExecutionId: executionId }));
       },
       onKnown: outcome => {
         setExecutionReconciliationState(owner, 'known');
         setExecutionPaused(owner, Boolean(outcome?.paused));
         if (owner.id !== workspace.activeId) return;
         syncExecutionReconciliationChrome(true);
-        addActivityMessage('Execution status available',
-          `Execution ${shortId(executionId)} is ${String(outcome?.status || 'non-terminal').toLowerCase()}. `
-          + 'Test and Run remain unavailable while it is active.');
+        addActivityMessage(uiText("workspace.notice.execution.status.available"),
+          uiText("workspace.notice.execution.is.test.and.run.remain.unavailable.while.it", { shortId: shortId(executionId), detail2: String(outcome?.status || 'non-terminal').toLowerCase() }));
       },
       onTerminal: ({ outcome, recoveredFromUnknown }) => {
         setExecutionPaused(owner, false);
@@ -12499,16 +12503,14 @@ async function preflightUnknownExecution(owner, flight) {
       setExecutionPaused(owner, Boolean(outcome?.paused));
       if (workspace.activeId === owner.id) {
         syncExecutionReconciliationChrome(true);
-        addActivityMessage('Execution still active',
-          `Execution ${shortId(executionId)} is ${String(outcome?.status || 'non-terminal').toLowerCase()}. `
-          + 'No new execution was submitted.', 'failed');
+        addActivityMessage(uiText("workspace.notice.execution.still.active"),
+          uiText("workspace.notice.execution.is.no.new.execution.was.submitted", { shortId: shortId(executionId), detail2: String(outcome?.status || 'non-terminal').toLowerCase() }), 'failed');
       }
     },
     onUnavailable: error => {
       if (executionCommandIsCurrent(flight) && workspace.activeId === owner.id) {
-        addActivityMessage('Execution status still unknown',
-          `Execution ${shortId(executionId)} could not be checked: ${error.message}. `
-          + 'No new execution was submitted; reconnect to the runtime or inspect this execution.', 'failed');
+        addActivityMessage(uiText("workspace.notice.execution.status.still.unknown"),
+          uiText("workspace.notice.execution.could.not.be.checked.no.new.execution.was", { shortId: shortId(executionId), message: error.message }), 'failed');
       }
     },
   });
@@ -12566,8 +12568,8 @@ async function presentRuntimeRefusal(owner, finding, title = 'Start refused') {
     finding.propertyName && `property ${finding.propertyName}`].filter(Boolean).join(' · ');
   const remediation = REFUSAL_REMEDIATION[finding.reason]
     || (String(finding.reason || '').includes('-')
-      ? 'Correct the source configuration or runtime authority named by this declared reason, then retry.'
-      : 'Correct the graph admission issue and retry.');
+      ? uiText("workspace.execution.correctDeclaredReason")
+      : uiText("workspace.execution.correctAdmission"));
   const handle = finding.incidentId ? ` · incident ${finding.incidentId}` : '';
   addActivityMessage(title,
     `${finding.phase} · ${finding.reason}${location ? ` · ${location}` : ''}. ${remediation}${handle}`,
@@ -12578,9 +12580,9 @@ async function presentRuntimeRefusal(owner, finding, title = 'Start refused') {
 async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
-  if (!owner || !ownerGraph) return showInspectorMessage('Create or load a workflow first.');
+  if (!owner || !ownerGraph) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first.3"));
   if (!tenantAuthorityAllows(owner)) {
-    return showInspectorMessage('Wait for this document workspace authority to be verified before execution.');
+    return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified.3"));
   }
   owner.execution.intentGeneration += 1;
   if (programNodes(ownerGraph).length) {
@@ -12589,19 +12591,19 @@ async function playGraph(mode = 'test') {
       const phases = programReadiness(owner).phases;
       const blocked = programNodes(ownerGraph).find(node => phases.get(node.id)?.phase !== 'READY');
       const state = blocked && phases.get(blocked.id);
-      document.getElementById('info-title').textContent = 'Program readiness';
-      document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>Cannot execute</h4>
+      document.getElementById('info-title').textContent = uiText("workspace.app.program.readiness.2");
+      document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(uiText("workspace.template.app.cannot.execute"))}</h4>
         <p>${escapeHtml(blocked ? `${blocked.id}: ${state?.detail || 'artifact is not ACTIVE'}`
           : 'A program artifact is not ACTIVE')}</p></div>`;
-      addActivityMessage('program readiness', 'Graph execution is gated until every program artifact is ACTIVE',
+      addActivityMessage(uiText("workspace.notice.program.readiness"), uiText("workspace.notice.graph.execution.is.gated.until.every.program.artifact.is"),
         'failed');
       return;
     }
   }
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight) {
-    addActivityMessage('Execution status check already in progress',
-      'No new execution was submitted. Wait for the current status check to finish.', 'failed');
+    addActivityMessage(uiText("workspace.notice.execution.status.check.already.in.progress"),
+      uiText("workspace.notice.no.new.execution.was.submitted.wait.for.the.current"), 'failed');
     return;
   }
 
@@ -12616,9 +12618,9 @@ async function playGraph(mode = 'test') {
   const ownerVisualStyle = visualStyle;
   const violations = validateWorkflow(ownerGraph);
   if (violations.length) {
-    document.getElementById('info-title').textContent = 'Validation';
-    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>Local advisory</h4>
-      <p>The runtime admission service is checking the exact GraphML that will be submitted.</p>
+    document.getElementById('info-title').textContent = uiText("workspace.app.validation");
+    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(uiText("workspace.template.app.local.advisory"))}</h4>
+      <p>${escapeHtml(uiText("workspace.template.app.the.runtime.admission.service.is.checking.the.exact"))}</p>
       <ul class="validation-list">${violations.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
   }
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
@@ -12626,7 +12628,7 @@ async function playGraph(mode = 'test') {
     const message = nodeCatalogFailure
       ? 'The trusted node catalog is unavailable, so Run cannot safely decide whether this graph requires a listener session.'
       : 'The trusted node catalog is still loading. Wait for it before running this graph.';
-    addActivityMessage('Run unavailable', message, 'failed');
+    addActivityMessage(uiText("workspace.notice.run.unavailable"), message, 'failed');
     return;
   }
   const sourceCount = mode === 'run' ? effectiveSourceCount(ownerGraph, nodeTypeCatalog) : 0;
@@ -12657,8 +12659,8 @@ async function playGraph(mode = 'test') {
   // "registered and controlled as a local deployment" without
   // hijacking this button. This is the Deployments-window contract.
   const confirmation = sourceCount > 0
-    ? `Start “${displayName}” as a local listener session?\n\n${sourceCount} inbound source node${sourceCount === 1 ? '' : 's'} will listen in this server process until you press Stop. No initial payload or traversal is sent; each later external event starts its own traversal.`
-    : `Run “${displayName}” now?\n\nThis is a real operational execution: node behaviors may send messages, call external services, write data, or perform other configured effects.`;
+    ? uiText("workspace.execution.localSession.confirm", { name: displayName, count: sourceCount })
+    : uiText("workspace.execution.run.confirm", { name: displayName });
   if (mode === 'run' && !globalThis.confirm(confirmation)) {
     releaseExecutionCommand(flight);
     return;
@@ -12703,18 +12705,14 @@ async function playGraph(mode = 'test') {
 
   const cancelledOutcome = enforceExecutionOutcomeCapacity(owner.execution);
   if (cancelledOutcome) {
-    addActivityMessage('Outcome lookup cancelled',
-      `Execution ${shortId(cancelledOutcome.executionId)} outcome details were still unavailable when a newer `
-      + 'run needed the bounded monitoring slot. Its pending lookup was cancelled; inspect that execution '
-      + 'in the runtime if those details are required.', 'failed');
+    addActivityMessage(uiText("workspace.notice.outcome.lookup.cancelled"),
+      uiText("workspace.notice.execution.outcome.details.were.still.unavailable.when.a.newer", { shortId: shortId(cancelledOutcome.executionId) }), 'failed');
   }
 
   resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
   setDocumentExecution(owner, PENDING_EXECUTION, null, executionClient);
   refreshCommands();
-  addActivityMessage('request', mode === 'run'
-    ? 'Submitting immutable GraphML snapshot for real node execution…'
-    : 'Submitting immutable GraphML snapshot for passthrough test…');
+  addActivityMessage(uiText("workspace.notice.request"), mode === 'run' ? uiText("workspace.notice.submitting.immutable.graphml.snapshot.for.real.node.execution") : uiText("workspace.notice.submitting.immutable.graphml.snapshot.for.passthrough.test"));
   try {
     const submission = await executionClient[mode === 'run' ? 'run' : 'start'](
       graphMl, payload);
@@ -12730,8 +12728,8 @@ async function playGraph(mode = 'test') {
       submission.processInstanceId ?? null);
     void reconcileTestCompletion(owner, submission.executionId, executionClient);
     if (workspace.activeId !== owner.id) return;
-    addActivityMessage('accepted',
-      `${submission.executionPolicy || 'policy unreported'} · execution ${shortId(submission.executionId)} · graph ${shortId(submission.graphVersion)}`,
+    addActivityMessage(uiText("workspace.notice.accepted"),
+      uiText("workspace.notice.execution.graph", { detail1: submission.executionPolicy || 'policy unreported', shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
       'completed');
     if (owner.execution.finished.has(submission.executionId)) refreshCommands();
     scheduleWorkspacePersistence();
@@ -12743,7 +12741,7 @@ async function playGraph(mode = 'test') {
     refreshCommands();
     if (error?.finding) await presentRuntimeRefusal(owner, error.finding, 'Execution refused');
     else {
-      addActivityMessage('request failed', error.message, 'failed');
+      addActivityMessage(uiText("workspace.notice.request.failed"), error.message, 'failed');
       showInspectorMessage(error.message);
     }
   }
@@ -13284,7 +13282,7 @@ function appendLogEmissionRow(event, css, output) {
 // work at all for a hidden event.
 function noteActivitySummary(event) {
   document.getElementById('activity-summary').textContent =
-    `${event.engineId || 'engine'} · execution ${shortId(event.executionId)}`;
+    uiText("workspace.app.execution.2", { engine: event.engineId || 'engine', executionId: shortId(event.executionId) });
   if (activeExecutionReconciliation === 'unknown') syncExecutionReconciliationChrome(true);
 }
 
@@ -13296,7 +13294,7 @@ function addActivityMessage(title, detail, css = '') {
 // "request failed") are not about one specific execution event and carry no identifiers to show.
 function appendActivity(title, detail, css, occurredAt, identifiersHtml = '') {
   const log = document.getElementById('activity-log');
-  const time = new Date(occurredAt).toLocaleTimeString([], { hour12: false });
+  const time = uiDateTime(new Date(occurredAt), { timeStyle: 'medium', hour12: false });
   const entry = document.createElement('div');
   entry.className = `activity-entry ${css}`;
   const timeElement = document.createElement('span');
@@ -13330,7 +13328,7 @@ function appendActivity(title, detail, css, occurredAt, identifiersHtml = '') {
 function clearActivity() {
   document.getElementById('activity-log').innerHTML = '';
   const summary = document.getElementById('activity-summary');
-  summary.textContent = 'Waiting for events';
+  summary.textContent = uiText("workspace.app.waiting.for.events");
   delete summary.dataset.executionReconciliation;
   summary.removeAttribute('aria-label');
   if (activeExecutionReconciliation === 'unknown') syncExecutionReconciliationChrome(true);
@@ -13531,7 +13529,7 @@ function renderAssistantConnection(state) {
   step.hidden = !pending;
   // The button says which of the two things it does. "Connect" while a code is already on screen
   // would be a second door to a state the author is already in.
-  connect.textContent = pending ? 'Start again with a new code' : 'Connect to the model provider';
+  connect.textContent = pending ? uiText("workspace.app.start.again.with.a.new.code") : uiText("workspace.app.connect.to.the.model.provider");
   connect.disabled = Boolean(assistantConnection?.starting);
 }
 
@@ -13715,7 +13713,7 @@ function renderAssistantTurn(entry, size) {
   const log = document.getElementById('assistant-transcript');
   if (!log) return;
   const attached = entry.attached.length
-    ? `<div class="assistant-turn-attached">context: ${escapeHtml(entry.attached.join(', '))}</div>`
+    ? `<div class="assistant-turn-attached">${escapeHtml(uiText("workspace.template.app.context"))} ${escapeHtml(entry.attached.join(', '))}</div>`
     : '';
   // The disclosure carries the id that AI-origin turns point at, and it is the ONLY element that
   // may: two nodes sharing an id make `aria-describedby` resolve to whichever comes first, which
@@ -13873,10 +13871,10 @@ function renderAssistantProposal(proposal) {
   card.dataset.proposalId = proposalId || proposalKey;
   card.dataset.proposalKey = proposalKey;
   const title = document.createElement('h3');
-  title.textContent = 'Proposed graph edit';
+  title.textContent = uiText("workspace.app.proposed.graph.edit");
   const summary = document.createElement('p');
   summary.className = 'assistant-proposal-summary';
-  summary.textContent = planned.ok ? planned.preview.summary : 'This proposal cannot be applied.';
+  summary.textContent = planned.ok ? planned.preview.summary : uiText("workspace.app.this.proposal.cannot.be.applied");
   const changes = document.createElement('ul');
   changes.className = 'assistant-proposal-changes';
   for (const change of planned.ok ? planned.preview.changes : planned.errors) {
@@ -13888,7 +13886,7 @@ function renderAssistantProposal(proposal) {
   status.className = 'assistant-proposal-status';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  status.textContent = planned.ok ? 'Review this preview, then confirm or reject it.' : 'Invalid proposal.';
+  status.textContent = planned.ok ? uiText("workspace.app.review.this.preview.then.confirm.or.reject") : uiText("workspace.app.invalid.proposal");
   const actions = document.createElement('div');
   actions.className = 'assistant-proposal-actions';
   const confirmButton = document.createElement('button');
@@ -13896,14 +13894,14 @@ function renderAssistantProposal(proposal) {
   confirmButton.className = 'btn primary';
   confirmButton.dataset.action = 'confirm-assistant-proposal';
   confirmButton.dataset.proposalId = proposalKey;
-  confirmButton.textContent = 'Apply proposal';
+  confirmButton.textContent = uiText("workspace.app.apply.proposal");
   confirmButton.disabled = !planned.ok;
   const rejectButton = document.createElement('button');
   rejectButton.type = 'button';
   rejectButton.className = 'btn';
   rejectButton.dataset.action = 'reject-assistant-proposal';
   rejectButton.dataset.proposalId = proposalKey;
-  rejectButton.textContent = 'Reject';
+  rejectButton.textContent = uiText("workspace.app.reject");
   actions.append(confirmButton, rejectButton);
   card.append(title, summary, changes, status, actions);
   host.append(card);
@@ -13918,7 +13916,7 @@ function confirmAssistantProposal(proposalId) {
   const pending = assistantProposals.get(proposalId);
   if (!pending || pending.state !== 'pending') return;
   if (!documentIsEditable(workspace.active)) {
-    pending.status.textContent = 'This snapshot is read-only. Fork it before applying a proposal.';
+    pending.status.textContent = uiText("workspace.app.this.snapshot.is.read.only.fork.it");
     return;
   }
   const result = applyAssistantGraphProposal(pending.proposal, liveAssistantProposalContext());
@@ -13933,7 +13931,7 @@ function confirmAssistantProposal(proposalId) {
   pending.proposal = null;
   pending.confirmButton.disabled = true;
   pending.rejectButton.disabled = true;
-  pending.status.textContent = 'Applied as one undoable edit.';
+  pending.status.textContent = uiText("workspace.app.applied.as.one.undoable.edit");
   retireInspectorDraft();
   resetConnectGesture();
   rebuildGraph({ syncPositions: false });
@@ -13949,7 +13947,7 @@ function rejectAssistantProposal(proposalId) {
   pending.proposal = null;
   pending.confirmButton.disabled = true;
   pending.rejectButton.disabled = true;
-  pending.status.textContent = 'Rejected. The graph was not changed.';
+  pending.status.textContent = uiText("workspace.app.rejected.the.graph.was.not.changed");
 }
 
 function toggleAssistantPayload() {
@@ -13959,7 +13957,7 @@ function toggleAssistantPayload() {
   const open = view.hidden;
   view.hidden = !open;
   toggle.setAttribute('aria-expanded', String(open));
-  toggle.textContent = open ? 'Hide payload' : 'View payload';
+  toggle.textContent = open ? uiText("workspace.app.hide.payload") : uiText("workspace.app.view.payload");
   renderAssistantPayload();
 }
 
@@ -13983,7 +13981,7 @@ function showInspectorMessage(message, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => showInspectorMessage(message, { skipDraftGuard: true }));
   }
-  document.getElementById('info-title').textContent = 'Ravenroot';
+  document.getElementById('info-title').textContent = uiText("workspace.app.ravenroot");
   document.getElementById('info-body').innerHTML = `<div class="info-empty">${escapeHtml(message)}</div>`;
   return true;
 }
@@ -14001,6 +13999,7 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
+
 
 function contextualHelpButtonHtml(title, content) {
   if (!String(content || '').trim()) return '';
@@ -14067,9 +14066,12 @@ function parsePreparedGraph(text, name, { automatic = false, maxBytes } = {}) {
     if (automatic) return sampleLargeGraph(graph, GFY_SAMPLE);
     const keep = GFY_SAMPLE;
     const sample = confirm(
-      `Very large graph: ${graph.nodes.length.toLocaleString()} nodes, ${graph.edges.length.toLocaleString()} edges.\n\n` +
-      `For best performance, the ${keep.toLocaleString()} most connected nodes (main hubs) will be shown.\n\n` +
-      `OK = sample top-${keep.toLocaleString()} hubs  |  Cancel = load all (may be slow)`,
+      uiText("workspace.app.veryLargeGraph", {
+        nodeSummary: uiText("workspace.app.graph.nodes", { count: graph.nodes.length }),
+        edgeSummary: uiText("workspace.app.graph.edges", { count: graph.edges.length }),
+      }) +
+      uiText("workspace.app.for.best.performance.the.value1.most.connected", { keep }) +
+      uiText("workspace.app.ok.sample.top.value1.hubs.cancel.load", { keep }),
     );
     if (sample) graph = sampleLargeGraph(graph, keep);
   }
@@ -14081,7 +14083,7 @@ async function loadFileObj(file) {
   try {
     maxBytes = await graphDocumentByteLimitForLoad();
   } catch (error) {
-    alert('Error: ' + error.message);
+    alert(uiText("workspace.app.error") + error.message);
     return false;
   }
   return loadLocalGraphInput(file, maxBytes, {
@@ -14093,11 +14095,11 @@ async function loadFileObj(file) {
       const graph = parsePreparedGraph(text, file.name, { maxBytes });
       openDocument({ name: file.name, graph });
       clearActivity();
-      addActivityMessage('editor', `Loaded ${file.name}`, 'completed');
+      addActivityMessage(uiText("workspace.notice.editor.18"), uiText("workspace.notice.loaded.2", { name: file.name }), 'completed');
     },
-    onRejected: err => alert('Error: ' + err.message),
+    onRejected: err => alert(uiText("workspace.app.error") + err.message),
     onError: err => {
-      alert('Error: ' + err.message);
+      alert(uiText("workspace.app.error") + err.message);
       console.error(err);
     },
     onComplete: hideLoading,
@@ -14109,7 +14111,7 @@ async function loadReplacementFile(file) {
   try {
     maxBytes = await graphDocumentByteLimitForLoad();
   } catch (error) {
-    alert('Error: ' + error.message);
+    alert(uiText("workspace.app.error") + error.message);
     return false;
   }
   return loadLocalGraphInput(file, maxBytes, {
@@ -14117,8 +14119,8 @@ async function loadReplacementFile(file) {
     onStart: showLoading,
     parseAndRender: text => replaceActiveDocumentFromText(
       String(text), file.name, document.getElementById('menu-file'), maxBytes),
-    onRejected: error => alert('Error: ' + error.message),
-    onError: error => alert('Error: ' + error.message),
+    onRejected: error => alert(uiText("workspace.app.error") + error.message),
+    onError: error => alert(uiText("workspace.app.error") + error.message),
     onComplete: hideLoading,
   });
 }
@@ -14226,7 +14228,7 @@ async function runStartupImport({ target, binding, signal }) {
     openDocument({ name: target.filename, graph,
       tenantId: activeWorkspaceScope?.tenantId ?? null });
     clearActivity();
-    addActivityMessage('editor', `Imported ${target.filename}`, 'completed');
+    addActivityMessage(uiText("workspace.notice.editor.19"), uiText("workspace.notice.imported", { filename: target.filename }), 'completed');
   }
   scheduleWorkspacePersistence();
 }
@@ -14264,9 +14266,9 @@ function initializeStartupImport(rawUrl) {
     const surface = document.getElementById('startup-import');
     surface.hidden = false;
     surface.dataset.phase = 'failed';
-    document.getElementById('startup-import-file').textContent = 'graph URL';
+    document.getElementById('startup-import-file').textContent = uiText("workspace.app.graph.url");
     document.getElementById('startup-import-status').textContent = error instanceof StartupImportError
-      ? error.publicMessage : 'The graph URL is invalid.';
+      ? error.publicMessage : uiText("workspace.app.the.graph.url.is.invalid");
     document.getElementById('startup-import-confirm').hidden = true;
     document.getElementById('startup-import-retry').hidden = true;
     document.getElementById('startup-import-cancel').hidden = false;
@@ -14311,7 +14313,7 @@ wrap.addEventListener('drop', e => {
   const behavior = e.dataTransfer?.getData('application/x-ravenroot-node');
   if (behavior) {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) {
-      showInspectorMessage('Switch to Editing before dropping a node type.');
+      showInspectorMessage(uiText("workspace.notice.switch.to.editing.before.dropping.a.node.type"));
       return;
     }
     const rect = cy.container()?.getBoundingClientRect();
@@ -14902,7 +14904,7 @@ function applyPanelLayout() {
     const owner = zone === 'left' ? 'left toolbox' : 'right sidebar';
     const label = `${collapsed ? 'Expand' : 'Collapse'} ${owner}`;
     const reason = `No open panels in the ${owner}; use Panels to reopen one`;
-    toggle.setAttribute('aria-label', empty ? `${label} unavailable: ${reason}` : label);
+    toggle.setAttribute('aria-label', empty ? uiText("workspace.app.value1.unavailable.value2", { label: label, reason: reason }) : label);
     toggle.dataset.tooltip = label;
     if (empty) toggle.dataset.tooltipDisabled = reason;
     else delete toggle.dataset.tooltipDisabled;
@@ -15142,10 +15144,10 @@ function syncDocumentSwitcher() {
   const activeIndex = workspace.documents.findIndex(document_ => document_.id === workspace.activeId);
   const active = activeIndex >= 0 ? workspace.documents[activeIndex] : null;
   trigger.disabled = !active;
-  trigger.setAttribute('aria-label', active ? documentAccessibleName(active, activeIndex) : 'No open documents');
+  trigger.setAttribute('aria-label', active ? documentAccessibleName(active, activeIndex) : uiText("workspace.app.no.open.documents"));
   trigger.title = trigger.getAttribute('aria-label');
   document.getElementById('document-position').textContent = active
-    ? `${activeIndex + 1} of ${workspace.size}`
+    ? uiText("workspace.app.value1.of.value2", { activeIndex: activeIndex + 1, size: workspace.size })
     : '';
 
   list.innerHTML = workspace.documents.map((document_, index) => {
@@ -15221,12 +15223,12 @@ function openUnsavedDocumentDialog({ documentId, origin, kind = 'close', eligibl
   pendingDocumentAction = { documentId, origin, eligible, complete };
   const replacing = kind === 'replace';
   document.getElementById('unsaved-document-title').textContent =
-    `Save changes to “${target.displayName}”?`;
+    uiText("workspace.app.save.changes.to", { displayName: target.displayName });
   document.getElementById('unsaved-document-description').textContent = replacing
-    ? 'Replacing will discard changes that have not been downloaded.'
-    : 'Closing will discard changes that have not been downloaded.';
+    ? uiText("workspace.app.replacing.will.discard.changes.that.have.not")
+    : uiText("workspace.app.closing.will.discard.changes.that.have.not");
   document.querySelector('[data-unsaved-action="save"]').textContent =
-    replacing ? 'Save and Replace' : 'Save and Close';
+    replacing ? uiText("workspace.app.save.and.replace") : uiText("workspace.app.save.and.close");
   const dialog = document.getElementById('unsaved-document-dialog');
   dialog.showModal();
   document.querySelector('[data-unsaved-action="cancel"]').focus();
@@ -15517,8 +15519,7 @@ function gitAuthoringEnabled() {
 
 function primaryPersistenceUnavailable() {
   const detail = graphAuthoringCapability.error?.message;
-  showInspectorMessage(`Open and Save are unavailable until authoring capabilities are verified. `
-    + `Reconnect or authenticate and retry${detail ? `: ${detail}` : '.'}`);
+  showInspectorMessage(uiText("workspace.notice.open.and.save.are.unavailable.until.authoring.capabilities.are", { detail1: detail ? `: ${detail}` : '.' }));
   return false;
 }
 
@@ -15555,7 +15556,7 @@ async function openRepositoryGraph(requested = null) {
     if (!documentId || !['draft', 'release'].includes(source)) {
       const page = await graphAuthoringClient.list();
       setGraphAuthoringAvailability(true);
-      if (!page.items.length) return showInspectorMessage('This repository has no graphs in your workspace.') || false;
+      if (!page.items.length) return showInspectorMessage(uiText("workspace.notice.this.repository.has.no.graphs.in.your.workspace")) || false;
       const choices = page.items.flatMap(item => [
         ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
           source: 'draft', label: `${item.documentId} [draft] · v${item.releaseVersion}`
@@ -15579,11 +15580,11 @@ async function openRepositoryGraph(requested = null) {
     applyAuthoringDocument(target, result, result.documentId);
     target.history.markSaved();
     updateHistoryUi();
-    addActivityMessage('editor', `Opened ${result.documentId} from ${runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay}.`, 'completed');
+    addActivityMessage(uiText("workspace.notice.editor.20"), uiText("workspace.notice.opened.from", { documentId: result.documentId, repositoryDisplay: runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay }), 'completed');
     return true;
   } catch (error) {
     setGraphAuthoringAvailability(false);
-    showInspectorMessage(error.message || 'The repository graph could not be opened.'); return false;
+    showInspectorMessage(error.message || uiText("workspace.notice.the.repository.graph.could.not.be.opened")); return false;
   }
 }
 
@@ -15613,12 +15614,12 @@ async function saveRepositoryGraph() {
     if (target.history === history && history.revision() === submittedRevision) {
       history.markSaved(); target.visualGroupPresentationDirty = false;
     }
-    addActivityMessage('editor', `Saved ${providerDocumentId} as authored version ${result.releaseVersion}.`, 'completed');
+    addActivityMessage(uiText("workspace.notice.editor.21"), uiText("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
     updateHistoryUi(); return true;
   } catch (error) {
     target.authoring.saveError = error.message || 'The repository save failed.';
     setGraphAuthoringAvailability(false);
-    showInspectorMessage(error.message || 'The repository save failed. Refresh and retry.'); return false;
+    showInspectorMessage(error.message || uiText("workspace.notice.the.repository.save.failed.refresh.and.retry")); return false;
   } finally {
     if (target.authoring.saveFlight === flight) target.authoring.saveFlight = null;
     updateHistoryUi();
@@ -15633,28 +15634,28 @@ async function repositoryHistory() {
     const lines = page.items.map(item => `${item.revision.slice(0, 12)} · ${item.summary} · ${item.author}`);
     const revision = globalThis.prompt(`History for ${id}:\n\n${lines.join('\n')}\n\nEnter a full revision to restore, or leave blank to close:`, '')?.trim();
     if (!revision) return true;
-    if (!globalThis.confirm('Restore this revision as a new draft commit?')) return false;
+    if (!globalThis.confirm(uiText("workspace.app.restore.this.revision.as.a.new.draft"))) return false;
     const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
     completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
-  } catch (error) { showInspectorMessage(error.message || 'Repository history is unavailable.'); return false; }
+  } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.repository.history.is.unavailable")); return false; }
 }
 
 async function repositoryDiscard() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id || !globalThis.confirm('Discard draft changes and restore the reviewed release?')) return false;
+  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.discard.draft.changes.and.restore.the.reviewed"))) return false;
   try {
     const result = await graphAuthoringClient.discard(id, target.authoring.revision);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
     completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
-  } catch (error) { showInspectorMessage(error.message || 'Draft changes could not be discarded.'); return false; }
+  } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.draft.changes.could.not.be.discarded")); return false; }
 }
 
 async function repositoryDelete() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(`Delete the draft ${id}? Git history is retained.`)) return false;
+  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.delete.the.draft.git.history.is.retained", { id: id }))) return false;
   try { await graphAuthoringClient.delete(id, target.authoring.revision);
     if (target.authoring.released) {
       const result = await graphAuthoringClient.open(id, 'release');
@@ -15662,24 +15663,24 @@ async function repositoryDelete() {
       completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
       target.history.markSaved();
     } else target.authoring.providerDocumentId = null;
-    addActivityMessage('editor', `Deleted the ${id} draft; Git history remains available.`, 'completed');
+    addActivityMessage(uiText("workspace.notice.editor.22"), uiText("workspace.notice.deleted.the.draft.git.history.remains.available", { id: id }), 'completed');
     updateHistoryUi(); refreshCommands(); return true;
-  } catch (error) { showInspectorMessage(error.message || 'The draft could not be deleted.'); return false; }
+  } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.the.draft.could.not.be.deleted")); return false; }
 }
 
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
   if (!gitAuthoringEnabled() || !id) return false;
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
-    addActivityMessage('editor', `${result.reused ? 'Existing' : 'New'} graph review: ${result.url}`, 'completed'); return true;
-  } catch (error) { showInspectorMessage(error.message || 'A release review could not be proposed.'); return false; }
+    addActivityMessage(uiText("workspace.notice.editor.23"), uiText("workspace.notice.graph.review", { detail1: result.reused ? 'Existing' : 'New', url: result.url }), 'completed'); return true;
+  } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
 }
 
 async function publishedArtifacts() {
   if (!gitAuthoringEnabled()) return false;
   try {
     const page = await graphAuthoringClient.artifacts();
-    if (!page.items.length) return showInspectorMessage('No verified published graph versions are available.') || false;
+    if (!page.items.length) return showInspectorMessage(uiText("workspace.notice.no.verified.published.graph.versions.are.available")) || false;
     const choices = page.items.map(item => `${item.graphId}@${item.releaseVersion} · ${item.sha256.slice(0, 12)}`);
     const selection = globalThis.prompt(`Published versions (selecting an older version performs rollback):\n\n${choices.join('\n')}\n\nEnter graphId@version to pin and register:`, '')?.trim();
     if (!selection) return false;
@@ -15694,8 +15695,8 @@ async function publishedArtifacts() {
     await graphAuthoringClient.importArtifact(match[1], releaseVersion, selected.sha256, selected.artifactRef);
     const result = await graphAuthoringClient.deploy(match[1], releaseVersion, deploymentId,
       selected.sha256, selected.artifactRef);
-    addActivityMessage('deployment', `Pinned ${result.graphId} v${result.releaseVersion} and registered it as ${result.deploymentId}. It is not running.`, 'completed'); return true;
-  } catch (error) { showInspectorMessage(error.message || 'The published version could not be deployed.'); return false; }
+    addActivityMessage(uiText("workspace.notice.deployment.4"), uiText("workspace.notice.pinned.v.and.registered.it.as.it.is.not", { graphId: result.graphId, releaseVersion: result.releaseVersion, deploymentId: result.deploymentId }), 'completed'); return true;
+  } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.the.published.version.could.not.be.deployed")); return false; }
 }
 
 function openActiveDeploymentCloseDialog({ documentId, origin }) {
@@ -15704,9 +15705,9 @@ function openActiveDeploymentCloseDialog({ documentId, origin }) {
   pendingActiveDeploymentClose = { documentId, origin };
   const count = target.sourceSession.sourceCount;
   document.getElementById('active-deployment-description').textContent =
-    `Closing “${target.displayName}” only stops watching it from this browser tab. The local listener `
-    + `session (${count} inbound source node${count === 1 ? '' : 's'}, scope LOCAL_PROCESS) keeps `
-    + 'running in this server process until you Stop it.';
+    uiText("workspace.app.closing.value1.only.stops.watching.it.from", { displayName: target.displayName })
+    + uiText("workspace.app.session.value1.inbound.source.node.value2.scope", { count })
+    + uiText("workspace.app.running.in.this.server.process.until.you");
   const dialog = document.getElementById('active-deployment-dialog');
   dialog.showModal();
   document.querySelector('[data-active-deployment-action="cancel"]').focus();
@@ -15741,7 +15742,7 @@ function closeActiveDeploymentDialog(outcome) {
   completeCloseDocument(pending.documentId);
 }
 
-const commandRegistry = createCommandRegistry(createAppCommands({
+const commandActions = {
   newDocument: () => runAfterInspectorDraft(() => openDocument()),
   openFile: () => runAfterInspectorDraft(() => runPrimaryPersistence(graphAuthoringCapability, {
     git: () => openRepositoryGraph(),
@@ -15795,6 +15796,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   toggleLeftPanels: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'left', !panelLayout.zones.left.collapsed)),
   toggleRightInspector: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'right', !panelLayout.zones.right.collapsed)),
   setTheme: theme => themePreference.select(theme),
+  openLanguage: () => languageDialog.open(),
   toggleHelp: (_context, invocation) => toggleHelp(
     invocation.control?.closest('#application-menu') ? menuTrigger('view') : invocation.control),
   setWorkspaceLayout: mode => setWorkspaceLayoutMode(mode),
@@ -15817,7 +15819,8 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   openDeployments: () => deploymentsWindow?.open(),
   graphKey: (_context, invocation) => handleGraphKeydown(invocation.event),
   dismiss: () => dismissTransientUi(),
-}));
+};
+let commandRegistry = createCommandRegistry(createAppCommands(commandActions, { t: uiText }));
 
 function commandContext() {
   const history = editHistory.state();
@@ -15896,18 +15899,18 @@ function executeCommand(id, invocation = {}) {
 }
 
 function commandDisplayLabel(command, context) {
-  if (context.gitAuthoring && command.id === 'file.open') return 'Open from repository…';
-  if (context.gitAuthoring && command.id === 'file.save') return 'Save draft to repository';
-  if (context.repositoryReleasedSource && command.id === 'file.fork') return 'Open repository draft';
+  if (context.gitAuthoring && command.id === 'file.open') return uiText('commands.file.open.repositoryLabel');
+  if (context.gitAuthoring && command.id === 'file.save') return uiText('commands.file.save.repositoryLabel');
+  if (context.repositoryReleasedSource && command.id === 'file.fork') return uiText('commands.file.fork.repositoryLabel');
   return command.label;
 }
 
 function commandDisplayDescription(command, state, context) {
   if (context.gitAuthoring && command.id === 'file.open') {
-    return 'Open a tenant graph from the configured Git repository';
+    return uiText('commands.file.open.repositoryHelp');
   }
   if (context.gitAuthoring && command.id === 'file.save') {
-    return 'Save this GraphML draft to the configured Git repository with conflict protection';
+    return uiText('commands.file.save.repositoryHelp');
   }
   return state.description;
 }
@@ -15927,8 +15930,8 @@ function refreshCommands({ menu = true } = {}) {
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
     const displayLabel = commandDisplayLabel(command, context);
     if (control.hasAttribute('data-command-label')) control.textContent = displayLabel;
-    if (control.id === 'btn-open') control.textContent = `📂 ${displayLabel.replace(/…$/, '')}`;
-    if (control.id === 'btn-export') control.textContent = `${context.gitAuthoring ? '↑' : '⇩'} ${displayLabel}`;
+    if (control.id === 'btn-open') control.textContent = uiText("workspace.app.text.5", { displayLabel: displayLabel.replace(/…$/, '') });
+    if (control.id === 'btn-export') control.textContent = uiText("workspace.app.text.6", { gitAuthoring: context.gitAuthoring ? '↑' : '⇩', displayLabel: displayLabel });
     // This runs after every edit, undo, redo and save, so whatever it writes here is the last
     // word: a title applied elsewhere before the refresh does not survive it. Writing the state's
     // description rather than the static help is what lets the history controls keep naming the
@@ -15938,7 +15941,7 @@ function refreshCommands({ menu = true } = {}) {
     if (description) {
       control.title = description;
       if (command.group === 'unavailable-lifecycle') {
-        control.setAttribute('aria-label', `${command.label}. ${command.help}`);
+        control.setAttribute('aria-label', uiText("workspace.app.text.7", { label: command.label, help: command.help }));
       }
     }
     const firstShortcut = command.shortcuts?.find(shortcut => (shortcut.scope || 'global') === 'global');
@@ -16166,9 +16169,9 @@ function openPanelsIndex(anchor) {
       ><span class="popover-name">${escapeHtml(descriptor.title)}</span
       ><span class="popover-where">${escapeHtml(where)}</span></button>`;
   }).join('');
-  index.innerHTML = `<div class="popover-title">Panels</div>${items}
+  index.innerHTML = `<div class="popover-title">${escapeHtml(uiText("workspace.template.app.panels"))}</div>${items}
     <div class="popover-sep"></div>
-    <button class="popover-item" type="button" data-index-reset="1">Reset layout</button>`;
+    <button class="popover-item" type="button" data-index-reset="1">${escapeHtml(uiText("workspace.template.app.reset.layout"))}</button>`;
   closePopovers();
   placePopover(index, anchor);
   anchor.setAttribute('aria-expanded', 'true');
@@ -16402,7 +16405,7 @@ document.getElementById('cy-wrap').addEventListener('keydown', event => {
       && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'e', 'E', 'r', 'R'].includes(event.key)) {
     event.preventDefault();
     event.stopPropagation();
-    announceGraph('Layout in progress. Graph editing is available when it finishes.');
+    announceGraph(uiText("workspace.notice.layout.in.progress.graph.editing.is.available.when.it.3"));
     return;
   }
   const id = commandRegistry.matchShortcut(event, commandContext(), 'canvas');
@@ -16497,7 +16500,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       const result = await client.settleHumanTask(task, action, comment, response, { capability });
       if (!current()) return result;
       clearHumanTaskSelection();
-      addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+      addActivityMessage(uiText("workspace.notice.human.task"), uiText("workspace.notice.task", { detail1: action.toLowerCase(), shortId: shortId(task.taskId), outcome: result.outcome }),
         'completed');
       if (!current()) return result;
       await humanTaskController.refresh();
@@ -16542,14 +16545,14 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // at completion instead of replaying issuance-time identity claims.
     const result = await client.settleHumanTask(task, action, comment, typedResponse, { capability });
     clearHumanTaskSelection();
-    addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+    addActivityMessage(uiText("workspace.notice.human.task.2"), uiText("workspace.notice.task.2", { detail1: action.toLowerCase(), shortId: shortId(task.taskId), outcome: result.outcome }),
       'completed');
     await humanTaskController.refresh();
     return result;
   },
   onExternalReconcile: async task => {
     await humanTaskController.refresh();
-    addActivityMessage('human task', `reconciled external response · task ${shortId(task.taskId)}`, 'completed');
+    addActivityMessage(uiText("workspace.notice.human.task.3"), uiText("workspace.notice.reconciled.external.response.task", { shortId: shortId(task.taskId) }), 'completed');
   },
   onRevoke: async (task, launch) => {
     const client = runtimeClient;
@@ -16826,11 +16829,16 @@ const drawingModelController = createDrawingModelController({
     [...nodeIds, ...edgeIds].forEach(elementId => owner.cy.getElementById(elementId).select());
     revealInspector();
     if (nodeIds.length === 1) showNodeInfo(owner.cy.getElementById(nodeIds[0]));
-    else showInspectorMessage(`${role === 'transition' ? 'Transition' : 'State'} ${id} maps to `
-      + `${nodeIds.length} workflow node(s) and ${edgeIds.length} ordered workflow edge(s).`);
-    addActivityMessage('drawing-model', `Inspected mapped ${role} ${id}`, 'completed');
+    else showInspectorMessage(uiText("workspace.notice.drawingModel.mapping", {
+      role: role === 'transition' ? uiText("workspace.notice.drawingModel.transition")
+        : uiText("workspace.notice.drawingModel.state"),
+      id,
+      nodeSummary: uiText("workspace.notice.drawingModel.nodes", { count: nodeIds.length }),
+      edgeSummary: uiText("workspace.notice.drawingModel.edges", { count: edgeIds.length }),
+    }));
+    addActivityMessage(uiText("workspace.notice.drawing.model"), uiText("workspace.notice.inspected.mapped", { role: role, id: id }), 'completed');
   },
-  notify: (message, state) => addActivityMessage('drawing-model', message, state),
+  notify: (message, state) => addActivityMessage(uiText("workspace.notice.drawing.model.2"), message, state),
 });
 window.ravenroot.drawingModels = drawingModelController;
 
@@ -16850,6 +16858,55 @@ document.getElementById('startup-import-cancel').addEventListener('click', () =>
 // ═══════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════
+
+uiLocalization.subscribe(() => {
+  // Several locale refreshers rebuild catalog-derived controls. Capture the active working view
+  // first so that their paint-only rebuild cannot reset history, selection, or an inspector draft.
+  captureActiveDocument();
+  const selectedIds = cy && !cy.destroyed() ? cy.elements(':selected').map(element => element.id()) : [];
+  const openEditor = document.getElementById('node-editor');
+  const editorDraft = openEditor ? [...openEditor.elements].filter(control => control.name).map(control => ({
+    name: control.name,
+    value: control.value,
+    checked: 'checked' in control ? control.checked : undefined,
+  })) : null;
+  const focusedEditorControl = openEditor?.contains(document.activeElement) ? document.activeElement.name : null;
+  commandRegistry = createCommandRegistry(createAppCommands(commandActions, { t: uiText }));
+  syncActiveDocumentChrome();
+  syncGraphModeLabel();
+  syncSourceSessionChrome();
+  updateHistoryUi();
+  updateModifyAvailability();
+  updateStats();
+  renderRailPanels();
+  renderNodeCatalog();
+  renderPersonalPalettes();
+  renderSelectedHumanTasks();
+  renderAssistantState();
+  credentialsWindow?.refreshLocale?.();
+  deploymentsWindow?.refreshLocale?.();
+  drawingModelController?.refreshLocale?.();
+  refreshCommands();
+  renderShortcutHelp();
+  if (selectedIds.length && cy && !cy.destroyed()) {
+    cy.batch(() => selectedIds.forEach(id => cy.getElementById(id).select()));
+    showSelectionInfo({ skipDraftGuard: true });
+  }
+  const localizedEditor = editorDraft && document.getElementById('node-editor');
+  if (localizedEditor) {
+    for (const saved of editorDraft) {
+      const control = localizedEditor.elements.namedItem(saved.name);
+      if (!control || !('value' in control)) continue;
+      control.value = saved.value;
+      if (saved.checked !== undefined && 'checked' in control) control.checked = saved.checked;
+      control.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    localizedEditor.elements.namedItem(focusedEditorControl)?.focus?.();
+  }
+  // Rail/catalog rebuilds can recreate statically annotated chrome. Reapply history presentation
+  // last so a dirty document never inherits the shell's initial "saved" fallback.
+  updateHistoryUi();
+});
 
 // Browsers ignore custom beforeunload text and only honour that a handler asked to warn, so this
 // is the whole contract: a dirty document gets the browser's own leave-site confirmation.

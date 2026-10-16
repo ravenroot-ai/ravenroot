@@ -18,7 +18,8 @@ describe('the assistant panel exists as a panel, not as a bolted-on box', () => 
       .toEqual(['inspector', 'assistant']);
     expect(PANELS.find(panel => panel.id === 'assistant'))
       .toEqual({
-        id: 'assistant', title: 'Assistant', zone: 'right', kind: 'unbounded',
+        id: 'assistant', title: 'Assistant', titleKey: 'workspace.panel.assistant',
+        zone: 'right', kind: 'unbounded',
         // Measured, not stylistic — see the descriptor comment in `panel-layout.js`.
         defaultClosed: true,
       });

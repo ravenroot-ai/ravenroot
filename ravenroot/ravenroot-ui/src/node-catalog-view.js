@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 // The catalog is server-driven, but its interaction contract is entirely local: every descriptor
 // remains one native button in response order. Keeping this small view separate from app.js makes
 // that contract testable without booting the graph renderer or duplicating production markup.
@@ -72,9 +73,11 @@ function catalogButton(document, type, iconFor, onActivate, onDragStart, selecte
     button.draggable = true;
     button.setAttribute('aria-pressed', String(button.dataset.catalogAdd === selectedBehavior));
     button.classList.toggle('selected', button.dataset.catalogAdd === selectedBehavior);
-    button.setAttribute('aria-label', `Add ${displayName} node${category ? `, category ${category}` : ''}`);
+    button.setAttribute('aria-label', uiText("workspace.node.catalog.view.add.node", { displayName: displayName, detail: category ? `, category ${category}` : '' }));
 
-    button.dataset.tooltip = category ? `Add ${displayName} · ${category}` : `Add ${displayName}`;
+    button.dataset.tooltip = uiText(category
+      ? "workspace.node.catalog.view.add.node.category.tooltip"
+      : "workspace.node.catalog.view.add.node.tooltip", { displayName, category });
 
     const icon = document.createElement('span');
     icon.className = 'catalog-item-icon';

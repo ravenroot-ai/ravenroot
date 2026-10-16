@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import {
   FRONTEND_DRAWING_MODEL_PROPERTY,
   FRONTEND_PRESENTATION_PROPERTY,
@@ -39,7 +40,7 @@ function sceneSvg(document_, scene, onEvidence) {
   svg.classList.add('drawing-model-scene');
   svg.setAttribute('viewBox', `0 0 ${scene.width} ${scene.height}`);
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Plugin drawing model. Highlights are mapped workflow evidence, not a formal acceptance result.');
+  svg.setAttribute('aria-label', uiText("workspace.drawing.model.controller.plugin.drawing.model.highlights.are.mapped.workflow"));
   const defs = document_.createElementNS(SVG, 'defs');
   const marker = document_.createElementNS(SVG, 'marker');
   marker.id = 'drawing-model-arrow';
@@ -262,16 +263,16 @@ export function createDrawingModelController({ document: document_, getContext, 
   const renderPackageManager = () => {
     packageList.replaceChildren();
     if (!packages.length) {
-      const empty = document_.createElement('p'); empty.textContent = 'No frontend packages are installed.';
+      const empty = document_.createElement('p'); empty.textContent = uiText("workspace.drawing.model.controller.no.frontend.packages.are.installed");
       packageList.append(empty); return;
     }
     for (const package_ of packages) {
       const row = document_.createElement('div'); row.className = 'drawing-model-package-row';
       const description = document_.createElement('span');
-      description.textContent = `${package_.manifest.name} ${package_.manifest.version} — ${package_.enabled ? 'enabled' : 'disabled'}`;
+      description.textContent = uiText("workspace.drawing.model.controller.text", { name: package_.manifest.name, version: package_.manifest.version, disabled: package_.enabled ? 'enabled' : 'disabled' });
       const toggle = document_.createElement('button'); toggle.type = 'button'; toggle.className = 'btn';
-      toggle.textContent = package_.enabled ? 'Disable' : 'Enable';
-      toggle.setAttribute('aria-label', `${toggle.textContent} ${package_.manifest.name}`);
+      toggle.textContent = package_.enabled ? uiText("workspace.drawing.model.controller.disable") : uiText("workspace.drawing.model.controller.enable");
+      toggle.setAttribute('aria-label', uiText("workspace.drawing.model.controller.text.2", { textContent: toggle.textContent, name: package_.manifest.name }));
       toggle.addEventListener('click', async () => {
         await setFrontendPackageEnabled(package_.id, !package_.enabled, indexedDB);
         if (package_.enabled && selectedReferencesPackage(package_.id)) {
@@ -280,7 +281,7 @@ export function createDrawingModelController({ document: document_, getContext, 
         await reload(); renderPackageManager();
       });
       const remove = document_.createElement('button'); remove.type = 'button'; remove.className = 'btn';
-      remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove ${package_.manifest.name}`);
+      remove.textContent = uiText("workspace.drawing.model.controller.remove"); remove.setAttribute('aria-label', uiText("workspace.drawing.model.controller.remove.2", { name: package_.manifest.name }));
       remove.addEventListener('click', async () => {
         await removeFrontendPackage(package_.id, indexedDB);
         if (selectedReferencesPackage(package_.id)) {
@@ -317,7 +318,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       if (context()?.documentId === documentId) void render();
     });
   }
-  return Object.freeze({ reload, refresh: render, scheduleRefresh, destroy() {
+  return Object.freeze({ reload, refresh: render, refreshLocale() { renderPackageManager(); void render(); }, scheduleRefresh, destroy() {
     if (refreshFrame != null) cancelAnimationFrame(refreshFrame);
     stop(); clearOverlays();
   } });

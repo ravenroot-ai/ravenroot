@@ -1,4 +1,5 @@
 import { stableEdgeIdViolation } from './stable-edge-id.js';
+import { uiDateTime } from './ui-text.js';
 
 export const FLOW_PULSE_MS = 1_400;
 export const FLOW_BASE_WIDTH = 1.8;
@@ -286,5 +287,5 @@ export function edgeFlowWidth(recent) {
 export function formatRuntimeTime(value) {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleTimeString([], { hour12: false });
+  return Number.isNaN(date.getTime()) ? null : uiDateTime(date, { timeStyle: 'medium', hour12: false });
 }

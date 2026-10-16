@@ -56,7 +56,14 @@ public final class EmbedLaunchTicketAuthority {
 
     /** Returns a one-use ticket for either a legacy registration or dynamic grant. */
     public synchronized IssuedTicket issue(EmbedSessionAuthorization authorization) {
+        return issue(authorization, EmbedPresentation.english());
+    }
+
+    /** Returns a one-use ticket carrying presentation data independently of authorization. */
+    public synchronized IssuedTicket issue(EmbedSessionAuthorization authorization,
+                                           EmbedPresentation presentation) {
         Objects.requireNonNull(authorization, "authorization");
+        Objects.requireNonNull(presentation, "presentation");
         Instant now = clock.instant();
         cleanup(now);
         if (tickets.size() >= capacity) throw new CapacityExceededException();
@@ -65,7 +72,7 @@ public final class EmbedLaunchTicketAuthority {
             Instant expiresAt = authorization.expiresAt().map(limit -> earlier(now.plus(ttl), limit))
                     .orElseGet(() -> now.plus(ttl));
             if (!expiresAt.isAfter(now)) throw new IllegalArgumentException("authorization is expired");
-            if (tickets.putIfAbsent(digest(ticket), new Entry(expiresAt, authorization)) == null) {
+            if (tickets.putIfAbsent(digest(ticket), new Entry(expiresAt, authorization, presentation)) == null) {
                 return new IssuedTicket(ticket, expiresAt);
             }
         }
@@ -96,7 +103,7 @@ public final class EmbedLaunchTicketAuthority {
                 || !currency.isCurrent(removed.authorization())) {
             return Resolution.Unavailable.INSTANCE;
         }
-        return new Resolution.Available(removed.authorization());
+        return new Resolution.Available(removed.authorization(), removed.presentation());
     }
 
     synchronized int retainedEntries() {
@@ -153,8 +160,12 @@ public final class EmbedLaunchTicketAuthority {
     }
 
     public sealed interface Resolution {
-        record Available(EmbedSessionAuthorization authorization) implements Resolution {
-            public Available { Objects.requireNonNull(authorization, "authorization"); }
+        record Available(EmbedSessionAuthorization authorization, EmbedPresentation presentation)
+                implements Resolution {
+            public Available {
+                Objects.requireNonNull(authorization, "authorization");
+                Objects.requireNonNull(presentation, "presentation");
+            }
             public EmbedRegistrationAggregate registration() {
                 return authorization instanceof EmbedSessionAuthorization.Registered registered
                         ? registered.registration() : null;
@@ -163,7 +174,8 @@ public final class EmbedLaunchTicketAuthority {
         enum Unavailable implements Resolution { INSTANCE }
     }
 
-    private record Entry(Instant expiresAt, EmbedSessionAuthorization authorization) { }
+    private record Entry(Instant expiresAt, EmbedSessionAuthorization authorization,
+                         EmbedPresentation presentation) { }
 
     public static final class CapacityExceededException extends RuntimeException {
         private CapacityExceededException() { super("embed ticket capacity exhausted"); }

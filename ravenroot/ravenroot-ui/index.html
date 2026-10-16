@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ravenroot UI</title>
+  <title data-i18n="shell.title-1.text">Ravenroot UI</title>
   <link rel="icon" href="/assets/brand/ravenroot-nav-raven-ice.svg">
   <!-- Synchronous, CSP-compatible and before CSS: the resolved preference is present at first paint. -->
   <script vite-ignore src="%BASE_URL%theme-bootstrap.js"></script>
@@ -121,93 +121,93 @@
 
 <!-- ══ TOP BAR ══════════════════════════════════════════════════ -->
 <div id="topbar">
-  <div class="logo" role="img" aria-label="Ravenroot Flow Editor">
+  <div class="logo" role="img" aria-label="Ravenroot Flow Editor" data-i18n-aria-label="shell.logo-1.aria-label">
     <img class="logo-mark" src="/assets/brand/ravenroot-nav-raven-ice.svg" alt="" aria-hidden="true">
-    <span class="logo-wordmark">Ravenroot Flow Editor</span>
+    <span class="logo-wordmark" data-i18n="shell.logo-wordmark-1.text">Ravenroot Flow Editor</span>
   </div>
   <div class="vr"></div>
-  <nav class="application-menubar" id="application-menubar" role="menubar" aria-label="Application menu">
+  <nav class="application-menubar" id="application-menubar" role="menubar" aria-label="Application menu" data-i18n-aria-label="shell.application-menubar.aria-label">
     <button id="menu-file" type="button" role="menuitem" tabindex="0" data-menu="file"
-            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">File</button>
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu" data-i18n="shell.menu-file.text">File</button>
     <button id="menu-edit" type="button" role="menuitem" tabindex="-1" data-menu="edit"
-            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">Edit</button>
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu" data-i18n="shell.menu-edit.text">Edit</button>
     <button id="menu-view" type="button" role="menuitem" tabindex="-1" data-menu="view"
-            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">View</button>
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu" data-i18n="shell.menu-view.text">View</button>
     <button id="menu-layout" type="button" role="menuitem" tabindex="-1" data-menu="layout"
-            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">Layout</button>
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu" data-i18n="shell.menu-layout.text">Layout</button>
     <button id="menu-run" type="button" role="menuitem" tabindex="-1" data-menu="run"
-            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">Run</button>
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu" data-i18n="shell.menu-run.text">Run</button>
   </nav>
   <button class="document-switcher" id="document-switcher" type="button"
           data-action="document-switcher"
           aria-haspopup="dialog" aria-expanded="false" aria-controls="document-switcher-dialog"
-          aria-label="No open documents" title="No open documents" disabled>
-    <span id="graph-title">No graph loaded</span>
+          aria-label="No open documents" title="No open documents" disabled data-i18n-aria-label="shell.document-switcher.aria-label" data-i18n-title="shell.document-switcher.title">
+    <span id="graph-title" data-i18n="shell.graph-title.text">No graph loaded</span>
     <span id="document-position" aria-hidden="true"></span>
     <span class="document-switcher-chevron" aria-hidden="true">▾</span>
   </button>
-  <span id="dirty-state" class="dirty-state" role="status" aria-live="polite">saved</span>
+  <span id="dirty-state" class="dirty-state" role="status" aria-live="polite" data-i18n="shell.dirty-state.text">saved</span>
   <div class="spacer"></div>
 
   <!-- Semantic rendering modes. Algorithm names stay internal. -->
-  <div class="btn-group command-mirrors layout-mirrors" role="radiogroup" aria-label="Graph view">
+  <div class="btn-group command-mirrors layout-mirrors" role="radiogroup" aria-label="Graph view" data-i18n-aria-label="shell.btn-group-1.aria-label">
     <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-design"
-            data-command-id="layout.design" title="Restore the saved Design view">✎ Design</button>
+            data-command-id="layout.design" title="Restore the saved Design view" data-i18n-title="shell.btn-design.title" data-i18n="shell.btn-design.text" data-i18n-prefix="✎">✎ Design</button>
     <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-monitoring"
-            data-command-id="layout.monitoring" title="Restore the saved Monitoring view">◉ Monitoring</button>
+            data-command-id="layout.monitoring" title="Restore the saved Monitoring view" data-i18n-title="shell.btn-monitoring.title" data-i18n="shell.btn-monitoring.text" data-i18n-prefix="◉">◉ Monitoring</button>
   </div>
   <button class="btn command-mirrors render-mirror" id="btn-render" data-command-id="layout.render"
-          title="Recompute the active graph view">↻ Render</button>
+          title="Recompute the active graph view" data-i18n-title="shell.btn-render.title" data-i18n="shell.btn-render.text" data-i18n-prefix="↻">↻ Render</button>
   <div class="vr command-mirrors view-mirrors"></div>
   <div class="command-mirrors view-mirrors btn-group">
-    <button class="btn" data-command-id="view.fit" title="Fit to screen (F)">⤢ Fit</button>
-    <button class="btn" data-command-id="view.keyboardShortcuts" title="Keyboard shortcuts">?</button>
+    <button class="btn" data-command-id="view.fit" title="Fit to screen (F)" data-i18n-title="shell.command-view-fit.title" data-i18n="shell.command-view-fit.text" data-i18n-prefix="⤢">⤢ Fit</button>
+    <button class="btn" data-command-id="view.keyboardShortcuts" title="Keyboard shortcuts" data-i18n-title="shell.command-view-keyboardshortcuts.title">?</button>
   </div>
   <div class="vr command-mirrors view-mirrors"></div>
   <!-- Font size control -->
-  <div id="font-ctrl" title="Label text size">
+  <div id="font-ctrl" title="Label text size" data-i18n-title="shell.font-ctrl.title">
     <span id="font-icon">𝐴</span>
     <input id="font-slider" type="range" min="8" max="28" value="20" step="1" data-input-action="font-size">
     <span id="font-val">20</span>
   </div>
   <!-- Global screen-space size of the node action minibar. Unlike graph zoom, this preference
        changes the actual interactive geometry and follows the author across documents/sessions. -->
-  <div id="node-action-scale-ctrl" title="Node minibar size">
+  <div id="node-action-scale-ctrl" title="Node minibar size" data-i18n-title="shell.node-action-scale-ctrl.title">
     <span id="node-action-scale-icon" aria-hidden="true">⋮</span>
     <input id="node-action-scale-slider" type="range" min="75" max="175" value="115" step="5"
-           aria-label="Node minibar size" aria-describedby="node-action-scale-val">
+           aria-label="Node minibar size" aria-describedby="node-action-scale-val" data-i18n-aria-label="shell.node-action-scale-slider.aria-label">
     <output id="node-action-scale-val" for="node-action-scale-slider">115</output>
   </div>
   <!-- Monitoring elastic controls: spacing, attraction, and simulation movement speed. -->
-  <div id="elastic-ctrl" title="Monitoring forces — node spacing and link attraction">
-    <span id="rep-icon" title="Node spacing">⇔</span>
-    <input id="rep-slider" type="range" min="30" max="1200" value="320" step="10" aria-label="Node spacing" data-input-action="elastic-repulsion">
+  <div id="elastic-ctrl" title="Monitoring forces — node spacing and link attraction" data-i18n-title="shell.elastic-ctrl.title">
+    <span id="rep-icon" title="Node spacing" data-i18n-title="shell.rep-icon.title">⇔</span>
+    <input id="rep-slider" type="range" min="30" max="1200" value="320" step="10" aria-label="Node spacing" data-input-action="elastic-repulsion" data-i18n-aria-label="shell.rep-slider.aria-label">
     <span id="rep-val">320</span>
     <span style="width:1px;height:14px;background:var(--bd);margin:0 6px;flex-shrink:0"></span>
-    <span id="attr-icon" title="Link attraction">⇕</span>
-    <input id="attr-slider" type="range" min="5" max="150" value="30" step="5" aria-label="Link attraction" data-input-action="elastic-attraction">
+    <span id="attr-icon" title="Link attraction" data-i18n-title="shell.attr-icon.title">⇕</span>
+    <input id="attr-slider" type="range" min="5" max="150" value="30" step="5" aria-label="Link attraction" data-input-action="elastic-attraction" data-i18n-aria-label="shell.attr-slider.aria-label">
     <span id="attr-val">0.30</span>
-    <span id="speed-icon" title="Movement speed">↯</span>
-    <input id="speed-slider" type="range" min="10" max="100" value="50" step="5" aria-label="Elastic movement speed" data-input-action="elastic-speed">
+    <span id="speed-icon" title="Movement speed" data-i18n-title="shell.speed-icon.title">↯</span>
+    <input id="speed-slider" type="range" min="10" max="100" value="50" step="5" aria-label="Elastic movement speed" data-input-action="elastic-speed" data-i18n-aria-label="shell.speed-slider.aria-label">
     <span id="speed-val">50</span>
   </div>
   <div class="vr command-mirrors file-mirrors"></div>
   <button class="btn primary command-mirrors file-mirrors" id="btn-open" data-command-id="file.open"
-          title="Open a GraphML or Graphify file as a new document">📂 Open file</button>
+          title="Open a GraphML or Graphify file as a new document" data-i18n-title="shell.btn-open.title" data-i18n="shell.btn-open.text" data-i18n-prefix="📂">📂 Open file</button>
   <input type="file" id="file-inp" accept=".graphml,.xml,.json" class="visually-hidden">
   <button class="btn play" id="btn-play" data-command-id="run.play"
-          title="Test this graph with pass-through execution; node side effects are bypassed">▶ Test</button>
-  <div class="btn-group graph-lifecycle-controls" aria-label="Current graph lifecycle">
+          title="Test this graph with pass-through execution; node side effects are bypassed" data-i18n-title="shell.btn-play.title" data-i18n="shell.btn-play.text" data-i18n-prefix="▶">▶ Test</button>
+  <div class="btn-group graph-lifecycle-controls" aria-label="Current graph lifecycle" data-i18n-aria-label="shell.btn-group-2.aria-label">
     <button class="btn" id="btn-run" data-command-id="run.start"
-            title="Execute real node behavior in a transient operational run">▶ Run</button>
+            title="Execute real node behavior in a transient operational run" data-i18n-title="shell.btn-run.title" data-i18n="shell.btn-run.text" data-i18n-prefix="▶">▶ Run</button>
     <button class="btn" id="btn-pause" data-command-id="run.pause"
-            title="Pause this execution after its current node reaches a safe boundary">Ⅱ Pause</button>
+            title="Pause this execution after its current node reaches a safe boundary" data-i18n-title="shell.btn-pause.title" data-i18n="shell.btn-pause.text" data-i18n-prefix="Ⅱ">Ⅱ Pause</button>
     <button class="btn" id="btn-resume" data-command-id="run.resume" hidden
-            title="Resume this paused execution">▶ Resume</button>
+            title="Resume this paused execution" data-i18n-title="shell.btn-resume.title" data-i18n="shell.btn-resume.text" data-i18n-prefix="▶">▶ Resume</button>
     <button class="btn danger" id="btn-cancel" data-command-id="run.cancel" hidden
-            title="Cooperatively cancel this execution">✕ Cancel</button>
+            title="Cooperatively cancel this execution" data-i18n-title="shell.btn-cancel.title" data-i18n="shell.btn-cancel.text" data-i18n-prefix="✕">✕ Cancel</button>
     <button class="btn danger" id="btn-stop" data-command-id="run.stop"
-            title="Stop this document’s process-local source session">■ Stop</button>
+            title="Stop this document’s process-local source session" data-i18n-title="shell.btn-stop.title" data-i18n="shell.btn-stop.text" data-i18n-prefix="■">■ Stop</button>
   </div>
   <span id="source-session-status" class="source-session-status" role="status" aria-live="polite" hidden></span>
 </div>
@@ -216,57 +216,57 @@
 
 <dialog id="drawing-model-dialog" class="drawing-model-dialog" aria-labelledby="drawing-model-dialog-title">
   <form method="dialog">
-    <h2 id="drawing-model-dialog-title">Presentation mapping</h2>
-    <p>Map synthetic states and transitions to real workflow nodes and ordered edge paths. Ravenroot validates every id and path before saving.</p>
-    <label for="drawing-model-mapping-json">Versioned mapping JSON</label>
+    <h2 id="drawing-model-dialog-title" data-i18n="shell.drawing-model-dialog-title.text">Presentation mapping</h2>
+    <p data-i18n="shell.p-1.text">Map synthetic states and transitions to real workflow nodes and ordered edge paths. Ravenroot validates every id and path before saving.</p>
+    <label for="drawing-model-mapping-json" data-i18n="shell.field-drawing-model-mapping-json.text">Versioned mapping JSON</label>
     <textarea id="drawing-model-mapping-json" spellcheck="false" rows="20" aria-describedby="drawing-model-error"></textarea>
     <p id="drawing-model-error" class="form-error" role="alert"></p>
     <div class="dialog-actions">
-      <button type="button" class="btn" data-drawing-model-cancel>Cancel</button>
-      <button type="submit" class="btn primary">Save mapping</button>
+      <button type="button" class="btn" data-drawing-model-cancel data-i18n="shell.data-drawing-model-cancel-control.text">Cancel</button>
+      <button type="submit" class="btn primary" data-i18n="shell.btn-1.text">Save mapping</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="drawing-model-package-dialog" class="drawing-model-dialog" aria-labelledby="drawing-model-package-title">
-  <h2 id="drawing-model-package-title">Installed frontend packages</h2>
-  <p>Enable, disable, or remove packages independently of the active drawing model.</p>
+  <h2 id="drawing-model-package-title" data-i18n="shell.drawing-model-package-title.text">Installed frontend packages</h2>
+  <p data-i18n="shell.p-2.text">Enable, disable, or remove packages independently of the active drawing model.</p>
   <div id="drawing-model-package-list" class="drawing-model-package-list"></div>
   <div class="dialog-actions">
-    <button type="button" class="btn" data-drawing-model-package-close>Close</button>
+    <button type="button" class="btn" data-drawing-model-package-close data-i18n="shell.data-drawing-model-package-close-control.text">Close</button>
   </div>
 </dialog>
 
 <!-- ══ WORKFLOW COMMAND BAR ═════════════════════════════════════ -->
 <div id="workflowbar">
   <div class="btn-group command-mirrors editor-mirrors">
-    <button class="btn" id="btn-new" data-command-id="file.new" title="Create a new document">＋ New document</button>
+    <button class="btn" id="btn-new" data-command-id="file.new" title="Create a new document" data-i18n-title="shell.btn-new.title" data-i18n="shell.btn-new.text" data-i18n-prefix="＋">＋ New document</button>
     <button class="btn" id="btn-connect" type="button" data-command-id="edit.connect"
-            aria-pressed="false" disabled title="Connect a source node directly to a target node">↗ Connect</button>
-    <button class="btn" id="btn-add-node" data-command-id="edit.addNode" title="Add a flow node">⬡ Node</button>
-    <button class="btn" id="btn-add-edge" data-command-id="edit.addEdge" title="Connect two nodes">↗ Edge</button>
+            aria-pressed="false" disabled title="Connect a source node directly to a target node" data-i18n-title="shell.btn-connect.title" data-i18n="shell.btn-connect.text" data-i18n-prefix="↗">↗ Connect</button>
+    <button class="btn" id="btn-add-node" data-command-id="edit.addNode" title="Add a flow node" data-i18n-title="shell.btn-add-node.title" data-i18n="shell.btn-add-node.text" data-i18n-prefix="⬡">⬡ Node</button>
+    <button class="btn" id="btn-add-edge" data-command-id="edit.addEdge" title="Connect two nodes" data-i18n-title="shell.btn-add-edge.title" data-i18n="shell.btn-add-edge.text" data-i18n-prefix="↗">↗ Edge</button>
     <button class="btn" id="btn-undo" data-command-id="edit.undo" disabled
-            aria-label="Undo the last change" title="Nothing to undo">↶ Undo</button>
+            aria-label="Undo the last change" title="Nothing to undo" data-i18n-aria-label="shell.btn-undo.aria-label" data-i18n-title="shell.btn-undo.title" data-i18n="shell.btn-undo.text" data-i18n-prefix="↶">↶ Undo</button>
     <button class="btn" id="btn-redo" data-command-id="edit.redo" disabled
-            aria-label="Redo the last undone change" title="Nothing to redo">↷ Redo</button>
+            aria-label="Redo the last undone change" title="Nothing to redo" data-i18n-aria-label="shell.btn-redo.aria-label" data-i18n-title="shell.btn-redo.title" data-i18n="shell.btn-redo.text" data-i18n-prefix="↷">↷ Redo</button>
     <button class="btn" id="btn-autosave" type="button" data-command-id="edit.autosave"
             data-command-label aria-pressed="true"></button>
-    <button class="btn" id="btn-export" data-command-id="file.save" title="Save the current workflow as GraphML">⇩ Save GraphML</button>
+    <button class="btn" id="btn-export" data-command-id="file.save" title="Save the current workflow as GraphML" data-i18n-title="shell.btn-export.title" data-i18n="shell.btn-export.text" data-i18n-prefix="⇩">⇩ Save GraphML</button>
   </div>
-  <div class="drawing-model-controls" role="group" aria-label="Drawing model">
+  <div class="drawing-model-controls" role="group" aria-label="Drawing model" data-i18n-aria-label="shell.drawing-model-controls-1.aria-label">
     <details class="drawing-model-actions">
-      <summary class="btn" id="drawing-model-options" title="Install and manage frontend drawing packages">Drawing options</summary>
-      <div class="drawing-model-actions-menu" role="group" aria-label="Drawing model options">
-        <label for="drawing-model-select">Drawing model</label>
-        <select id="drawing-model-select" title="Choose the drawing model for this document">
-          <option value="integrated">Integrated Design</option>
+      <summary class="btn" id="drawing-model-options" title="Install and manage frontend drawing packages" data-i18n-title="shell.drawing-model-options.title" data-i18n="shell.drawing-model-options.text">Drawing options</summary>
+      <div class="drawing-model-actions-menu" role="group" aria-label="Drawing model options" data-i18n-aria-label="shell.drawing-model-actions-menu-1.aria-label">
+        <label for="drawing-model-select" data-i18n="shell.field-drawing-model-select.text">Drawing model</label>
+        <select id="drawing-model-select" title="Choose the drawing model for this document" data-i18n-title="shell.drawing-model-select.title">
+          <option value="integrated" data-i18n="shell.option-1.text">Integrated Design</option>
         </select>
-        <button class="btn" type="button" id="drawing-model-install" title="Install a frontend plugin package directory">＋ Install package</button>
+        <button class="btn" type="button" id="drawing-model-install" title="Install a frontend plugin package directory" data-i18n-title="shell.drawing-model-install.title" data-i18n="shell.drawing-model-install.text" data-i18n-prefix="＋">＋ Install package</button>
         <input id="drawing-model-package-input" class="visually-hidden" type="file" multiple webkitdirectory
-               aria-label="Frontend plugin package directory">
-        <button class="btn" type="button" id="drawing-model-mapping" title="Author the explicit presentation mapping">Edit mapping</button>
-        <button class="btn" type="button" id="drawing-model-manage" title="Enable, disable, or remove installed packages">Manage packages</button>
-        <button class="btn" type="button" id="drawing-model-full-flow" title="Return to the complete operational flow" hidden>Full operational flow</button>
+               aria-label="Frontend plugin package directory" data-i18n-aria-label="shell.drawing-model-package-input.aria-label">
+        <button class="btn" type="button" id="drawing-model-mapping" title="Author the explicit presentation mapping" data-i18n-title="shell.drawing-model-mapping.title" data-i18n="shell.drawing-model-mapping.text">Edit mapping</button>
+        <button class="btn" type="button" id="drawing-model-manage" title="Enable, disable, or remove installed packages" data-i18n-title="shell.drawing-model-manage.title" data-i18n="shell.drawing-model-manage.text">Manage packages</button>
+        <button class="btn" type="button" id="drawing-model-full-flow" title="Return to the complete operational flow" hidden data-i18n-title="shell.drawing-model-full-flow.title" data-i18n="shell.drawing-model-full-flow.text">Full operational flow</button>
       </div>
     </details>
   </div>
@@ -292,40 +292,40 @@
        a sentence the two labels beside it already carry. -->
   <div class="runtime-controls" role="group" aria-labelledby="runtime-controls-caption"
        aria-describedby="runtime-controls-scope"
-       title="Connects this editor to your own Ravenroot service. Credentials that nodes use are stored in the Credentials window.">
-    <span id="runtime-controls-caption" class="visually-hidden">Your Ravenroot service connection</span>
-    <span id="runtime-controls-scope" class="visually-hidden">These fields sign this editor in to your
+       title="Connects this editor to your own Ravenroot service. Credentials that nodes use are stored in the Credentials window." data-i18n-title="shell.runtime-controls-1.title">
+    <span id="runtime-controls-caption" class="visually-hidden" data-i18n="shell.runtime-controls-caption.text">Your Ravenroot service connection</span>
+    <span id="runtime-controls-scope" class="visually-hidden" data-i18n="shell.runtime-controls-scope.text">These fields sign this editor in to your
       own Ravenroot service. They are not a model provider credential: credentials that nodes use are
       stored in the Credentials window, on the Run menu.</span>
     <label class="command-field service-field">
-      <span>Service</span>
-      <input id="service-url" value="" placeholder="same origin" aria-label="Ravenroot service URL">
+      <span data-i18n="shell.span-2.text">Service</span>
+      <input id="service-url" value="" placeholder="same origin" aria-label="Ravenroot service URL" data-i18n-aria-label="shell.service-url.aria-label" data-i18n-placeholder="shell.service-url.placeholder">
     </label>
     <label class="command-field token-field">
-      <span>Service token</span>
+      <span data-i18n="shell.span-3.text">Service token</span>
       <input id="access-token" type="password" value="" autocomplete="off" placeholder="paste token"
-             aria-label="Ravenroot service token — signs this editor in to your own service, not to a model provider">
+             aria-label="Ravenroot service token — signs this editor in to your own service, not to a model provider" data-i18n-aria-label="shell.access-token.aria-label" data-i18n-placeholder="shell.access-token.placeholder">
     </label>
     <button class="btn" id="btn-authenticate" data-command-id="run.authenticate"
-            title="Sign in to the Ravenroot service named above">Authenticate</button>
+            title="Sign in to the Ravenroot service named above" data-i18n-title="shell.btn-authenticate.title" data-i18n="shell.btn-authenticate.text">Authenticate</button>
     <button class="btn" id="btn-revoke" data-command-id="run.forgetToken" disabled
-            title="Forget the service token in memory and in this browser">Forget token</button>
+            title="Forget the service token in memory and in this browser" data-i18n-title="shell.btn-revoke.title" data-i18n="shell.btn-revoke.text">Forget token</button>
     <span id="runtime-connection" class="connection-state authentication-required" role="status"
-          aria-live="polite">authentication required</span>
+          aria-live="polite" data-i18n="shell.runtime-connection.text">authentication required</span>
     <label class="command-field payload-field">
-      <span>Payload</span>
-      <input id="execution-payload" value="hello ravenroot" aria-label="Initial execution payload">
+      <span data-i18n="shell.span-4.text">Payload</span>
+      <input id="execution-payload" value="hello ravenroot" aria-label="Initial execution payload" data-i18n-aria-label="shell.execution-payload.aria-label">
     </label>
   </div>
   <section id="startup-import" class="startup-import" aria-labelledby="startup-import-title"
            aria-describedby="startup-import-status" hidden>
-    <strong id="startup-import-title">Startup import</strong>
+    <strong id="startup-import-title" data-i18n="shell.startup-import-title.text">Startup import</strong>
     <span id="startup-import-file" class="startup-import-file"></span>
     <span id="startup-import-status" role="status" aria-live="polite"></span>
     <span class="startup-import-actions">
-      <button class="btn" id="startup-import-confirm" type="button" hidden>Confirm origin</button>
-      <button class="btn" id="startup-import-retry" type="button" hidden>Retry</button>
-      <button class="btn" id="startup-import-cancel" type="button">Cancel</button>
+      <button class="btn" id="startup-import-confirm" type="button" hidden data-i18n="shell.startup-import-confirm.text">Confirm origin</button>
+      <button class="btn" id="startup-import-retry" type="button" hidden data-i18n="shell.startup-import-retry.text">Retry</button>
+      <button class="btn" id="startup-import-cancel" type="button" data-i18n="shell.startup-import-cancel.text">Cancel</button>
     </span>
   </section>
   <input type="file" id="replace-file-inp" accept=".graphml,.xml,.json" class="visually-hidden">
@@ -351,7 +351,7 @@
     <div class="rail" data-rail-zone="left">
       <button class="rail-btn rail-toggle" type="button" data-action="zone-toggle" data-zone="left"
               aria-expanded="true" aria-controls="sidebar-scroll"
-              aria-label="Collapse left toolbox" data-tooltip="Collapse left toolbox">
+              aria-label="Collapse left toolbox" data-tooltip="Collapse left toolbox" data-i18n-aria-label="shell.data-action-zone-toggle.aria-label">
         <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-zone-left"/></svg>
       </button>
       <!-- One icon per panel in this zone uses the panel identity marks. The rail's two
@@ -359,7 +359,7 @@
       <div class="rail-panels" data-rail-panels="left"></div>
       <button class="rail-btn rail-index" type="button" data-action="panels-index" data-zone="left"
               aria-haspopup="dialog" aria-expanded="false"
-              aria-label="Panels" data-tooltip="Open panels index">
+              aria-label="Panels" data-tooltip="Open panels index" data-i18n-aria-label="shell.data-action-panels-index.aria-label">
         <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-index"/></svg>
       </button>
     </div>
@@ -367,37 +367,37 @@
       <section class="panel" data-panel-id="search" data-panel-zone="left" aria-labelledby="panel-search-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-search-t">Search</h2>
+          <h2 class="panel-title" id="panel-search-t" data-i18n="shell.panel-search-t.text">Search</h2>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="search"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Search panel options" data-tooltip="Search panel options">
+                aria-label="Search panel options" data-tooltip="Search panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="search"
-                aria-label="Close Search panel" data-tooltip="Close Search panel">
+                aria-label="Close Search panel" data-tooltip="Close Search panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
         <div class="panel-body"><div class="panel-content">
           <input id="search-inp" type="text" placeholder="Search nodes…" aria-label="Search nodes"
                  data-input-action="search" data-tooltip-short="Search nodes"
-                 data-tooltip-exempt="persistent-placeholder">
+                 data-tooltip-exempt="persistent-placeholder" data-i18n-aria-label="shell.search-inp.aria-label" data-i18n-placeholder="shell.search-inp.placeholder">
         </div></div>
       </section>
 
       <section class="panel" data-panel-id="node-types" data-panel-zone="left" aria-labelledby="panel-nodetypes-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-nodetypes-t">Node Types</h2>
+          <h2 class="panel-title" id="panel-nodetypes-t" data-i18n="shell.panel-nodetypes-t.text">Node Types</h2>
         <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-types"
-                aria-expanded="true" aria-controls="panel-nodetypes-body" aria-label="Collapse Node Types">▾</button>
+                aria-expanded="true" aria-controls="panel-nodetypes-body" aria-label="Collapse Node Types" data-i18n-aria-label="shell.data-action-panel-disclosure.aria-label">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-types"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Node Types panel options" data-tooltip="Node Types panel options">
+                aria-label="Node Types panel options" data-tooltip="Node Types panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-2">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-types"
-                aria-label="Close Node Types panel" data-tooltip="Close Node Types panel">
+                aria-label="Close Node Types panel" data-tooltip="Close Node Types panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-2">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
@@ -407,56 +407,56 @@
       <section class="panel" data-panel-id="node-catalog" data-panel-zone="left" aria-labelledby="panel-catalog-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-catalog-t">Node Catalog</h2>
+          <h2 class="panel-title" id="panel-catalog-t" data-i18n="shell.panel-catalog-t.text">Node Catalog</h2>
         <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-catalog"
-                aria-expanded="true" aria-controls="panel-catalog-body" aria-label="Collapse Node Catalog">▾</button>
+                aria-expanded="true" aria-controls="panel-catalog-body" aria-label="Collapse Node Catalog" data-i18n-aria-label="shell.data-action-panel-disclosure.aria-label-2">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-catalog"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Node Catalog panel options" data-tooltip="Node Catalog panel options">
+                aria-label="Node Catalog panel options" data-tooltip="Node Catalog panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-3">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-catalog"
-                aria-label="Close Node Catalog panel" data-tooltip="Close Node Catalog panel">
+                aria-label="Close Node Catalog panel" data-tooltip="Close Node Catalog panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-3">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
         <div class="panel-body" id="panel-catalog-body"><div class="panel-content">
-          <div id="node-catalog" class="node-catalog"><div class="catalog-empty">Connect to the service to load programmable nodes.</div></div>
+          <div id="node-catalog" class="node-catalog"><div class="catalog-empty" data-i18n="shell.catalog-empty-1.text">Connect to the service to load programmable nodes.</div></div>
         </div></div>
       </section>
 
       <section class="panel" data-panel-id="node-palettes" data-panel-zone="left" aria-labelledby="panel-palettes-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-palettes-t">Personal Palettes</h2>
+          <h2 class="panel-title" id="panel-palettes-t" data-i18n="shell.panel-palettes-t.text">Personal Palettes</h2>
         <button class="panel-ctl" type="button" data-action="panel-disclosure" data-panel="node-palettes"
-                aria-expanded="true" aria-controls="panel-palettes-body" aria-label="Collapse Personal Palettes">▾</button>
+                aria-expanded="true" aria-controls="panel-palettes-body" aria-label="Collapse Personal Palettes" data-i18n-aria-label="shell.data-action-panel-disclosure.aria-label-3">▾</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-palettes"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Personal Palettes panel options" data-tooltip="Personal Palettes panel options">
+                aria-label="Personal Palettes panel options" data-tooltip="Personal Palettes panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-4">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-palettes"
-                aria-label="Close Personal Palettes panel" data-tooltip="Close Personal Palettes panel">
+                aria-label="Close Personal Palettes panel" data-tooltip="Close Personal Palettes panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-4">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
         <div class="panel-body" id="panel-palettes-body"><div class="panel-content">
-          <div id="node-palettes" class="node-palettes"><div class="catalog-empty">Connect to load personal palettes.</div></div>
+          <div id="node-palettes" class="node-palettes"><div class="catalog-empty" data-i18n="shell.catalog-empty-2.text">Connect to load personal palettes.</div></div>
         </div></div>
       </section>
 
       <section class="panel" data-panel-id="edge-types" data-panel-zone="left" aria-labelledby="panel-edgetypes-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-edgetypes-t">Edge Types</h2>
+          <h2 class="panel-title" id="panel-edgetypes-t" data-i18n="shell.panel-edgetypes-t.text">Edge Types</h2>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="edge-types"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Edge Types panel options" data-tooltip="Edge Types panel options">
+                aria-label="Edge Types panel options" data-tooltip="Edge Types panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-5">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="edge-types"
-                aria-label="Close Edge Types panel" data-tooltip="Close Edge Types panel">
+                aria-label="Close Edge Types panel" data-tooltip="Close Edge Types panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-5">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
@@ -466,14 +466,14 @@
       <section class="panel" data-panel-id="graph-stats" data-panel-zone="left" aria-labelledby="panel-stats-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-stats-t">Graph Stats</h2>
+          <h2 class="panel-title" id="panel-stats-t" data-i18n="shell.panel-stats-t.text">Graph Stats</h2>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="graph-stats"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Graph Stats panel options" data-tooltip="Graph Stats panel options">
+                aria-label="Graph Stats panel options" data-tooltip="Graph Stats panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-6">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="graph-stats"
-                aria-label="Close Graph Stats panel" data-tooltip="Close Graph Stats panel">
+                aria-label="Close Graph Stats panel" data-tooltip="Close Graph Stats panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-6">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
@@ -496,7 +496,7 @@
        data-layout-splitter="left" data-splitter-kind="workspace" role="separator" tabindex="0"
        aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="16"
        aria-controls="sidebar stage" aria-label="Resize left toolbox and graph stage"
-       data-tooltip="Resize left toolbox"></div>
+       data-tooltip="Resize left toolbox" data-i18n-aria-label="shell.pane-separator-1.aria-label"></div>
 
   <!-- ── Stage column: the graph, and the bottom dock beneath it ────────────────────────────────
        The dock is a SIBLING of #cy-wrap inside this column, not an overlay over it. #minimap and
@@ -512,14 +512,14 @@
        real path to the same edits rather than a reduced one (UI-02). -->
   <div id="cy-wrap" tabindex="0" role="application"
        aria-label="Workflow graph. Drag empty space to select; press H for Navigation and panning. Arrow keys move between nodes, E starts an edge, R reconnects, Enter confirms, Escape cancels."
-       aria-describedby="graph-live">
+       aria-describedby="graph-live" data-i18n-aria-label="shell.cy-wrap.aria-label">
     <div id="cy"></div>
-    <div class="graph-interaction-tools" aria-label="Graph interaction mode">
-      <span id="graph-mode-label" class="graph-mode-label" role="status">Viewer</span>
+    <div class="graph-interaction-tools" aria-label="Graph interaction mode" data-i18n-aria-label="shell.graph-interaction-tools-1.aria-label">
+      <span id="graph-mode-label" class="graph-mode-label" role="status" data-i18n="shell.graph-mode-label.text">Viewer</span>
       <button class="btn modify-toggle" id="btn-modify" type="button" data-command-id="edit.modify"
-              aria-pressed="false" aria-label="Switch to Editing mode">✎ Editing</button>
+              aria-pressed="false" aria-label="Switch to Editing mode" data-i18n-aria-label="shell.btn-modify.aria-label" data-i18n="shell.btn-modify.text" data-i18n-prefix="✎">✎ Editing</button>
       <button class="btn navigation-toggle" id="btn-navigation" type="button" data-command-id="view.navigation"
-              aria-pressed="false" aria-keyshortcuts="H" title="Pan the canvas (H)">✋ Navigation</button>
+              aria-pressed="false" aria-keyshortcuts="H" title="Pan the canvas (H)" data-i18n-title="shell.btn-navigation.title" data-i18n="shell.btn-navigation.text" data-i18n-prefix="✋">✋ Navigation</button>
     </div>
     <div id="graph-live" class="visually-hidden" role="status" aria-live="polite"></div>
     <!-- Empty state -->
@@ -531,33 +531,33 @@
         <line x1="20" y1="32" x2="52" y2="21" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="4 3"/>
         <line x1="20" y1="40" x2="52" y2="51" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="4 3"/>
       </svg>
-      <p>No graph loaded</p>
-      <small>Drag & drop a .graphml or .json (graphify) file, or use Load</small>
+      <p data-i18n="shell.p-3.text">No graph loaded</p>
+      <small data-i18n="shell.small-1.text">Drag & drop a .graphml or .json (graphify) file, or use Load</small>
     </div>
 
     <!-- Drop zone -->
     <div id="dropzone">
       <span style="font-size:28px">📂</span>
-      Drop .graphml or .json (graphify) file here
+      <span data-i18n="shell.dropzone.instruction">Drop .graphml or .json (graphify) file here</span>
     </div>
 
     <!-- Loading spinner -->
     <div id="loading" class="off">
       <div class="spin"></div>
-      <span style="font-size:13px; color:var(--tx-2)">Parsing graph…</span>
+      <span style="font-size:13px; color:var(--tx-2)" data-i18n="shell.span-6.text">Parsing graph…</span>
     </div>
 
     <!-- Zoom controls -->
     <div id="zoom-ctrl">
-      <button class="zbtn" data-command-id="view.zoomIn" aria-label="Zoom in" title="Zoom in (+)">+</button>
-      <button class="zbtn" data-command-id="view.fit" aria-label="Fit graph" title="Fit (F)">⤢</button>
-      <button class="zbtn" data-command-id="view.zoomOut" aria-label="Zoom out" title="Zoom out (-)">−</button>
+      <button class="zbtn" data-command-id="view.zoomIn" aria-label="Zoom in" title="Zoom in (+)" data-i18n-aria-label="shell.command-view-zoomin.aria-label" data-i18n-title="shell.command-view-zoomin.title">+</button>
+      <button class="zbtn" data-command-id="view.fit" aria-label="Fit graph" title="Fit (F)" data-i18n-aria-label="shell.command-view-fit.aria-label" data-i18n-title="shell.command-view-fit.title-2">⤢</button>
+      <button class="zbtn" data-command-id="view.zoomOut" aria-label="Zoom out" title="Zoom out (-)" data-i18n-aria-label="shell.command-view-zoomout.aria-label" data-i18n-title="shell.command-view-zoomout.title">−</button>
     </div>
 
     <!-- Shared active-document overview. The canvas is a real keyboard/pointer control; the label
          remains visible so tiled workspaces never make ownership depend on focus colour alone. -->
     <div id="minimap" data-renderer-kind="cytoscape">
-      <span id="minimap-label">Overview</span>
+      <span id="minimap-label" data-i18n="shell.minimap-label.text">Overview</span>
       <canvas id="minimap-canvas" tabindex="0" role="application"
               aria-roledescription="graph overview"
               aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Home Escape"></canvas>
@@ -573,13 +573,13 @@
          data-layout-splitter="bottom" data-splitter-kind="workspace" role="separator" tabindex="0"
          aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80"
          aria-controls="cy-wrap dock" aria-label="Resize graph stage and bottom dock"
-         data-tooltip="Resize bottom dock"></div>
+         data-tooltip="Resize bottom dock" data-i18n-aria-label="shell.pane-separator-2.aria-label"></div>
     <div id="dock" class="zone zone--bottom">
       <section class="panel" data-panel-id="activity" data-panel-zone="bottom" aria-labelledby="panel-activity-t">
         <header class="panel-hd">
           <span class="panel-grip" aria-hidden="true"></span>
-          <h2 class="panel-title" id="panel-activity-t">Runtime activity</h2>
-          <span id="activity-summary">Waiting for events</span>
+          <h2 class="panel-title" id="panel-activity-t" data-i18n="shell.panel-activity-t.text">Runtime activity</h2>
+          <span id="activity-summary" data-i18n="shell.activity-summary.text">Waiting for events</span>
           <!-- How much of the event stream this panel RENDERS. A presentation-only observer
                preference: it cannot reach GraphML, the graph, the execution or the node/edge
                monitoring projection, and it is never reset by, or an input to, a submission.
@@ -591,25 +591,25 @@
                Radio semantics with a roving tabindex, the same keyboard model as the topbar's
                Design/Monitoring control: arrow keys move between levels and select, Home/End jump
                to the ends, and exactly one button is a tab stop. -->
-          <div class="btn-group activity-modes" role="radiogroup" aria-label="Activity detail level">
+          <div class="btn-group activity-modes" role="radiogroup" aria-label="Activity detail level" data-i18n-aria-label="shell.btn-group-4.aria-label">
             <button class="btn" role="radio" type="button" aria-checked="true" tabindex="0"
                     data-action="activity-mode" data-mode="output"
-                    data-tooltip="Intentional log output, failures and the final execution state">Output</button>
+                    data-tooltip="Intentional log output, failures and the final execution state" data-i18n="shell.data-action-activity-mode.text">Output</button>
             <button class="btn" role="radio" type="button" aria-checked="false" tabindex="-1"
                     data-action="activity-mode" data-mode="nodes"
-                    data-tooltip="Node start, completion and failure, plus everything Output shows">Nodes</button>
+                    data-tooltip="Node start, completion and failure, plus everything Output shows" data-i18n="shell.data-action-activity-mode.text-2">Nodes</button>
             <button class="btn" role="radio" type="button" aria-checked="false" tabindex="-1"
                     data-action="activity-mode" data-mode="trace"
-                    data-tooltip="The complete technical event stream, including identifiers">Trace</button>
+                    data-tooltip="The complete technical event stream, including identifiers" data-i18n="shell.data-action-activity-mode.text-3">Trace</button>
           </div>
-          <button class="activity-clear" data-action="clear-activity" data-tooltip-exempt="persistent-text">Clear</button>
+          <button class="activity-clear" data-action="clear-activity" data-tooltip-exempt="persistent-text" data-i18n="shell.data-action-clear-activity.text">Clear</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="activity"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Runtime activity panel options" data-tooltip="Runtime activity panel options">
+                aria-label="Runtime activity panel options" data-tooltip="Runtime activity panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-7">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="activity"
-                aria-label="Close Runtime activity panel" data-tooltip="Close Runtime activity panel">
+                aria-label="Close Runtime activity panel" data-tooltip="Close Runtime activity panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-7">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
         </header>
@@ -621,7 +621,7 @@
 
     <!-- Only present while a panel is being dragged AND the dock is absent. An absent dock has no
          target otherwise, which would make drag strictly weaker than the menu it enhances. -->
-    <div id="dock-drop-band" aria-hidden="true">Drop here to dock</div>
+    <div id="dock-drop-band" aria-hidden="true" data-i18n="shell.dock-drop-band.text">Drop here to dock</div>
 
   </div><!-- /#stage -->
 
@@ -629,7 +629,7 @@
        data-layout-splitter="right" data-splitter-kind="workspace" role="separator" tabindex="0"
        aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="75"
        aria-controls="stage info" aria-label="Resize graph stage and right sidebar"
-       data-tooltip="Resize right sidebar"></div>
+       data-tooltip="Resize right sidebar" data-i18n-aria-label="shell.pane-separator-3.aria-label"></div>
 
   <!-- ── Right column (zone) ───────────── -->
   <!-- The Inspector now owns this column outright. `#info` no longer carries a hardcoded `on`
@@ -641,7 +641,7 @@
     <section class="panel" data-panel-id="inspector" data-panel-zone="right" aria-labelledby="info-title">
       <header class="panel-hd">
         <span class="panel-grip" aria-hidden="true"></span>
-        <h2 class="panel-title" id="info-title">Inspector</h2>
+        <h2 class="panel-title" id="info-title" data-i18n="shell.info-title.text">Inspector</h2>
         <!-- CLEARS the inspector; it does not close the panel. It was a ✕ until the panel ✕
              arrived beside it, and two identical glyphs one control apart meaning different things
              is a defect however well each is labelled. It becomes a word, matching `.activity-clear`
@@ -649,19 +649,19 @@
              panel header, so this is consistency rather than invention. Id, action and behaviour
              are untouched. -->
         <button id="info-close" class="panel-text-ctl" data-action="close-info"
-                aria-label="Clear inspector" data-tooltip-exempt="persistent-text">Clear</button>
+                aria-label="Clear inspector" data-tooltip-exempt="persistent-text" data-i18n-aria-label="shell.info-close.aria-label" data-i18n="shell.info-close.text">Clear</button>
       <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="inspector"
               aria-haspopup="menu" aria-expanded="false"
-              aria-label="Inspector panel options" data-tooltip="Inspector panel options">
+              aria-label="Inspector panel options" data-tooltip="Inspector panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-8">
         <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
       </button>
       <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="inspector"
-              aria-label="Close Inspector panel" data-tooltip="Close Inspector panel">
+              aria-label="Close Inspector panel" data-tooltip="Close Inspector panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-8">
         <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
       </button>
       </header>
       <div class="panel-body">
-        <div id="info-body"><div class="info-empty">Select a node or edge, or create a new one.</div></div>
+        <div id="info-body"><div class="info-empty" data-i18n="shell.info-empty-1.text">Select a node or edge, or create a new one.</div></div>
       </div>
     </section>
 
@@ -686,19 +686,19 @@
     <section class="panel" data-panel-id="assistant" data-panel-zone="right" aria-labelledby="assistant-title">
       <header class="panel-hd">
         <span class="panel-grip" aria-hidden="true"></span>
-        <h2 class="panel-title" id="assistant-title">Assistant</h2>
+        <h2 class="panel-title" id="assistant-title" data-i18n="shell.assistant-title.text">Assistant</h2>
         <!-- Clears the conversation; it does not close the panel. A word rather than a ✕, matching
              the Inspector's `Clear` and `.activity-clear` — the product's existing pattern for a
              content command in a panel header. -->
         <button id="assistant-clear" class="panel-text-ctl" type="button" data-action="clear-assistant"
-                aria-label="Clear assistant conversation" data-tooltip-exempt="persistent-text">Clear</button>
+                aria-label="Clear assistant conversation" data-tooltip-exempt="persistent-text" data-i18n-aria-label="shell.assistant-clear.aria-label" data-i18n="shell.assistant-clear.text">Clear</button>
         <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="assistant"
                 aria-haspopup="menu" aria-expanded="false"
-                aria-label="Assistant panel options" data-tooltip="Assistant panel options">
+                aria-label="Assistant panel options" data-tooltip="Assistant panel options" data-i18n-aria-label="shell.data-action-panel-menu.aria-label-9">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
         </button>
         <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="assistant"
-                aria-label="Close Assistant panel" data-tooltip="Close Assistant panel">
+                aria-label="Close Assistant panel" data-tooltip="Close Assistant panel" data-i18n-aria-label="shell.data-action-panel-close.aria-label-9">
           <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
         </button>
       </header>
@@ -727,14 +727,14 @@
           <div id="assistant-connection" class="assistant-connection" role="status"
                aria-live="polite" hidden>
             <button id="assistant-connect" class="btn" type="button"
-                    data-action="connect-assistant">Connect to the model provider</button>
+                    data-action="connect-assistant" data-i18n="shell.assistant-connect.text">Connect to the model provider</button>
             <!-- OUTSIDE the step, deliberately. This line reports on the ATTEMPT, and an attempt
                  that fails before a code arrives has no visible step. Placing the progress line
                  inside that hidden step would conceal a refused start, making the panel appear to
                  answer a click with no visible response. -->
             <p id="assistant-connection-progress" class="assistant-connection-progress"></p>
             <div id="assistant-connection-step" class="assistant-connection-step" hidden>
-              <p class="assistant-connection-instruction">Open this address and enter the code:</p>
+              <p class="assistant-connection-instruction" data-i18n="shell.assistant-connection-instruction-1.text">Open this address and enter the code:</p>
               <!-- Filled from the service's answer, as TEXT. `app.js` sets `href` only after
                    checking the scheme: a destination that arrives over the wire is not a
                    destination this page follows on trust. -->
@@ -744,34 +744,34 @@
                    says "reproduce this exactly" to a reader and to a screen reader alike. -->
               <code id="assistant-connection-code" class="assistant-connection-code"></code>
               <button id="assistant-connection-cancel" class="btn" type="button"
-                      data-action="cancel-assistant-connection">Stop waiting</button>
+                      data-action="cancel-assistant-connection" data-i18n="shell.assistant-connection-cancel.text">Stop waiting</button>
             </div>
           </div>
 
           <div id="assistant-transcript" class="assistant-transcript" role="log" aria-live="polite"
-               aria-label="Assistant conversation" tabindex="0"></div>
+               aria-label="Assistant conversation" tabindex="0" data-i18n-aria-label="shell.assistant-transcript.aria-label"></div>
 
           <!-- The falsifiable half of the disclosure. Each chip states its class as attached or
                unavailable, and `View payload` shows exactly what would be sent. Both are rendered
                from the SAME composed context, so a chip cannot claim a class the payload lacks. -->
           <div class="assistant-context">
             <div class="assistant-context-hd">
-              <span id="assistant-context-label">Context for the next message</span>
+              <span id="assistant-context-label" data-i18n="shell.assistant-context-label.text">Context for the next message</span>
               <button id="assistant-payload-toggle" class="panel-text-ctl" type="button"
                       aria-expanded="false" aria-controls="assistant-payload"
-                      data-tooltip-exempt="persistent-text">View payload</button>
+                      data-tooltip-exempt="persistent-text" data-i18n="shell.assistant-payload-toggle.text">View payload</button>
             </div>
             <ul id="assistant-chips" class="assistant-chips"
                 aria-labelledby="assistant-context-label"></ul>
             <pre id="assistant-payload" class="assistant-payload" tabindex="0"
-                 aria-label="Exact payload that would be sent" hidden></pre>
+                 aria-label="Exact payload that would be sent" hidden data-i18n-aria-label="shell.assistant-payload.aria-label"></pre>
           </div>
 
           <form id="assistant-composer" class="assistant-composer" novalidate>
-            <label class="visually-hidden" for="assistant-draft">Ask about this graph</label>
+            <label class="visually-hidden" for="assistant-draft" data-i18n="shell.field-assistant-draft.text">Ask about this graph</label>
             <textarea id="assistant-draft" class="assistant-draft" rows="3"
                       placeholder="Ask about this graph, the catalog, or the last run…"
-                      aria-describedby="assistant-composer-help"></textarea>
+                      aria-describedby="assistant-composer-help" data-i18n-placeholder="shell.assistant-draft.placeholder"></textarea>
             <!-- Polite, not `role="alert"`. Bound to the textarea by `aria-errormessage` in app.js
                  together with `aria-invalid`, which is what makes it REACHABLE from the control
                  rather than merely announced once. -->
@@ -785,8 +785,8 @@
                    It is the short form of `DISCLOSURE_SHORT_TEXT` and is pinned to that constant by
                    `assistant-disclosure.test.js`; it never substitutes for the full disclosure,
                    which `admitTurn` emits regardless of what is written here. -->
-              <small id="assistant-composer-help">Replies are generated by an AI model. Graph proposals require your explicit confirmation; the assistant cannot start a run.</small>
-              <button id="assistant-send" class="btn primary" type="submit">Ask</button>
+              <small id="assistant-composer-help" data-i18n="shell.assistant-composer-help.text">Replies are generated by an AI model. Graph proposals require your explicit confirmation; the assistant cannot start a run.</small>
+              <button id="assistant-send" class="btn primary" type="submit" data-i18n="shell.assistant-send.text">Ask</button>
             </div>
           </form>
         </div>
@@ -799,13 +799,13 @@
     <div class="rail" data-rail-zone="right">
       <button class="rail-btn rail-toggle" type="button" data-action="zone-toggle" data-zone="right"
               aria-expanded="true" aria-controls="info-body-zone"
-              aria-label="Collapse right sidebar" data-tooltip="Collapse right sidebar">
+              aria-label="Collapse right sidebar" data-tooltip="Collapse right sidebar" data-i18n-aria-label="shell.data-action-zone-toggle.aria-label-2">
         <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-zone-right"/></svg>
       </button>
       <div class="rail-panels" data-rail-panels="right"></div>
       <button class="rail-btn rail-index" type="button" data-action="panels-index" data-zone="right"
               aria-haspopup="dialog" aria-expanded="false"
-              aria-label="Panels" data-tooltip="Open panels index">
+              aria-label="Panels" data-tooltip="Open panels index" data-i18n-aria-label="shell.data-action-panels-index.aria-label">
         <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-index"/></svg>
       </button>
     </div>
@@ -828,7 +828,7 @@
      The route back. Every panel that exists, its zone, whether it is open or closed, and a click to
      bring it back — which is what makes the ✕ safe to offer at all. Reached from either rail, so it
      survives a collapsed column, and it carries Reset layout. -->
-<div id="panels-index" class="popover" role="dialog" aria-label="Panels" hidden></div>
+<div id="panels-index" class="popover" role="dialog" aria-label="Panels" hidden data-i18n-aria-label="shell.panels-index.aria-label"></div>
 
 <!-- One shared, delegated tooltip for the panel system. Its text and relationship are populated
      only while it is visible, so accessible names remain owned by the controls themselves. -->
@@ -842,7 +842,7 @@
   <header class="contextual-help-header">
     <h2 id="contextual-help-heading" data-contextual-help-heading></h2>
     <button class="contextual-help-close" type="button" data-contextual-help-close
-            aria-label="Close contextual help" data-tooltip="Close contextual help">
+            aria-label="Close contextual help" data-tooltip="Close contextual help" data-i18n-aria-label="shell.contextual-help-close-1.aria-label">
       <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
     </button>
   </header>
@@ -851,8 +851,8 @@
 
 <!-- One stable route to every open document, including documents hidden by narrow pane fallback. -->
 <div id="document-switcher-dialog" class="popover document-switcher-dialog" role="dialog"
-     aria-label="Open documents" hidden>
-  <div class="popover-title">Open documents</div>
+     aria-label="Open documents" hidden data-i18n-aria-label="shell.document-switcher-dialog.aria-label">
+  <div class="popover-title" data-i18n="shell.popover-title-1.text">Open documents</div>
   <ul class="document-switcher-list"></ul>
 </div>
 
@@ -860,27 +860,27 @@
 <dialog id="remember-connection-dialog" class="unsaved-document-dialog"
         aria-labelledby="remember-connection-title" aria-describedby="remember-connection-disclosure">
   <form method="dialog">
-    <h2 id="remember-connection-title">Remember this connection?</h2>
+    <h2 id="remember-connection-title" data-i18n="shell.remember-connection-title.text">Remember this connection?</h2>
     <p id="remember-connection-service"></p>
-    <p id="remember-connection-disclosure">Your service token will be stored in this browser’s Local Storage,
+    <p id="remember-connection-disclosure" data-i18n="shell.remember-connection-disclosure.text">Your service token will be stored in this browser’s Local Storage,
       readable by page JavaScript. It will reconnect on reload or reopening, with no additional time limit.
       The service still decides when it expires. Use Forget token to remove it. For a same-origin proxy,
       the operator controls the upstream service.</p>
     <div class="unsaved-document-actions">
-      <button class="btn" value="decline">Keep in memory</button>
-      <button class="btn" value="remember">Remember</button>
+      <button class="btn" value="decline" data-i18n="shell.btn-2.text">Keep in memory</button>
+      <button class="btn" value="remember" data-i18n="shell.btn-3.text">Remember</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="unsaved-document-dialog" class="unsaved-document-dialog"
         aria-labelledby="unsaved-document-title" aria-describedby="unsaved-document-description">
-  <h2 id="unsaved-document-title">Save changes?</h2>
-  <p id="unsaved-document-description">Closing will discard changes that have not been downloaded.</p>
+  <h2 id="unsaved-document-title" data-i18n="shell.unsaved-document-title.text">Save changes?</h2>
+  <p id="unsaved-document-description" data-i18n="shell.unsaved-document-description.text">Closing will discard changes that have not been downloaded.</p>
   <div class="unsaved-document-actions">
-    <button class="btn primary" type="button" data-unsaved-action="save">Save and Close</button>
-    <button class="btn danger" type="button" data-unsaved-action="discard">Discard</button>
-    <button class="btn" type="button" data-unsaved-action="cancel">Cancel</button>
+    <button class="btn primary" type="button" data-unsaved-action="save" data-i18n="shell.data-unsaved-action-save.text">Save and Close</button>
+    <button class="btn danger" type="button" data-unsaved-action="discard" data-i18n="shell.data-unsaved-action-discard.text">Discard</button>
+    <button class="btn" type="button" data-unsaved-action="cancel" data-i18n="shell.data-unsaved-action-cancel.text">Cancel</button>
   </div>
 </dialog>
 
@@ -901,12 +901,12 @@
      before. -->
 <dialog id="active-deployment-dialog" class="unsaved-document-dialog active-deployment-dialog"
         aria-labelledby="active-deployment-title" aria-describedby="active-deployment-description">
-  <h2 id="active-deployment-title">Close this document?</h2>
-  <p id="active-deployment-description">Closing only stops watching this deployment from this browser tab. It keeps running in this server process until you Stop it.</p>
+  <h2 id="active-deployment-title" data-i18n="shell.active-deployment-title.text">Close this document?</h2>
+  <p id="active-deployment-description" data-i18n="shell.active-deployment-description.text">Closing only stops watching this deployment from this browser tab. It keeps running in this server process until you Stop it.</p>
   <div class="unsaved-document-actions">
-    <button class="btn danger" type="button" data-active-deployment-action="stop-and-close">Stop and Close</button>
-    <button class="btn" type="button" data-active-deployment-action="close">Close (keep running)</button>
-    <button class="btn" type="button" data-active-deployment-action="cancel">Cancel</button>
+    <button class="btn danger" type="button" data-active-deployment-action="stop-and-close" data-i18n="shell.data-active-deployment-action-stop-and-close.text">Stop and Close</button>
+    <button class="btn" type="button" data-active-deployment-action="close" data-i18n="shell.data-active-deployment-action-close.text">Close (keep running)</button>
+    <button class="btn" type="button" data-active-deployment-action="cancel" data-i18n="shell.data-active-deployment-action-cancel.text">Cancel</button>
   </div>
 </dialog>
 
@@ -941,8 +941,8 @@
 <dialog id="runner-dialog" class="credentials-dialog runner-dialog" aria-labelledby="runner-title"></dialog>
 <dialog id="credentials-dialog" class="credentials-dialog" aria-labelledby="credentials-title">
   <header class="credentials-hd">
-    <h2 id="credentials-title">Credentials</h2>
-    <button id="credential-close" class="btn" type="button">Close</button>
+    <h2 id="credentials-title" data-i18n="shell.credentials-title.text">Credentials</h2>
+    <button id="credential-close" class="btn" type="button" data-i18n="shell.credential-close.text">Close</button>
   </header>
   <!-- Filled from `CREDENTIAL_SCOPE_TEXT` rather than written here, so the one sentence separating
        this window from the command bar's service token cannot exist in two versions. -->
@@ -950,42 +950,42 @@
 
   <form id="credential-form" class="credential-form" novalidate autocomplete="off">
     <div class="editor-field full">
-      <label for="credential-label">Label *</label>
+      <label for="credential-label" data-i18n="shell.field-credential-label.text">Label *</label>
       <input id="credential-label" type="text" autocomplete="off" spellcheck="false"
              maxlength="120" aria-describedby="credential-label-hint">
-      <small id="credential-label-hint">What you will recognise this credential by when a node asks for one. At most 120 characters.</small>
+      <small id="credential-label-hint" data-i18n="shell.credential-label-hint.text">What you will recognise this credential by when a node asks for one. At most 120 characters.</small>
       <p id="credential-label-error" class="credential-error" hidden></p>
     </div>
     <div class="editor-field full">
-      <label for="credential-scheme">Kind</label>
+      <label for="credential-scheme" data-i18n="shell.field-credential-scheme.text">Kind</label>
       <!-- Options are written by `credential-panel.js` from the client's own scheme vocabulary, so
            the service's spelling and the reader's wording cannot drift apart here. -->
       <select id="credential-scheme" aria-describedby="credential-scheme-hint"></select>
-      <small id="credential-scheme-hint">What the service does with the value when a node uses it.</small>
+      <small id="credential-scheme-hint" data-i18n="shell.credential-scheme-hint.text">What the service does with the value when a node uses it.</small>
       <p id="credential-scheme-error" class="credential-error" hidden></p>
     </div>
     <div class="editor-field full" id="credential-username-field" hidden>
-      <label for="credential-username">Username *</label>
+      <label for="credential-username" data-i18n="shell.field-credential-username.text">Username *</label>
       <input id="credential-username" type="text" autocomplete="off" spellcheck="false"
              aria-describedby="credential-username-hint">
-      <small id="credential-username-hint">Only a username-and-password credential carries one. It is stored beside the value, not inside it.</small>
+      <small id="credential-username-hint" data-i18n="shell.credential-username-hint.text">Only a username-and-password credential carries one. It is stored beside the value, not inside it.</small>
       <p id="credential-username-error" class="credential-error" hidden></p>
     </div>
     <div class="editor-field full">
-      <label for="credential-value">Value *</label>
+      <label for="credential-value" data-i18n="shell.field-credential-value.text">Value *</label>
       <input id="credential-value" type="password" autocomplete="off" spellcheck="false"
              aria-describedby="credential-value-hint">
-      <small id="credential-value-hint">Sent once to your service and never shown again — not here, not in a node, not masked. This field is cleared the moment the attempt finishes, whether it succeeded or not.</small>
+      <small id="credential-value-hint" data-i18n="shell.credential-value-hint.text">Sent once to your service and never shown again — not here, not in a node, not masked. This field is cleared the moment the attempt finishes, whether it succeeded or not.</small>
       <p id="credential-value-error" class="credential-error" hidden></p>
     </div>
     <div class="credential-actions">
-      <button id="credential-save" class="btn primary" type="submit">Store credential</button>
+      <button id="credential-save" class="btn primary" type="submit" data-i18n="shell.credential-save.text">Store credential</button>
     </div>
     <p id="credential-status" class="credential-status" role="status" aria-live="polite"></p>
   </form>
 
   <section class="credentials-listing" aria-labelledby="credentials-list-title">
-    <h3 id="credentials-list-title">Credentials you hold</h3>
+    <h3 id="credentials-list-title" data-i18n="shell.credentials-list-title.text">Credentials you hold</h3>
     <p id="credential-empty" class="credential-note"></p>
     <!-- No value column, and none masked: there is nothing to mask. The reference is what a node's
          property stores, so it is the one identifier shown, verbatim and copyable. -->
@@ -1006,48 +1006,48 @@
      durable generations describe reconciled command intent, not cluster-owned runtime execution. -->
 <dialog id="deployments-dialog" class="credentials-dialog deployments-dialog" aria-labelledby="deployments-title">
   <header class="credentials-hd">
-    <h2 id="deployments-title">Operational console</h2>
-    <button id="deployment-close" class="btn" type="button">Close</button>
+    <h2 id="deployments-title" data-i18n="shell.deployments-title.text">Operational console</h2>
+    <button id="deployment-close" class="btn" type="button" data-i18n="shell.deployment-close.text">Close</button>
   </header>
   <p id="deployment-scope" class="credential-note"></p>
 
   <form id="deployment-register-form" class="credential-form" novalidate autocomplete="off">
     <div class="editor-field full">
-      <label for="deployment-id-input">Deployment id *</label>
+      <label for="deployment-id-input" data-i18n="shell.field-deployment-id-input.text">Deployment id *</label>
       <input id="deployment-id-input" type="text" autocomplete="off" spellcheck="false"
              aria-describedby="deployment-id-hint">
-      <small id="deployment-id-hint">Addresses this deployment here and in the CLI (`ravenroot deployments`). Registering the same id with the same graph again is a no-op; a different graph is refused.</small>
+      <small id="deployment-id-hint" data-i18n="shell.deployment-id-hint.text">Addresses this deployment here and in the CLI (`ravenroot deployments`). Registering the same id with the same graph again is a no-op; a different graph is refused.</small>
       <p id="deployment-id-error" class="credential-error" hidden></p>
     </div>
     <div class="credential-actions">
-      <button id="deployment-register" class="btn primary" type="submit">Register and start from active document</button>
+      <button id="deployment-register" class="btn primary" type="submit" data-i18n="shell.deployment-register.text">Register and start from active document</button>
     </div>
     <p id="deployment-status" class="credential-status" role="status" aria-live="polite"></p>
   </form>
 
   <section class="credentials-listing" aria-labelledby="deployments-list-title">
-    <h3 id="deployments-list-title">Deployments you hold</h3>
+    <h3 id="deployments-list-title" data-i18n="shell.deployments-list-title.text">Deployments you hold</h3>
     <p id="deployment-empty" class="credential-note"></p>
     <ul id="deployment-list" class="credential-list deployment-list" aria-labelledby="deployments-list-title" hidden></ul>
   </section>
   <section class="credentials-listing lifecycle-processes" aria-labelledby="lifecycle-processes-title">
-    <h3 id="lifecycle-processes-title">Process instances</h3>
-    <p id="lifecycle-process-scope" class="credential-note">Select a deployment above to read its authoritative process inventory. Process controls never act on a task or a single traversal.</p>
+    <h3 id="lifecycle-processes-title" data-i18n="shell.lifecycle-processes-title.text">Process instances</h3>
+    <p id="lifecycle-process-scope" class="credential-note" data-i18n="shell.lifecycle-process-scope.text">Select a deployment above to read its authoritative process inventory. Process controls never act on a task or a single traversal.</p>
     <p id="lifecycle-process-status" class="credential-status" role="status" aria-live="polite"></p>
     <ul id="lifecycle-process-list" class="credential-list lifecycle-process-list"
         aria-labelledby="lifecycle-processes-title" hidden></ul>
   </section>
   <section class="credentials-listing" aria-labelledby="derived-execution-title">
-    <h3 id="derived-execution-title">Selective derived execution</h3>
-    <p class="credential-note">Continue retained work in a fresh execution. Preview shows the possible downstream scope and exact inherited invocation evidence before submission.</p>
+    <h3 id="derived-execution-title" data-i18n="shell.derived-execution-title.text">Selective derived execution</h3>
+    <p class="credential-note" data-i18n="shell.credential-note-1.text">Continue retained work in a fresh execution. Preview shows the possible downstream scope and exact inherited invocation evidence before submission.</p>
     <form id="derived-execution-form" class="credential-form" novalidate autocomplete="off">
-      <div class="editor-field full"><label for="derived-source-id">Source process id *</label><input id="derived-source-id" required spellcheck="false"></div>
-      <div class="editor-field full"><label for="derived-boundary-choice">Retained downstream boundary *</label><select id="derived-boundary-choice" required><option value="">Select a source process, then discover retained boundaries</option></select><button id="derived-discover" class="btn" type="button">Discover retained boundaries</button></div>
-      <div class="editor-field"><label for="derived-idempotency-key">Generated request key *</label><input id="derived-idempotency-key" required maxlength="200" spellcheck="false"></div>
-      <div class="editor-field full"><label for="derived-reason">Reason *</label><textarea id="derived-reason" required maxlength="500"></textarea></div>
-      <div class="editor-field full"><label for="derived-repeatability">Effect reconciliation or repeatability decision</label><textarea id="derived-repeatability" maxlength="500"></textarea></div>
-      <label class="credential-note"><input id="derived-authorize-effects" type="checkbox"> I am authorized to repeat selected downstream external effects.</label>
-      <div class="credential-actions"><button id="derived-preview" class="btn" type="button">Preview</button><button id="derived-start" class="btn primary" type="submit" disabled>Start derived execution</button></div>
+      <div class="editor-field full"><label for="derived-source-id" data-i18n="shell.field-derived-source-id.text">Source process id *</label><input id="derived-source-id" required spellcheck="false"></div>
+      <div class="editor-field full"><label for="derived-boundary-choice" data-i18n="shell.field-derived-boundary-choice.text">Retained downstream boundary *</label><select id="derived-boundary-choice" required><option value="" data-i18n="shell.option-2.text">Select a source process, then discover retained boundaries</option></select><button id="derived-discover" class="btn" type="button" data-i18n="shell.derived-discover.text">Discover retained boundaries</button></div>
+      <div class="editor-field"><label for="derived-idempotency-key" data-i18n="shell.field-derived-idempotency-key.text">Generated request key *</label><input id="derived-idempotency-key" required maxlength="200" spellcheck="false"></div>
+      <div class="editor-field full"><label for="derived-reason" data-i18n="shell.field-derived-reason.text">Reason *</label><textarea id="derived-reason" required maxlength="500"></textarea></div>
+      <div class="editor-field full"><label for="derived-repeatability" data-i18n="shell.field-derived-repeatability.text">Effect reconciliation or repeatability decision</label><textarea id="derived-repeatability" maxlength="500"></textarea></div>
+      <label class="credential-note"><input id="derived-authorize-effects" type="checkbox"> <span data-i18n="shell.derived-authorize-effects.text">I am authorized to repeat selected downstream external effects.</span></label>
+      <div class="credential-actions"><button id="derived-preview" class="btn" type="button" data-i18n="shell.derived-preview.text">Preview</button><button id="derived-start" class="btn primary" type="submit" disabled data-i18n="shell.derived-start.text">Start derived execution</button></div>
       <p id="derived-execution-status" class="credential-status" role="status" aria-live="polite"></p>
       <pre id="derived-execution-preview" class="human-task-review-text" tabindex="0" hidden></pre>
     </form>
@@ -1061,19 +1061,19 @@
         aria-describedby="human-task-dialog-prompt">
   <form method="dialog" class="human-task-decision-form" novalidate>
     <header class="credentials-hd">
-      <h2 id="human-task-dialog-title">Human task decision</h2>
-      <button class="btn" type="button" data-human-task-close>Close</button>
+      <h2 id="human-task-dialog-title" data-i18n="shell.human-task-dialog-title.text">Human task decision</h2>
+      <button class="btn" type="button" data-human-task-close data-i18n="shell.data-human-task-close-control.text">Close</button>
     </header>
     <p id="human-task-dialog-prompt" class="human-task-prompt" data-human-task-prompt></p>
     <p class="human-task-dialog-identity" data-human-task-identity></p>
     <section class="human-task-review" data-human-task-review hidden aria-labelledby="human-task-review-title">
-      <h3 id="human-task-review-title">Review content</h3>
+      <h3 id="human-task-review-title" data-i18n="shell.human-task-review-title.text">Review content</h3>
       <p class="human-task-review-status" data-human-task-review-status></p>
       <pre class="human-task-review-text" data-human-task-review-text dir="auto" tabindex="0"></pre>
       <small class="human-task-review-digest" data-human-task-review-digest></small>
     </section>
     <div class="editor-field full" data-human-task-comment-field>
-      <label for="human-task-comment">Comment</label>
+      <label for="human-task-comment" data-i18n="shell.field-human-task-comment.text">Comment</label>
       <textarea id="human-task-comment" data-human-task-comment
                 aria-describedby="human-task-comment-hint human-task-error"></textarea>
       <small id="human-task-comment-hint" data-human-task-comment-hint></small>
@@ -1092,20 +1092,20 @@
 
 <!-- ══ BOTTOM BAR ════════════════════════════════════════════════ -->
 <div id="bot">
-  <div class="stat">🔵 <b id="b-nodes">0</b> nodes</div>
-  <div class="stat">➔  <b id="b-edges">0</b> edges</div>
+  <div class="stat">🔵 <b id="b-nodes">0</b> <span data-i18n="shell.bottom.nodes">nodes</span></div>
+  <div class="stat">➔  <b id="b-edges">0</b> <span data-i18n="shell.bottom.edges">edges</span></div>
   <div class="spacer"></div>
-  <div class="stat">Zoom: <b id="b-zoom">100%</b></div>
-  <div class="stat">Selected: <b id="b-sel">—</b></div>
+  <div class="stat"><span data-i18n="shell.bottom.zoom">Zoom:</span> <b id="b-zoom">100%</b></div>
+  <div class="stat"><span data-i18n="shell.bottom.selected">Selected:</span> <b id="b-sel">—</b></div>
 </div>
 
 <!-- ══ KEYBOARD HELP ════════════════════════════════════════════= -->
 <div id="help-overlay" data-command-id="view.keyboardShortcuts">
   <div id="help-box">
-    <h2>⌨ Keyboard Shortcuts</h2>
+    <h2 data-i18n="shell.h2-1.text" data-i18n-prefix="⌨">⌨ Keyboard Shortcuts</h2>
     <div id="shortcut-help-list"></div>
     <br>
-    <button class="btn help-close" data-command-id="view.keyboardShortcuts">Close</button>
+    <button class="btn help-close" data-command-id="view.keyboardShortcuts" data-i18n="shell.command-view-keyboardshortcuts.text">Close</button>
   </div>
 </div>
 

@@ -50,7 +50,8 @@ class EmbedLaunchTicketAuthorityTest {
         var registration = EmbedSessionFixtures.registration(1);
         var registrations = new MutableEmbedRegistrations(registration);
         var authority = new EmbedLaunchTicketAuthority(Clock.systemUTC(), Duration.ofSeconds(30));
-        var issued = authority.issue(registration);
+        var presentation = new EmbedPresentation("it-IT", "{\"schema\":\"ravenroot.ui-catalog/v1\"}");
+        var issued = authority.issue(new EmbedSessionAuthorization.Registered(registration), presentation);
         assertTrue(issued.value().length() >= 43);
         assertFalse(issued.value().contains("reg"));
 
@@ -63,6 +64,7 @@ class EmbedLaunchTicketAuthorityTest {
             var available = first instanceof EmbedLaunchTicketAuthority.Resolution.Available value
                     ? value : (EmbedLaunchTicketAuthority.Resolution.Available) second;
             assertEquals(registration, available.registration());
+            assertEquals(presentation, available.presentation());
         }
         assertInstanceOf(EmbedLaunchTicketAuthority.Resolution.Unavailable.class,
                 authority.consume(issued.value(), registrations));

@@ -1,4 +1,5 @@
 import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
+import { uiText } from './ui-text.js';
 // The credential routes, as this page reaches them (the UI half).
 //
 // ── WHY THIS IS A CLIENT OF ITS OWN AND NOT METHODS ON AN EXISTING ONE ───────────────────────────
@@ -68,15 +69,15 @@ export const OAUTH_TOKEN_SCHEME = 'oauth-token';
 
 export const CREDENTIAL_SCHEMES = Object.freeze([API_KEY_SCHEME, BASIC_SCHEME, OAUTH_TOKEN_SCHEME]);
 
-const SCHEME_LABELS = Object.freeze({
-  [API_KEY_SCHEME]: 'API key',
-  [BASIC_SCHEME]: 'Username and password',
-  [OAUTH_TOKEN_SCHEME]: 'OAuth token',
+const SCHEME_LABEL_KEYS = Object.freeze({
+  [API_KEY_SCHEME]: 'workspace.credential.scheme.api-key',
+  [BASIC_SCHEME]: 'workspace.credential.scheme.basic',
+  [OAUTH_TOKEN_SCHEME]: 'workspace.credential.scheme.oauth-token',
 });
 
 /** A scheme this build does not recognise is shown as itself rather than as a guess. */
 export function credentialSchemeLabel(scheme) {
-  return SCHEME_LABELS[scheme] || String(scheme || '');
+  return SCHEME_LABEL_KEYS[scheme] ? uiText(SCHEME_LABEL_KEYS[scheme]) : String(scheme || '');
 }
 
 /** The one scheme that carries a username. The server refuses the pairing in both directions. */

@@ -1,3 +1,4 @@
+import { uiDateTime, uiText } from './ui-text.js';
 // The Credentials window is the ONE place in this product where a credential
 // value is typed.
 //
@@ -51,29 +52,33 @@ export const CREDENTIAL_SCOPE_TEXT = 'A credential stored here is held by your R
  * Pure, DOM-free, and exported so the rules can be read and tested without a document.
  * Returns `{ok, errors}` — never a partially repaired draft.
  */
-export function validateCredentialDraft(draft) {
+export function validateCredentialDraft(draft, t = uiText) {
   const errors = {};
   const label = String(draft?.label ?? '').trim();
   const scheme = String(draft?.scheme ?? '');
   const username = String(draft?.username ?? '').trim();
   const value = String(draft?.value ?? '');
 
-  if (!label) errors.label = 'Give this credential a name you will recognise in a node.';
+  if (!label) errors.label = t('workspace.credential.validation.labelRequired');
   else if (label.length > LABEL_MAX_LENGTH) {
-    errors.label = `A name may be at most ${LABEL_MAX_LENGTH} characters; this one is ${label.length}.`;
+    errors.label = t('workspace.credential.validation.labelLength', {
+      maximum: LABEL_MAX_LENGTH, count: label.length,
+    });
   }
-  if (!CREDENTIAL_SCHEMES.includes(scheme)) errors.scheme = 'Choose what kind of credential this is.';
+  if (!CREDENTIAL_SCHEMES.includes(scheme)) errors.scheme = t('workspace.credential.validation.scheme');
   // Both directions, because the service refuses both: a blank username for `basic`, and any
   // username at all for the other two. The second is unreachable through the form — the field is
   // hidden and cleared when the kind changes — and is checked anyway, because "unreachable through
   // the form" is a statement about today's form.
   if (schemeCarriesUsername(scheme) && !username) {
-    errors.username = 'A username and password credential needs the username too.';
+    errors.username = t('workspace.credential.validation.usernameRequired');
   }
   if (!schemeCarriesUsername(scheme) && username) {
-    errors.username = `A ${credentialSchemeLabel(scheme).toLowerCase()} credential carries no username.`;
+    errors.username = t('workspace.credential.validation.usernameForbidden', {
+      scheme: credentialSchemeLabel(scheme).toLowerCase(),
+    });
   }
-  if (!value) errors.value = 'Paste the credential value. It is sent once and never shown again.';
+  if (!value) errors.value = t('workspace.credential.validation.valueRequired');
 
   return { ok: Object.keys(errors).length === 0, errors };
 }
@@ -83,7 +88,7 @@ export function credentialCreatedText(createdAt) {
   const raw = String(createdAt || '');
   if (!raw) return '';
   const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? raw : parsed.toLocaleDateString();
+  return Number.isNaN(parsed.getTime()) ? raw : uiDateTime(parsed, { dateStyle: 'medium' });
 }
 
 /**
@@ -123,7 +128,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
   let busy = false;
   let disposed = false;
 
-  if (scope) scope.textContent = CREDENTIAL_SCOPE_TEXT;
+  if (scope) scope.textContent = uiText('workspace.credential.scope');
   if (controls.label) controls.label.maxLength = LABEL_MAX_LENGTH;
   if (controls.scheme && controls.scheme.options.length === 0) {
     controls.scheme.replaceChildren(...CREDENTIAL_SCHEMES.map(scheme => {
@@ -166,8 +171,8 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       // model provider panel's `onModeChange` documents.
       empty.hidden = credentials.length > 0 || listing.surface === 'absent';
       empty.textContent = listing.loaded
-        ? 'You hold no credentials yet. The first one you store appears here.'
-        : 'Connect to your Ravenroot service to see the credentials you hold.';
+        ? uiText("workspace.credential.panel.you.hold.no.credentials.yet.the.first")
+        : uiText("workspace.credential.panel.connect.to.your.ravenroot.service.to.see");
     }
     list.hidden = credentials.length === 0;
     // textContent throughout. A label is text a person typed and this page renders author-authored
@@ -198,7 +203,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       const copy = doc.createElement('button');
       copy.type = 'button';
       copy.className = 'btn credential-copy';
-      copy.textContent = 'Copy reference';
+      copy.textContent = uiText("workspace.credential.panel.copy.reference");
       copy.dataset.copyReference = credential.reference;
 
       const row = doc.createElement('div');
@@ -393,6 +398,13 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
     refresh,
     save,
     references: () => ({ loaded: listing.loaded, credentials: listing.credentials }),
+    refreshLocale() {
+      if (scope) scope.textContent = uiText('workspace.credential.scope');
+      if (controls.scheme) for (const option of controls.scheme.options) {
+        option.textContent = credentialSchemeLabel(option.value);
+      }
+      renderList();
+    },
     setClient(next) {
       client = next;
       if (!next) {

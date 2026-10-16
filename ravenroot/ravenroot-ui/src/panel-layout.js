@@ -35,14 +35,16 @@ export const ZONES = Object.freeze(['left', 'right', 'bottom']);
 // label:value lines) can each reflow their OWN content shape into something shorter too. The two
 // `unbounded` panels (Inspector, Runtime activity) still cannot: they fill their zone rather than
 // stacking inside it, so there is no column height for a short form to give back.
+const panel = (id, titleKey, zone, kind, options = {}) => Object.freeze({ id, titleKey, zone, kind,
+  ...options, get title() { return uiText(titleKey); } });
 export const PANELS = Object.freeze([
-  { id: 'search', title: 'Search', zone: 'left', kind: 'control' },
-  { id: 'node-types', title: 'Node Types', zone: 'left', kind: 'palette' },
-  { id: 'node-catalog', title: 'Node Catalog', zone: 'left', kind: 'palette' },
-  { id: 'node-palettes', title: 'Personal Palettes', zone: 'left', kind: 'palette' },
-  { id: 'edge-types', title: 'Edge Types', zone: 'left', kind: 'palette' },
-  { id: 'graph-stats', title: 'Graph Stats', zone: 'left', kind: 'bounded' },
-  { id: 'inspector', title: 'Inspector', zone: 'right', kind: 'unbounded' },
+  panel('search', 'workspace.panel.search', 'left', 'control'),
+  panel('node-types', 'workspace.panel.nodeTypes', 'left', 'palette'),
+  panel('node-catalog', 'workspace.panel.nodeCatalog', 'left', 'palette'),
+  panel('node-palettes', 'workspace.panel.nodePalettes', 'left', 'palette'),
+  panel('edge-types', 'workspace.panel.edgeTypes', 'left', 'palette'),
+  panel('graph-stats', 'workspace.panel.graphStats', 'left', 'bounded'),
+  panel('inspector', 'workspace.panel.inspector', 'right', 'unbounded'),
   // `unbounded` for the same reason the other two are: a transcript and a composer fill the
   // column rather than stacking inside it, so there is no column height a short form could give
   // back — offering one would put a "Shorten" command in its menu that does nothing visible, which
@@ -82,8 +84,8 @@ export const PANELS = Object.freeze([
   // So the panel ships closed and is one rail click away, in the Panels index like everything
   // else. A user who opens it has chosen to accept the scroll and can size the splitter; nobody
   // silently loses a guarantee that was measured and written down.
-  { id: 'assistant', title: 'Assistant', zone: 'right', kind: 'unbounded', defaultClosed: true },
-  { id: 'activity', title: 'Runtime activity', zone: 'bottom', kind: 'unbounded' },
+  panel('assistant', 'workspace.panel.assistant', 'right', 'unbounded', { defaultClosed: true }),
+  panel('activity', 'workspace.panel.activity', 'bottom', 'unbounded'),
 ]);
 
 // Every kind except `unbounded` has a short form. Each reflows its own content shape rather
@@ -387,10 +389,11 @@ export function panelMenuCommands(layout, id) {
 
   for (const zone of ZONES) {
     if (zone === panel.zone) continue;
-    commands.push({ command: 'move-zone', zone, label: `Move to ${zoneLabel(zone)}` });
+    commands.push({ command: 'move-zone', zone,
+      label: uiText('workspace.panel.moveTo', { zone: zoneLabel(zone) }) });
   }
-  if (at > 0) commands.push({ command: 'move-up', label: 'Move up' });
-  if (at >= 0 && at < siblings.length - 1) commands.push({ command: 'move-down', label: 'Move down' });
+  if (at > 0) commands.push({ command: 'move-up', label: uiText('workspace.panel.moveUp') });
+  if (at >= 0 && at < siblings.length - 1) commands.push({ command: 'move-down', label: uiText('workspace.panel.moveDown') });
   // The word says which direction it goes — never "collapse", which is what a ZONE does. Two
   // different outcomes must never share a verb.
   // The label used to read "Shorten (icons only)" / "Lengthen (show labels)". That parenthetical
@@ -402,23 +405,24 @@ export function panelMenuCommands(layout, id) {
   // specific mechanism at all.
   if (canShorten(id)) {
     commands.push(panel.short
-      ? { command: 'lengthen', label: 'Lengthen' }
-      : { command: 'shorten', label: 'Shorten' });
+      ? { command: 'lengthen', label: uiText('workspace.panel.lengthen') }
+      : { command: 'shorten', label: uiText('workspace.panel.shorten') });
   }
   if (panel.zone === 'bottom') {
     commands.push(layout.zones.bottom.maximised
-      ? { command: 'restore', label: 'Restore dock size' }
-      : { command: 'maximise', label: 'Maximise dock' });
+      ? { command: 'restore', label: uiText('workspace.panel.restoreDock') }
+      : { command: 'maximise', label: uiText('workspace.panel.maximiseDock') });
   }
   // Not offered when the panel is ALREADY closed. `defaultClosed` makes that state ordinary, and
   // this function's contract is to list no inert commands. The "every entry changes the layout"
   // test in `panel-layout.test.js` covers this case.
-  if (!panel.closed) commands.push({ command: 'close', label: 'Close' });
+  if (!panel.closed) commands.push({ command: 'close', label: uiText('workspace.panel.close') });
   return commands;
 }
 
 export function zoneLabel(zone) {
-  if (zone === 'left') return 'left column';
-  if (zone === 'right') return 'right column';
-  return 'bottom dock';
+  if (zone === 'left') return uiText('workspace.zone.left');
+  if (zone === 'right') return uiText('workspace.zone.right');
+  return uiText('workspace.zone.bottom');
 }
+import { uiText } from './ui-text.js';

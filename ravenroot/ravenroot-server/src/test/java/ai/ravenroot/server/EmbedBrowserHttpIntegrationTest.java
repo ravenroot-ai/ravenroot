@@ -604,8 +604,8 @@ class EmbedBrowserHttpIntegrationTest {
 
             String readOnlyHtml = launch(client, base, "v2-read").body();
             assertTrue(readOnlyHtml.contains("\"viewerSourceVersion\":\"2\""), readOnlyHtml);
-            assertTrue(readOnlyHtml.contains("<option value=\"design\">Design</option>"));
-            assertTrue(readOnlyHtml.contains("<option value=\"monitoring\">Monitoring</option>"));
+            assertTrue(readOnlyHtml.contains("<option value=\"design\" data-i18n=\"embed.mode.design\">Design</option>"));
+            assertTrue(readOnlyHtml.contains("<option value=\"monitoring\" data-i18n=\"embed.mode.monitoring\">Monitoring</option>"));
             assertTrue(readOnlyHtml.contains("data-viewer-command=\"render\""));
             assertTrue(readOnlyHtml.contains("data-viewer-metadata hidden"));
             assertTrue(readOnlyHtml.contains("class=\"embed-zoom-controls\""));
@@ -618,11 +618,11 @@ class EmbedBrowserHttpIntegrationTest {
 
             String startHtml = launch(client, base, "v2-start").body();
             assertTrue(startHtml.contains("\"showStartExecution\":true"), startHtml);
-            assertTrue(startHtml.contains("data-viewer-start>Start execution</button>"));
+            assertTrue(startHtml.contains("data-viewer-start data-i18n=\"embed.controls.startExecution\">Start execution</button>"));
 
             String grantedHtml = launch(client, base, "v2-start-granted").body();
             assertTrue(grantedHtml.contains("\"showStartExecution\":true"), grantedHtml);
-            assertTrue(grantedHtml.contains("data-viewer-start>Start execution</button>"));
+            assertTrue(grantedHtml.contains("data-viewer-start data-i18n=\"embed.controls.startExecution\">Start execution</button>"));
 
             String hiddenGrantedHtml = launch(client, base, "v2-hidden-granted").body();
             assertTrue(hiddenGrantedHtml.contains("\"showStartExecution\":false"), hiddenGrantedHtml);

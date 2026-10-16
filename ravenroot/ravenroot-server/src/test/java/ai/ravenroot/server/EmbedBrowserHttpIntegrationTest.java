@@ -396,6 +396,20 @@ class EmbedBrowserHttpIntegrationTest {
                             "{\"registrationId\":\"reg\",\"theme\":\"light\"}")));
             assertEquals(400, themeCoordinate.statusCode());
 
+            for (var invalidPresentation : List.of(
+                    Map.entry("{\"registrationId\":\"reg\",\"locale\":\"not a locale\"}", 400),
+                    Map.entry("{\"registrationId\":\"reg\",\"locale\":\"en\",\"catalog\":\"[]\"}", 400),
+                    Map.entry("{\"registrationId\":\"reg\",\"locale\":\"en\",\"catalog\":\""
+                            + "a".repeat(ai.ravenroot.server.embed.EmbedPresentation.MAX_CATALOG_CHARACTERS + 1)
+                            + "\"}", 413))) {
+                var refusedPresentation = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                        .header("Authorization", "Bearer workload")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(invalidPresentation.getKey())));
+                assertEquals(invalidPresentation.getValue(), refusedPresentation.statusCode(), refusedPresentation.body());
+                assertPrivate(refusedPresentation);
+            }
+
             var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
                     .header("Authorization", "Bearer workload")
                     .header("Content-Type", "application/json")

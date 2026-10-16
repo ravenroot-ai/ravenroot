@@ -18,6 +18,37 @@ const contrast = (foreground, background) => {
   return (values[0] + 0.05) / (values[1] + 0.05);
 };
 
+test('localizes a real server session and accepts only the authenticated locale channel', async ({ page }) => {
+  await page.goto('/localized');
+  await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId))).toBe(true);
+  const viewer = page.frames().find(frame => frame.url().startsWith(viewerOrigin));
+  expect(viewer).toBeDefined();
+  expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+  await page.evaluate(() => window.postViewerAcknowledgement());
+  await expect.poll(() => page.evaluate(() => window.embedMessages.some(
+    message => message.type === 'READY'))).toBe(true);
+
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('⟦Graph⟧');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('⟦Fit⟧');
+  const before = await page.evaluate(() => window.embedMessages.length);
+
+  await page.evaluate(() => window.postViewerLocale('en', null, { channelId: 'wrong-channel' }));
+  await page.evaluate(() => window.relayViewerLocale('sibling', 'en', null));
+  await page.evaluate(() => window.relayViewerLocale('foreign', 'en', null));
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => window.embedMessages.length)).toBe(before);
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+
+  await page.evaluate(() => window.postViewerLocale('en', null));
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('en');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Fit');
+  await expect(viewer.locator('#ravenroot-embed-viewer')).toHaveAttribute('data-viewer-state', 'ready');
+});
+
 for (const scenario of [
   { path: '/theme-light', system: 'dark', expected: 'light' },
   { path: '/theme-dark', system: 'light', expected: 'dark' },

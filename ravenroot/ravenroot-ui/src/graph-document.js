@@ -1,5 +1,6 @@
 import { assertStableEdgeId, stableEdgeIdViolation } from './stable-edge-id.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups } from './visual-groups.js';
+import { uiText } from './ui-text.js';
 
 const GRAPHML_NS = 'http://graphml.graphdrawing.org/xmlns';
 
@@ -16,14 +17,14 @@ export const NODE_KINDS = ['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR'];
 // lives here, next to NODE_KINDS, because `graph-document.js` has no imports of its own and both the
 // parser and the app can therefore read it without a cycle.
 export const NODE_VISUAL_TYPES = Object.freeze([
-  { type: 'start', label: 'Start' }, { type: 'end', label: 'End' },
-  { type: 'terminal', label: 'Terminal' }, { type: 'error', label: 'Error' },
-  { type: 'consumer', label: 'Consumer' }, { type: 'handler', label: 'Handler' },
-  { type: 'agent', label: 'Agent' }, { type: 'flow', label: 'Flow' },
-  { type: 'actor', label: 'Actor' }, { type: 'system', label: 'System' },
-  { type: 'trace', label: 'Trace' }, { type: 'human-task', label: 'Human task' },
-  { type: 'workspace', label: 'Workspace' },
-].map(Object.freeze));
+  'start', 'end', 'terminal', 'error', 'consumer', 'handler', 'agent', 'flow', 'actor',
+  'system', 'trace', 'human-task', 'workspace',
+].map(type => Object.freeze({
+  type,
+  labelKey: `nodeVisualType.${type}`,
+  // `type` is the persisted machine value. The key is presentation metadata and is resolved only
+  // at the UI boundary, so changing language can never rewrite a graph document.
+})));
 
 const NODE_VISUAL_TYPE_NAMES = new Set(NODE_VISUAL_TYPES.map(entry => entry.type));
 
@@ -106,23 +107,26 @@ export const GRAPH_DESIGN_ARRANGEMENT_PROPERTY = 'ravenroot.designArrangement';
 const JOIN_EACH_POLICY = 'each';
 const JOIN_PROPERTY_NAMES = [JOIN_POLICY_PROPERTY, JOIN_QUORUM_PROPERTY, JOIN_TIMEOUT_PROPERTY];
 
+const localizedField = (name, labelKey, type) => Object.freeze(Object.defineProperty({ name, type },
+  'label', { enumerable: true, get: () => uiText(labelKey) }));
+
 export const KNOWN_NODE_FIELDS = [
-  { name: 'name', label: 'Name', type: 'string' },
-  { name: 'kind', label: 'Ravenroot kind', type: 'string' },
-  { name: 'behavior', label: 'Behavior', type: 'string' },
-  { name: 'classname', label: 'Class name', type: 'string' },
-  { name: 'classification', label: 'Visual classification', type: 'string' },
-  { name: 'description', label: 'Description', type: 'string' },
+  localizedField('name', 'graphField.name', 'string'),
+  localizedField('kind', 'graphField.kind', 'string'),
+  localizedField('behavior', 'graphField.behavior', 'string'),
+  localizedField('classname', 'graphField.classname', 'string'),
+  localizedField('classification', 'graphField.classification', 'string'),
+  localizedField('description', 'graphField.description', 'string'),
 ];
 
 export const KNOWN_EDGE_FIELDS = [
-  { name: 'outcome', label: 'Outcome', type: 'string' },
-  { name: 'command', label: 'Command', type: 'string' },
-  { name: 'name', label: 'Name', type: 'string' },
-  { name: 'status', label: 'Status', type: 'int' },
-  { name: 'parallel', label: 'Parallel', type: 'boolean' },
-  { name: 'trafficWeight', label: 'Traffic weight', type: 'double' },
-  { name: 'description', label: 'Description', type: 'string' },
+  localizedField('outcome', 'graphField.outcome', 'string'),
+  localizedField('command', 'graphField.command', 'string'),
+  localizedField('name', 'graphField.name', 'string'),
+  localizedField('status', 'graphField.status', 'int'),
+  localizedField('parallel', 'graphField.parallel', 'boolean'),
+  localizedField('trafficWeight', 'graphField.trafficWeight', 'double'),
+  localizedField('description', 'graphField.description', 'string'),
 ];
 
 const NODE_KNOWN_NAMES = new Set([
@@ -400,6 +404,7 @@ export function outcomeToEdgeType(outcome) {
 
 export function createEdge(id, source, target, outcome = 'continue') {
   assertStableEdgeId(id);
+  // i18n-audit-exempt: authored-content - the default is a persisted edge outcome token.
   const normalizedOutcome = outcome || 'continue';
   return {
     id,
@@ -540,11 +545,11 @@ export function hasDeclaredJoinSemantics(graph) {
 // because a boolean hides machinery that is already there and buys a
 // second migration the day a third policy arrives.
 export const JOIN_KIND_OPTIONS = [
-  { value: 'none', label: 'No join — each arrival runs independently' },
-  { value: 'all', label: 'Wait for all branches' },
-  { value: 'first', label: 'First arrival wins' },
-  { value: 'quorum', label: 'K of N branches' },
-];
+  ['none', 'joinKind.none'], ['all', 'joinKind.all'], ['first', 'joinKind.first'],
+  ['quorum', 'joinKind.quorum'],
+].map(([value, labelKey]) => Object.freeze(Object.defineProperty({ value }, 'label', {
+  enumerable: true, get: () => uiText(labelKey),
+})));
 
 // The Kind-of-arrival `<select>`'s fifth, non-vocabulary option -- selected
 // whenever `declaredJoinKind` reports `recognized: false`, and never written by this control itself

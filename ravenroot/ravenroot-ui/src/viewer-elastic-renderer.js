@@ -1,6 +1,7 @@
 import * as d3 from 'd3';
 import { edgeFlowWidth, formatRuntimeTime } from './monitoring-runtime-state.js';
 import { createElasticVisualGroupRenderer } from './visual-group-elastic-renderer.js';
+import { uiText } from './ui-text.js';
 
 function requiredElement(value, name) {
   if (!(value instanceof Element)) throw new TypeError(`${name} is required.`);
@@ -168,14 +169,16 @@ export function mountD3ElasticRenderer({
   if (tooltip !== null) {
     const tip = d3.select(tooltip);
     let tooltipPoint = null;
-    const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
+    const known = (labelKey, value) => value == null || value === ''
+      ? uiText('embed.tooltip.unavailable', { label: uiText(labelKey) })
+      : uiText('embed.tooltip.value', { label: uiText(labelKey), value });
     const nodeText = runtimeNodeTooltipText;
     const edgeText = link => [link.label || link.id,
-      `Recent activity: ${link.flow?.recent ?? 0}`,
-      `Traversals: ${link.flow?.count ?? 0}`,
-      known('Last traversal', link.flow?.lastEvent),
-      known('Last traversal time', formatRuntimeTime(link.flow?.lastOccurredAt)),
-      known('Configured weight', link.configuredWeight),
+      uiText('embed.tooltip.recentActivity', { count: link.flow?.recent ?? 0 }),
+      uiText('embed.tooltip.traversals', { count: link.flow?.count ?? 0 }),
+      known('embed.tooltip.lastTraversal', link.flow?.lastEvent),
+      known('embed.tooltip.lastTraversalTime', formatRuntimeTime(link.flow?.lastOccurredAt)),
+      known('embed.tooltip.configuredWeight', link.configuredWeight),
     ].join('\n');
     const positionTooltip = event => {
       if (!event) return;
@@ -490,14 +493,17 @@ export function mountD3ElasticRenderer({
 }
 
 export function runtimeNodeTooltipText(node) {
-  const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
+  const known = (labelKey, value) => value == null || value === ''
+    ? uiText('embed.tooltip.unavailable', { label: uiText(labelKey) })
+    : uiText('embed.tooltip.value', { label: uiText(labelKey), value });
   const state = node.runtimeObserved ? node.runtimeState : null;
-  return [node.label, known('ID', node.id), known('State', state),
-    known('Active instances', node.runtimeObserved ? node.instances : null),
-    known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
-    known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
-    known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
-    known('Fallback', node.runtimeObserved ? (node.fallback ? 'yes' : 'no') : null),
-    known('Bypassed', node.runtimeObserved ? (node.runtimeState === 'bypassed' ? 'yes' : 'no') : null),
+  return [node.label, known('embed.tooltip.id', node.id), known('embed.tooltip.state', state),
+    known('embed.tooltip.activeInstances', node.runtimeObserved ? node.instances : null),
+    known('embed.tooltip.inFlightArrivals', node.runtimeObserved ? node.arrivals : null),
+    known('embed.tooltip.lastEvent', node.lastEventType),
+    known('embed.tooltip.lastEventTime', formatRuntimeTime(node.lastOccurredAt)),
+    known('embed.tooltip.processingDuration', node.processingDuration == null ? null : `${node.processingDuration}s`),
+    known('embed.tooltip.fallback', node.runtimeObserved ? uiText(node.fallback ? 'common.yes' : 'common.no') : null),
+    known('embed.tooltip.bypassed', node.runtimeObserved ? uiText(node.runtimeState === 'bypassed' ? 'common.yes' : 'common.no') : null),
   ].join('\n');
 }

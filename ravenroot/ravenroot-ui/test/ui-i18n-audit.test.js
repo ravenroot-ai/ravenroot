@@ -41,4 +41,16 @@ describe('UI localization source audit fixtures', () => {
       node.innerHTML = \`<span>\${htmlText('fixture.message')}</span>\`;
     `)).toEqual([]);
   });
+
+  it('finds product text returned for a caller in another module', () => {
+    expect(findPresentationSinkViolations(`
+      export function state() { return { kind: 'empty', message: 'Indirect empty state' }; }
+    `)).toEqual([2]);
+  });
+
+  it('finds product labels in exported presentation metadata', () => {
+    expect(findPresentationSinkViolations(`
+      export const palette = [{ type: 'machine-value', label: 'Visible palette label' }];
+    `)).toEqual([2]);
+  });
 });

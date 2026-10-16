@@ -71,6 +71,15 @@ test('switches a complete catalog live while preserving a dirty selected documen
   await expect(page.locator('#menu-file')).toHaveText('⟦IT⟧File⟦IT⟧');
   await expect(page.locator('#language-dialog-title')).toHaveText('⟦IT⟧Interface language⟦IT⟧');
   await expect(page.locator('#language-selection')).toHaveValue('it');
+  await expect(page.locator('#leg-nodes .li-label').first()).toHaveText('⟦IT⟧Start⟦IT⟧');
+  await expect(page.locator('#node-catalog .catalog-empty')).toContainText('⟦IT⟧');
+  await expect(page.locator('#activity-log .activity-title').last()).toContainText('⟦IT⟧');
+  await expect(page.locator('#btn-program-approve')).toHaveText('⟦IT⟧Approve program batch⟦IT⟧');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await page.locator('#btn-program-approve').evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= innerWidth && bounds.width >= 160;
+  })).toBe(true);
   await expect(page.locator('#node-editor input[name="name"]')).toHaveValue('Unsubmitted localized draft');
   await expect(page.locator('#dirty-state')).toContainText('unsaved changes');
   await expect.poll(() => page.evaluate(() => ({
@@ -86,9 +95,10 @@ test('switches a complete catalog live while preserving a dirty selected documen
     'placeholder', '" autofocus onfocus="globalThis.__catalogExecuted=true',
   );
   expect(await page.evaluate(() => globalThis.__catalogExecuted)).toBeUndefined();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   const screenshot = testInfo.outputPath('complete-catalog-live-switch.png');
-  await page.screenshot({ path: screenshot, fullPage: true });
+  await page.screenshot({ path: screenshot });
   await testInfo.attach('complete catalog live switch', { path: screenshot, contentType: 'image/png' });
 
   await page.reload();
@@ -120,6 +130,7 @@ test('applies exact-to-base-to-English fallback and rejects malformed configurat
 });
 
 test('supports long RTL labels without losing the language control', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 900, height: 720 });
   await configure(page);
   await page.goto('/');
   await openLanguageDialog(page);
@@ -129,8 +140,21 @@ test('supports long RTL labels without losing the language control', async ({ pa
   await expect(page.locator('#language-selection')).toBeVisible();
   await expect(page.locator('#language-selection')).toBeInViewport();
   await expect(page.locator('#menu-file')).toContainText('نص واجهة طويل للاختبار');
+  expect(await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: innerWidth,
+  }))).toEqual({ scrollWidth: 900, viewportWidth: 900 });
+  const dialogBox = await page.locator('.language-dialog').boundingBox();
+  expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+  expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(900);
+  for (const control of await page.locator('.language-actions .btn').all()) {
+    const box = await control.boundingBox();
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.x).toBeGreaterThanOrEqual(dialogBox.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width + 1);
+  }
   const screenshot = testInfo.outputPath('rtl-long-labels.png');
-  await page.screenshot({ path: screenshot, fullPage: true });
+  await page.screenshot({ path: screenshot });
   await testInfo.attach('RTL long labels', { path: screenshot, contentType: 'image/png' });
 });
 

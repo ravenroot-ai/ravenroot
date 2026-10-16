@@ -1,11 +1,12 @@
 import { humanTaskContext, nextHumanTaskBackoff } from './human-task-attention.js';
+import { uiText } from './ui-text.js';
 
 const EMPTY_COUNTS = Object.freeze({ pending: 0, escalated: 0 });
 
 function initialState() {
-  return { kind: 'unavailable', message: 'Run or select an authoritative deployment context to see Human Tasks.',
+  return { kind: 'unavailable', message: uiText('humanTasks.context.required'),
     nodeCounts: new Map(), selectedNodeId: null, page: { kind: 'unavailable', message:
-      'Run or select an authoritative deployment context to see Human Tasks.', items: [], counts: EMPTY_COUNTS,
+      uiText('humanTasks.context.required'), items: [], counts: EMPTY_COUNTS,
     nextCursor: null, hasPrevious: false, pageNumber: 1 } };
 }
 
@@ -54,7 +55,7 @@ export function createHumanTaskController({ onChange = () => {}, setTimer = setT
       const selectedNodeId = state.selectedNodeId;
       state = initialState();
       state.selectedNodeId = selectedNodeId;
-      state.message = 'This runtime does not expose embedded Human Task presentation.';
+      state.message = uiText('humanTasks.capability.unavailable');
       state.page.message = state.message;
       publish();
       return state;
@@ -97,9 +98,9 @@ export function createHumanTaskController({ onChange = () => {}, setTimer = setT
         return refresh();
       }
       backoff = nextHumanTaskBackoff(backoff, capability);
-      state = { ...state, kind: 'error', message: `Human Tasks could not be refreshed: ${error.message}`,
+      state = { ...state, kind: 'error', message: uiText('humanTasks.refresh.failed', { reason: error.message }),
         page: { ...state.page, kind: 'error', message:
-          `Human Tasks could not be refreshed: ${error.message}` } };
+          uiText('humanTasks.refresh.failed', { reason: error.message }) } };
       publish();
       schedule(backoff);
       return state;
@@ -143,8 +144,8 @@ export function createHumanTaskController({ onChange = () => {}, setTimer = setT
         pageCursors = [null]; pageIndex = 0; backoff = 0;
         const available = Boolean(client && capability && nextContextKey);
         const message = available ? '' : client && !capability
-          ? 'This runtime does not expose embedded Human Task presentation.'
-          : 'Run or select an authoritative deployment context to see Human Tasks.';
+          ? uiText('humanTasks.capability.unavailable')
+          : uiText('humanTasks.context.required');
         state = emptyProjection(state.selectedNodeId, { kind: available ? 'loading' : 'unavailable', message });
         publish();
       }

@@ -1,5 +1,6 @@
 import { projectVisualGroups } from './visual-group-projection.js';
 import { createVisualGroupTransition } from './visual-group-transition.js';
+import { uiText } from './ui-text.js';
 
 const HIDDEN = 'rr-visual-hidden';
 const MEMBER = 'rr-visual-member';
@@ -61,8 +62,11 @@ export function createVisualGroupRenderer({ cy, isCurrent = () => true,
     const remaining = wrapAt < 0 ? '' : displayName.slice(wrapAt).trim();
     const secondLine = [...remaining].length > 14 ? `${[...remaining].slice(0, 13).join('')}…` : remaining;
     const wrappedName = [firstLine, secondLine].filter(Boolean).join('\n');
-    const label = header ? `▦ ${displayName} · ${group.memberNodeIds.length}`
-      : `▦\n${wrappedName}\n${group.memberNodeIds.length} members`;
+    const label = header ? uiText('visualGroup.header', {
+      name: displayName, count: group.memberNodeIds.length,
+    }) : uiText('visualGroup.summary', {
+      name: wrappedName, count: group.memberNodeIds.length,
+    });
     return {
       data: { id, name: group.name, label, nodeType: 'visual-group', rrVisualGroup: group.id,
         rrVisualRole: role, memberCount: group.memberNodeIds.length, nw: header ? 190 : 100,
@@ -222,6 +226,7 @@ export function createVisualGroupRenderer({ cy, isCurrent = () => true,
       return projection;
     },
     finish() { transition.finish(); },
+    refreshLocale() { if (input && projection && !suspended) paint(transition.values, true); },
     suspend() { transition.cancel(); suspended = true; removePresentation(); },
     destroy() { if (destroyed) return; transition.destroy(); removePresentation(); destroyed = true; },
     get projection() { return projection; },

@@ -1,3 +1,5 @@
+import { uiText } from './ui-text.js';
+
 export const STARTUP_IMPORT_PHASE = Object.freeze({
   WAITING_RUNTIME: 'waiting-runtime',
   WAITING_AUTHENTICATION: 'waiting-authentication',
@@ -30,7 +32,7 @@ function decodedFilename(pathname) {
 export function startupImportTarget(rawUrl, pageUrl) {
   const url = new URL(rawUrl, pageUrl);
   if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new StartupImportError('unsupported-url', 'The graph URL must use HTTP or HTTPS.');
+    throw new StartupImportError('unsupported-url', uiText('startupImport.url.unsupported'));
   }
   const page = new URL(pageUrl);
   return Object.freeze({
@@ -46,9 +48,9 @@ function publicFailure(error) {
     return { code: error.code, message: error.publicMessage };
   }
   if (error?.name === 'AbortError') {
-    return { code: 'aborted', message: 'The graph import was cancelled.' };
+    return { code: 'aborted', message: uiText('startupImport.cancelled') };
   }
-  return { code: 'import-failed', message: 'The graph could not be imported. Check the file and try again.' };
+  return { code: 'import-failed', message: uiText('startupImport.failed') };
 }
 
 function sameBinding(left, right) {

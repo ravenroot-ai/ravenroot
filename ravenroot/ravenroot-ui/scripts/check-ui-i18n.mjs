@@ -128,6 +128,8 @@ export function findPresentationSinkViolations(source, { sourceType = 'module' }
   } });
   const violations = [];
   const inspect = node => violations.push(...outputLiterals(node, [], bindings).map(item => item.loc.start.line));
+  const presentationRecordProperties = new Set(['label', 'shortLabel', 'caption', 'help', 'title',
+    'message', 'emptyText', 'placeholder', 'ariaLabel', 'ariaDescription']);
   walk.simple(ast, {
     AssignmentExpression(node) {
       if (node.left.type === 'MemberExpression'
@@ -153,6 +155,24 @@ export function findPresentationSinkViolations(source, { sourceType = 'module' }
         }
       }
     },
+    ReturnStatement(node) {
+      const inspectRecord = value => {
+        if (!value) return;
+        if (value.type === 'ObjectExpression') {
+          value.properties.forEach(property => {
+            if (presentationRecordProperties.has(property.key?.name ?? property.key?.value)) {
+              inspect(property.value);
+            }
+          });
+        } else if (value.type === 'ConditionalExpression') {
+          inspectRecord(value.consequent); inspectRecord(value.alternate);
+        }
+      };
+      inspectRecord(node.argument);
+    },
+    Property(node) {
+      if (presentationRecordProperties.has(node.key?.name ?? node.key?.value)) inspect(node.value);
+    },
   });
   return [...new Set(violations)].sort((left, right) => left - right);
 }
@@ -163,6 +183,10 @@ function auditJavascript() {
   sources.push({ file: 'public/embed-bootstrap.js', sourceType: 'script' });
   const presentationProperties = new Set(['textContent', 'innerText', 'innerHTML', 'title', 'placeholder', 'ariaLabel']);
   const presentationAttributes = /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u;
+  const presentationRecordProperties = new Set([
+    'label', 'shortLabel', 'caption', 'help', 'title', 'message', 'emptyText', 'placeholder',
+    'ariaLabel', 'ariaDescription',
+  ]);
   for (const entry of sources) {
     const { file, sourceType } = entry;
     const fileName = path.basename(file);
@@ -188,6 +212,26 @@ function auditJavascript() {
     const report = node => {
       for (const literal of outputLiterals(node, [], bindings)) {
         reportLiteral(literal);
+      }
+    };
+    const reportPresentationMetadata = (node, reportAllValues = false) => {
+      if (!node) return;
+      if (node.type === 'ObjectExpression') {
+        for (const property of node.properties) {
+          const name = property.key?.name ?? property.key?.value;
+          if (reportAllValues || presentationRecordProperties.has(name)) report(property.value);
+          else reportPresentationMetadata(property.value, false);
+        }
+      } else if (node.type === 'ArrayExpression') {
+        node.elements.forEach(element => reportPresentationMetadata(element, reportAllValues));
+      } else if (node.type === 'CallExpression') {
+        if (node.callee.type === 'Identifier' && node.callee.name === 'localizedLookup') {
+          for (const argument of node.arguments.filter(item => item.type === 'ObjectExpression')) {
+            argument.properties.forEach(property => recordKeyExpression(property.value));
+          }
+          return;
+        }
+        node.arguments.forEach(argument => reportPresentationMetadata(argument, reportAllValues));
       }
     };
     const reportHtml = node => {
@@ -298,9 +342,36 @@ function auditJavascript() {
       },
       Property(node) {
         const name = node.key?.name ?? node.key?.value;
-        if (/Key$/u.test(name || '') && node.value.type === 'Literal'
-            && typeof node.value.value === 'string'
-            && Object.hasOwn(ENGLISH_MESSAGES, node.value.value)) references.add(node.value.value);
+        if (/Key$/u.test(name || '')
+            && (node.value.type !== 'Literal' || Object.hasOwn(ENGLISH_MESSAGES, node.value.value))) {
+          recordKeyExpression(node.value);
+        }
+      },
+      VariableDeclarator(node) {
+        if (node.id.type !== 'Identifier') return;
+        if (/_KEY_BY_TYPE$/u.test(node.id.name)) {
+          const value = node.init?.type === 'CallExpression' ? node.init.arguments[0] : node.init;
+          value?.properties?.forEach(property => recordKeyExpression(property.value));
+          return;
+        }
+        const presentationCollection = /(?:LABELS?|MESSAGES?|OPTIONS|TYPES|CLASSES)$/u.test(node.id.name);
+        const textMap = /(?:_TEXT|DESCRIPTION_BY_TYPE)$/u.test(node.id.name);
+        if (presentationCollection || textMap) reportPresentationMetadata(node.init, textMap);
+      },
+      ReturnStatement(node) {
+        const inspectRecord = value => {
+          if (!value) return;
+          if (value.type === 'ObjectExpression') {
+            for (const property of value.properties) {
+              if (presentationRecordProperties.has(property.key?.name ?? property.key?.value)) {
+                report(property.value);
+              }
+            }
+          } else if (value.type === 'ConditionalExpression') {
+            inspectRecord(value.consequent); inspectRecord(value.alternate);
+          }
+        };
+        inspectRecord(node.argument);
       },
     });
   }

@@ -1944,7 +1944,7 @@ function refreshVisualGroups(owner = workspace.active, { animate = false, select
   }
   if (metadata.warning && owner.visualGroupWarning !== metadata.warning) {
     owner.visualGroupWarning = metadata.warning;
-    addActivityMessage(uiText("workspace.notice.editor"), metadata.warning, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.editor"), metadata.warning, 'failed');
   }
   if (owner === workspace.active) { updateStats(); refreshCommands(); }
 }
@@ -2300,8 +2300,8 @@ function deleteNodeFromActionOverlay(owner, instance, nodeId, { skipDraftGuard =
   scheduleMinimap();
   updateHistoryUi();
   refreshCommands();
-  addActivityMessage(uiText("workspace.notice.editor.2"),
-    uiText("workspace.notice.deleted.graphElements", {
+  addActivityMessage(uiMessage("workspace.notice.editor.2"),
+    uiMessage("workspace.notice.deleted.graphElements", {
       nodeSummary: uiText("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
       edgeSummary: uiText("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
     }), 'completed');
@@ -3685,7 +3685,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
     syncPaneHeaders();
     if (workspace.active === owner) {
-      addActivityMessage(uiText("workspace.notice.deployment"), result.reason === 'execution' ? uiText("workspace.notice.observed.on", { type: frame.event.type, deploymentId: deploymentId }) : uiText("workspace.notice.deployment.2", { deploymentId: deploymentId, detail2: state.continuity.toLowerCase() }),
+      addActivityMessage(uiMessage("workspace.notice.deployment"), result.reason === 'execution' ? uiMessage("workspace.notice.observed.on", { type: frame.event.type, deploymentId: deploymentId }) : uiMessage("workspace.notice.deployment.2", { deploymentId: deploymentId, detail2: state.continuity.toLowerCase() }),
       result.terminal ? 'failed' : 'completed');
     }
   };
@@ -3700,7 +3700,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     }
     if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
     syncPaneHeaders();
-    if (workspace.active === owner) addActivityMessage(uiText("workspace.notice.deployment.3"), message,
+    if (workspace.active === owner) addActivityMessage(uiMessage("workspace.notice.deployment.3"), message,
       ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
   });
   owner.deploymentView = { envelope, state, disconnect };
@@ -3736,7 +3736,7 @@ function forkActiveDocument() {
       layoutMode: fork.layoutMode, designArrangement: fork.designArrangement,
       visualStyle: fork.visualStyle, fontSize: fork.fontSize },
   });
-  addActivityMessage(uiText("workspace.notice.editor.3"), uiText("workspace.notice.forked.immutable.snapshot.as.an.editable.draft", { mode: source.mode }), 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.3"), uiMessage("workspace.notice.forked.immutable.snapshot.as.an.editable.draft", { mode: source.mode }), 'completed');
   scheduleWorkspacePersistence();
   return id;
 }
@@ -3811,7 +3811,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   initLoadedGraph(graph, visualStyle);
   if (renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   clearActivity();
-  addActivityMessage(uiText("workspace.notice.editor.4"), uiText("workspace.notice.loaded", { name: name }), 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.4"), uiMessage("workspace.notice.loaded", { name: name }), 'completed');
   captureActiveDocument();
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(target);
@@ -6279,11 +6279,12 @@ function clearFilter() {
   document.querySelectorAll('.li').forEach(el => {
     el.classList.remove('filt');
     const kind = el.dataset.legendKind;
-    const label = kind === 'node'
-      ? NODE_TYPES.find(type => type.type === el.dataset.legendType)?.label
-      : EDGE_TYPES.find(type => type.type === el.dataset.legendType)?.label;
+    const visualType = kind === 'node'
+      ? NODE_TYPES.find(type => type.type === el.dataset.legendType)
+      : EDGE_TYPES.find(type => type.type === el.dataset.legendType);
+    const label = visualType && visualTypeLabel(visualType);
     if (!label) return;
-    const accessibleName = `Filter ${kind} type: ${label}`;
+    const accessibleName = uiText(kind === 'node' ? 'legend.filterNodeType' : 'legend.filterEdgeType', { label });
     el.setAttribute('aria-label', accessibleName);
     el.dataset.tooltip = accessibleName;
   });
@@ -7123,7 +7124,7 @@ function renderNodeForm(model, creating) {
     .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name)
       && !additionalGroups.claimed.has(property.name));
   const visualTypes = NODE_TYPES.map(type =>
-    `<option value="${type.type}" ${type.type === model.nodeType ? 'selected' : ''}>${escapeHtml(type.label)}</option>`)
+    `<option value="${type.type}" ${type.type === model.nodeType ? 'selected' : ''}>${escapeHtml(visualTypeLabel(type))}</option>`)
     .join('');
   const kindOptions = NODE_KINDS.map(kind =>
     `<option value="${kind}" ${kind === model.kind ? 'selected' : ''}>${kind}</option>`).join('');
@@ -8595,7 +8596,7 @@ function applyProgramServerResult(owner, node, result) {
   programPhase(owner, node.id, result);
   if ((result.phase === 'FAILED' || result.phase === 'RETIRED') && owner === workspace.active
       && (previous?.phase !== result.phase || previous?.diagnostic !== result.diagnostic)) {
-    addActivityMessage(uiText("workspace.notice.program.build", { id: node.id }),
+    addActivityMessage(uiMessage("workspace.notice.program.build", { id: node.id }),
       `${result.phase}: ${result.diagnostic || uiText("workspace.program.noDiagnostic")}`, 'failed');
   }
 }
@@ -8853,7 +8854,7 @@ function bindProgramWorkspace(form, model) {
     const build = panel.querySelector('[data-program-operation="build"]');
     if (build) build.disabled = false;
     panel.querySelector('.program-status').textContent = error.message;
-    addActivityMessage(uiText("workspace.notice.program.artifact"), error.message, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.program.artifact"), error.message, 'failed');
   };
 
   // The language selector is populated from the runtime's own declared catalog -- never
@@ -8937,7 +8938,7 @@ function bindProgramWorkspace(form, model) {
   if (!runtimeClient) connectRuntime();
   runtimeClient.programLanguages().then(applyLanguageCatalog).catch(error => {
     languageStatus.textContent = uiText("workspace.app.could.not.load.the.languages.this.runtime", { reason: error.message });
-    addActivityMessage(uiText("workspace.notice.program.artifact.2"), error.message, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.program.artifact.2"), error.message, 'failed');
   });
 
   panel.querySelector('[data-program-operation="build"]').addEventListener('click', async () => {
@@ -8967,7 +8968,7 @@ function bindProgramWorkspace(form, model) {
       });
       const result = settled?.programs.find(program => program.nodeId === draft.id);
       if (result) {
-        addActivityMessage(uiText("workspace.notice.program.build.2"), `${draft.id} · ${result.phase.toLowerCase()}`,
+        addActivityMessage(uiMessage("workspace.notice.program.build.2"), `${draft.id} · ${result.phase.toLowerCase()}`,
           result.ready ? 'completed' : result.phase === 'APPROVAL_REQUIRED' ? 'running' : 'failed');
       }
     } catch (error) { fail(error); }
@@ -9582,19 +9583,24 @@ function onSearch(q) {
 // there reaches all three instead of two of them.
 const NODE_TYPES = NODE_VISUAL_TYPES;
 const EDGE_TYPES = [
-  { type: 'failed', label: 'FAILED', dash: true },
+  { type: 'failed', labelKey: 'edgeVisualType.failed', dash: true },
   // Reads FAILURE ROUTE, not FAILED, and sits immediately beside it: the two names next to
   // each other are what tells an author the list holds two different things, which is precisely the
   // confusion this distinction prevents. The other entries are outcome tokens, spelled as an author would
   // type them into the Outcome field; this one is not an outcome at all, so it is named for what it
   // is rather than for a word someone could type.
-  { type: 'failure', label: 'FAILURE ROUTE', dash: true },
-  { type: 'completed', label: 'COMPLETED' }, { type: 'continue', label: 'CONTINUE' },
-  { type: 'continueP', label: 'CONTINUE (parallel)', thick: true },
-  { type: 'validate', label: 'VALIDATE' }, { type: 'ping', label: 'PING', dash: true },
-  { type: 'outcome', label: '*_OUTCOME' }, { type: 'callback', label: 'CALLBACK_*' },
-  { type: 'undefined', label: 'UNDEFINED', dash: true },
+  { type: 'failure', labelKey: 'edgeVisualType.failure', dash: true },
+  { type: 'completed', labelKey: 'edgeVisualType.completed' },
+  { type: 'continue', labelKey: 'edgeVisualType.continue' },
+  { type: 'continueP', labelKey: 'edgeVisualType.continueP', thick: true },
+  { type: 'validate', labelKey: 'edgeVisualType.validate' },
+  { type: 'ping', labelKey: 'edgeVisualType.ping', dash: true },
+  { type: 'outcome', labelKey: 'edgeVisualType.outcome' },
+  { type: 'callback', labelKey: 'edgeVisualType.callback' },
+  { type: 'undefined', labelKey: 'edgeVisualType.undefined', dash: true },
 ];
+
+const visualTypeLabel = type => uiText(type.labelKey);
 
 function buildLegend() {
   // THE CHIP CARRIES THE CANVAS GLYPH, not colour alone. In the full form the label carries
@@ -9606,28 +9612,30 @@ function buildLegend() {
   // Native buttons give the filter tiles their missing keyboard route. Their explicit accessible
   // names and delegated visual tooltips carry both action and identity in the compact form.
   visualTooltip.dismiss();
-  document.getElementById('leg-nodes').innerHTML = NODE_TYPES.map(t =>
-    `<button class="li" type="button" id="li-node-${t.type}" data-legend-kind="node" data-legend-type="${t.type}"
-          data-tooltip="Filter node type: ${escapeAttribute(t.label)}"
-          aria-label="Filter node type: ${escapeAttribute(t.label)}">
+  document.getElementById('leg-nodes').innerHTML = NODE_TYPES.map(t => {
+    const label = visualTypeLabel(t);
+    return `<button class="li" type="button" id="li-node-${t.type}" data-legend-kind="node" data-legend-type="${t.type}"
+          data-tooltip="${escapeAttribute(uiText('legend.filterNodeType', { label }))}"
+          aria-label="${escapeAttribute(uiText('legend.filterNodeType', { label }))}">
        <div class="li-dot" style="background:${NODE_TYPE_COLORS[t.type]}20;border:2px solid ${NODE_TYPE_COLORS[t.type]}"
          ><span class="li-glyph" aria-hidden="true">${escapeHtml((NODE_ICONS[t.type] || '').trim())}</span></div>
-       <span class="li-label">${escapeHtml(t.label)}</span>
+       <span class="li-label">${escapeHtml(label)}</span>
      </button>`
-  ).join('');
+  }).join('');
 
   document.getElementById('leg-edges').innerHTML = EDGE_TYPES.map(t => {
     const color = EDGE_TYPE_COLORS[t.type];
+    const label = visualTypeLabel(t);
     const lineEl = t.dash
       ? `<div class="li-dash" style="color:${color}"></div>`
       : `<div class="li-line" style="background:${color};height:${t.thick?4:2}px"></div>`;
     // Edge types already carry SHAPE — dash pattern and thickness — so the short form keeps the
     // tile and only drops the word. The name still rides along for assistive technology.
     return `<button class="li" type="button" id="li-edge-${t.type}" data-legend-kind="edge" data-legend-type="${t.type}"
-          data-tooltip="Filter edge type: ${escapeAttribute(t.label)}"
-          aria-label="Filter edge type: ${escapeAttribute(t.label)}">
+          data-tooltip="${escapeAttribute(uiText('legend.filterEdgeType', { label }))}"
+          aria-label="${escapeAttribute(uiText('legend.filterEdgeType', { label }))}">
         ${lineEl}
-        <span class="li-label">${escapeHtml(t.label)}</span>
+        <span class="li-label">${escapeHtml(label)}</span>
       </button>`;
   }).join('');
 }
@@ -9728,7 +9736,7 @@ async function paletteMutation(operation) {
     await loadPersonalPalettes(runtimeClient);
   } catch (error) {
     showInspectorMessage(error.message || uiText("workspace.notice.personal.palette.update.failed"));
-    addActivityMessage(uiText("workspace.notice.palette"), error.message || uiText("workspace.notice.personal.palette.update.failed.2"), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.palette"), error.message || uiMessage("workspace.notice.personal.palette.update.failed.2"), 'failed');
   }
 }
 
@@ -9770,7 +9778,7 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
     await client.validateNodeTemplate(template.id);
   } catch (error) {
     showInspectorMessage(error.message || uiText("workspace.notice.the.saved.node.is.no.longer.valid.for.this"));
-    addActivityMessage(uiText("workspace.notice.palette.2"), error.message || uiText("workspace.notice.saved.node.validation.failed"), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.palette.2"), error.message || uiMessage("workspace.notice.saved.node.validation.failed"), 'failed');
     return null;
   }
   if (runtimeClient !== client || workspace.active !== owner || graphData !== graph
@@ -9794,7 +9802,7 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
   cy.batch(() => applyVisualStyle(visualStyle, cy, workspace.active));
   updateStats(); scheduleMinimap(); updateHistoryUi();
   showNodeInfo(cy.getElementById(result.node.id));
-  addActivityMessage(uiText("workspace.notice.editor.5"), uiText("workspace.notice.inserted.saved.node", { name: template.name }), 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.5"), uiMessage("workspace.notice.inserted.saved.node", { name: template.name }), 'completed');
   return result.node;
 }
 
@@ -9826,9 +9834,10 @@ function toggleLegendFilter(elType, type) {
   clearFilter();
   filterActive = { elType, type, key };
   liEl.classList.add('filt');
-  const label = elType === 'node'
-    ? NODE_TYPES.find(entry => entry.type === type)?.label
-    : EDGE_TYPES.find(entry => entry.type === type)?.label;
+  const visualType = elType === 'node'
+    ? NODE_TYPES.find(entry => entry.type === type)
+    : EDGE_TYPES.find(entry => entry.type === type);
+  const label = visualType && visualTypeLabel(visualType);
   if (label) {
     liEl.setAttribute('aria-label', uiText("workspace.app.clear.filter", { label: label }));
     liEl.dataset.tooltip = uiText("workspace.app.clear.filter.2", { label });
@@ -10156,7 +10165,7 @@ function newWorkflow() {
   clearActivity();
   // The message must describe the START -> Do something -> {End, Error} shape that
   // createWorkflowDocument() actually builds.
-  addActivityMessage(uiText("workspace.notice.editor.6"), uiText("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
 }
 
 function createStartupImportPlaceholder() {
@@ -10235,7 +10244,7 @@ function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}
     rebuildGraph({ syncPositions: false });
     updateHistoryUi();
     showNodeInfo(cy.getElementById(inserted.primary.id));
-    addActivityMessage(uiText("workspace.notice.editor.7"), uiText("workspace.notice.inserted.as.ordinary.nodes.and.edges", { displayName: preset.displayName }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.editor.7"), uiMessage("workspace.notice.inserted.as.ordinary.nodes.and.edges", { displayName: preset.displayName }), 'completed');
   });
 }
 
@@ -10327,7 +10336,7 @@ function markDocumentDownloaded(prepared, { announce = true } = {}) {
   if (target.id === workspace.activeId) {
     editHistory.markSaved();
     updateHistoryUi();
-    if (announce) addActivityMessage(uiText("workspace.notice.editor.8"), uiText("workspace.notice.saved", { filename: prepared.filename }), 'completed');
+    if (announce) addActivityMessage(uiMessage("workspace.notice.editor.8"), uiMessage("workspace.notice.saved", { filename: prepared.filename }), 'completed');
   } else {
     syncPaneHeaders();
     syncDocumentSwitcher();
@@ -10428,7 +10437,7 @@ function applyHistoryStep(command, verb) {
   selectCommandTargets(command);
   refreshVisualGroups();
   updateHistoryUi();
-  addActivityMessage(uiText("workspace.notice.editor.9"), `${verb}: ${command.label}`, 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.9"), `${verb}: ${command.label}`, 'completed');
 }
 
 // Undo restores the document; the renderer follows. Selecting whatever the step touched — when it
@@ -10865,7 +10874,7 @@ function commitEdgeGestureAt(candidateId, { skipDraftGuard = false } = {}) {
     const refusal = `Cannot connect: ${candidate.reason}.`;
     showInspectorMessage(refusal);
     announceGraph(refusal);
-    addActivityMessage(uiText("workspace.notice.editor.10"), refusal, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.editor.10"), refusal, 'failed');
     return false;
   }
   if (!skipDraftGuard) {
@@ -10909,7 +10918,7 @@ function commitEdgeGestureAt(candidateId, { skipDraftGuard = false } = {}) {
     edge: describeEdge(edge, session.graph),
   });
   announceGraph(done);
-  addActivityMessage(uiText("workspace.notice.editor.11"), done, 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.11"), done, 'completed');
   return true;
 }
 
@@ -11637,7 +11646,7 @@ function createNodeFromStage(position, behavior = selectedCatalogBehavior, sourc
     const refusal = `Cannot add and connect node: ${connected.reason}.`;
     showInspectorMessage(refusal);
     announceGraph(refusal);
-    addActivityMessage(uiText("workspace.notice.editor.12"), refusal, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.editor.12"), refusal, 'failed');
     return null;
   }
   const node = connected?.node || addNodeAt(graphData, position, editHistory, { descriptor });
@@ -11650,7 +11659,7 @@ function createNodeFromStage(position, behavior = selectedCatalogBehavior, sourc
   scheduleMinimap();
   updateHistoryUi();
   showNodeInfo(cy.getElementById(node.id));
-  addActivityMessage(uiText("workspace.notice.editor.13"), edge ? uiText("workspace.notice.created.and.connected", { id: node.id, sourceId: sourceId, id2: node.id }) : uiText("workspace.notice.created", { id: node.id }), 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.13"), edge ? uiMessage("workspace.notice.created.and.connected", { id: node.id, sourceId: sourceId, id2: node.id }) : uiMessage("workspace.notice.created", { id: node.id }), 'completed');
   return node;
 }
 
@@ -11678,8 +11687,8 @@ function deleteCurrentSelection({ skipDraftGuard = false } = {}) {
   updateStats();
   scheduleMinimap();
   updateHistoryUi();
-  addActivityMessage(uiText("workspace.notice.editor.14"),
-    uiText("workspace.notice.deleted.graphElements", {
+  addActivityMessage(uiMessage("workspace.notice.editor.14"),
+    uiMessage("workspace.notice.deleted.graphElements", {
       nodeSummary: uiText("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
       edgeSummary: uiText("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
     }), 'completed');
@@ -11697,7 +11706,7 @@ function migrateJoinSemanticsAction({ skipDraftGuard = false } = {}) {
   if (!graphData || !modifyEnabled || !canModifyGraph(graphData, layoutMode)) return false;
   const plan = planJoinSemanticsMigration(graphData);
   if (plan.alreadyDeclared) {
-    addActivityMessage(uiText("workspace.notice.editor.15"), uiText("workspace.app.joinMigration.alreadyDeclared"), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.editor.15"), uiMessage("workspace.app.joinMigration.alreadyDeclared"), 'completed');
     return false;
   }
   const summary = plan.changes.length
@@ -11709,7 +11718,7 @@ function migrateJoinSemanticsAction({ skipDraftGuard = false } = {}) {
   rebuildGraph();
   updateHistoryUi();
   refreshCommands();
-  addActivityMessage(uiText("workspace.notice.editor.16"), uiText("workspace.app.joinMigration.completed", {
+  addActivityMessage(uiMessage("workspace.notice.editor.16"), uiMessage("workspace.app.joinMigration.completed", {
     count: plan.changes.length,
   }), 'completed');
   const selected = cy?.nodes(':selected');
@@ -11739,7 +11748,7 @@ function duplicateNodeInDocument(owner, instance, nodeId, { skipDraftGuard = fal
   refreshCommands();
   showNodeInfo(added);
   owner.pane?.focus({ preventScroll: true });
-  addActivityMessage(uiText("workspace.notice.editor.17"), uiText("workspace.notice.duplicated.as", { nodeId: nodeId, id: copy.id }), 'completed');
+  addActivityMessage(uiMessage("workspace.notice.editor.17"), uiMessage("workspace.notice.duplicated.as", { nodeId: nodeId, id: copy.id }), 'completed');
   return true;
 }
 
@@ -11933,7 +11942,7 @@ async function connectRuntime(atBoot = false) {
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
       renderNodeCatalog();
-      addActivityMessage(uiText("workspace.notice.catalog"), catalogEmptyState(error, []).message, 'failed');
+      addActivityMessage(uiMessage("workspace.notice.catalog"), catalogEmptyState(error, []).message, 'failed');
     });
   } catch (error) {
     graphAuthoringCapability = unavailableAuthoringCapability(error);
@@ -11942,7 +11951,7 @@ async function connectRuntime(atBoot = false) {
     nodeCatalogPending = false;
     renderNodeCatalog();
     setRuntimeConnectionState('error', error.message);
-    addActivityMessage(uiText("workspace.notice.connection"), error.message, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.connection"), error.message, 'failed');
     const outcome = { kind: 'error', code: 'connection-failed',
       message: 'The Ravenroot service connection failed. Retry when the service is available.' };
     startupImportController?.updateRuntime(outcome);
@@ -12098,7 +12107,7 @@ function stopCurrentSourceSession() {
 
 function showUnavailableLifecycle(reason) {
   showInspectorMessage(reason);
-  addActivityMessage(uiText("workspace.notice.lifecycle.control.unavailable"), reason, 'failed');
+  addActivityMessage(uiMessage("workspace.notice.lifecycle.control.unavailable"), reason, 'failed');
   return false;
 }
 
@@ -12111,8 +12120,8 @@ async function executionLifecycleCommand(action) {
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight || !flight.executionId || flight.executionId === PENDING_EXECUTION) {
     if (flight) releaseExecutionCommand(flight);
-    addActivityMessage(uiText("workspace.notice.execution.control.unavailable"),
-      uiText("workspace.notice.another.command.is.already.in.flight.or.this.execution"), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.execution.control.unavailable"),
+      uiMessage("workspace.notice.another.command.is.already.in.flight.or.this.execution"), 'failed');
     refreshCommands();
     return false;
   }
@@ -12120,7 +12129,7 @@ async function executionLifecycleCommand(action) {
     && executionCommandIsCurrent(flight);
   if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
   refreshCommands();
-  addActivityMessage(action, uiText("workspace.notice.requested.for.execution", { detail1: action[0].toUpperCase(), detail2: action.slice(1), shortId: shortId(flight.executionId) }));
+  addActivityMessage(action, uiMessage("workspace.notice.requested.for.execution", { detail1: action[0].toUpperCase(), detail2: action.slice(1), shortId: shortId(flight.executionId) }));
   try {
     const result = await requestExecutionLifecycle(action, {
       client: flight.client,
@@ -12134,8 +12143,8 @@ async function executionLifecycleCommand(action) {
       if (workspace.activeId === owner.id) {
         const reason = result.observationError?.message || result.commandError?.message
           || 'the runtime returned no readable reason';
-        addActivityMessage(uiText("workspace.notice.status.unknown", { action: action }),
-          uiText("workspace.notice.execution.could.not.be.authoritatively.read.after.the.command", { shortId: shortId(flight.executionId), reason: reason }), 'failed');
+        addActivityMessage(uiMessage("workspace.notice.status.unknown", { action: action }),
+          uiMessage("workspace.notice.execution.could.not.be.authoritatively.read.after.the.command", { shortId: shortId(flight.executionId), reason: reason }), 'failed');
         syncExecutionReconciliationChrome(true);
       }
       return false;
@@ -12152,10 +12161,10 @@ async function executionLifecycleCommand(action) {
       const status = String(outcome?.status || 'active').toLowerCase();
       const paused = outcome?.paused ? 'paused' : 'not paused';
       addActivityMessage(action,
-        uiText("workspace.notice.authoritative.state.execution", { commandOutcome: commandOutcome, status: status, paused: paused, shortId: shortId(flight.executionId) }),
+        uiMessage("workspace.notice.authoritative.state.execution", { commandOutcome: commandOutcome, status: status, paused: paused, shortId: shortId(flight.executionId) }),
         result.commandError ? 'failed' : 'completed');
-      if (result.commandError) addActivityMessage(uiText("workspace.notice.request.response.unavailable", { action: action }),
-        uiText("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: result.commandError.message }),
+      if (result.commandError) addActivityMessage(uiMessage("workspace.notice.request.response.unavailable", { action: action }),
+        uiMessage("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: result.commandError.message }),
         'failed');
       document.getElementById('activity-summary').textContent =
         uiText("workspace.app.execution", { action: action[0].toUpperCase(), action2: action.slice(1), status: status, executionId: shortId(flight.executionId) });
@@ -12199,8 +12208,8 @@ function updateSourceSession(owner, status, token = null,
     // an unexplained blank canvas is exactly the symptom this binding exists to remove.
     session.deploymentUnreported = true;
     if (owner === workspace.active) {
-      addActivityMessage(uiText("workspace.notice.source.activity.not.attributable"),
-        uiText("workspace.notice.this.runtime.reported.no.deployment.identity.for.the.session"), 'failed');
+      addActivityMessage(uiMessage("workspace.notice.source.activity.not.attributable"),
+        uiMessage("workspace.notice.this.runtime.reported.no.deployment.identity.for.the.session"), 'failed');
     }
   }
   session.state = status.state;
@@ -12220,7 +12229,7 @@ function updateSourceSession(owner, status, token = null,
       void presentRuntimeRefusal(owner, status.failure, 'Source session refused');
     } else if (changed && !silentActivity) {
       const detail = status.diagnostic || `${status.sourceCount} source node${status.sourceCount === 1 ? '' : 's'} · local process only`;
-      addActivityMessage(uiText("workspace.notice.source.session", { detail1: status.state.toLowerCase() }), detail,
+      addActivityMessage(uiMessage("workspace.notice.source.session", { detail1: status.state.toLowerCase() }), detail,
         status.state === 'FAILED' || status.state === 'DEGRADED' || status.state === 'UNKNOWN'
           ? 'failed' : 'completed');
     }
@@ -12267,8 +12276,8 @@ async function observeSourceSession(owner, token) {
         state: recoverSourceSessionState(owner.sourceSession.state),
         sourceCount: owner.sourceSession.sourceCount, diagnostic: '',
       }, token, { observationUnavailable: true });
-      if (!wasUnavailable && owner === workspace.active) addActivityMessage(uiText("workspace.notice.source.session.status.unavailable"),
-        uiText("workspace.notice.the.local.session.may.still.be.running.the.editor"), 'failed');
+      if (!wasUnavailable && owner === workspace.active) addActivityMessage(uiMessage("workspace.notice.source.session.status.unavailable"),
+        uiMessage("workspace.notice.the.local.session.may.still.be.running.the.editor"), 'failed');
     }
   }
   if (owner.sourceSession.pollController === controller) owner.sourceSession.pollController = null;
@@ -12313,8 +12322,8 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
       diagnostic: explicitFailure ? 'The server rejected the source session start.' : '',
       failure: error?.finding || null,
     }, token, { observationUnavailable: !explicitFailure, silentActivity: explicitFailure });
-    if (owner === workspace.active && !error?.finding) addActivityMessage(uiText("workspace.notice.source.session.request.failed"),
-      explicitFailure ? uiText("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? ` · incident ${error.incidentId}` : '' }) : uiText("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
+    if (owner === workspace.active && !error?.finding) addActivityMessage(uiMessage("workspace.notice.source.session.request.failed"),
+      explicitFailure ? uiMessage("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? ` · incident ${error.incidentId}` : '' }) : uiMessage("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
     if (!explicitFailure && !session.stopRequested) void observeSourceSession(owner, token);
     return false;
   } finally {
@@ -12370,8 +12379,8 @@ async function stopActiveSourceSession(owner) {
       updateSourceSession(owner, {
         state: recoverSourceSessionState(stateBeforeStop), sourceCount: session.sourceCount, diagnostic: '',
       }, token, { observationUnavailable: true });
-      if (owner === workspace.active) addActivityMessage(uiText("workspace.notice.source.session.stop.failed"),
-        uiText("workspace.notice.the.stop.response.was.unavailable.the.editor.will.keep"), 'failed');
+      if (owner === workspace.active) addActivityMessage(uiMessage("workspace.notice.source.session.stop.failed"),
+        uiMessage("workspace.notice.the.stop.response.was.unavailable.the.editor.will.keep"), 'failed');
       void observeSourceSession(owner, token);
       return false;
     } finally {
@@ -12393,7 +12402,7 @@ async function stopActiveSourceSession(owner) {
 // performs a reconciliation-only preflight and sends no new POST until GET proves this run terminal.
 function reportExecutionOutcome(outcome) {
   for (const message of executionOutcomeMessages(outcome)) {
-    addActivityMessage(message.title, message.detail, message.css);
+    addActivityMessage(uiMessage(message.titleKey), uiMessage(message.detailKey, message.detailParams), message.css);
   }
 }
 
@@ -12434,8 +12443,8 @@ function settleReconciledExecution(owner, executionId, client, generation, outco
   if (fetchOutcome) void fetchAndReportExecutionOutcome(owner, token);
   else reportExecutionOutcomeOnce(owner, token, outcome);
   if (workspace.activeId === owner.id && recoveredFromUnknown) {
-    addActivityMessage(uiText("workspace.notice.execution.status.recovered"),
-      uiText("workspace.notice.execution.is.test.and.run.are.available.again", { shortId: shortId(executionId), detail2: String(outcome.status).toLowerCase() }),
+    addActivityMessage(uiMessage("workspace.notice.execution.status.recovered"),
+      uiMessage("workspace.notice.execution.is.test.and.run.are.available.again", { shortId: shortId(executionId), detail2: String(outcome.status).toLowerCase() }),
       'completed');
     document.getElementById('activity-summary').textContent =
       uiText("workspace.app.reconciled.execution", { status: outcome.status, executionId: shortId(executionId) });
@@ -12458,8 +12467,8 @@ async function reconcileTestCompletion(owner, executionId, client) {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
         const reason = error?.message || 'the runtime returned no readable reason';
-        addActivityMessage(uiText("workspace.notice.execution.status.unknown"),
-          uiText("workspace.notice.execution.could.not.be.reconciled.after.checks.test.and", { shortId: shortId(executionId), failureCount: failureCount, reason: reason }),
+        addActivityMessage(uiMessage("workspace.notice.execution.status.unknown"),
+          uiMessage("workspace.notice.execution.could.not.be.reconciled.after.checks.test.and", { shortId: shortId(executionId), failureCount: failureCount, reason: reason }),
           'failed');
         document.getElementById('activity-summary').textContent =
           uiText("workspace.app.status.unknown.execution.test.run.will.check", { activeExecutionId: shortId(executionId) });
@@ -12472,8 +12481,8 @@ async function reconcileTestCompletion(owner, executionId, client) {
         setExecutionPaused(owner, Boolean(outcome?.paused));
         if (owner.id !== workspace.activeId) return;
         syncExecutionReconciliationChrome(true);
-        addActivityMessage(uiText("workspace.notice.execution.status.available"),
-          uiText("workspace.notice.execution.is.test.and.run.remain.unavailable.while.it", { shortId: shortId(executionId), detail2: String(outcome?.status || 'non-terminal').toLowerCase() }));
+        addActivityMessage(uiMessage("workspace.notice.execution.status.available"),
+          uiMessage("workspace.notice.execution.is.test.and.run.remain.unavailable.while.it", { shortId: shortId(executionId), detail2: String(outcome?.status || 'non-terminal').toLowerCase() }));
       },
       onTerminal: ({ outcome, recoveredFromUnknown }) => {
         setExecutionPaused(owner, false);
@@ -12503,14 +12512,14 @@ async function preflightUnknownExecution(owner, flight) {
       setExecutionPaused(owner, Boolean(outcome?.paused));
       if (workspace.activeId === owner.id) {
         syncExecutionReconciliationChrome(true);
-        addActivityMessage(uiText("workspace.notice.execution.still.active"),
-          uiText("workspace.notice.execution.is.no.new.execution.was.submitted", { shortId: shortId(executionId), detail2: String(outcome?.status || 'non-terminal').toLowerCase() }), 'failed');
+        addActivityMessage(uiMessage("workspace.notice.execution.still.active"),
+          uiMessage("workspace.notice.execution.is.no.new.execution.was.submitted", { shortId: shortId(executionId), detail2: String(outcome?.status || 'non-terminal').toLowerCase() }), 'failed');
       }
     },
     onUnavailable: error => {
       if (executionCommandIsCurrent(flight) && workspace.activeId === owner.id) {
-        addActivityMessage(uiText("workspace.notice.execution.status.still.unknown"),
-          uiText("workspace.notice.execution.could.not.be.checked.no.new.execution.was", { shortId: shortId(executionId), message: error.message }), 'failed');
+        addActivityMessage(uiMessage("workspace.notice.execution.status.still.unknown"),
+          uiMessage("workspace.notice.execution.could.not.be.checked.no.new.execution.was", { shortId: shortId(executionId), message: error.message }), 'failed');
       }
     },
   });
@@ -12595,15 +12604,15 @@ async function playGraph(mode = 'test') {
       document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(uiText("workspace.template.app.cannot.execute"))}</h4>
         <p>${escapeHtml(blocked ? `${blocked.id}: ${state?.detail || 'artifact is not ACTIVE'}`
           : 'A program artifact is not ACTIVE')}</p></div>`;
-      addActivityMessage(uiText("workspace.notice.program.readiness"), uiText("workspace.notice.graph.execution.is.gated.until.every.program.artifact.is"),
+      addActivityMessage(uiMessage("workspace.notice.program.readiness"), uiMessage("workspace.notice.graph.execution.is.gated.until.every.program.artifact.is"),
         'failed');
       return;
     }
   }
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight) {
-    addActivityMessage(uiText("workspace.notice.execution.status.check.already.in.progress"),
-      uiText("workspace.notice.no.new.execution.was.submitted.wait.for.the.current"), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.execution.status.check.already.in.progress"),
+      uiMessage("workspace.notice.no.new.execution.was.submitted.wait.for.the.current"), 'failed');
     return;
   }
 
@@ -12628,7 +12637,7 @@ async function playGraph(mode = 'test') {
     const message = nodeCatalogFailure
       ? 'The trusted node catalog is unavailable, so Run cannot safely decide whether this graph requires a listener session.'
       : 'The trusted node catalog is still loading. Wait for it before running this graph.';
-    addActivityMessage(uiText("workspace.notice.run.unavailable"), message, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.run.unavailable"), message, 'failed');
     return;
   }
   const sourceCount = mode === 'run' ? effectiveSourceCount(ownerGraph, nodeTypeCatalog) : 0;
@@ -12705,14 +12714,14 @@ async function playGraph(mode = 'test') {
 
   const cancelledOutcome = enforceExecutionOutcomeCapacity(owner.execution);
   if (cancelledOutcome) {
-    addActivityMessage(uiText("workspace.notice.outcome.lookup.cancelled"),
-      uiText("workspace.notice.execution.outcome.details.were.still.unavailable.when.a.newer", { shortId: shortId(cancelledOutcome.executionId) }), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.outcome.lookup.cancelled"),
+      uiMessage("workspace.notice.execution.outcome.details.were.still.unavailable.when.a.newer", { shortId: shortId(cancelledOutcome.executionId) }), 'failed');
   }
 
   resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
   setDocumentExecution(owner, PENDING_EXECUTION, null, executionClient);
   refreshCommands();
-  addActivityMessage(uiText("workspace.notice.request"), mode === 'run' ? uiText("workspace.notice.submitting.immutable.graphml.snapshot.for.real.node.execution") : uiText("workspace.notice.submitting.immutable.graphml.snapshot.for.passthrough.test"));
+  addActivityMessage(uiMessage("workspace.notice.request"), mode === 'run' ? uiMessage("workspace.notice.submitting.immutable.graphml.snapshot.for.real.node.execution") : uiMessage("workspace.notice.submitting.immutable.graphml.snapshot.for.passthrough.test"));
   try {
     const submission = await executionClient[mode === 'run' ? 'run' : 'start'](
       graphMl, payload);
@@ -12728,8 +12737,8 @@ async function playGraph(mode = 'test') {
       submission.processInstanceId ?? null);
     void reconcileTestCompletion(owner, submission.executionId, executionClient);
     if (workspace.activeId !== owner.id) return;
-    addActivityMessage(uiText("workspace.notice.accepted"),
-      uiText("workspace.notice.execution.graph", { detail1: submission.executionPolicy || 'policy unreported', shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
+    addActivityMessage(uiMessage("workspace.notice.accepted"),
+      uiMessage("workspace.notice.execution.graph", { detail1: submission.executionPolicy || 'policy unreported', shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
       'completed');
     if (owner.execution.finished.has(submission.executionId)) refreshCommands();
     scheduleWorkspacePersistence();
@@ -12741,7 +12750,7 @@ async function playGraph(mode = 'test') {
     refreshCommands();
     if (error?.finding) await presentRuntimeRefusal(owner, error.finding, 'Execution refused');
     else {
-      addActivityMessage(uiText("workspace.notice.request.failed"), error.message, 'failed');
+      addActivityMessage(uiMessage("workspace.notice.request.failed"), error.message, 'failed');
       showInspectorMessage(error.message);
     }
   }
@@ -13243,22 +13252,28 @@ function appendActivityEvent(event) {
   }) : null;
   if (appendLogEmissionRow(event, css, output)) return;
 
-  const title = event.nodeId ? `${type} · ${event.nodeId}` : type;
+  const title = event.nodeId
+    ? uiMessage('activity.event.nodeTitle', { type, nodeId: event.nodeId })
+    : uiMessage('activity.event.title', { type });
   // Named for what each number is. `active=` was the old label and it named neither.
-  const counts = event.nodeId
-    ? ` · instances=${Number(event.activeInstances) || 0} inFlight=${Number(event.inFlightArrivals) || 0}`
-    : '';
   // `detail` is an internal diagnostic channel and may contain exception/payload text. Older peers
   // send no public description, so their safe rendering is the fixed type fallback -- never detail.
   const message = runtimeActivityMessage(event.message, {
     redacted: event.messageRedacted,
     truncated: event.messageTruncated,
   });
-  const diagnosticFlags = projection => [projection.redacted ? 'redacted' : '', projection.truncated ? 'truncated' : '']
-    .filter(Boolean).join(', ');
-  const detail = `${publicExecutionDescription(event.description, type, event.publicReason)}${counts}`
-    + (message.value ? ` · ${message.value}${diagnosticFlags(message) ? ` (${diagnosticFlags(message)})` : ''}` : '')
-    + (output ? ` · output=${output.displayValue}${diagnosticFlags(output) ? ` (${diagnosticFlags(output)})` : ''}` : '');
+  const diagnosticFlags = projection => [projection.redacted ? uiText('activity.flag.redacted') : '',
+    projection.truncated ? uiText('activity.flag.truncated') : ''].filter(Boolean).join(', ');
+  const detail = uiComputed(() => publicExecutionDescription(event.description, type, event.publicReason)
+    + (event.nodeId ? uiText('activity.event.counts', {
+      instances: Number(event.activeInstances) || 0, inFlight: Number(event.inFlightArrivals) || 0,
+    }) : '')
+    + (message.value ? uiText('activity.event.diagnostic', {
+      value: message.value, flags: diagnosticFlags(message) ? ` (${diagnosticFlags(message)})` : '',
+    }) : '')
+    + (output ? uiText('activity.event.output', {
+      value: output.displayValue, flags: diagnosticFlags(output) ? ` (${diagnosticFlags(output)})` : '',
+    }) : ''));
   appendActivity(title, detail, css, event.occurredAt, activityIdentifiersHtml(event));
   noteActivitySummary(event);
 }
@@ -13290,6 +13305,46 @@ function addActivityMessage(title, detail, css = '') {
   appendActivity(title, detail, css, new Date().toISOString());
 }
 
+// Synthetic activity stays semantic until it reaches the row. This lets a locale change repaint
+// notices that are already mounted without replaying events, losing scroll position, or attempting
+// to recover keys by comparing translated English text.
+function uiMessage(key, params = {}) {
+  return Object.freeze({ key, params: Object.freeze({ ...params }) });
+}
+
+function uiComputed(render) {
+  return Object.freeze({ render });
+}
+
+function activityMessageText(value) {
+  if (value && typeof value === 'object' && typeof value.render === 'function') return value.render();
+  return value && typeof value === 'object' && typeof value.key === 'string'
+    ? uiText(value.key, value.params)
+    : String(value || '');
+}
+
+function bindActivityMessage(element, value) {
+  element.textContent = activityMessageText(value);
+  if (value && typeof value === 'object'
+      && (typeof value.key === 'string' || typeof value.render === 'function')) {
+    element.__ravenrootUiMessage = value;
+  }
+}
+
+function refreshActivityLocale() {
+  document.querySelectorAll('#activity-log .activity-title, #activity-log .activity-detail')
+    .forEach(element => {
+      if (element.__ravenrootUiMessage) {
+        element.textContent = activityMessageText(element.__ravenrootUiMessage);
+      }
+    });
+  document.querySelectorAll('#activity-log .activity-time[data-occurred-at]').forEach(element => {
+    element.textContent = uiDateTime(new Date(element.dataset.occurredAt), {
+      timeStyle: 'medium', hour12: false,
+    });
+  });
+}
+
 // `identifiersHtml` is optional: `addActivityMessage`'s own synthetic UI messages ("Submitting…",
 // "request failed") are not about one specific execution event and carry no identifiers to show.
 function appendActivity(title, detail, css, occurredAt, identifiersHtml = '') {
@@ -13300,17 +13355,18 @@ function appendActivity(title, detail, css, occurredAt, identifiersHtml = '') {
   const timeElement = document.createElement('span');
   timeElement.className = 'activity-time';
   timeElement.textContent = time;
+  timeElement.dataset.occurredAt = occurredAt;
   const dot = document.createElement('span');
   dot.className = 'activity-dot';
   const content = document.createElement('div');
   content.className = 'activity-content';
   const titleElement = document.createElement('div');
   titleElement.className = 'activity-title';
-  titleElement.textContent = String(title || '');
+  bindActivityMessage(titleElement, title);
   const detailElement = document.createElement('div');
   detailElement.className = 'activity-detail';
   // A text sink by construction: markup, URLs and entity syntax remain literal log text.
-  detailElement.textContent = String(detail || '');
+  bindActivityMessage(detailElement, detail);
   content.append(titleElement, detailElement);
   if (identifiersHtml) {
     const identifiersRow = document.createElement('div');
@@ -14095,7 +14151,7 @@ async function loadFileObj(file) {
       const graph = parsePreparedGraph(text, file.name, { maxBytes });
       openDocument({ name: file.name, graph });
       clearActivity();
-      addActivityMessage(uiText("workspace.notice.editor.18"), uiText("workspace.notice.loaded.2", { name: file.name }), 'completed');
+      addActivityMessage(uiMessage("workspace.notice.editor.18"), uiMessage("workspace.notice.loaded.2", { name: file.name }), 'completed');
     },
     onRejected: err => alert(uiText("workspace.app.error") + err.message),
     onError: err => {
@@ -14228,7 +14284,7 @@ async function runStartupImport({ target, binding, signal }) {
     openDocument({ name: target.filename, graph,
       tenantId: activeWorkspaceScope?.tenantId ?? null });
     clearActivity();
-    addActivityMessage(uiText("workspace.notice.editor.19"), uiText("workspace.notice.imported", { filename: target.filename }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.editor.19"), uiMessage("workspace.notice.imported", { filename: target.filename }), 'completed');
   }
   scheduleWorkspacePersistence();
 }
@@ -15580,7 +15636,7 @@ async function openRepositoryGraph(requested = null) {
     applyAuthoringDocument(target, result, result.documentId);
     target.history.markSaved();
     updateHistoryUi();
-    addActivityMessage(uiText("workspace.notice.editor.20"), uiText("workspace.notice.opened.from", { documentId: result.documentId, repositoryDisplay: runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.editor.20"), uiMessage("workspace.notice.opened.from", { documentId: result.documentId, repositoryDisplay: runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay }), 'completed');
     return true;
   } catch (error) {
     setGraphAuthoringAvailability(false);
@@ -15614,7 +15670,7 @@ async function saveRepositoryGraph() {
     if (target.history === history && history.revision() === submittedRevision) {
       history.markSaved(); target.visualGroupPresentationDirty = false;
     }
-    addActivityMessage(uiText("workspace.notice.editor.21"), uiText("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.editor.21"), uiMessage("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
     updateHistoryUi(); return true;
   } catch (error) {
     target.authoring.saveError = error.message || 'The repository save failed.';
@@ -15663,7 +15719,7 @@ async function repositoryDelete() {
       completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
       target.history.markSaved();
     } else target.authoring.providerDocumentId = null;
-    addActivityMessage(uiText("workspace.notice.editor.22"), uiText("workspace.notice.deleted.the.draft.git.history.remains.available", { id: id }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.editor.22"), uiMessage("workspace.notice.deleted.the.draft.git.history.remains.available", { id: id }), 'completed');
     updateHistoryUi(); refreshCommands(); return true;
   } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.the.draft.could.not.be.deleted")); return false; }
 }
@@ -15672,7 +15728,7 @@ async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
   if (!gitAuthoringEnabled() || !id) return false;
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
-    addActivityMessage(uiText("workspace.notice.editor.23"), uiText("workspace.notice.graph.review", { detail1: result.reused ? 'Existing' : 'New', url: result.url }), 'completed'); return true;
+    addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", { detail1: result.reused ? 'Existing' : 'New', url: result.url }), 'completed'); return true;
   } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
 }
 
@@ -15695,7 +15751,7 @@ async function publishedArtifacts() {
     await graphAuthoringClient.importArtifact(match[1], releaseVersion, selected.sha256, selected.artifactRef);
     const result = await graphAuthoringClient.deploy(match[1], releaseVersion, deploymentId,
       selected.sha256, selected.artifactRef);
-    addActivityMessage(uiText("workspace.notice.deployment.4"), uiText("workspace.notice.pinned.v.and.registered.it.as.it.is.not", { graphId: result.graphId, releaseVersion: result.releaseVersion, deploymentId: result.deploymentId }), 'completed'); return true;
+    addActivityMessage(uiMessage("workspace.notice.deployment.4"), uiMessage("workspace.notice.pinned.v.and.registered.it.as.it.is.not", { graphId: result.graphId, releaseVersion: result.releaseVersion, deploymentId: result.deploymentId }), 'completed'); return true;
   } catch (error) { showInspectorMessage(error.message || uiText("workspace.notice.the.published.version.could.not.be.deployed")); return false; }
 }
 
@@ -16500,7 +16556,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       const result = await client.settleHumanTask(task, action, comment, response, { capability });
       if (!current()) return result;
       clearHumanTaskSelection();
-      addActivityMessage(uiText("workspace.notice.human.task"), uiText("workspace.notice.task", { detail1: action.toLowerCase(), shortId: shortId(task.taskId), outcome: result.outcome }),
+      addActivityMessage(uiMessage("workspace.notice.human.task"), uiMessage("workspace.notice.task", { detail1: action.toLowerCase(), shortId: shortId(task.taskId), outcome: result.outcome }),
         'completed');
       if (!current()) return result;
       await humanTaskController.refresh();
@@ -16545,14 +16601,14 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // at completion instead of replaying issuance-time identity claims.
     const result = await client.settleHumanTask(task, action, comment, typedResponse, { capability });
     clearHumanTaskSelection();
-    addActivityMessage(uiText("workspace.notice.human.task.2"), uiText("workspace.notice.task.2", { detail1: action.toLowerCase(), shortId: shortId(task.taskId), outcome: result.outcome }),
+    addActivityMessage(uiMessage("workspace.notice.human.task.2"), uiMessage("workspace.notice.task.2", { detail1: action.toLowerCase(), shortId: shortId(task.taskId), outcome: result.outcome }),
       'completed');
     await humanTaskController.refresh();
     return result;
   },
   onExternalReconcile: async task => {
     await humanTaskController.refresh();
-    addActivityMessage(uiText("workspace.notice.human.task.3"), uiText("workspace.notice.reconciled.external.response.task", { shortId: shortId(task.taskId) }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.human.task.3"), uiMessage("workspace.notice.reconciled.external.response.task", { shortId: shortId(task.taskId) }), 'completed');
   },
   onRevoke: async (task, launch) => {
     const client = runtimeClient;
@@ -16836,9 +16892,9 @@ const drawingModelController = createDrawingModelController({
       nodeSummary: uiText("workspace.notice.drawingModel.nodes", { count: nodeIds.length }),
       edgeSummary: uiText("workspace.notice.drawingModel.edges", { count: edgeIds.length }),
     }));
-    addActivityMessage(uiText("workspace.notice.drawing.model"), uiText("workspace.notice.inspected.mapped", { role: role, id: id }), 'completed');
+    addActivityMessage(uiMessage("workspace.notice.drawing.model"), uiMessage("workspace.notice.inspected.mapped", { role: role, id: id }), 'completed');
   },
-  notify: (message, state) => addActivityMessage(uiText("workspace.notice.drawing.model.2"), message, state),
+  notify: (message, state) => addActivityMessage(uiMessage("workspace.notice.drawing.model.2"), message, state),
 });
 window.ravenroot.drawingModels = drawingModelController;
 
@@ -16878,16 +16934,21 @@ uiLocalization.subscribe(() => {
   updateHistoryUi();
   updateModifyAvailability();
   updateStats();
+  buildLegend();
   renderRailPanels();
   renderNodeCatalog();
   renderPersonalPalettes();
+  const programApproveButton = document.getElementById('btn-program-approve');
+  if (programApproveButton) programApproveButton.textContent = uiText('workspace.app.approve.program.batch');
   renderSelectedHumanTasks();
   renderAssistantState();
   credentialsWindow?.refreshLocale?.();
   deploymentsWindow?.refreshLocale?.();
   drawingModelController?.refreshLocale?.();
+  workspace.documents.forEach(owner => owner.visualGroupsRenderer?.refreshLocale?.());
   refreshCommands();
   renderShortcutHelp();
+  refreshActivityLocale();
   if (selectedIds.length && cy && !cy.destroyed()) {
     cy.batch(() => selectedIds.forEach(id => cy.getElementById(id).select()));
     showSelectionInfo({ skipDraftGuard: true });

@@ -6,7 +6,7 @@ describe('execution outcome reconciliation in Runtime activity', () => {
     expect(executionOutcomeMessages({ status: 'COMPLETED', handledFailure: true,
       handledFailureNodes: ['mail-1'] })).toContainEqual({
       title: 'execution outcome', css: 'failed',
-      detail: 'COMPLETED with 1 handled node failure(s): mail-1',
+      detail: 'COMPLETED with one handled node failure: mail-1',
     });
   });
 
@@ -14,7 +14,7 @@ describe('execution outcome reconciliation in Runtime activity', () => {
     expect(executionOutcomeMessages({ status: 'COMPLETED', degraded: true,
       defaultedNodes: ['future-1', 'future-2'] })).toContainEqual({
       title: 'execution outcome', css: 'fallback',
-      detail: 'COMPLETED, degraded: 2 node(s) ran as an unresolved default: future-1, future-2',
+      detail: 'COMPLETED, degraded: 2 nodes ran as unresolved defaults: future-1, future-2',
     });
   });
 
@@ -38,7 +38,7 @@ describe('execution outcome reconciliation in Runtime activity', () => {
 
     it('states what did happen — no behaviour, traversal continued — and names the nodes', () => {
       const detail = bypassLine({ status: 'COMPLETED', bypassedNodes: ['a', 'b'] });
-      expect(detail).toContain('2 node(s) bypassed');
+      expect(detail).toContain('2 nodes bypassed');
       expect(detail).toContain('behaviour not invoked');
       expect(detail).toContain('traversal continued');
       expect(detail).toContain('a, b');

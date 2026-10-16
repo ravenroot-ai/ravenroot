@@ -1,3 +1,5 @@
+import { uiText } from './ui-text.js';
+
 // The one-line summaries the Runtime activity panel prints when an execution reaches a terminal
 // state, built from `/v1/executions/{id}/outcome` alone.
 //
@@ -36,13 +38,15 @@ export function executionOutcomeMessages(outcome = {}) {
   const messages = [];
 
   if (handledFailure) {
-    const nodes = handledNodes.length ? `: ${handledNodes.join(', ')}` : '; node list unavailable';
-    messages.push({ title: 'execution outcome', css: 'failed',
-      detail: `${outcome.status || 'COMPLETED'} with ${handledNodes.length} handled node failure(s)${nodes}` });
+    messages.push({ titleKey: 'executionOutcome.title', css: 'failed',
+      detailKey: handledNodes.length ? 'executionOutcome.handled' : 'executionOutcome.handledUnavailable',
+      detailParams: { status: outcome.status || 'COMPLETED', count: handledNodes.length,
+        nodes: handledNodes.join(', ') } });
   } else if (degraded) {
-    const nodes = defaultedNodes.length ? `: ${defaultedNodes.join(', ')}` : '; node list unavailable';
-    messages.push({ title: 'execution outcome', css: 'fallback',
-      detail: `${outcome.status || 'COMPLETED'}, degraded: ${defaultedNodes.length} node(s) ran as an unresolved default${nodes}` });
+    messages.push({ titleKey: 'executionOutcome.title', css: 'fallback',
+      detailKey: defaultedNodes.length ? 'executionOutcome.degraded' : 'executionOutcome.degradedUnavailable',
+      detailParams: { status: outcome.status || 'COMPLETED', count: defaultedNodes.length,
+        nodes: defaultedNodes.join(', ') } });
   } else if (outcome.status === 'FAILED' && (outcome.cancelled === true || outcome.terminationReason === 'CANCELLED')) {
     // A cancelled execution is stored and reported as FAILED (see `ExecutionTerminationReason`'s own
     // documented rationale: forward/backward compatibility for a status persisted by name), so a bare
@@ -54,19 +58,23 @@ export function executionOutcomeMessages(outcome = {}) {
     // cancellation is deliberately neither the green of a clean COMPLETED nor the red this panel
     // reserves for an actual incident -- see TelemetryBridge's identical UNSET-not-ERROR span-status
     // reasoning for a cancelled traversal, made for the same reason on a different surface.
-    messages.push({ title: 'execution outcome', detail: 'CANCELLED (stopped on request, stored as FAILED)',
-      css: 'fallback' });
+    messages.push({ titleKey: 'executionOutcome.title', detailKey: 'executionOutcome.cancelled', css: 'fallback' });
   } else if (outcome.status === 'FAILED') {
-    messages.push({ title: 'execution outcome', detail: 'FAILED', css: 'failed' });
+    messages.push({ titleKey: 'executionOutcome.title', detailKey: 'executionOutcome.failed', css: 'failed' });
   } else {
-    messages.push({ title: 'execution outcome', css: 'completed',
-      detail: `${outcome.status || 'COMPLETED'}, no handled failures and no defaulted nodes` });
+    messages.push({ titleKey: 'executionOutcome.title', css: 'completed',
+      detailKey: 'executionOutcome.clean', detailParams: { status: outcome.status || 'COMPLETED' } });
   }
   if (bypassedNodes.length) {
-    messages.push({ title: 'execution outcome', css: 'bypassed',
-      detail: `${bypassedNodes.length} node(s) bypassed — behaviour not invoked, traversal continued`
-        + ` past ${bypassedNodes.length === 1 ? 'it' : 'them'}: ${bypassedNodes.join(', ')}.`
-        + ' Cause is reported per node, in the NODE_BYPASSED entries.' });
+    messages.push({ titleKey: 'executionOutcome.title', css: 'bypassed',
+      detailKey: 'executionOutcome.bypassed',
+      detailParams: { count: bypassedNodes.length, nodes: bypassedNodes.join(', ') } });
   }
-  return messages;
+  return messages.map(message => Object.defineProperties({
+    title: uiText(message.titleKey), detail: uiText(message.detailKey, message.detailParams), css: message.css,
+  }, {
+    titleKey: { value: message.titleKey },
+    detailKey: { value: message.detailKey },
+    detailParams: { value: message.detailParams },
+  }));
 }

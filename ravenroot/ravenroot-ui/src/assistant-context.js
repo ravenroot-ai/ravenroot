@@ -37,6 +37,8 @@ export const NOT_PROVIDED = 'not-provided';
 export const NO_DATA = 'no-data';
 export const SOURCE_ERROR = 'source-error';
 
+import { uiText } from './ui-text.js';
+
 // The context classes are the open graph, the node catalog, validation errors, the last
 // execution's result, logs and the event stream.
 //
@@ -55,12 +57,12 @@ export const SOURCE_ERROR = 'source-error';
 // Every class here is composed from state the editor already holds, fetched under the user's own
 // session by the same client the rest of the UI uses.
 export const CONTEXT_CLASSES = Object.freeze([
-  Object.freeze({ id: 'graph', label: 'Open graph', tier: 1 }),
-  Object.freeze({ id: 'catalog', label: 'Node catalog', tier: 0 }),
-  Object.freeze({ id: 'validation', label: 'Validation errors', tier: 1 }),
-  Object.freeze({ id: 'execution', label: 'Last execution', tier: 1 }),
-  Object.freeze({ id: 'logs', label: 'Logs', tier: 0 }),
-  Object.freeze({ id: 'events', label: 'Event stream', tier: 0 }),
+  Object.freeze({ id: 'graph', labelKey: 'assistant.context.graph', tier: 1 }),
+  Object.freeze({ id: 'catalog', labelKey: 'assistant.context.catalog', tier: 0 }),
+  Object.freeze({ id: 'validation', labelKey: 'assistant.context.validation', tier: 1 }),
+  Object.freeze({ id: 'execution', labelKey: 'assistant.context.execution', tier: 1 }),
+  Object.freeze({ id: 'logs', labelKey: 'assistant.context.logs', tier: 0 }),
+  Object.freeze({ id: 'events', labelKey: 'assistant.context.events', tier: 0 }),
 ]);
 
 export const CONTEXT_CLASS_IDS = Object.freeze(CONTEXT_CLASSES.map(entry => entry.id));
@@ -100,7 +102,7 @@ export function composeContext(sources = {}, options = {}) {
 }
 
 function readClass(descriptor, source, budget) {
-  const base = { id: descriptor.id, label: descriptor.label, tier: descriptor.tier, truncated: false };
+  const base = { id: descriptor.id, label: uiText(descriptor.labelKey), tier: descriptor.tier, truncated: false };
 
   if (typeof source !== 'function') {
     return { ...base, state: UNAVAILABLE, reason: NOT_PROVIDED, detail: 'not available in this build' };
@@ -175,9 +177,13 @@ export const CHIP_DETAIL_LIMIT = 72;
 export function contextChipDescription(entry) {
   const detail = chipDetail(entry.detail);
   if (entry.state === ATTACHED) {
-    return detail ? `${entry.label}: attached, ${detail}` : `${entry.label}: attached`;
+    return uiText(detail ? 'assistant.context.attachedDetail' : 'assistant.context.attached', {
+      label: entry.label, detail,
+    });
   }
-  return detail ? `${entry.label}: unavailable, ${detail}` : `${entry.label}: unavailable`;
+  return uiText(detail ? 'assistant.context.unavailableDetail' : 'assistant.context.unavailable', {
+    label: entry.label, detail,
+  });
 }
 
 function chipDetail(value) {

@@ -1,101 +1,58 @@
-# Visualize a two-state DFA
+# Textbook DFA projection reference
 
-In this exercise, learners inspect an executable even-ones workflow, map its operational paths to two
-states, and render a textbook DFA projection. They then return to the full graph to explain what the
-projection hides.
+This page preserves the optional frontend drawing-model example shipped with Ravenroot. It is a
+client-side presentation reference for plugin authors and reviewers. It is not a guided execution
+exercise, an automata simulator, or evidence that the supplied GraphML implements a runnable DFA.
 
-## Learning objectives
+## What the example contains
 
-By the end, a learner can:
-
-- explain the state invariant for even and odd counts of `1`;
-- distinguish an executable GraphML path from a synthetic state-transition projection;
-- identify the initial and accepting state and predict four transition results;
-- connect a projected state or transition back to its real workflow evidence; and
-- state why drawing-model highlights are not themselves an automaton acceptance result.
-
-## Prerequisites
-
-Use Ravenroot 0.7.0-alpha.1 source or a later version whose Workbench supports frontend drawing-model
-packages. Package installation is verified for a Chromium-family browser. No server credential is
-needed to inspect the sanitized example, but executing a complete workflow requires a connected,
-configured runtime and the behavior contracts used by that workflow.
-
-The repository contains all exercise files under
+The files live under
 `ravenroot/ravenroot-ui/public/examples/frontend-plugins/textbook-automata/`:
 
-- `ravenroot-frontend-plugin.json` and `plugin.js` form the installable presentation package;
-- `dfa-even-ones-sanitized.graphml` preserves the workflow topology without claiming executable
-  behavior for every internal step; and
-- `dfa-even-ones-presentation.json` maps `qEven`, `qOdd`, and four transitions to real node and edge
-  identifiers.
+- `ravenroot-frontend-plugin.json` and `plugin.js` define an installable presentation package;
+- `dfa-even-ones-sanitized.graphml` is a 22-node, 24-edge inspection fixture whose generic
+  `BEHAVIOR` nodes have no behavior identifiers or runtime configuration; and
+- `dfa-even-ones-presentation.json` maps two synthetic states and four transitions to real node and
+  edge identifiers in that fixture.
 
-## Predict before opening Workbench
+The package renders a bounded SVG overlay. Selecting a projected state or transition selects its
+mapped workflow evidence. **Full flow** returns to the underlying GraphML.
 
-`qEven` is initial and accepting. Reading `0` preserves the current state. Reading `1` switches
-between `qEven` and `qOdd`.
+## Inspect the projection
 
-| Input | Expected final state | Accepted by this DFA |
-|---|---|---|
-| empty | `qEven` | yes |
-| `0` | `qEven` | yes |
-| `1` | `qOdd` | no |
-| `1011` | `qOdd` | no |
-| `1010` | `qEven` | yes |
-
-## Install and map the drawing model
+These steps exercise browser-side package installation and mapping only:
 
 1. Open `dfa-even-ones-sanitized.graphml` in Workbench.
-2. Open **Drawing options**, choose **Install package**, and select the `textbook-automata` directory.
-3. Choose **Edit mapping**, paste the complete `dfa-even-ones-presentation.json`, and save it.
+2. Open **Drawing options**, choose **Install package**, and select the `textbook-automata`
+   directory.
+3. Choose **Edit mapping**, paste `dfa-even-ones-presentation.json`, and save it.
 4. Select **Textbook DFA/NFA**.
-5. Confirm the projection shows an incoming initial marker on `qEven`, a double accepting ring around
-   `qEven`, a `0` loop on both states, and opposing `1` transitions.
-6. Select each projected element. Confirm the Inspector identifies the mapped workflow node or the
-   ordered edge path rather than an unrelated synthetic object.
+5. Confirm that the overlay shows `qEven`, `qOdd`, two `0` loops, two opposing `1` transitions, an
+   incoming initial marker, and an accepting ring around `qEven`.
+6. Select projected elements and confirm that the Inspector identifies the mapped workflow node or
+   ordered edge path.
+7. Choose **Full flow** and confirm that the underlying 22-node, 24-edge fixture returns.
 
-![Ravenroot Workbench displaying the textbook two-state DFA projection and the mapped qEven workflow node](../assets/education/textbook-dfa-projection.png)
+The overview minimap and graph statistics describe the underlying operational graph, even while the
+drawing-model overlay shows two synthetic states. Keep both views visible only when the distinction
+is explained; they are different presentations of one document, not competing node counts.
 
-*Figure 1. The drawing model reduces a larger operational graph to two states and four transitions.
-The Workbench still selects evidence from the underlying workflow.*
+## Evidence boundary
 
-## Compare the projection with the full flow
+Ravenroot's browser tests verify package installation, the two-state/four-transition scene, mapped
+selection, full-flow restoration, and simulated activity highlighting. Those tests use the UI
+fixture server and stub runtime routes. They do not prove that the supplied GraphML is executable or
+that a real server catalog is connected.
 
-Choose **Full operational flow**. Trace the edge path mapped to `qEven` on input `1`. The full graph
-contains parsing, empty-input checks, symbol validation, decisions, consumption, and routing that the
-two-state projection deliberately hides.
+The fixture intentionally carries no executable behavior mapping. **Test** or **Run** is outside
+this example's contract. Use an independently validated executable graph and a connected runtime
+when teaching execution, and use terminal runtime output when making an acceptance claim.
 
-Answer these questions:
+The package adds no network, storage, DOM, backend behavior, automata execution, determinization,
+minimization, or DOT import authority. Removing or disabling it leaves the GraphML unchanged and
+restores integrated Design.
 
-1. Which real node is the evidence anchor for `qEven`?
-2. Why is a transition represented by an ordered edge path instead of one visual edge?
-3. What invalid-input behavior is visible in the full graph but absent from the textbook view?
-4. If a mapped path is highlighted during monitoring, what further result would be required to claim
-   that an input was accepted?
-
-Expected answers: `state-q-even` is the `qEven` anchor; operational work spans several edges; symbol
-validation and failure routing are deliberately omitted from the projection; and acceptance requires
-the workflow's terminal result or other explicit execution evidence, not a drawing highlight.
-
-## Further exercises
-
-- Move the two state positions in the mapping, save GraphML, reopen it, and verify the presentation
-  survives without changing workflow topology.
-- Add a third synthetic state only after adding a real workflow evidence node and valid contiguous
-  paths. Observe that mappings with missing or discontinuous evidence are refused.
-- Compare the expanded flow with the interpreter evidence in
-  [Finite-automata architecture evidence](../examples/finite-automata/). Explain why the interpreter,
-  production contract, and drawing model are three different artifacts.
-- Open `addition.graphml` from the [register-machine library](../examples/register-machine/) and
-  identify its loop invariant and expected final registers.
-
-## Recovery and limits
-
-If package installation fails, verify browser support, manifest/API version, file sizes, UTF-8 source,
-and declared integrity. If mapping validation fails, inspect missing node IDs, edge order, endpoints,
-and provider capabilities. Removing or disabling the package leaves GraphML intact and restores the
-integrated view.
-
-The package runs in an opaque-origin frontend sandbox and returns a bounded declarative SVG scene.
-It adds no network, storage, DOM, backend behavior, determinization, minimization, DOT import, or
-automata execution authority.
+For the API, package lifecycle, sandbox and mapping contracts, read
+[Frontend drawing model plugins](../developer-guide/frontend-drawing-models.md). For a guided
+exercise with an observed runtime result, use
+[Execute a register-machine loop](register-machine-exercise.md).

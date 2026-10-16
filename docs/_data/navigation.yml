@@ -149,8 +149,6 @@
       url: /education/
     - title: Execute a register-machine loop
       url: /education/register-machine-exercise.html
-    - title: Visualize a two-state DFA
-      url: /education/finite-state-exercise.html
     - title: Register-machine examples
       url: /examples/register-machine/
 

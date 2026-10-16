@@ -5,7 +5,7 @@ choose **Install package**, and select this directory. Open `dfa-even-ones-sanit
 **Edit mapping**, apply `dfa-even-ones-presentation.json`, then select **Textbook DFA/NFA**.
 
 The package changes only presentation. Its mapping explicitly connects synthetic states and
-transitions to real workflow nodes and ordered edge paths. **Full flow** restores the complete
+transitions to real workflow nodes and ordered edge paths. **Full operational flow** restores the complete
 operational graph. NFA shapes and parallel transitions are renderer capabilities; this package does
 not add an automata runtime, DOT import, determinization, minimization, or an educational simulator.
 

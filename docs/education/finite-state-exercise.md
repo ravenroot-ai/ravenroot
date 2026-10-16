@@ -16,7 +16,7 @@ The files live under
   edge identifiers in that fixture.
 
 The package renders a bounded SVG overlay. Selecting a projected state or transition selects its
-mapped workflow evidence. **Full flow** returns to the underlying GraphML.
+mapped workflow evidence. **Full operational flow** returns to the underlying GraphML.
 
 ## Inspect the projection
 
@@ -31,7 +31,7 @@ These steps exercise browser-side package installation and mapping only:
    incoming initial marker, and an accepting ring around `qEven`.
 6. Select projected elements and confirm that the Inspector identifies the mapped workflow node or
    ordered edge path.
-7. Choose **Full flow** and confirm that the underlying 22-node, 24-edge fixture returns.
+7. Choose **Full operational flow** and confirm that the underlying 22-node, 24-edge fixture returns.
 
 The overview minimap and graph statistics describe the underlying operational graph, even while the
 drawing-model overlay shows two synthetic states. Keep both views visible only when the distinction

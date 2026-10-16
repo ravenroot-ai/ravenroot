@@ -80,7 +80,7 @@ inspection fixture, open `dfa-even-ones-sanitized.graphml`, choose **Edit mappin
 save, and select **Textbook DFA/NFA**.
 The diagram shows `qEven` as initial and accepting, `qOdd`, both `0` loops, and both `1`
 transitions. Select a state or transition to select and inspect its underlying node or ordered edge
-path. Choose **Full flow** to return to every node and edge in the underlying inspection fixture.
+path. Choose **Full operational flow** to return to every node and edge in the underlying inspection fixture.
 Position values in the mapping are editable in Ravenroot and survive
 save, reopen, and export.
 

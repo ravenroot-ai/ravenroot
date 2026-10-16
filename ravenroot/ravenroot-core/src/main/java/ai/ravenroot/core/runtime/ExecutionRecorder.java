@@ -41,12 +41,17 @@ import java.util.Set;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Holds one process instance's lease for the life of a traversal and writes the runner's lifecycle
@@ -119,11 +124,16 @@ public final class ExecutionRecorder implements AutoCloseable {
     private final ExecutionKey key;
     private final Duration leaseTtl;
     private final ScheduledExecutorService renewals;
+    /** Coordinates renewal with close without making a virtual cleanup thread contend on a monitor. */
+    private final ReentrantLock leaseLifecycle = new ReentrantLock();
+    /** Serializes revision-bearing operations without pinning a Java 21 carrier during store waits. */
+    private final ReentrantLock operationLock = new ReentrantLock();
 
     private LeaseHandle lease;
     private long revision;
     private boolean sourceOutcomeAmbiguous;
     private volatile boolean closed;
+    private final AtomicBoolean closeStarted = new AtomicBoolean();
     private volatile boolean fenceLost;
     private volatile ExecutionStoreFailure fenceLostBecause;
     private ScheduledFuture<?> renewalTask;
@@ -189,6 +199,63 @@ public final class ExecutionRecorder implements AutoCloseable {
             }
             throw refused;
         }
+        return claimed(store, key, leaseTtl, revision, lease);
+    }
+
+    /**
+     * Claims the instance within the caller's remaining admission deadline.
+     *
+     * <p>A timed-out claim may still commit. The completion callback releases such a late lease;
+     * expiry remains the backstop if that best-effort release cannot complete.</p>
+     */
+    static ExecutionRecorder open(ExecutionStore store, ExecutionKey key, String workerId,
+                                  Duration leaseTtl, long revision, Duration waitBound) {
+        Objects.requireNonNull(store, "store");
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(workerId, "workerId");
+        Objects.requireNonNull(leaseTtl, "leaseTtl");
+        Objects.requireNonNull(waitBound, "waitBound");
+        if (waitBound.isZero() || waitBound.isNegative()) {
+            throw new IllegalArgumentException("waitBound must be positive");
+        }
+        CompletionStage<LeaseHandle> claim = store.claim(key, workerId, leaseTtl);
+        LeaseHandle lease;
+        try {
+            lease = claim.toCompletableFuture().get(waitBound.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (ExecutionException wrapped) {
+            ExecutionStoreException refused = ExecutionStoreException.unwrap(wrapped);
+            if (refused != null && refused.failure() instanceof ExecutionStoreFailure.LeaseHeldByAnother) {
+                throw new ExecutionInstanceBusyException(key, refused);
+            }
+            if (refused != null) throw refused;
+            throw new CompletionException(wrapped.getCause());
+        } catch (TimeoutException timedOut) {
+            releaseLateClaim(store, claim);
+            throw new ExecutionStoreException(new ExecutionStoreFailure.OutcomeUnknown(key,
+                    "lease claim did not resolve within the admission bound"), timedOut);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            releaseLateClaim(store, claim);
+            throw new ExecutionStoreException(new ExecutionStoreFailure.OutcomeUnknown(key,
+                    "interrupted while waiting for the lease claim"), interrupted);
+        }
+        return claimed(store, key, leaseTtl, revision, lease);
+    }
+
+    private static void releaseLateClaim(ExecutionStore store, CompletionStage<LeaseHandle> claim) {
+        claim.whenComplete((lateLease, ignoredFailure) -> {
+            if (lateLease != null) {
+                try {
+                    store.release(lateLease);
+                } catch (RuntimeException ignored) {
+                    // Lease expiry is the recovery backstop when a late best-effort release fails.
+                }
+            }
+        });
+    }
+
+    private static ExecutionRecorder claimed(ExecutionStore store, ExecutionKey key,
+            Duration leaseTtl, long revision, LeaseHandle lease) {
         var renewals = Executors.newSingleThreadScheduledExecutor(runnable -> {
             var thread = new Thread(runnable, "ravenroot-lease-" + key.processInstanceId());
             thread.setDaemon(true);
@@ -245,15 +312,23 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /** Renews immediately. Visible for tests, which drive the clock rather than waiting on it. */
-    public synchronized void renewNow() {
-        if (closed || fenceLost) {
-            return;
-        }
+    public void renewNow() {
+        operationLock.lock();
         try {
-            lease = await(store.renew(lease, leaseTtl));
-        } catch (ExecutionStoreException lost) {
-            loseFence(lost.failure());
-            throw lost;
+        leaseLifecycle.lock();
+        try {
+            if (closed || fenceLost) return;
+            try {
+                lease = await(store.renew(lease, leaseTtl));
+            } catch (ExecutionStoreException lost) {
+                loseFence(lost.failure());
+                throw lost;
+            }
+        } finally {
+            leaseLifecycle.unlock();
+        }
+        } finally {
+            operationLock.unlock();
         }
     }
 
@@ -265,14 +340,24 @@ public final class ExecutionRecorder implements AutoCloseable {
      * asynchronous write would let the action overtake the record — which is the one ordering this
      * design does not survive losing.</p>
      */
-    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events) {
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events) {
+        operationLock.lock();
+        try {
         record(transitions, events, List.of());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Adds durable agent accounting to the same fenced commit as its lifecycle and audit events. */
-    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations) {
+        operationLock.lock();
+        try {
         record(transitions, events, agentBudgetOperations, List.of());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     java.util.Optional<ReplayInvocationEvidence> replayEvidence(UUID traversalId, UUID invocationId,
@@ -293,7 +378,9 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /** Records positive quiescence while this worker still owns the terminal source fence. */
-    public synchronized void recordReplaySettlement(ExecutionManifestDigest manifestDigest) {
+    public void recordReplaySettlement(ExecutionManifestDigest manifestDigest) {
+        operationLock.lock();
+        try {
         requireFence();
         if (!store.supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) return;
         StoredProcessInstance source = await(store.load(key));
@@ -303,6 +390,9 @@ public final class ExecutionRecorder implements AutoCloseable {
         Instant retainedUntil = inventory.retainedUntil().orElseGet(() -> now.plus(store.terminalRetention()));
         await(store.recordReplaySettlement(new ReplaySourceSettlement(key, source.revision(),
                 lease.fencingToken(), manifestDigest, sourceOutcomeAmbiguous, now, retainedUntil), lease));
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -312,14 +402,21 @@ public final class ExecutionRecorder implements AutoCloseable {
      * after cancellation made the aggregate terminal, because local quiescence cannot turn that
      * masked outcome into proof that no external effect occurred.</p>
      */
-    public synchronized void markReplaySourceOutcomeAmbiguous() {
+    public void markReplaySourceOutcomeAmbiguous() {
+        operationLock.lock();
+        try {
         sourceOutcomeAmbiguous = true;
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Commits completed invocation evidence atomically with its lifecycle transition. */
-    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations,
                                     List<ReplayInvocationEvidence> replayEvidence) {
+        operationLock.lock();
+        try {
         requireFence();
         if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
                 && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())
@@ -361,6 +458,9 @@ public final class ExecutionRecorder implements AutoCloseable {
             }
             throw failed;
         }
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -374,7 +474,9 @@ public final class ExecutionRecorder implements AutoCloseable {
      * @param writes conditional saga aggregate replacements
      * @param commands stable application commands created by those replacements
      */
-    public synchronized void recordSaga(List<SagaWrite> writes, List<SagaCommandIntent> commands) {
+    public void recordSaga(List<SagaWrite> writes, List<SagaCommandIntent> commands) {
+        operationLock.lock();
+        try {
         requireFence();
         if ((writes == null || writes.isEmpty()) && (commands == null || commands.isEmpty())) return;
         var batch = ExecutionBatch.to(key)
@@ -391,6 +493,9 @@ public final class ExecutionRecorder implements AutoCloseable {
                 loseFence(failed.failure());
             }
             throw failed;
+        }
+        } finally {
+            operationLock.unlock();
         }
     }
 
@@ -411,19 +516,26 @@ public final class ExecutionRecorder implements AutoCloseable {
      * <p>The approval, handler, timer, journal row, and three WAITING transitions are one batch.
      * No independent writer can race the runner's revision between the node dispatch and this wait.</p>
      */
-    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+    public void suspendForToolApproval(ToolApprovalRegistration approval,
                                                      HandlerRegistration handler,
                                                      TimerSchedule timer,
                                                      EventEnvelope event) {
+        operationLock.lock();
+        try {
         suspendForToolApproval(approval, handler, timer, event, null);
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Approval wait plus its optional HELD economic reservation, in one fenced commit. */
-    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+    public void suspendForToolApproval(ToolApprovalRegistration approval,
                                                      HandlerRegistration handler,
                                                      TimerSchedule timer,
                                                      EventEnvelope event,
                                                      AgentBudgetOperation budgetOperation) {
+        operationLock.lock();
+        try {
         requireFence();
         if (!approval.traversalId().equals(handler.traversalId())
                 || !approval.invocationId().equals(handler.invocationId())
@@ -449,11 +561,16 @@ public final class ExecutionRecorder implements AutoCloseable {
         if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Atomically parks the exact attempt with its governed runner job and continuation. */
-    public synchronized void suspendForRunner(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit,
+    public void suspendForRunner(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit,
                                               EventEnvelope event) {
+        operationLock.lock();
+        try {
         requireFence();
         var id = submit.identity();
         if (!key.equals(id.execution())) throw new IllegalArgumentException("runner admission scope mismatch");
@@ -465,25 +582,40 @@ public final class ExecutionRecorder implements AutoCloseable {
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
                 .runner(submit).publish(event);
         revision = await(store.apply(batch.build())).revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Applies one runner lifecycle change and its audit event through the current process fence. */
-    public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event) {
+    public void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event) {
+        operationLock.lock();
+        try {
         applyRunner(operation, event, java.util.List.of());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Commits an operator continuation disposition with its graph transitions and audit atomically. */
-    public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event,
+    public void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event,
                                           java.util.List<ExecutionTransition> transitions) {
+        operationLock.lock();
+        try {
         requireFence();
         var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
                 .fencedBy(lease).runner(operation).publish(event);
         transitions.forEach(batch::apply);
         revision = await(store.apply(batch.build())).revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Confirms the core signal against immutable durable acceptance before unwinding engine workers. */
-    public synchronized boolean confirmsRunnerJob(UUID jobId, NodeMessage message) {
+    public boolean confirmsRunnerJob(UUID jobId, NodeMessage message) {
+        operationLock.lock();
+        try {
         if (!key.tenantId().equals(message.security().tenantId()) || !key.processInstanceId().equals(message.processInstanceId())) return false;
         var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
         var entry = workspace == null ? null : workspace.jobs().get(jobId);
@@ -491,10 +623,15 @@ public final class ExecutionRecorder implements AutoCloseable {
         var id = entry.job().identity();
         return id.traversalId().equals(message.traversalId()) && id.invocationId().equals(message.invocationId())
                 && id.attemptId().equals(message.attemptId());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Confirms accepted runner evidence and lifecycle admission at this recorder's CAS revision. */
-    public synchronized boolean confirmsRunnerTerminal(ai.ravenroot.api.runner.RunnerJob job) {
+    public boolean confirmsRunnerTerminal(ai.ravenroot.api.runner.RunnerJob job) {
+        operationLock.lock();
+        try {
         if (!key.equals(job.identity().execution()) || !job.state().terminal()) return false;
         if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, revision)) return false;
         var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
@@ -502,13 +639,18 @@ public final class ExecutionRecorder implements AutoCloseable {
         return entry != null && !entry.continuationUncertain() && java.util.Arrays.equals(
                 ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), job)),
                 ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), entry.job())));
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Atomically parks one invocation behind a first-class durable human task. */
-    public synchronized void suspendForHumanTask(HumanTaskRegistration task,
+    public void suspendForHumanTask(HumanTaskRegistration task,
                                                  HandlerRegistration handler,
                                                  List<TimerSchedule> timers,
                                                  EventEnvelope event) {
+        operationLock.lock();
+        try {
         requireFence();
         Objects.requireNonNull(task, "task");
         Objects.requireNonNull(handler, "handler");
@@ -536,6 +678,9 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -559,7 +704,9 @@ public final class ExecutionRecorder implements AutoCloseable {
      *
      * @param pause the hold to commit, carrying its bounded continuation.
      */
-    public synchronized void commitExecutionPause(ExecutionPauseRegistration pause) {
+    public void commitExecutionPause(ExecutionPauseRegistration pause) {
+        operationLock.lock();
+        try {
         requireFence();
         Objects.requireNonNull(pause, "pause");
         var batch = ExecutionBatch.to(key)
@@ -571,6 +718,9 @@ public final class ExecutionRecorder implements AutoCloseable {
                 .registerExecutionPause(pause);
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -588,10 +738,15 @@ public final class ExecutionRecorder implements AutoCloseable {
      *                        would be the first of two, leaving the second illegal.
      * @param processStatus the state the process instance moves to, under the same rule.
      */
-    public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
+    public void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
                                                   TraversalStatus traversalStatus,
                                                   ProcessInstanceStatus processStatus) {
+        operationLock.lock();
+        try {
         settleExecutionPause(transition, traversalId, traversalStatus, processStatus, null);
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -615,11 +770,13 @@ public final class ExecutionRecorder implements AutoCloseable {
      *                          distinguishes the termination. Ignored for a non-terminal status,
      *                          which the aggregate refuses to qualify.
      */
-    public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
+    public void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
                                                   TraversalStatus traversalStatus,
                                                   ProcessInstanceStatus processStatus,
                                                   ai.ravenroot.api.application.ExecutionTerminationReason
                                                           terminationReason) {
+        operationLock.lock();
+        try {
         requireFence();
         Objects.requireNonNull(transition, "transition");
         Objects.requireNonNull(traversalId, "traversalId");
@@ -637,6 +794,9 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -646,7 +806,9 @@ public final class ExecutionRecorder implements AutoCloseable {
      * task after its registration commits but before the runner observes the suspension signal. The
      * immutable registration remains the authority in that legal interleaving.</p>
      */
-    public synchronized boolean confirmsHumanTask(UUID taskId, NodeMessage message) {
+    public boolean confirmsHumanTask(UUID taskId, NodeMessage message) {
+        operationLock.lock();
+        try {
         if (!key.tenantId().equals(message.security().tenantId())
                 || !key.processInstanceId().equals(message.processInstanceId())) {
             return false;
@@ -659,18 +821,28 @@ public final class ExecutionRecorder implements AutoCloseable {
                 && request.attemptId().equals(message.attemptId())
                 && request.nodeId().equals(message.nodeId())
                 && request.requester().equals(message.security());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Commits the exact redeemed effect outcome through this recorder's current claim fence. */
-    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+    public void completeToolApproval(UUID approvalId, boolean succeeded,
                                                   EventEnvelope event) {
+        operationLock.lock();
+        try {
         completeToolApproval(approvalId, succeeded, event, null);
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Outcome transition plus optional reservation settlement through the same claim fence. */
-    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+    public void completeToolApproval(UUID approvalId, boolean succeeded,
                                                   EventEnvelope event,
                                                   AgentBudgetOperation budgetOperation) {
+        operationLock.lock();
+        try {
         requireFence();
         Objects.requireNonNull(approvalId, "approvalId");
         var transition = succeeded
@@ -702,13 +874,18 @@ public final class ExecutionRecorder implements AutoCloseable {
                 throw failed;
             }
         }
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
      * Confirms that a core signal names the exact invocation this recorder durably registered.
      * Later approval lifecycle transitions do not invalidate that immutable proof.
      */
-    public synchronized boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
+    public boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
+        operationLock.lock();
+        try {
         if (!key.tenantId().equals(message.security().tenantId())
                 || !key.processInstanceId().equals(message.processInstanceId())) {
             return false;
@@ -721,17 +898,30 @@ public final class ExecutionRecorder implements AutoCloseable {
                 && request.attemptId().equals(message.attemptId())
                 && request.nodeId().equals(message.nodeId())
                 && request.requester().equals(message.security());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Immutable graph pin this fenced recorder is writing under. */
-    public synchronized GraphVersionPin graphVersionPin() {
+    public GraphVersionPin graphVersionPin() {
+        operationLock.lock();
+        try {
         return await(store.load(key)).graphVersionPin();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Current fenced aggregate snapshot used to seed a trusted re-entry runner. */
-    public synchronized ai.ravenroot.api.application.ProcessInstance storedState() {
+    public ai.ravenroot.api.application.ProcessInstance storedState() {
+        operationLock.lock();
+        try {
         requireFence();
         return await(store.load(key)).state();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -749,10 +939,15 @@ public final class ExecutionRecorder implements AutoCloseable {
      *
      * @return the current persisted origin, or an empty origin when none was recorded
      */
-    public synchronized ExecutionOrigin origin() {
+    public ExecutionOrigin origin() {
+        operationLock.lock();
+        try {
         requireFence();
         return await(store.findProcessInstance(key)).map(ProcessInventoryEntry::origin)
                 .orElse(ExecutionOrigin.none());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     private void loseFence(ExecutionStoreFailure because) {
@@ -778,8 +973,13 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /** The revision the instance is at after the last successful write. */
-    public synchronized long revision() {
+    public long revision() {
+        operationLock.lock();
+        try {
         return revision;
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -835,21 +1035,75 @@ public final class ExecutionRecorder implements AutoCloseable {
      * nobody experiences in production.</p>
      */
     @Override
-    public synchronized void close() {
-        if (closed) return;
-        closed = true;
-        if (renewalTask != null) {
-            renewalTask.cancel(false);
-        }
-        renewals.shutdownNow();
+    public void close() {
         try {
             // Release is fenced by worker identity and token, and an already-lost release is a
             // no-op by contract. Always offer the last handle: a failed renewal can mark the local
             // fence lost while the store still retains this worker's lease, and skipping release in
             // that case delays an orderly continuation until the full TTL expires.
-            await(store.release(lease));
+            await(beginClose());
         } catch (RuntimeException expiryWillHandleIt) {
             // A failed release is the crash path, which the store already handles by expiry.
+        }
+    }
+
+    /**
+     * Starts the best-effort release without waiting for the store.
+     *
+     * <p>Admission and lifecycle cleanup call this form. They may run on a Java 21 virtual thread,
+     * sometimes while the deployment dispatch lock is held, so even a bounded blocking wait would
+     * consume the only scheduler carrier and could prevent the store completion it is waiting for.
+     * Lease expiry remains the recovery backstop.</p>
+     */
+    void closeBestEffort() {
+        try {
+            if (operationLock.tryLock()) {
+                try {
+                    observeRelease(beginClose());
+                } finally {
+                    operationLock.unlock();
+                }
+                return;
+            }
+            Thread.ofVirtual().name("ravenroot-recorder-release-" + key.processInstanceId()).start(() -> {
+                try {
+                    observeRelease(beginClose());
+                } catch (RuntimeException ignored) {
+                    // Expiry is the backstop for a failed asynchronous release.
+                }
+            });
+        } catch (RuntimeException ignored) {
+            // Expiry is the backstop when even initiating the release fails.
+        }
+    }
+
+    private static void observeRelease(CompletionStage<Void> release) {
+        release.whenComplete((ignored, failure) -> {
+            // Observing the stage keeps exceptional completions contained. Expiry handles them.
+        });
+    }
+
+    private CompletionStage<Void> beginClose() {
+        operationLock.lock();
+        try {
+        leaseLifecycle.lock();
+        try {
+            if (!closeStarted.compareAndSet(false, true)) {
+                return CompletableFuture.completedFuture(null);
+            }
+            // Volatile publication makes every recorder operation fail closed from this point. A
+            // ReentrantLock lets a virtual cleanup thread wait for an in-flight renewal without
+            // pinning its carrier, then releases the renewed handle rather than a stale one.
+            closed = true;
+            ScheduledFuture<?> task = renewalTask;
+            if (task != null) task.cancel(false);
+            renewals.shutdownNow();
+            return store.release(lease);
+        } finally {
+            leaseLifecycle.unlock();
+        }
+        } finally {
+            operationLock.unlock();
         }
     }
 

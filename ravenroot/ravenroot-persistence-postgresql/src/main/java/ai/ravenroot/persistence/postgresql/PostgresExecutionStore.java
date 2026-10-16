@@ -2124,6 +2124,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
         private boolean retired;
         private boolean released;
         private int pending;
+        private final java.util.concurrent.locks.ReentrantLock lifecycleLock =
+                new java.util.concurrent.locks.ReentrantLock();
 
         OwnedSourceCheckpoints(String tenant, String namespace, Connection owner, long lockId) {
             this.tenant = tenant; this.owner = owner; this.lockId = lockId;
@@ -2136,30 +2138,54 @@ public final class PostgresExecutionStore implements ExecutionStore {
             return prefix + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
                     sourceId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
-        private synchronized <T> CompletionStage<T> admitted(
+        private <T> CompletionStage<T> admitted(
                 java.util.function.Supplier<CompletionStage<T>> operation) {
+            lifecycleLock.lock();
             try {
-                if (retired || closed.get() || owner.isClosed() || !owner.isValid(1))
+                if (retired || closed.get())
                     return CompletableFuture.failedFuture(new IllegalStateException("source ownership is retired"));
-            } catch (SQLException lost) {
-                return CompletableFuture.failedFuture(new IllegalStateException("source ownership is retired"));
+                pending++;
+            } finally {
+                lifecycleLock.unlock();
             }
-            pending++;
             try {
-                CompletionStage<T> underlying = operation.get();
+                // Connection validation is JDBC I/O. Keep it asynchronous and outside the lifecycle
+                // lock so a Java 21 virtual source thread never parks its scheduler carrier while
+                // owning an intrinsic monitor or while retirement waits to acquire this state.
+                CompletionStage<T> underlying = async(() -> {
+                    try {
+                        if (owner.isClosed() || !owner.isValid(1))
+                            throw new IllegalStateException("source ownership is retired");
+                        return null;
+                    } catch (SQLException lost) {
+                        throw new IllegalStateException("source ownership is retired", lost);
+                    }
+                }).thenCompose(ignored -> operation.get());
                 var result = new CompletableFuture<T>();
                 underlying.whenComplete((value, failure) -> {
-                    synchronized (OwnedSourceCheckpoints.this) {
-                        pending--;
-                        if (retired && pending == 0) releaseOwnership();
-                    }
+                    settleAdmission();
                     if (failure == null) result.complete(value); else result.completeExceptionally(failure);
                 });
                 return result;
             } catch (RuntimeException failure) {
-                pending--;
+                settleAdmission();
                 return CompletableFuture.failedFuture(failure);
             }
+        }
+
+        private void settleAdmission() {
+            boolean release = false;
+            lifecycleLock.lock();
+            try {
+                pending--;
+                if (retired && pending == 0 && !released) {
+                    released = true;
+                    release = true;
+                }
+            } finally {
+                lifecycleLock.unlock();
+            }
+            if (release) releaseOwnership();
         }
         @Override public CompletionStage<JournalCursor> checkpoint(String sourceId) {
             return admitted(() -> outboxCursor(tenant, destination(sourceId)));
@@ -2197,13 +2223,21 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 }
             })));
         }
-        @Override public synchronized void close() {
-            retired = true;
-            if (pending == 0) releaseOwnership();
+        @Override public void close() {
+            boolean release = false;
+            lifecycleLock.lock();
+            try {
+                retired = true;
+                if (pending == 0 && !released) {
+                    released = true;
+                    release = true;
+                }
+            } finally {
+                lifecycleLock.unlock();
+            }
+            if (release) releaseOwnership();
         }
         private void releaseOwnership() {
-            if (released) return;
-            released = true;
             releaseAdvisoryLock(owner, lockId);
             try { owner.close(); } catch (SQLException ignored) { }
             synchronized (sourceCheckpointOwners) { sourceCheckpointOwners.remove(this); }

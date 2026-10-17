@@ -286144,69 +286144,9 @@
       "remediationOwner": "#321"
     },
     {
-      "id": "oc-1e501445162ba469757f",
-      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 35,
-      "symbol": "constructor",
-      "kind": "fixed-declaration",
-      "role": "earlyCatalogMatches",
-      "expression": "'-'",
-      "expressionDigest": "01f86083c0c7d2b1fdd3d4e93cc502990ce51bada47b4da56d987d4efbad6d98",
-      "evidenceDigest": "b4c8104dd756edbebd710bf643f162cb104c22e1ab92705f192a990a04f2de5b",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-e51b2ae430e09d7017de",
-      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 35,
-      "symbol": "constructor",
-      "kind": "fixed-declaration",
-      "role": "earlyCatalogMatches",
-      "expression": "'_'",
-      "expressionDigest": "bdc4e106fa8ebf0e98da507d47fb4708e9144a68d01a460a1b533cb5a2e82536",
-      "evidenceDigest": "b4c8104dd756edbebd710bf643f162cb104c22e1ab92705f192a990a04f2de5b",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-d00b098c811b20038322",
-      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 36,
-      "symbol": "constructor",
-      "kind": "fixed-declaration",
-      "role": "literal",
-      "expression": "'-'",
-      "expressionDigest": "01f86083c0c7d2b1fdd3d4e93cc502990ce51bada47b4da56d987d4efbad6d98",
-      "evidenceDigest": "53935202824e76eecaf4c2ef6737e187d8c594ec82377f7cc54df42eaf7721f6",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-974b7ef1ef55d5f7bf15",
-      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 36,
-      "symbol": "constructor",
-      "kind": "fixed-declaration",
-      "role": "literal",
-      "expression": "'_'",
-      "expressionDigest": "bdc4e106fa8ebf0e98da507d47fb4708e9144a68d01a460a1b533cb5a2e82536",
-      "evidenceDigest": "53935202824e76eecaf4c2ef6737e187d8c594ec82377f7cc54df42eaf7721f6",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
       "id": "oc-5a34f4923103cc978e5d",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 44,
+      "line": 34,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "base64url",
@@ -286224,7 +286164,7 @@
     {
       "id": "oc-f027ede481fd6d015a3b",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 50,
+      "line": 40,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "hex",
@@ -286242,7 +286182,7 @@
     {
       "id": "oc-ef7e0e46494c56add3c2",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 50,
+      "line": 40,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "hex",
@@ -286260,7 +286200,7 @@
     {
       "id": "oc-04c02f555873c0e38b2c",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 50,
+      "line": 40,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "hex",
@@ -286278,7 +286218,7 @@
     {
       "id": "oc-edfd65b53b7d74da7a6e",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 50,
+      "line": 40,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "hex",
@@ -286296,7 +286236,7 @@
     {
       "id": "oc-3c8bf29feb37d92663be",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 53,
+      "line": 43,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "int64",
@@ -286314,7 +286254,7 @@
     {
       "id": "oc-d34762768fc2fb756d9b",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 60,
+      "line": 50,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "framed",
@@ -286332,7 +286272,7 @@
     {
       "id": "oc-71220957a798d1d69a68",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 67,
+      "line": 57,
       "symbol": "constructor",
       "kind": "fixed-declaration",
       "role": "concat",
@@ -286350,7 +286290,7 @@
     {
       "id": "oc-ff8c0d8b25014c65f2e0",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 77,
+      "line": 67,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "proofPayload",
@@ -286368,7 +286308,7 @@
     {
       "id": "oc-365b035168e434ee85dd",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 92,
+      "line": 82,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "exchangeProofPayload",
@@ -286386,7 +286326,7 @@
     {
       "id": "oc-f85768e43beda41d76ad",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 109,
+      "line": 99,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "sign",
@@ -286404,7 +286344,7 @@
     {
       "id": "oc-08e2b36fb763188de1bb",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 109,
+      "line": 99,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "sign",
@@ -286422,7 +286362,7 @@
     {
       "id": "oc-936d2caf5073deb01467",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 116,
+      "line": 106,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "signExchange",
@@ -286440,7 +286380,7 @@
     {
       "id": "oc-e9bac08961b842fbaad6",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 116,
+      "line": 106,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "signExchange",
@@ -286458,7 +286398,7 @@
     {
       "id": "oc-5d9b17307fa73a5287a9",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 123,
+      "line": 113,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "postJson",
@@ -286476,7 +286416,7 @@
     {
       "id": "oc-2b6fb08cc07a965e4724",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 123,
+      "line": 113,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "postJson",
@@ -286494,7 +286434,7 @@
     {
       "id": "oc-f5b940522da35f217d66",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 166,
+      "line": 156,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "parseFrame",
@@ -286509,7 +286449,7 @@
     {
       "id": "oc-1d8e04d651c05b1bcaa4",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 171,
+      "line": 161,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "colon",
@@ -286524,7 +286464,7 @@
     {
       "id": "oc-b9f658fb183f5b35182e",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 172,
+      "line": 162,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "fieldName",
@@ -286539,7 +286479,7 @@
     {
       "id": "oc-6bf27f86a1590dd0af81",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 172,
+      "line": 162,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "fieldName",
@@ -286554,7 +286494,7 @@
     {
       "id": "oc-29843936baf80440209e",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 173,
+      "line": 163,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "fieldValue",
@@ -286569,7 +286509,7 @@
     {
       "id": "oc-89eaa57eac5ee5a52fb6",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 173,
+      "line": 163,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "fieldValue",
@@ -286584,7 +286524,7 @@
     {
       "id": "oc-48af7067a69e9193a244",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 173,
+      "line": 163,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "fieldValue",
@@ -286599,7 +286539,7 @@
     {
       "id": "oc-a2d70c7e85d24d09c438",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 173,
+      "line": 163,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "fieldValue",
@@ -286614,7 +286554,7 @@
     {
       "id": "oc-7c9326f01a5756d3fc0d",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 200,
+      "line": 190,
       "symbol": "while",
       "kind": "fixed-declaration",
       "role": "type",
@@ -286633,7 +286573,7 @@
     {
       "id": "oc-3dc04d21abbc7b28d97d",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 200,
+      "line": 190,
       "symbol": "while",
       "kind": "fixed-declaration",
       "role": "type",
@@ -286652,7 +286592,7 @@
     {
       "id": "oc-9217d6867c5f1317b6b6",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 201,
+      "line": 191,
       "symbol": "while",
       "kind": "fixed-declaration",
       "role": "type",
@@ -286671,7 +286611,7 @@
     {
       "id": "oc-6584219e5f59700a7ac8",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 201,
+      "line": 191,
       "symbol": "while",
       "kind": "fixed-declaration",
       "role": "type",
@@ -286690,7 +286630,7 @@
     {
       "id": "oc-8f990f62c124d0699f91",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 202,
+      "line": 192,
       "symbol": "while",
       "kind": "fixed-declaration",
       "role": "type",
@@ -286705,7 +286645,7 @@
     {
       "id": "oc-691bd30245763bd5f51a",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 202,
+      "line": 192,
       "symbol": "while",
       "kind": "fixed-declaration",
       "role": "type",
@@ -286718,27 +286658,31 @@
       "rationale": "Exact embed v2 protocol, persistence, DOM, renderer, or document atom."
     },
     {
-      "id": "oc-8ac77592bbe371bc3f18",
+      "id": "oc-d63ab8a210f004824b6e",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 239,
+      "line": 229,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "readBootstrap",
       "expression": "'ravenroot-embed-bootstrap'",
       "expressionDigest": "174c02b3201d12c39f84824e55e181a4c8194fa94d8c2f8c745c7ec2a3ad6213",
-      "evidenceDigest": "dd53d276133260532522d021cac4630b160a10ecc1f565e2770dfa3af9d191ea",
+      "evidenceDigest": "5d9d817a6a0122bff87aad84adcad078f3e815ff25a28d1eb27683e80e63c392",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "rationale": "These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities.",
       "finalReviewAuthority": "issue-321-final-semantic-review-v1",
       "finalReviewGroup": "ui-protocol-dom-and-storage-identities",
-      "remediationOwner": "#321"
+      "remediationOwner": "#321",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-8ac77592bbe371bc3f18"
+      }
     },
     {
       "id": "oc-9f40806331a6a1a8ec5d",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 242,
+      "line": 232,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286756,7 +286700,7 @@
     {
       "id": "oc-3089a8b4d8f9861d762f",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 242,
+      "line": 232,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286774,7 +286718,7 @@
     {
       "id": "oc-f5c083eb6090dbbec39e",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 242,
+      "line": 232,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286792,7 +286736,7 @@
     {
       "id": "oc-5afe90a0a54eb24417f0",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 242,
+      "line": 232,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286810,7 +286754,7 @@
     {
       "id": "oc-491e547c2fe30101c700",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 242,
+      "line": 232,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286828,7 +286772,7 @@
     {
       "id": "oc-bc8f5b09b924c8f686b3",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 243,
+      "line": 233,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286846,7 +286790,7 @@
     {
       "id": "oc-5ecc21b38f63b3632b61",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 243,
+      "line": 233,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286864,7 +286808,7 @@
     {
       "id": "oc-7485a368721dbfafff13",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 243,
+      "line": 233,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286882,7 +286826,7 @@
     {
       "id": "oc-56d02f8cf87fdc20ebf7",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 243,
+      "line": 233,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v1Keys",
@@ -286900,7 +286844,7 @@
     {
       "id": "oc-5df5fd0034c3cf614db2",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 244,
+      "line": 234,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -286915,7 +286859,7 @@
     {
       "id": "oc-a6304d25339a03a8c848",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 244,
+      "line": 234,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -286930,7 +286874,7 @@
     {
       "id": "oc-f7d0d58160b17f0c4b93",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 244,
+      "line": 234,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -286945,7 +286889,7 @@
     {
       "id": "oc-5a73cd6d907dd75f75de",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 244,
+      "line": 234,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -286960,7 +286904,7 @@
     {
       "id": "oc-c132f09b5856ab2a1b61",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 244,
+      "line": 234,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -286975,7 +286919,7 @@
     {
       "id": "oc-cd63a4bc02b34717d390",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 245,
+      "line": 235,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -286990,7 +286934,7 @@
     {
       "id": "oc-2f32f4fda395431a6cff",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 245,
+      "line": 235,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -287005,7 +286949,7 @@
     {
       "id": "oc-9399843e33ab85c11d55",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 245,
+      "line": 235,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -287020,7 +286964,7 @@
     {
       "id": "oc-03c32632b521e7fe4721",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 245,
+      "line": 235,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -287035,7 +286979,7 @@
     {
       "id": "oc-e0e6a0763586d9dbc395",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 245,
+      "line": 235,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -287050,7 +286994,7 @@
     {
       "id": "oc-2ffec20ee4bf5e1e11d9",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 246,
+      "line": 236,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2Keys",
@@ -287065,7 +287009,7 @@
     {
       "id": "oc-83e104b5e8735bdccbc7",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 247,
+      "line": 237,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "localizedKeys",
@@ -287080,7 +287024,7 @@
     {
       "id": "oc-9f055cf3fa2b9301dc61",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 247,
+      "line": 237,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "localizedKeys",
@@ -287095,7 +287039,7 @@
     {
       "id": "oc-d39a10cf45d3294a4335",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 248,
+      "line": 238,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "v2",
@@ -287110,7 +287054,7 @@
     {
       "id": "oc-c54be93ef3050e2171f2",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 250,
+      "line": 240,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "localized",
@@ -287125,7 +287069,7 @@
     {
       "id": "oc-214cd95a9f5e18fb4f5a",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 250,
+      "line": 240,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "localized",
@@ -287140,7 +287084,7 @@
     {
       "id": "oc-e339a357b076d56a6fc1",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 278,
+      "line": 270,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "media",
@@ -287158,7 +287102,7 @@
     {
       "id": "oc-ba0614542a82043d106f",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 285,
+      "line": 276,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "showFailure",
@@ -287180,7 +287124,7 @@
     {
       "id": "oc-12df5d6f09f3b75aeeaf",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 286,
+      "line": 277,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "root",
@@ -287198,7 +287142,7 @@
     {
       "id": "oc-307bf975097ce62abdbc",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 287,
+      "line": 278,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "status",
@@ -287214,9 +287158,39 @@
       "remediationOwner": "#321"
     },
     {
+      "id": "oc-23eb499d30e424708ee8",
+      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
+      "line": 293,
+      "symbol": "if",
+      "kind": "fixed-declaration",
+      "role": "localizationModule",
+      "expression": "'/embed-localization.js'",
+      "expressionDigest": "0b180116c8e055e3d89cfcb7a4f69e08e9f9b446918af97a1e25a3731cc31f95",
+      "evidenceDigest": "a99cd6b33ea5aad77a3ced27d07b6a44ad6d335a51fa56ba05d441d92f2cf9d9",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Stable same-origin presentation-only module route that loads the complete bounded localization validator before the fallible viewer module."
+    },
+    {
+      "id": "oc-bfb10fc394b936aa32ed",
+      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
+      "line": 299,
+      "symbol": "if",
+      "kind": "fixed-declaration",
+      "role": "viewerModule",
+      "expression": "'/embed-viewer.js'",
+      "expressionDigest": "e3a80303a3af053f68300516c2f6aa1c196c0b4ff1bc2b8b28e03db164cbe907",
+      "evidenceDigest": "78baf86e18d6d68f5f82366aa79aaf22ce852f9864a72b4099205bc030bc3f2e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Stable same-origin viewer module route retained as the heavy implementation boundary after validated early localization."
+    },
+    {
       "id": "oc-ba91a40fb5b33112835b",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 325,
+      "line": 309,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "sendToParent",
@@ -287238,7 +287212,7 @@
     {
       "id": "oc-7e1a57149d41c1fb340f",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 331,
+      "line": 315,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "message",
@@ -287256,7 +287230,7 @@
     {
       "id": "oc-a55cde68191e2bf526bd",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 333,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pingKeys",
@@ -287271,7 +287245,7 @@
     {
       "id": "oc-43f074d582c649ff1052",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 333,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pingKeys",
@@ -287286,7 +287260,7 @@
     {
       "id": "oc-a2187bb14a4192086ce5",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 333,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pingKeys",
@@ -287301,7 +287275,7 @@
     {
       "id": "oc-72b3c76939b0e8745cd8",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 333,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pingKeys",
@@ -287316,7 +287290,7 @@
     {
       "id": "oc-f1ffae4adef8a0a90c48",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 333,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pingKeys",
@@ -287331,7 +287305,7 @@
     {
       "id": "oc-b17408abd9c54456a0f9",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 334,
+      "line": 318,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "localeKeys",
@@ -287346,7 +287320,7 @@
     {
       "id": "oc-13ee78c0cecd7c51e1b6",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 334,
+      "line": 318,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "localeKeys",
@@ -287361,7 +287335,7 @@
     {
       "id": "oc-e7c906301cd4d1a230fa",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 335,
+      "line": 319,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "setLocale",
@@ -287376,7 +287350,7 @@
     {
       "id": "oc-47503bb3ad0cd986fb93",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 365,
+      "line": 349,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "timeout",
@@ -287394,7 +287368,7 @@
     {
       "id": "oc-7bd125e4e9d7a8193964",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 370,
+      "line": 354,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keys",
@@ -287416,7 +287390,7 @@
     {
       "id": "oc-28cd0fe67e932f6d0562",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 370,
+      "line": 354,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keys",
@@ -287434,7 +287408,7 @@
     {
       "id": "oc-cfa7b48ee74506be0c2d",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 370,
+      "line": 354,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keys",
@@ -287452,7 +287426,7 @@
     {
       "id": "oc-1b35cfb8bbb548ee4cb4",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 370,
+      "line": 354,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keys",
@@ -287470,7 +287444,7 @@
     {
       "id": "oc-f25a35bf34e8f9402482",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 370,
+      "line": 354,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keys",
@@ -287488,7 +287462,7 @@
     {
       "id": "oc-03857eeae501dfa56087",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 396,
+      "line": 380,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keyPair",
@@ -287506,7 +287480,7 @@
     {
       "id": "oc-85898627fb0e0cce1ac4",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 396,
+      "line": 380,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keyPair",
@@ -287524,7 +287498,7 @@
     {
       "id": "oc-0b319cdaf25fbccffc3d",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 396,
+      "line": 380,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keyPair",
@@ -287542,7 +287516,7 @@
     {
       "id": "oc-faa1fff50c19f951b56e",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 396,
+      "line": 380,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keyPair",
@@ -287560,7 +287534,7 @@
     {
       "id": "oc-05df4b146a9606738902",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 461,
+      "line": 445,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "attempt",
@@ -287575,7 +287549,7 @@
     {
       "id": "oc-d1051f8f2303186c2f02",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 473,
+      "line": 457,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "setTimeout",
@@ -287590,7 +287564,7 @@
     {
       "id": "oc-e2dbc5f10cb3d8e06e34",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 473,
+      "line": 457,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "setTimeout",
@@ -287605,7 +287579,7 @@
     {
       "id": "oc-7a93c77f32a004d7f0f9",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 473,
+      "line": 457,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "setTimeout",
@@ -287620,7 +287594,7 @@
     {
       "id": "oc-70f68c3e5e78135d17bb",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 539,
+      "line": 523,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "attempt",
@@ -287635,7 +287609,7 @@
     {
       "id": "oc-911d96809b33972fd27c",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 559,
+      "line": 543,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "setTimeout",
@@ -287650,7 +287624,7 @@
     {
       "id": "oc-6f31a24c91f36f0fb59a",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 559,
+      "line": 543,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "setTimeout",
@@ -287665,7 +287639,7 @@
     {
       "id": "oc-c2dbdd1ada8b52bc5cad",
       "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-      "line": 559,
+      "line": 543,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "setTimeout",
@@ -318180,7 +318154,7 @@
     {
       "id": "oc-3f3a0d38aaca6a9da85a",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 87,
+      "line": 62,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318199,7 +318173,7 @@
     {
       "id": "oc-954508bf948c7d49d586",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 90,
+      "line": 65,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318218,7 +318192,7 @@
     {
       "id": "oc-39b2574455427031cbc0",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 91,
+      "line": 66,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318240,7 +318214,7 @@
     {
       "id": "oc-7edaa5bb2fb9004ce4ed",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 91,
+      "line": 66,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318262,7 +318236,7 @@
     {
       "id": "oc-320f98c5e5c5e3a3c49c",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 92,
+      "line": 67,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318284,7 +318258,7 @@
     {
       "id": "oc-64aa174927985086250b",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 93,
+      "line": 68,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318306,7 +318280,7 @@
     {
       "id": "oc-9a821ab7ad71aaf55455",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 97,
+      "line": 72,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "nodes",
@@ -318322,7 +318296,7 @@
     {
       "id": "oc-9dac8823f863dc62d18c",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 109,
+      "line": 84,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "links",
@@ -318344,7 +318318,7 @@
     {
       "id": "oc-74eee3733b5d2fc25c4c",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 110,
+      "line": 85,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "links",
@@ -318366,7 +318340,7 @@
     {
       "id": "oc-1e7c38b2465453357266",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 112,
+      "line": 87,
       "symbol": "elasticElements",
       "kind": "fixed-declaration",
       "role": "links",
@@ -318388,7 +318362,7 @@
     {
       "id": "oc-5cbfeb7901be3c22b517",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 135,
+      "line": 110,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "canvas",
@@ -318406,7 +318380,7 @@
     {
       "id": "oc-08133e11507414739747",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 136,
+      "line": 111,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "status",
@@ -318424,7 +318398,7 @@
     {
       "id": "oc-33f9223644942ebdcf45",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 137,
+      "line": 112,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "metadata",
@@ -318442,7 +318416,7 @@
     {
       "id": "oc-5f11842905d324611b12",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 138,
+      "line": 113,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "alternative",
@@ -318460,7 +318434,7 @@
     {
       "id": "oc-0967175f29a83c2b6d0f",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 139,
+      "line": 114,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "minimap",
@@ -318478,7 +318452,7 @@
     {
       "id": "oc-29b370d9c1c398574775",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 140,
+      "line": 115,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "mode",
@@ -318496,7 +318470,7 @@
     {
       "id": "oc-d72f170b799b66f768a3",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 141,
+      "line": 116,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "elasticOption",
@@ -318514,7 +318488,7 @@
     {
       "id": "oc-ead26b81e716a0bbf6de",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 142,
+      "line": 117,
       "symbol": "requiredElement",
       "kind": "fixed-declaration",
       "role": "semanticModes",
@@ -318529,7 +318503,7 @@
     {
       "id": "oc-3c9a231e005cf6ff0f06",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 147,
+      "line": 122,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runEmpty",
@@ -318544,7 +318518,7 @@
     {
       "id": "oc-0dbc9fbc1ccfbd27a6a4",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 148,
+      "line": 123,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "startExecution",
@@ -318559,7 +318533,7 @@
     {
       "id": "oc-6e3ec02f30bb125ff9ff",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 149,
+      "line": 124,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "monitoringOption",
@@ -318574,7 +318548,7 @@
     {
       "id": "oc-b20ce59bb65d77904101",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 152,
+      "line": 127,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "controls",
@@ -318592,7 +318566,7 @@
     {
       "id": "oc-8d2bcdef17967f4661bd",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 153,
+      "line": 128,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "maximizeControl",
@@ -318608,7 +318582,7 @@
     {
       "id": "oc-8d2d6d4f45dfecec0081",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 154,
+      "line": 129,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "focusBoundaries",
@@ -318626,7 +318600,7 @@
     {
       "id": "oc-a8a21021b1437b558f77",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 160,
+      "line": 135,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "lifecycle",
@@ -318648,7 +318622,7 @@
     {
       "id": "oc-901c6a223cd85568928a",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 161,
+      "line": 136,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "lifecycle",
@@ -318670,7 +318644,7 @@
     {
       "id": "oc-315a944edd0c1da36d02",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 167,
+      "line": 142,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "instance",
@@ -318688,7 +318662,7 @@
     {
       "id": "oc-0ea7550dbf1392540283",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 171,
+      "line": 146,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "instance",
@@ -318706,7 +318680,7 @@
     {
       "id": "oc-f0feeb2314e2402f2f21",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 172,
+      "line": 147,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "instance",
@@ -318724,7 +318698,7 @@
     {
       "id": "oc-f00e8b3d452f4de75318",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 173,
+      "line": 148,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "instance",
@@ -318742,7 +318716,7 @@
     {
       "id": "oc-2fbff6fbaf9fb85980de",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 183,
+      "line": 158,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "elasticSvg",
@@ -318760,7 +318734,7 @@
     {
       "id": "oc-4ae29d9a66696c5c44ee",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 183,
+      "line": 158,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "elasticSvg",
@@ -318778,7 +318752,7 @@
     {
       "id": "oc-6304a93cf738802b9051",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 189,
+      "line": 164,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runtimeTooltip",
@@ -318794,7 +318768,7 @@
     {
       "id": "oc-14f4dadbb33f74a11028",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 209,
+      "line": 184,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "isMonitoring",
@@ -318812,7 +318786,7 @@
     {
       "id": "oc-96bd1651851f178f9e2b",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 209,
+      "line": 184,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "isMonitoring",
@@ -318827,7 +318801,7 @@
     {
       "id": "oc-a8aedce84fe41bd20690",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 210,
+      "line": 185,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "designStyle",
@@ -318842,7 +318816,7 @@
     {
       "id": "oc-878394002a6d55b83151",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 237,
+      "line": 212,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "priority",
@@ -318858,7 +318832,7 @@
     {
       "id": "oc-c6496989cbad761c6716",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 237,
+      "line": 212,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "priority",
@@ -318874,7 +318848,7 @@
     {
       "id": "oc-b50d6947eb69d78c2106",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 237,
+      "line": 212,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "priority",
@@ -318890,7 +318864,7 @@
     {
       "id": "oc-b5f9ecead07d3c61267b",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 237,
+      "line": 212,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "priority",
@@ -318906,7 +318880,7 @@
     {
       "id": "oc-8d53aa3b87b0c403f367",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 237,
+      "line": 212,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "priority",
@@ -318922,7 +318896,7 @@
     {
       "id": "oc-964221f1c56535e26ba1",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 241,
+      "line": 216,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "internalPulse",
@@ -318938,7 +318912,7 @@
     {
       "id": "oc-02af5bc30b4794810a89",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 267,
+      "line": 242,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "reducedMotion",
@@ -318954,7 +318928,7 @@
     {
       "id": "oc-173de5cd10c3f30c7f06",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 272,
+      "line": 247,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "remainingPulseMs",
@@ -318970,7 +318944,7 @@
     {
       "id": "oc-e4e0cf5094501f19ccd1",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 272,
+      "line": 247,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "remainingPulseMs",
@@ -318986,7 +318960,7 @@
     {
       "id": "oc-cc3408761a444c618e61",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 329,
+      "line": 304,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "enableMinimap",
@@ -319004,7 +318978,7 @@
     {
       "id": "oc-3c0e55f83b4460275ed4",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 342,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "ratio",
@@ -319022,7 +318996,7 @@
     {
       "id": "oc-357a72735a0fb799acc6",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 342,
+      "line": 317,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "ratio",
@@ -319040,7 +319014,7 @@
     {
       "id": "oc-6c885c5dfb34e1335ce3",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 343,
+      "line": 318,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "width",
@@ -319058,7 +319032,7 @@
     {
       "id": "oc-642b7d5540fc62e611e1",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 344,
+      "line": 319,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "height",
@@ -319076,7 +319050,7 @@
     {
       "id": "oc-408652a0197151a22af3",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 347,
+      "line": 322,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "context",
@@ -319094,7 +319068,7 @@
     {
       "id": "oc-14dede547e53323d43f0",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 406,
+      "line": 381,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runCommand",
@@ -319109,7 +319083,7 @@
     {
       "id": "oc-650d78f78404352082f0",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 407,
+      "line": 382,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runCommand",
@@ -319124,7 +319098,7 @@
     {
       "id": "oc-6e7c162ee0e0e0634bff",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 436,
+      "line": 411,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "width",
@@ -319142,7 +319116,7 @@
     {
       "id": "oc-d4de674e5d7291544d5b",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 437,
+      "line": 412,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "height",
@@ -319160,7 +319134,7 @@
     {
       "id": "oc-7a06a444f145081005c8",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 439,
+      "line": 414,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "saved",
@@ -319175,7 +319149,7 @@
     {
       "id": "oc-1df63c7b55ac9bea3573",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 480,
+      "line": 455,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "captureMode",
@@ -319190,7 +319164,7 @@
     {
       "id": "oc-478ab59dc03d3d03c570",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 506,
+      "line": 481,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "saved",
@@ -319205,7 +319179,7 @@
     {
       "id": "oc-836917650d8f212dd1e8",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 541,
+      "line": 516,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runChange",
@@ -319220,7 +319194,7 @@
     {
       "id": "oc-f6a470b3ce1ab12154a4",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319238,7 +319212,7 @@
     {
       "id": "oc-69bd3013612966345f46",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319256,7 +319230,7 @@
     {
       "id": "oc-64d1836c4704e44b4905",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319274,7 +319248,7 @@
     {
       "id": "oc-76d5c3e09edd19821759",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319292,7 +319266,7 @@
     {
       "id": "oc-e80d842715a7447a6421",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319310,7 +319284,7 @@
     {
       "id": "oc-bd07f536b2baf2b31775",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319328,7 +319302,7 @@
     {
       "id": "oc-ecbc199b1cf2d96b5b54",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319346,7 +319320,7 @@
     {
       "id": "oc-f03437338e2a9ebec35a",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319364,7 +319338,7 @@
     {
       "id": "oc-c17ebdd593e9890cb2eb",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 559,
+      "line": 534,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "keydown",
@@ -319382,7 +319356,7 @@
     {
       "id": "oc-170a43b873bdc4b476b6",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 568,
+      "line": 543,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pans",
@@ -319400,7 +319374,7 @@
     {
       "id": "oc-e19b78b3048f84473371",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 568,
+      "line": 543,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pans",
@@ -319418,7 +319392,7 @@
     {
       "id": "oc-17c09cf353b8944a9c3f",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 569,
+      "line": 544,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pans",
@@ -319436,7 +319410,7 @@
     {
       "id": "oc-0e96f2a95d16d953b5dc",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 569,
+      "line": 544,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "pans",
@@ -319454,7 +319428,7 @@
     {
       "id": "oc-51da40439edd8548ce98",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 593,
+      "line": 568,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "minimapPointer",
@@ -319476,7 +319450,7 @@
     {
       "id": "oc-5dacfcd3706781b4ea9d",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 664,
+      "line": 639,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "edgeStyle",
@@ -319491,7 +319465,7 @@
     {
       "id": "oc-e3e239419faac526d755",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 664,
+      "line": 639,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "edgeStyle",
@@ -319506,7 +319480,7 @@
     {
       "id": "oc-f35987a423a48f3a9a14",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 664,
+      "line": 639,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "edgeStyle",
@@ -319521,7 +319495,7 @@
     {
       "id": "oc-f99b93afb0d27c8ac0dc",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 664,
+      "line": 639,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "edgeStyle",
@@ -319536,7 +319510,7 @@
     {
       "id": "oc-f28cdba9ecd852924f87",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 665,
+      "line": 640,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "edgeStyle",
@@ -319551,7 +319525,7 @@
     {
       "id": "oc-abb9d16ed3730c7b2959",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 665,
+      "line": 640,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "edgeStyle",
@@ -319566,7 +319540,7 @@
     {
       "id": "oc-68ca579b9243c775975f",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 751,
+      "line": 726,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runtimeColor",
@@ -319581,7 +319555,7 @@
     {
       "id": "oc-f6aa8e4221450cf59982",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 752,
+      "line": 727,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runtimeColor",
@@ -319596,7 +319570,7 @@
     {
       "id": "oc-542eddf0dc7535e5ab58",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 753,
+      "line": 728,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runtimeColor",
@@ -319611,7 +319585,7 @@
     {
       "id": "oc-c15309d1926bcd3c8091",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 754,
+      "line": 729,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runtimeColor",
@@ -319626,7 +319600,7 @@
     {
       "id": "oc-0dfcdfddc89c3a82d22e",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 755,
+      "line": 730,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "runtimeColor",
@@ -319641,7 +319615,7 @@
     {
       "id": "oc-59a4fcf3a5af4dabac65",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 788,
+      "line": 763,
       "symbol": "updateRuns",
       "kind": "fixed-declaration",
       "role": "authorized",
@@ -319656,7 +319630,7 @@
     {
       "id": "oc-35b4a8612e5f11b56cf1",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 806,
+      "line": 781,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "selected",
@@ -319671,7 +319645,7 @@
     {
       "id": "oc-9788ec13690464de629a",
       "path": "ravenroot/ravenroot-ui/src/embed-viewer-entry.js",
-      "line": 806,
+      "line": 781,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "selected",
@@ -426547,264 +426521,153 @@
       "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
     },
     {
-      "id": "oc-09d0abea47e80ae74aef",
+      "id": "oc-c48da9b2b1f0f927b1ea",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 527,
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_SCRIPTS",
+      "expression": "'Adlm'",
+      "expressionDigest": "f7dd8fc2d4f2d469f0d49f60d4cfede79929acdfd4aa2702fc71064d78347746",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Unicode Adlam script identifier in the source-owned compatibility fallback for engines without Intl locale direction metadata."
+    },
+    {
+      "id": "oc-f02927b647aa25f1bd2d",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
       "symbol": "module",
       "kind": "fixed-declaration",
       "role": "RTL_SCRIPTS",
       "expression": "'Arab'",
       "expressionDigest": "e5d2da711493846b74345b48c7fdc8473e2c09988a2b0695c482c4bd28047bc6",
-      "evidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-09d0abea47e80ae74aef"
+      }
     },
     {
-      "id": "oc-5600b3c072d8094d251c",
+      "id": "oc-671045ae2c9ddb7261b8",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 527,
+      "line": 528,
       "symbol": "module",
       "kind": "fixed-declaration",
       "role": "RTL_SCRIPTS",
       "expression": "'Hebr'",
       "expressionDigest": "3774ad7a63e7a63ab2cddd5890b59ede8da7c6b0436cab6fcf45a37af8990634",
-      "evidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-5600b3c072d8094d251c"
+      }
     },
     {
-      "id": "oc-cb838f4008226d01d624",
+      "id": "oc-56263c87e31939b55fe8",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 527,
+      "line": 528,
       "symbol": "module",
       "kind": "fixed-declaration",
       "role": "RTL_SCRIPTS",
       "expression": "'Nkoo'",
       "expressionDigest": "8b4edc7dd002aedfef2fadc359708131642a4bff63661b681c8b2fdff4820ee3",
-      "evidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-cb838f4008226d01d624"
+      }
     },
     {
-      "id": "oc-9dbb0f4cc5eb3c4a7bcd",
+      "id": "oc-4f351b4ad744593c5d09",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 527,
+      "line": 528,
       "symbol": "module",
       "kind": "fixed-declaration",
       "role": "RTL_SCRIPTS",
       "expression": "'Rohg'",
       "expressionDigest": "2e6b0b2f219399a5aa6267006d27962d6720ac33818492065e94dd19feb97d93",
-      "evidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-9dbb0f4cc5eb3c4a7bcd"
+      }
     },
     {
-      "id": "oc-e5df96349a24a0827bbd",
+      "id": "oc-482643a88b4272897c08",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 527,
+      "line": 528,
       "symbol": "module",
       "kind": "fixed-declaration",
       "role": "RTL_SCRIPTS",
       "expression": "'Syrc'",
       "expressionDigest": "d45bed8d5b0e24aae2cc22588c90327075fd1b72c945a649247c4894a0610064",
-      "evidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-e5df96349a24a0827bbd"
+      }
     },
     {
-      "id": "oc-9840281f0a1623123b8b",
+      "id": "oc-1eac0dbd638d8179d90d",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 527,
+      "line": 528,
       "symbol": "module",
       "kind": "fixed-declaration",
       "role": "RTL_SCRIPTS",
       "expression": "'Thaa'",
       "expressionDigest": "054b44b75ff77c9e14051ae368775c5eb8c5715c2019489f4787fbf1cf7eaaa3",
-      "evidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+      "evidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "identityMigration": {
+        "history": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+        "fromId": "oc-9840281f0a1623123b8b"
+      }
     },
     {
-      "id": "oc-356191e0dc9dec89251c",
+      "id": "oc-ed2e6d53897bf0fbe8ba",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
+      "line": 554,
+      "symbol": "if",
       "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'ar'",
-      "expressionDigest": "6c5b264121676130bec9da9f784b517dc86bfbe7fcdcac90bf377ec48725441d",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "role": "textInfo",
+      "expression": "'function'",
+      "expressionDigest": "91bd57c46c04bf8bd32a5a2430c8ab596d00fcaf007fa1928a76097473164c7c",
+      "evidenceDigest": "805cbda36fabb9ac81f49c94f83d4c9bf3f21c0d124ca82a69067fe0d4fb037a",
       "surface": "ui",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-ac6242237785e10723da",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'dv'",
-      "expressionDigest": "b765262e32fec05a3c3488529c032e695bc306f85c77ea7898e1fa70130f266a",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-d11100ccb63d3c1162d9",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'fa'",
-      "expressionDigest": "39a350b916135bf7a10a10b96f1fffbe0cc92474ff354ffe1372e93e542394c6",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-48ac6a0ce54d26637cc8",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'he'",
-      "expressionDigest": "5b0a0ac00041f43b6fb2b677320602c24ed31e12db03f27e158844b5d3d8c778",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-edc7b07675401b46c144",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'ku'",
-      "expressionDigest": "b18e0dda8a1b437099dbd6d34a2d8cbd8892f4398cdddf23eab150a72cbcf961",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-4e961a587ef2e1bff2e2",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'nqo'",
-      "expressionDigest": "824f968748d9a07a57d8ee5ec1edbddc7d55273a23befbbdefed8431012e772a",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-d1a33a83d428d742c9ea",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'ps'",
-      "expressionDigest": "73d750ee9026e41f308d4b87f00a01b5bc75b2c364d4de2dab428282303ed8f7",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-c78a65b4815904b00a1c",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'sd'",
-      "expressionDigest": "3de1a9b0cc5909b21acc3edd1dd7cb7a4e77d79ce6b97a1278e5b9e69d159bc0",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-93f4767ca0ffa20d3734",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'ug'",
-      "expressionDigest": "e63b089a6c33811b7aee9e20b94ee0ea7b3e7308f768bd14851de21b3d876636",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-f9cab252f5c6d277b32d",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'ur'",
-      "expressionDigest": "a79af289540d20fab4c6f9e455cc16673522ebbd0de207faa1844f6c75590ae0",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
-    },
-    {
-      "id": "oc-e1c15311e79b35bd1a75",
-      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 528,
-      "symbol": "module",
-      "kind": "fixed-declaration",
-      "role": "RTL_LANGUAGES",
-      "expression": "'yi'",
-      "expressionDigest": "a08c3fc3183da4bd8c07f5ba3d2495992f94ef442c34b58440900c69943454ae",
-      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
-      "surface": "ui",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+      "rationale": "JavaScript capability discriminator used to select the host Intl.Locale direction API without changing locale wire vocabulary."
     },
     {
       "id": "oc-1ff3180265dbec1b0b14",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 666,
+      "line": 670,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "category",
@@ -426819,7 +426682,7 @@
     {
       "id": "oc-5c31a0d34789560a62f1",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 671,
+      "line": 675,
       "symbol": "catch",
       "kind": "fixed-declaration",
       "role": "fallback",
@@ -426834,7 +426697,7 @@
     {
       "id": "oc-39c37406cc06cad4a116",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 710,
+      "line": 714,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "absoluteSeconds",
@@ -426849,7 +426712,7 @@
     {
       "id": "oc-d2939f7a41e469e81490",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 710,
+      "line": 714,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "absoluteSeconds",
@@ -426864,7 +426727,7 @@
     {
       "id": "oc-7c68444ea21b962d6729",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 711,
+      "line": 715,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426879,7 +426742,7 @@
     {
       "id": "oc-9103247287f42bc50b47",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 712,
+      "line": 716,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426894,7 +426757,7 @@
     {
       "id": "oc-1053b11ec81e49212d74",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 712,
+      "line": 716,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426909,7 +426772,7 @@
     {
       "id": "oc-19b796d3bcbeee1b8428",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 712,
+      "line": 716,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426924,7 +426787,7 @@
     {
       "id": "oc-7cbc8fcdfe723e784715",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 712,
+      "line": 716,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426939,7 +426802,7 @@
     {
       "id": "oc-139b75935a1f217951cf",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 712,
+      "line": 716,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426954,7 +426817,7 @@
     {
       "id": "oc-1a23f4a55b641f648bea",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 713,
+      "line": 717,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426969,7 +426832,7 @@
     {
       "id": "oc-12cabe79d9ae3950213a",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 714,
+      "line": 718,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426984,7 +426847,7 @@
     {
       "id": "oc-fd217a04bffdf1303fa8",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 714,
+      "line": 718,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -426999,7 +426862,7 @@
     {
       "id": "oc-45d87be038e467405f39",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 714,
+      "line": 718,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -427014,7 +426877,7 @@
     {
       "id": "oc-b56b3049818a2a9003a6",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 714,
+      "line": 718,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -427029,7 +426892,7 @@
     {
       "id": "oc-8398645ce13f7def6c15",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 715,
+      "line": 719,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -427040,6 +426903,36 @@
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+    },
+    {
+      "id": "oc-e97e548c8a71316c4e29",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 748,
+      "symbol": "direction",
+      "kind": "fixed-declaration",
+      "role": "catalog",
+      "expression": "'en'",
+      "expressionDigest": "92941d720779e57d7e888f7439cf828452e137df11f8b9513b1d2d7ecfaebc31",
+      "evidenceDigest": "65e3a783cc87049a58103a020bb24119d4ca7d92e7a5ba6d17e418857a478100",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "English is the stable locale identifier excluded from unrelated-language direction fallback and admitted only as the matching English base."
+    },
+    {
+      "id": "oc-f09664dbdaa2bd4c4f99",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 748,
+      "symbol": "direction",
+      "kind": "fixed-declaration",
+      "role": "catalog",
+      "expression": "'en'",
+      "expressionDigest": "92941d720779e57d7e888f7439cf828452e137df11f8b9513b1d2d7ecfaebc31",
+      "evidenceDigest": "65e3a783cc87049a58103a020bb24119d4ca7d92e7a5ba6d17e418857a478100",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "English is the stable locale identifier excluded from unrelated-language direction fallback and admitted only as the matching English base."
     },
     {
       "id": "oc-31752d98fa82286d7937",
@@ -642152,6 +642045,261 @@
       },
       "retirementRationale": "Issue #561 replaces the obsolete direct release-transition fixture error with bounded multi-step history reconstruction.",
       "evidence": "prepared_version = prepare(prepared_source, \"minor\")[\"version\"]"
+    },
+    {
+      "id": "oc-1e501445162ba469757f",
+      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
+      "line": 35,
+      "symbol": "constructor",
+      "kind": "fixed-declaration",
+      "role": "earlyCatalogMatches",
+      "expression": "'-'",
+      "expressionDigest": "01f86083c0c7d2b1fdd3d4e93cc502990ce51bada47b4da56d987d4efbad6d98",
+      "evidenceDigest": "b4c8104dd756edbebd710bf643f162cb104c22e1ab92705f192a990a04f2de5b",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import.",
+      "evidence": "const earlyCatalogMatches = (catalogLocale, selectedLocale) => { try { const [catalog] = Intl.getCanonicalLocales(String(catalogLocale).replaceAll('_', '-'));"
+    },
+    {
+      "id": "oc-356191e0dc9dec89251c",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'ar'",
+      "expressionDigest": "6c5b264121676130bec9da9f784b517dc86bfbe7fcdcac90bf377ec48725441d",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-48ac6a0ce54d26637cc8",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'he'",
+      "expressionDigest": "5b0a0ac00041f43b6fb2b677320602c24ed31e12db03f27e158844b5d3d8c778",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-4e961a587ef2e1bff2e2",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'nqo'",
+      "expressionDigest": "824f968748d9a07a57d8ee5ec1edbddc7d55273a23befbbdefed8431012e772a",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-93f4767ca0ffa20d3734",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'ug'",
+      "expressionDigest": "e63b089a6c33811b7aee9e20b94ee0ea7b3e7308f768bd14851de21b3d876636",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-974b7ef1ef55d5f7bf15",
+      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
+      "line": 36,
+      "symbol": "constructor",
+      "kind": "fixed-declaration",
+      "role": "literal",
+      "expression": "'_'",
+      "expressionDigest": "bdc4e106fa8ebf0e98da507d47fb4708e9144a68d01a460a1b533cb5a2e82536",
+      "evidenceDigest": "53935202824e76eecaf4c2ef6737e187d8c594ec82377f7cc54df42eaf7721f6",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import.",
+      "evidence": "const [selected] = Intl.getCanonicalLocales(String(selectedLocale).replaceAll('_', '-'));"
+    },
+    {
+      "id": "oc-ac6242237785e10723da",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'dv'",
+      "expressionDigest": "b765262e32fec05a3c3488529c032e695bc306f85c77ea7898e1fa70130f266a",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-c78a65b4815904b00a1c",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'sd'",
+      "expressionDigest": "3de1a9b0cc5909b21acc3edd1dd7cb7a4e77d79ce6b97a1278e5b9e69d159bc0",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-d00b098c811b20038322",
+      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
+      "line": 36,
+      "symbol": "constructor",
+      "kind": "fixed-declaration",
+      "role": "literal",
+      "expression": "'-'",
+      "expressionDigest": "01f86083c0c7d2b1fdd3d4e93cc502990ce51bada47b4da56d987d4efbad6d98",
+      "evidenceDigest": "53935202824e76eecaf4c2ef6737e187d8c594ec82377f7cc54df42eaf7721f6",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import.",
+      "evidence": "const [selected] = Intl.getCanonicalLocales(String(selectedLocale).replaceAll('_', '-'));"
+    },
+    {
+      "id": "oc-d11100ccb63d3c1162d9",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'fa'",
+      "expressionDigest": "39a350b916135bf7a10a10b96f1fffbe0cc92474ff354ffe1372e93e542394c6",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-d1a33a83d428d742c9ea",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'ps'",
+      "expressionDigest": "73d750ee9026e41f308d4b87f00a01b5bc75b2c364d4de2dab428282303ed8f7",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-e1c15311e79b35bd1a75",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'yi'",
+      "expressionDigest": "a08c3fc3183da4bd8c07f5ba3d2495992f94ef442c34b58440900c69943454ae",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-e51b2ae430e09d7017de",
+      "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
+      "line": 35,
+      "symbol": "constructor",
+      "kind": "fixed-declaration",
+      "role": "earlyCatalogMatches",
+      "expression": "'_'",
+      "expressionDigest": "bdc4e106fa8ebf0e98da507d47fb4708e9144a68d01a460a1b533cb5a2e82536",
+      "evidenceDigest": "b4c8104dd756edbebd710bf643f162cb104c22e1ab92705f192a990a04f2de5b",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import.",
+      "evidence": "const earlyCatalogMatches = (catalogLocale, selectedLocale) => { try { const [catalog] = Intl.getCanonicalLocales(String(catalogLocale).replaceAll('_', '-'));"
+    },
+    {
+      "id": "oc-edc7b07675401b46c144",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'ku'",
+      "expressionDigest": "b18e0dda8a1b437099dbd6d34a2d8cbd8892f4398cdddf23eab150a72cbcf961",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
+    },
+    {
+      "id": "oc-f9cab252f5c6d277b32d",
+      "path": "ravenroot/ravenroot-ui/src/ui-text.js",
+      "line": 528,
+      "symbol": "module",
+      "kind": "fixed-declaration",
+      "role": "RTL_LANGUAGES",
+      "expression": "'ur'",
+      "expressionDigest": "a79af289540d20fab4c6f9e455cc16673522ebbd0de207faa1844f6c75590ae0",
+      "evidenceDigest": "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e",
+      "surface": "ui",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy.",
+      "retirementRationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags.",
+      "evidence": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);"
     }
   ],
   "evidenceRecords": {
@@ -642497,6 +642645,7 @@
     "085e3d083a162f85c370fd5264e21d047842e6b4a47bdf837d4f020d8cc2030c": "classname=\"ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest\" time=\"12.46\">",
     "085fa738fff846c65da63b0f8ea64065e23cc2a6880da7799f0f9507201bfadf": "self.assertIn(f\"ignored when the {package} package is not selected\", value)",
     "0865b4e713f1849643235a671fb05b79d09ce0aa2887418567fc9a99f62bed91": "\" public GraphMlLimits(int maxBytes,\", 1),",
+    "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4": "const RTL_SCRIPTS = new Set(['Adlm', 'Arab', 'Hebr', 'Nkoo', 'Rohg', 'Syrc', 'Thaa']);",
     "0879b591aea087529d2a4ab8adbca58638cf5d83dce2d0f1cea33a19185dafdb": "prepare(root, \"minor\")",
     "087a6f03d4755b54ceb15642792ba6ba7f3c2a6e8247070c239cd425599f416c": "} private RunnerAssignment latestMaterialized(RunnerAssignment assignment) throws Exception { Path path = directory(assignment).resolve(\"latest-materialized\");",
     "088ebf50520b3b6c4e3d02c0af2e96173cc4490d278c8cbe99b8e9a76d0abafd": "RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES: ${RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES:-}",
@@ -645748,7 +645897,6 @@
     "538b4bfed6600f2186f2dc2ec7237e9fbc1e934d93337c3b9cd41cc8fa1a87d3": "\"owner\": audit.SAGA_OUTBOX_CAPACITY_PATH + \"#SagaOutboxCapacity\",",
     "538c261130af2a54090599531d51338c501fd56b5c3ae41f6c0092d4a95822d9": "COMPOSE_WAIT_TIMEOUT=${RAVENROOT_COMPOSE_WAIT_TIMEOUT:-60}",
     "5391f98e4a54b511eba1990185ced1e9ed8c680d622e1438aab80d843f39ac41": "require_literal \"$helm_template\" 'RAVENROOT_EXECUTION_STORE_DIR'",
-    "53935202824e76eecaf4c2ef6737e187d8c594ec82377f7cc54df42eaf7721f6": "const [selected] = Intl.getCanonicalLocales(String(selectedLocale).replaceAll('_', '-'));",
     "5396319d2420da00e7599eb85d624c3c86a7875482bf86897fe30a147127f48d": "self.assertEqual(self.command.call_count, 1)",
     "539bca1b6b03f26a0d95691abc2ebabccc32f362bba5f4be695c799ff044b675": "const choices = page.items.map(item => `${item.graphId}@${item.releaseVersion} · ${item.sha256.slice(0, 12)}`);",
     "539d4929ac3e8d65f18b258563e342daf22161422bc4c783cf9274e2aeac5060": "changed = self.release(graph_hash=\"d\" * 64)",
@@ -646175,6 +646323,7 @@
     "5d7f88420ffdee57dd9c1416980b2765f319ac516f18b3d23aa5255b1e72a3d7": "REPOSITORY=\"$STAGE/repository\"",
     "5d9272c713793b83296f4dd41a21f6a8407af8da927bb0a234a18528f81f7499": "private static final int AMBIGUOUS = 6;",
     "5d9405346758859b174ddb9924e3ae756756e12f17814aafcb7f92e50995a5eb": "self.assertIn(\"contents: read\\n packages: write\", workflow)",
+    "5d9d817a6a0122bff87aad84adcad078f3e815ff25a28d1eb27683e80e63c392": "const readBootstrap = ({ requireFresh = true } = {}) => { const node = document.getElementById('ravenroot-embed-bootstrap');",
     "5d9f7e61a7952daec1190c61a6d4f1caf6347c3e7c66b03f20c06da445482296": "const invoke = async (method, input, { signal } = {}) => { if (destroyed) throw productError(\"workspace.error.frontend.plugin.sandbox.frontend.plugin.sandbox.was.destroyed\", new Error('Frontend plugin sandbox was destroyed'));",
     "5da0011b68937658db91f641b2f59c1f58b458c7bc4e8c702c86b84309e2291d": "} protected Duration settleWithin() { return Duration.ofSeconds(2);",
     "5db2b687fd71f8dca8c8aea373febf13acbdd77cdf6f5a3582d90e24aba7e629": "this.programAuthoringLimits = java.util.Objects.requireNonNull( programAuthoringLimits, \"programAuthoringLimits\");",
@@ -646521,6 +646670,7 @@
     "65ce819e0f0822fafcff002e269854656ab2d0193e000a71ab4c103bb0d6f1fc": "env -i PATH=\"$PATH\" HOME=\"$HOME\" \"$@\" docker compose --file \"$PROJECT_DIR/compose.yaml\" \\",
     "65dd41393bdbf913d8facc7bfc78d63181514cc5cc8e1121c9997492a016dfa3": "const pinnedEnd = state.endpoint === 'source' ? 'target' : 'source';",
     "65e25a32b61817e02591a4d8f87bca1e8a1ebdeb2c525a3b7527bd8201b217f2": "raise AssertionError(\"The exact agent budget setting must derive before negative tests\")",
+    "65e3a783cc87049a58103a020bb24119d4ca7d92e7a5ba6d17e418857a478100": "const catalog = uiLocaleCandidates(activeLocale) .filter(candidate => candidate !== 'en' || language === 'en') .map(candidate => available.get(candidate)).find(Boolean);",
     "65e765044cf011555d25ebea9d4f5ebac86c65ac16bf279989a9fea9392c0e30": "{\"pointer\":\"/definitions/aiConfiguration/properties/defaultMcpTimeoutMs/$ref\",\"reference\":\"#/definitions/aiPositive\",\"required\":true,\"resolutionError\":\"unsupported sibling next to $ref\",\"resolved\":null}",
     "65f65ac0357adb224410042cfd67a420b0b017a5520404c7a8bad5fcd6f4c5c3": "actual_id=$(extension_id_of_dir \"$module_dir\")",
     "65f827bd363c5a5a08fed91ea69806d3356cf52fa83331cc1bb3055c694b8f4f": "\"maxSystemPreambleChars\": { \"x-ravenroot-environment\": \"RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS\", \"$ref\": \"#/definitions/aiPositive\" },",
@@ -647353,6 +647503,7 @@
     "78b0e6dd9bd31913b37c1b6b8553d546cc8fe23d9973b2df172ec03766d6c698": "name = \"RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY\"",
     "78b137758f4c30b7f6f562a53db631b31334604f0b74c75661bc558ff178fe3a": "const pairTotal = next[boundary] + next[boundary + 1];",
     "78b63d2230546b0dcab1e844ee17c1cd8896db4c444f64607699db6a8ea68003": "verify_leaf_schema(child, node[\"items\"], f\"{path}.{index}\")",
+    "78baf86e18d6d68f5f82366aa79aaf22ce852f9864a72b4099205bc030bc3f2e": "const viewerModule = await import('/embed-viewer.js');",
     "78be423ce332d902a7bcf1198ef5d98b3e0bdec0d0b9c90a53cca31690f44fd5": "RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES: ${RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES:-}",
     "78c0b1422c6c51c615755b1c561feeab02a9a66e685d7594536de9d226f2d444": "if (lease == null) { lease = authority.acquire(\"teams.outgoing-webhook.\" + TeamsValues.sha256(context.nodeId().getBytes(StandardCharsets.UTF_8)).substring(0, 20), profile.webhookRoute(), Set.of(\"POST\"), new Handler(this, generation));",
     "78c6d471dd5510e04fcca4c7049ec9d387b2337236588c6a5cfa6f9ae332ca6b": "synchronized (monitor) { if (outstanding == null) { probe = store.forgottenBefore(\"__ravenroot_readiness_probe__\");",
@@ -647373,7 +647524,6 @@
     "792af796cc3d45b013d3744bd65ccce4c58914cb0940b8f1e32ae8a6718ea54c": "private static final PublicationRuleId MISSING = new PublicationRuleId(\"boundary.policy.missing\");",
     "792f842bb403b623cdb52772ab52b8ddf66be80a484b8c1f9b61c762a1d0e4c3": "coordinatorHttpQueue: 64",
     "7934ed6d63eef854d61d6fa5df38aa3c241be37bf3948fba2565bc646697e416": "public static final String REPEATABLE = \"repeatable\";",
-    "7949f96ade59f3dd690a7d5117cf8a568c300802ee7bf1cce17efb31064ac87e": "const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);",
     "7951091545b659a3ec7f957bcd223e779d633f966549f32184cb425b3156a317": "path = Path(directory) / \"prs.json\"",
     "795f62d3b7bf0923175c43832e321dd97033a91532a2bfc6d46216ce3229a6b0": "const DATABASE = 'ravenroot-frontend-plugins-v1';",
     "79629796f5d81367f9be34018cd6dd32b596997950c75e768bdfb8935edc0c63": "} } public record IssuedBearer(String bearer, String challenge, Instant expiresAt) { } public record ActiveSession(EmbedRegistrationAggregate registration, String challenge, ECPublicKey key, Instant expiresAt) { } public static final class CapacityExceededException extends RuntimeException { private CapacityExceededException() { super(\"embed session capacity exhausted\");",
@@ -647674,6 +647824,7 @@
     "804cd09726b39b2c8d0e301130451787c9faa17da1a38bffdcf5ed44bbf5979a": "private static final PublicationRuleId CANDIDATE_MALFORMED = new PublicationRuleId(\"boundary.candidate.malformed\");",
     "8057004ec5d06e984b3c4950f17ea7cf0e1708c1df14cc87610eeb2508f79a8f": "if ! docker build --build-arg PROBE_DIR=../ -t \"$PROBE_TAG\" \"$PROBE_DIR/context\" >/dev/null 2>&1; then",
     "80584f1f88b5b794837ccf167cac826b8cad6260a8f94190afe0e2cdab27d064": "self.assertEqual(contents.count(\"0.2.0-alpha.1\"), 3)",
+    "805cbda36fabb9ac81f49c94f83d4c9bf3f21c0d124ca82a69067fe0d4fb037a": "const textInfo = typeof parsed.getTextInfo === 'function' ? parsed.getTextInfo() : parsed.textInfo;",
     "8069a1a0dae7eb45642a117e4b64f4aa44fe652ecc206c14e80214612c22f416": "\"maxDocumentBytes > 100 * 1024 * 1024\", \"maxDocumentBytes > 101 * 1024 * 1024\"),",
     "806d0723e10779432b536212a2551db614bb2679c3be08cca9b361300e2acb56": "echo \" verify-port-knob: ${FAILURES} case(s) failed\" >&2",
     "8071b19c4279ddb0dd20e1d4fd6b93da1e74792b87945510a35548cc4ed8c1d4": "'\"persistence capacity is absent\"))',",
@@ -649514,6 +649665,7 @@
     "a99ba4a56a6351af6f4293d779eb492a9688fe4d3a60dacc7a436bfafc58dc60": "try { port = Integer.parseInt(p[1]);",
     "a99bfef74f57eb00089078dfa1a38d744a49f02178827a7c32b09630a87216fb": "\"RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES\",",
     "a99c67dee763a04c66af65d3a7d258147ee43b361d6e0bc7824f0e3f8c7fdcc2": "@mock.patch(\"scripts.release_contract.selected_pull_request\", return_value=(\"patch\", \"dev\"))",
+    "a99cd6b33ea5aad77a3ced27d07b6a44ad6d335a51fa56ba05d441d92f2cf9d9": "const localizationModule = await import('/embed-localization.js');",
     "a99def2791a1071a25c2d38affcef5bed13d071a5a1cbc54cd9a80b2c75199ac": "byte[] nameBytes=utf8(name,\"INVALID_HEADER\");",
     "a9a0a816a56385c11e1a062c5ef47b8cbc84c384090193fd0555248c8c6ff4ac": "self.mounts.return_value = {self.directory / \"unexpected\"}",
     "a9abb43f72fd02ebee82a7fc0da1bc16b72b9ebf01667bea85a6636badbd7b52": "if not path.is_file() or not path.read_text(encoding=\"utf-8\").strip():",
@@ -649990,7 +650142,6 @@
     "b4b06c728486ffee878c9e3d00bce0c42903aa9bd4cb8cd3137aef9de6f87f77": "\"result\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"version\",\"status\",\"commit\",\"polls\",\"workflows\",\"generation\",\"attempts\",\"remoteId\"],\"properties\":{\"version\":{\"const\":\"github.workflow-watch.result.v1\"},\"status\":{\"type\":\"string\"},\"commit\":{\"type\":\"string\"},\"polls\":{\"type\":\"integer\"},\"workflows\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/run\"}},\"generation\":{\"type\":\"integer\"},\"attempts\":{\"type\":\"integer\"},\"remoteId\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"retryAtEpochMs\":{\"type\":\"integer\"}}},",
     "b4bb20596c2e1adfb2e1a97fc68c782bc52e236af065b7ad2c43c5333a05d873": "const command = (dataValByName(edgeEl, 'command') || '').trim().toLowerCase();",
     "b4bc0e69791ac31b09fd8f10fe8edbc69d0fe3bfc1ea36f4f4d413caab0ca163": "\"RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS\": \"PostgreSQL definition insert/removal race attempts; default `3`\",",
-    "b4c8104dd756edbebd710bf643f162cb104c22e1ab92705f192a990a04f2de5b": "const earlyCatalogMatches = (catalogLocale, selectedLocale) => { try { const [catalog] = Intl.getCanonicalLocales(String(catalogLocale).replaceAll('_', '-'));",
     "b4d493a47bab274ff15690d9ecb544456e4e02af97fa9ddb8f54c09c9c57d0d8": "ReleaseContractError, \"exact merged internal dev promotion|exactly release:minor\"",
     "b4d52659852cb515d95c6335a74d12d028eaec52b26e343e943feb8ce20d0131": "\"x-ravenroot-environment\": \"RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS\",",
     "b4e36106b54348586f9647db6b95559632734b554153691521580858756c23d9": "RAVENROOT_ENABLED_PLUGINS: ${RAVENROOT_ENABLED_PLUGINS:-}",
@@ -650695,7 +650846,6 @@
     "c50b3df737823476b1c658ba807fb242e21e248980508fc10a3d4c1725451030": "export const LABEL_MAX_LENGTH = 120;",
     "c50da9a89d194dfe5644e0b46a4deeec6a77a82fd294827638171b24e53190a1": "const v2Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt', 'grantRevision', 'parentOrigin', 'showStartExecution', 'theme', 'viewerOrigin', 'viewerSourceVersion'];",
     "c50e9ae371185ac76ed86eac281d660ee8f4960bdf8a47bb9b750696e7c79b4e": "\"testPath\": str(tests.relative_to(root)), \"testType\": \"RuntimeLimitConfigurationTest\",",
-    "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930": "const RTL_SCRIPTS = new Set(['Arab', 'Hebr', 'Nkoo', 'Rohg', 'Syrc', 'Thaa']);",
     "c5127bf109ec01ef8fe93a18c0b6142b4c1906574645e5c70b178335b36f3643": "const page = element(doc, 'span', '', uiText(\"workspace.human.task.ui.page\", { pageNumber: state.pageNumber || 1 }));",
     "c514abde25e9a7e3883036486ec85fe55f43fc51844e3f2d6530878a91299e2b": "extension_module_dirs | while IFS= read -r dir; do extension_id_of_dir \"$dir\"; done",
     "c517b193f2d2b6e3b2aa539d24c80556649bec5e18f94f245e5e7d6e3caca157": "+ \"#PayloadLimits\")),",
@@ -651797,7 +651947,6 @@
     "dd48897f57a0d3a83c062ef5c9528da5af87a74db68186dc700f0761e7133d8e": "const validationOwnerId = document.querySelector('[data-workflow-validation=\"true\"]')",
     "dd4a81305c3525fc673355a8cf0016c7136e38fe72aaf77258201e7b5dd48919": "\"<!-- Generated by scripts/publish_environment_reference.py; do not edit directly. -->\", \"\",",
     "dd4caa1f1627b1c7bc6da6c76f6b588f631f35421b8c05b7d8017d27d8e7846f": "if related and release[\"releaseVersion\"] <= max(item[\"releaseVersion\"] for item in related):",
-    "dd53d276133260532522d021cac4630b160a10ecc1f565e2770dfa3af9d191ea": "const readBootstrap = () => { const node = document.getElementById('ravenroot-embed-bootstrap');",
     "dd637f516d280fa1631d70e80bb1eba14f42014f2f8d97dd5cc809dc05978b6f": "package_ready=${4:-0}",
     "dd734e37a91db46fafe21f10174c18452c9fe97820f200b718fc32a1111755b0": "if self.path != \"/v1/chat/completions\" or self.headers.get(\"Authorization\"):",
     "dd74189e491bf00ab4f5e6464dc2d5516ceb509455712b3f9d0c5275d7b6e06e": "run_browser_check 'service restart (fresh browser)' \"http://127.0.0.1:$COMPOSE_PORT\"",
@@ -1061113,6 +1061262,222 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-561-cycle2-attempt4-regional-direction-bootstrap-v1",
+      "issue": "#561",
+      "sourceRevision": "847880631e4d42e5a0db0dd054170b53ae7645e1",
+      "targetRevision": "faadc471651b5bf8748f51d5eeb53b4de7ebe816",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "59221a6bd2709f1404b493f1000794ae73a7f5fd8cccfbed7183c23b333b7791",
+      "targetCandidateDigest": "c59c33b4d70a1bb3f73f1ed7f5b5eccf74ede83d01f8be95f5612a4a977c6f7a",
+      "mappings": [
+        {
+          "fromId": "oc-09d0abea47e80ae74aef",
+          "toId": "oc-f02927b647aa25f1bd2d",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+            "afterEvidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4"
+          }
+        },
+        {
+          "fromId": "oc-5600b3c072d8094d251c",
+          "toId": "oc-671045ae2c9ddb7261b8",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+            "afterEvidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4"
+          }
+        },
+        {
+          "fromId": "oc-8ac77592bbe371bc3f18",
+          "toId": "oc-d63ab8a210f004824b6e",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "dd53d276133260532522d021cac4630b160a10ecc1f565e2770dfa3af9d191ea",
+            "afterEvidenceDigest": "5d9d817a6a0122bff87aad84adcad078f3e815ff25a28d1eb27683e80e63c392"
+          }
+        },
+        {
+          "fromId": "oc-9840281f0a1623123b8b",
+          "toId": "oc-1eac0dbd638d8179d90d",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+            "afterEvidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4"
+          }
+        },
+        {
+          "fromId": "oc-9dbb0f4cc5eb3c4a7bcd",
+          "toId": "oc-4f351b4ad744593c5d09",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+            "afterEvidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4"
+          }
+        },
+        {
+          "fromId": "oc-cb838f4008226d01d624",
+          "toId": "oc-56263c87e31939b55fe8",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+            "afterEvidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4"
+          }
+        },
+        {
+          "fromId": "oc-e5df96349a24a0827bbd",
+          "toId": "oc-482643a88b4272897c08",
+          "approved": true,
+          "rationale": "Issue #561 retains this exact locale-direction or bounded bootstrap atom while moving it into the validated regional-direction and pre-viewer localization flow.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "c5113f7f760700d19c738065cb07fb07be10faede9826a8f069d569a69963930",
+            "afterEvidenceDigest": "0865baf7d0dc59d0acec1140f96409747f2c799112c5b5c9291d195860295fe4"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-1e501445162ba469757f",
+          "approved": true,
+          "rationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import."
+        },
+        {
+          "id": "oc-356191e0dc9dec89251c",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-48ac6a0ce54d26637cc8",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-4e961a587ef2e1bff2e2",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-93f4767ca0ffa20d3734",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-974b7ef1ef55d5f7bf15",
+          "approved": true,
+          "rationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import."
+        },
+        {
+          "id": "oc-ac6242237785e10723da",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-c78a65b4815904b00a1c",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-d00b098c811b20038322",
+          "approved": true,
+          "rationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import."
+        },
+        {
+          "id": "oc-d11100ccb63d3c1162d9",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-d1a33a83d428d742c9ea",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-e1c15311e79b35bd1a75",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-e51b2ae430e09d7017de",
+          "approved": true,
+          "rationale": "Issue #561 removes the weak early-catalog matcher and its separator literals; the shipped bootstrap now uses the complete shared catalog validator atomically before viewer import."
+        },
+        {
+          "id": "oc-edc7b07675401b46c144",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        },
+        {
+          "id": "oc-f9cab252f5c6d277b32d",
+          "approved": true,
+          "rationale": "Issue #561 removes the approximate language-name direction table; host Intl script direction metadata with a script fallback now derives omitted direction and honors explicit script subtags."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-23eb499d30e424708ee8",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Stable same-origin presentation-only module route that loads the complete bounded localization validator before the fallible viewer module."
+          }
+        },
+        {
+          "id": "oc-bfb10fc394b936aa32ed",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Stable same-origin viewer module route retained as the heavy implementation boundary after validated early localization."
+          }
+        },
+        {
+          "id": "oc-c48da9b2b1f0f927b1ea",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Unicode Adlam script identifier in the source-owned compatibility fallback for engines without Intl locale direction metadata."
+          }
+        },
+        {
+          "id": "oc-e97e548c8a71316c4e29",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "English is the stable locale identifier excluded from unrelated-language direction fallback and admitted only as the matching English base."
+          }
+        },
+        {
+          "id": "oc-ed2e6d53897bf0fbe8ba",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "JavaScript capability discriminator used to select the host Intl.Locale direction API without changing locale wire vocabulary."
+          }
+        },
+        {
+          "id": "oc-f09664dbdaa2bd4c4f99",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "English is the stable locale identifier excluded from unrelated-language direction fallback and admitted only as the matching English base."
+          }
+        }
+      ],
+      "semanticReviews": []
     }
   ],
   "semanticReviewHistory": [
@@ -1135173,7 +1135538,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerTest.java",
-          "digest": "748df6413d82b00d2c84598bb0d4f0dc574e8fb2bf42d484ac880896da050ba8"
+          "digest": "b4d34df45969dae2ed85be1ee4a7c1365eb14a318fad1b5415dffda5d6b47046"
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java",
@@ -1137250,7 +1137615,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "b481b5e3125dc0392e160151fb2bb0ed4f0ff13a9e854a7b589d361e277d03a9"
+    "digest": "bd279a308d8f4f8e827fb2c67fa1d2963b649318589f573e987af65bd525fe53"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {

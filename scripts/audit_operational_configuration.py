@@ -14728,8 +14728,11 @@ GRAPH_AUTHORING_RAW_KUBERNETES_PATH = Path("deploy/kubernetes/ravenroot.yaml")
 GRAPH_AUTHORING_PUBLISHER_PATH = Path("scripts/publish-graph-artifacts.py")
 
 GRAPH_AUTHORING_FILE_PROOFS = {
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): "c66f096e571fa79a0d9dd7b895d1f29df847783faba8da4efa82b8d06b6aced1",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "36c56d5a54111abdbe2a1e6b442e7827dd023ce18e86a9fff917690a238e34d6",
+    Path("docs/examples/graph-authoring/gitlab-ci.yml"): "d49fa1887422a5bf726ad2c55e08b9f29185438314b626d9fd7e5feeb9c268b7",
     GRAPH_AUTHORING_CONFIGURATION_PATH:
-        "7b2ee4320ec2610fe4d7b9b096cdcfd017caba2c91c30173df6a96ff3e7df011",
+        "2456dfb6352ec34dbbd3311ef90ef6fbeaa29f7e258d984acab5e9c743215d71",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringHttpApi.java"):
         "1e9c0556aa07810c653faed15cb78a8ec8cb1a292306d3294e69f7230903602b",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactHttpApi.java"):
@@ -14753,9 +14756,9 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphProgramDependency.java"):
         "02ca6b2a286e62a9cd18c213bf2c1e628d2c6f686b44fee922ec48bbc59db2b4",
     GRAPH_AUTHORING_CLIENT_PATH:
-        "cda9f74cc1bc4a587d8bcdaba6ebd92a6cd3b87cf77a22937970f36b603f9ddd",
+        "d3ad3be071629c1c2daab0b2409e7cdd6c0f08b0007989609334dccd29d5a3bf",
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
-        "fc6894ee287b9c0913f5c64a3ef0c2404d85a738ea7e2d22b2a3a1f92b0f9612",
+        "b89d76d3694d4d1a0279473954d64cd64fa29197d6ae3c11c930d79028785fc6",
     GRAPH_AUTHORING_STARTUP_IMPORT_PATH:
         "fe40703b1b5dbb37dabba0015c1624b8e9110bc743cef56c18dfb67264543a70",
     GRAPH_AUTHORING_PUBLISHER_PATH:
@@ -14774,8 +14777,9 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): "1633f06cc6ac816bc7ad47290c3c6b6d38c117a4599d2573d1674d29b60d37b2",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
-        "2a923b2f4cb4518dcb7b08153c7f095f3a3d588aa4f43f3bb01b9eee219c02ee",
+        "5f00033d6093669f0dbb8f41ab188eb4e19650eb88e0a4e7ef370f16ad4306e8",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubAuthoringRepositoryTest.java"):
         "b3b81d489d93ac3255ff7d5a433defbdea7100e8a14fafd385979fa2ba736565",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubTokenSourceTest.java"):
@@ -14783,7 +14787,7 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/BoundedHttpResponseBodyTest.java"):
         "8de6368ff8a8bfc6714b6ba993747c844966cfc870d2069467a3cc85f4f71edb",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphAuthoringConfigurationTest.java"):
-        "30f5f9ef5d8087cd4aa967080f55d3c49e4e52daabf09ede6407bc9e124bac54",
+        "365e63c8229ee79416ebb8c940462cb4043af010f3a332c86e6009bb7f9b3894",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalogTest.java"):
         "853ffb8058623c9a89d830c90c367968e5e88bbeb97ad1495da846b1af434da4",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphReleaseMetadataTest.java"):
@@ -14795,9 +14799,9 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationLocalDeploymentTest.java"):
         "440f5e358571d6fa36a786913aa9e447de0017deb0f82f20f4f5e3ffb679b26e",
     Path("ravenroot/ravenroot-ui/test/graph-authoring-client.test.js"):
-        "1c50732ebcf54d29cad7c978339e0ec20afa99e353d0f1958f400ca63a75c10c",
+        "fbd73aacd5e369c25e8ed4d21ae3ce52ff0598492cce0923eaa4e328a77e92d7",
     Path("ravenroot/ravenroot-ui/test/authoring-capability.test.js"):
-        "356be89f7908295735b6cb1851ebd545a7fdfdcf934464ff19a37ab2e885a0ed",
+        "d6e2dc02e534f903d71bc3042f5d1f551e8a0bad09cedc90627fee4d38873ac0",
     Path("ravenroot/ravenroot-ui/test/startup-import.test.js"):
         "ae01fbd27d8bcbe3cf6a34471e3081f2e5b6e453f174dc6f2b0d043e5f9c2197",
     Path("ravenroot/ravenroot-ui/e2e/startup-import-redirects.spec.js"):
@@ -14835,7 +14839,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryHistory": "455dba6b85e8b9e2d202aa851c0e9c073b740eee02ec45bc8c6233aff5b19dcb",
     "repositoryDiscard": "5048fc18dfcc587d53b40a41b759de139d5f0b178323a9bab81eee12025b2fc0",
     "repositoryDelete": "954a18af00d54b9aabaa5731898bf33cdd740f14831a382546ff15870d2049d7",
-    "repositoryRelease": "def7c49bdc1e193b5b4303446a614ac288469056511210809886e932ca94b95f",
+    "repositoryRelease": "584140f4b88f1ac4e046a1988c707159ed67b316c9fbf108f2a4f0c76824fd53",
     "publishedArtifacts": "1c482b902b5dc8ec5ab654d5c7e886c3cff091856baa8ad1c4cb8ea298eb2908",
     "connectRuntime": "409ba299be0186b8b5ee42f8aef09f0f0649a380bbef43d9f15a747de4e2cba2",
     "createStartupImportPlaceholder": "8629a76a81d1669525f458040a9c14e4d2d886bba2b890a9b7974ca377e5211d",
@@ -14868,12 +14872,14 @@ GRAPH_AUTHORING_UI_SPAN_PROOFS = {
 }
 GRAPH_AUTHORING_SETTINGS = (
     ("graph.authoring.mode", "mode", "RAVENROOT_GRAPH_AUTHORING_MODE", "LOCAL", "LOCAL or GIT."),
-    ("graph.authoring.provider", "provider", "RAVENROOT_GRAPH_AUTHORING_PROVIDER", "GITHUB in Git mode; NONE locally", "GITHUB when Git mode is enabled."),
+    ("graph.authoring.provider", "provider", "RAVENROOT_GRAPH_AUTHORING_PROVIDER", "GITHUB in Git mode; NONE locally", "GITHUB or GITLAB when Git mode is enabled."),
     ("graph.authoring.repository-owner", "repositoryOwner", "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER", "required in Git mode", "One GitHub owner segment, at most 100 characters."),
     ("graph.authoring.repository-name", "repositoryName", "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME", "required in Git mode", "One GitHub repository segment, at most 100 characters."),
     ("graph.authoring.graph-directory", "graphDirectory", "RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY", "graphs", "Confined relative repository path."),
     ("graph.authoring.draft-branch", "draftBranch", "RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH", "draft", "Confined Git branch distinct from the release branch."),
     ("graph.authoring.release-branch", "releaseBranch", "RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "main", "Confined Git branch distinct from the draft branch."),
+    ("graph.authoring.gitlab-api-base", "apiBase", "RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE", "https://gitlab.com/api/v4", "Absolute HTTPS GitLab API base ending in /api/v4; no credentials, query or fragment."),
+    ("graph.authoring.gitlab-project", "project", "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "required for GitLab", "Positive project ID or complete confined nested namespace/project path."),
     ("graph.authoring.github-api-base", "apiBase", "RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE", "https://api.github.com", "Absolute HTTPS origin/path without credentials, query, or fragment."),
     ("graph.authoring.credential-mode", "credentialMode", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "required in Git mode", "PAT or APP; NONE only in local mode."),
     ("graph.authoring.credential-reference", "credentialReference", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE", "required in Git mode", "Opaque server-side credential reference."),
@@ -15042,6 +15048,10 @@ def graph_authoring_authority_from_source(
         ui_span_digests[f"{path.as_posix()}#{method}"] = digest
     configuration = sources[GRAPH_AUTHORING_CONFIGURATION_PATH]
     semantic_requirements = (
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
+         'action.put("last_commit_id", original.lastCommit())'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
+         'requestPath(actor, operation)'),
         (configuration, "maxDocumentBytes < 1 || maxDocumentBytes > 256 * 1024 * 1024"),
         (configuration, "maxDocumentBytes > 100 * 1024 * 1024"),
         (configuration, "pageSize < 1 || pageSize > 200"),
@@ -15101,7 +15111,7 @@ def graph_authoring_authority_from_source(
         return None
     graph_schema = json_pointer(schema, "#/properties/graphAuthoring")
     required_fields = {"enabled", "provider", "repositoryOwner", "repositoryName", "graphDirectory",
-                       "draftBranch", "releaseBranch", "githubApiBase", "credentialMode",
+                       "draftBranch", "releaseBranch", "githubApiBase", "gitlabApiBase", "gitlabProject", "credentialMode",
                        "credentialSecretName", "credentialSecretKey", "githubAppId",
                        "githubInstallationId", "tenantNamespaces", "artifactBaseUrl",
                        "artifactCatalogPath"}

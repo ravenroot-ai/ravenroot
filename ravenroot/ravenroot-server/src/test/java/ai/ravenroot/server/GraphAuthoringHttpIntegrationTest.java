@@ -28,13 +28,25 @@ import java.util.concurrent.CompletionStage;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GraphAuthoringHttpIntegrationTest {
-    @Test void liveHttpUsesAuthenticatedTenantAndEnforcesReadWriteScopes() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"LOCAL", "GITLAB"})
+    void liveHttpUsesAuthenticatedTenantAndEnforcesReadWriteScopes(String provider) throws Exception {
         var repository = new TenantRecordingRepository();
         var authorization = new DefaultAuthorizationService(new StructuredAuthorizationLogger(
                 new java.io.PrintStream(java.io.OutputStream.nullOutputStream())));
-        var api = new GraphAuthoringHttpApi(GraphAuthoringConfiguration.local(), repository,
+        var configuration = provider.equals("LOCAL") ? GraphAuthoringConfiguration.local()
+                : GraphAuthoringConfiguration.fromEnvironment(Map.of(
+                        "RAVENROOT_GRAPH_AUTHORING_MODE", "GIT", "RAVENROOT_GRAPH_AUTHORING_PROVIDER", "GITLAB",
+                        "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "group/nested/graphs",
+                        "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "PAT",
+                        "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE", "server-only",
+                        "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "tenant-a=a,tenant-b=b",
+                        "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "https://artifacts.example.test/"));
+        var api = new GraphAuthoringHttpApi(configuration, repository,
                 authorization, ignored -> { });
         assertTrue(api.capabilitiesJson().contains("ARTIFACT_IMPORT"));
+        assertTrue(api.capabilitiesJson().contains(provider.equals("GITLAB") ? "\"provider\":\"gitlab\"" : "\"provider\":\"none\""));
+        assertFalse(api.capabilitiesJson().contains("server-only"));
         assertTrue(api.capabilitiesJson().contains("ARTIFACT_DEPLOY"));
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/v1/graph-authoring", exchange -> {

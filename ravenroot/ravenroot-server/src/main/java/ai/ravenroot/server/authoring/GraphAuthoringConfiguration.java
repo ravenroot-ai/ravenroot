@@ -18,7 +18,7 @@ public record GraphAuthoringConfiguration(
         int retryLimit) {
 
     public enum Mode { LOCAL, GIT }
-    public enum Provider { NONE, GITHUB }
+    public enum Provider { NONE, GITHUB, GITLAB }
     public enum CredentialMode { NONE, PAT, APP }
 
     private static final Pattern OWNER_REPOSITORY = Pattern.compile("[A-Za-z0-9_.-]{1,100}");
@@ -58,13 +58,26 @@ public record GraphAuthoringConfiguration(
             if (maxDocumentBytes > 100 * 1024 * 1024) {
                 throw new IllegalArgumentException("GitHub graph authoring document limit cannot exceed the Git blob limit");
             }
-            if (provider != Provider.GITHUB) throw new IllegalArgumentException("Git authoring currently supports github only");
-            requireMatch(repositoryOwner, OWNER_REPOSITORY, "repository owner");
-            requireMatch(repositoryName, OWNER_REPOSITORY, "repository name");
+            if (provider == Provider.GITHUB) {
+                requireMatch(repositoryOwner, OWNER_REPOSITORY, "repository owner");
+                requireMatch(repositoryName, OWNER_REPOSITORY, "repository name");
+            } else if (provider == Provider.GITLAB) {
+                if (!repositoryOwner.isEmpty()) requireConfined(repositoryOwner, "GitLab project namespace");
+                requireMatch(repositoryName, OWNER_REPOSITORY, "GitLab project name or ID");
+                if (repositoryName.equals(".") || repositoryName.equals("..")
+                        || repositoryOwner.isEmpty() && !repositoryName.matches("[1-9][0-9]{0,19}")) {
+                    throw new IllegalArgumentException("GitLab project must be a positive ID or complete namespace/project path");
+                }
+                if (credentialMode != CredentialMode.PAT) throw new IllegalArgumentException("GitLab requires PAT credential mode");
+                if (!apiBase.getPath().replaceAll("/$", "").endsWith("/api/v4")) {
+                    throw new IllegalArgumentException("GitLab API base must end with /api/v4");
+                }
+                if (pageSize > 100) throw new IllegalArgumentException("GitLab pageSize must be 1..100");
+            } else throw new IllegalArgumentException("Git authoring requires a supported provider");
             requireConfined(graphDirectory, "graph directory");
             requireMatch(draftBranch, BRANCH, "draft branch");
             requireMatch(releaseBranch, BRANCH, "release branch");
-            requireHttps(apiBase, "GitHub API base");
+            requireHttps(apiBase, "provider API base");
             if (draftBranch.equals(releaseBranch)) throw new IllegalArgumentException("draft and release branches must differ");
             if (credentialMode == CredentialMode.NONE || credentialReference.isBlank()) {
                 throw new IllegalArgumentException("Git authoring requires a credential reference");
@@ -83,7 +96,17 @@ public record GraphAuthoringConfiguration(
                 if (tenant.isBlank()) throw new IllegalArgumentException("tenant namespace key cannot be blank");
                 requireConfined(namespace, "tenant namespace");
             });
+            for (String left : tenantNamespaces.values()) for (String right : tenantNamespaces.values()) {
+                if (!left.equals(right) && right.startsWith(left + "/")) {
+                    throw new IllegalArgumentException("tenant namespaces cannot overlap");
+                }
+            }
             var branchNamespaces = new java.util.HashSet<String>();
+            for (String namespace : tenantNamespaces.values()) {
+                String branch = draftBranch + "/" + namespace.replace('/', '-');
+                requireMatch(branch, BRANCH, "tenant draft branch");
+                if (branch.equals(releaseBranch)) throw new IllegalArgumentException("tenant draft branch cannot be the release branch");
+            }
             tenantNamespaces.values().forEach(namespace -> {
                 if (!branchNamespaces.add(namespace.replace('/', '-'))) {
                     throw new IllegalArgumentException("tenant namespaces must map to distinct draft branches");
@@ -108,14 +131,20 @@ public record GraphAuthoringConfiguration(
         Objects.requireNonNull(environment, "environment");
         Mode mode = enumValue(environment, "RAVENROOT_GRAPH_AUTHORING_MODE", Mode.class, Mode.LOCAL);
         if (mode == Mode.LOCAL) return local();
-        return new GraphAuthoringConfiguration(mode,
-                enumValue(environment, "RAVENROOT_GRAPH_AUTHORING_PROVIDER", Provider.class, Provider.GITHUB),
-                required(environment, "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER"),
-                required(environment, "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME"),
+        Provider provider = enumValue(environment, "RAVENROOT_GRAPH_AUTHORING_PROVIDER", Provider.class, Provider.GITHUB);
+        String project = provider == Provider.GITLAB ? required(environment, "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT") : "";
+        int split = project.lastIndexOf('/');
+        return new GraphAuthoringConfiguration(mode, provider,
+                provider == Provider.GITLAB ? (split < 0 ? "" : project.substring(0, split))
+                        : required(environment, "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER"),
+                provider == Provider.GITLAB ? project.substring(split + 1)
+                        : required(environment, "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME"),
                 environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY", "graphs"),
                 environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH", "draft"),
                 environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "main"),
-                URI.create(environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE", "https://api.github.com")),
+                URI.create(provider == Provider.GITLAB
+                        ? environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE", "https://gitlab.com/api/v4")
+                        : environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE", "https://api.github.com")),
                 enumValue(environment, "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", CredentialMode.class, null),
                 required(environment, "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE"),
                 environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID", ""),
@@ -129,6 +158,9 @@ public record GraphAuthoringConfiguration(
                 integer(environment, "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", 1));
     }
 
+    /** Returns the configured provider project path or numeric GitLab project ID. */
+    public String project() { return repositoryOwner.isEmpty() ? repositoryName : repositoryOwner + "/" + repositoryName; }
+
     public String tenantDirectory(String tenantId) {
         String namespace = tenantNamespaces.get(tenantId);
         if (namespace == null) throw new IllegalArgumentException("tenant has no configured graph namespace");
@@ -137,13 +169,13 @@ public record GraphAuthoringConfiguration(
 
     public String capabilitiesJson() {
         if (mode == Mode.LOCAL) return "{\"mode\":\"local\",\"provider\":null,\"operations\":[\"open-local\",\"save-local\"]}";
-        return "{\"mode\":\"git\",\"provider\":\"github\",\"operations\":[\"list\",\"open\",\"create\",\"save\",\"history\",\"diff\",\"restore\",\"delete\",\"discard\",\"release-proposal\",\"artifact-import\",\"artifact-deploy\"]}";
+        return "{\"mode\":\"git\",\"provider\":\"" + provider.name().toLowerCase(Locale.ROOT) + "\",\"operations\":[\"list\",\"open\",\"create\",\"save\",\"history\",\"diff\",\"restore\",\"delete\",\"discard\",\"release-proposal\",\"artifact-import\",\"artifact-deploy\"]}";
     }
 
     public Map<String, Object> capabilities() {
         return Map.of("mode", mode.name().toLowerCase(Locale.ROOT),
                 "provider", provider == Provider.NONE ? "none" : provider.name().toLowerCase(Locale.ROOT),
-                "repositoryDisplay", mode == Mode.GIT ? repositoryOwner + "/" + repositoryName : "",
+                "repositoryDisplay", mode == Mode.GIT ? project() : "",
                 "releaseBranch", mode == Mode.GIT ? releaseBranch : "",
                 "maxDocumentBytes", maxDocumentBytes);
     }
@@ -192,7 +224,7 @@ public record GraphAuthoringConfiguration(
     private static void requireConfined(String value, String name) {
         requireMatch(value, CONFINED, name);
         if (value.startsWith("/") || value.endsWith("/") || value.contains("//")
-                || java.util.Arrays.asList(value.split("/")).contains("..")) {
+                || java.util.Arrays.stream(value.split("/")).anyMatch(segment -> segment.equals("..") || segment.equals("."))) {
             throw new IllegalArgumentException(name + " is not confined");
         }
     }

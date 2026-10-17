@@ -29,7 +29,7 @@ const ENGLISH_MESSAGES = Object.freeze({
   'commands.file.repositoryDelete.label': 'Delete repository draft',
   'commands.file.repositoryDelete.help': 'Delete the draft while retaining Git history',
   'commands.file.repositoryRelease.label': 'Propose release review',
-  'commands.file.repositoryRelease.help': 'Open a review pull request in the graph repository',
+  'commands.file.repositoryRelease.help': 'Open a review proposal in the graph repository',
   'commands.file.publishedArtifacts.label': 'Published versions…',
   'commands.file.publishedArtifacts.help': 'Deploy or roll back using verified immutable publications',
   'commands.file.close.label': 'Close Document',

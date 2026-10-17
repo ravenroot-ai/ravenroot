@@ -68,6 +68,10 @@ spec:
               value: {{ .Values.graphAuthoring.releaseBranch | quote }}
             - name: RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE
               value: {{ .Values.graphAuthoring.githubApiBase | quote }}
+            - name: RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE
+              value: {{ .Values.graphAuthoring.gitlabApiBase | quote }}
+            - name: RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT
+              value: {{ .Values.graphAuthoring.gitlabProject | quote }}
             - name: RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE
               value: {{ .Values.graphAuthoring.credentialMode | quote }}
             - name: RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE

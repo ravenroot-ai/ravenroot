@@ -24,8 +24,8 @@ export function authoringCapabilityFromConfiguration(configuration) {
   if (advertised == null || advertised.mode === 'local') {
     return Object.freeze({ state: AUTHORING_CAPABILITY_STATE.LOCAL, error: null });
   }
-  if (advertised.mode === 'git' && advertised.provider === 'github') {
-    return Object.freeze({ state: AUTHORING_CAPABILITY_STATE.GIT, error: null });
+  if (advertised.mode === 'git' && ['github', 'gitlab'].includes(advertised.provider)) {
+    return Object.freeze({ state: AUTHORING_CAPABILITY_STATE.GIT, provider: advertised.provider, error: null });
   }
   throw new Error('Runtime graph authoring capability is malformed');
 }

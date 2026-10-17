@@ -6739,6 +6739,10 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
 
     def test_removed_auth_store_tenant_and_limit_guards_or_drifted_carriers_fail_closed(self) -> None:
         mutations = (
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GitlabAuthoringRepository.java"),
+             'action.put("last_commit_id", original.lastCommit())',
+             'action.put("last_commit_id", "unconditional")'),
             (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
              "maxDocumentBytes > 100 * 1024 * 1024", "maxDocumentBytes > 101 * 1024 * 1024"),
             (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,

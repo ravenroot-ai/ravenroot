@@ -54,7 +54,9 @@ function validatePublishedArtifacts(value) {
 export function validateGraphAuthoringCapability(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || !['local', 'git'].includes(value.mode)
-      || !['none', 'github'].includes(value.provider)
+      || !['none', 'github', 'gitlab'].includes(value.provider)
+      || (value.mode === 'git' && !['github', 'gitlab'].includes(value.provider))
+      || (value.mode === 'local' && value.provider !== 'none')
       || !Array.isArray(value.operations)
       || value.operations.some(item => typeof item !== 'string')) {
     throw new Error('Runtime graph authoring capability is malformed');
@@ -202,4 +204,9 @@ export function applyAcceptedGraphMl(currentGraph, document_, parseGraphMl) {
     [RELEASE_VERSION_PROPERTY]: String(releaseVersion),
   };
   return currentGraph;
+}
+
+/** Provider-specific review noun from a validated runtime capability. */
+export function repositoryReviewLabel(provider) {
+  return provider === 'gitlab' ? 'Merge request' : 'Pull request';
 }

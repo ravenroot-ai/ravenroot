@@ -488,7 +488,7 @@ public final class RavenrootServerMain {
             }
             publishedGraphCatalog = new ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog(
                     graphAuthoringConfiguration);
-            var gitRepository = new ai.ravenroot.server.authoring.GithubAuthoringRepository(
+            var gitRepository = ai.ravenroot.server.authoring.GraphAuthoringRepositories.create(
                     graphAuthoringConfiguration, credentialResolver, publishedGraphCatalog, graph -> {
                         var inspected = application.inspectGraphMl(new java.io.ByteArrayInputStream(graph),
                                 ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);

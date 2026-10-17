@@ -237,6 +237,7 @@ import {
   decodeGraphMl,
   parseAuthoredReleaseVersion,
   repositorySourceStatus,
+  repositoryReviewLabel,
 } from './graph-authoring-client.js';
 import {
   applyAssistantGraphProposal,
@@ -15703,7 +15704,7 @@ async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
   if (!gitAuthoringEnabled() || !id) return false;
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
-    addActivityMessage('editor', `${result.reused ? 'Existing' : 'New'} graph review: ${result.url}`, 'completed'); return true;
+    addActivityMessage('editor', `${result.reused ? 'Existing' : 'New'} ${repositoryReviewLabel(graphAuthoringCapability.provider).toLowerCase()}: ${result.url}`, 'completed'); return true;
   } catch (error) { showInspectorMessage(error.message || 'A release review could not be proposed.'); return false; }
 }
 

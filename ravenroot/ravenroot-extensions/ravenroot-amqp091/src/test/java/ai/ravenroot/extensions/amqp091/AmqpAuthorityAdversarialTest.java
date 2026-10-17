@@ -21,6 +21,43 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpAuthorityAdversarialTest {
     @Test
+    void producerQueueAndPublisherTopicSelectorsResolveToExplicitAuthorizedWireDestinations() {
+        var queueProtocol = new AmqpTestSupport.FakeProtocol(AmqpTestSupport.Event.CONFIRM);
+        var behavior = AmqpTestSupport.behavior(queueProtocol);
+        assertEquals("CONFIRMED", AmqpTestSupport.output(behavior.create(AmqpTestSupport.configuration(
+                Map.of("mode", "Producer", "queue", "orders.q"))), AmqpTestSupport.payload()).get("status"));
+        assertEquals("", queueProtocol.publications.getFirst().exchange());
+        assertEquals("orders.q", queueProtocol.publications.getFirst().routingKey());
+
+        var publisherProtocol = new AmqpTestSupport.FakeProtocol(AmqpTestSupport.Event.CONFIRM);
+        behavior = AmqpTestSupport.behavior(publisherProtocol);
+        assertEquals("CONFIRMED", AmqpTestSupport.output(behavior.create(AmqpTestSupport.configuration(
+                Map.of("mode", "Publisher", "exchange", "orders", "routingKey", "created"))),
+                AmqpTestSupport.payload()).get("status"));
+        assertEquals("orders", publisherProtocol.publications.getFirst().exchange());
+        assertEquals("created", publisherProtocol.publications.getFirst().routingKey());
+
+        for (Map<String, Object> invalid : List.<Map<String, Object>>of(
+                Map.of("mode", "Publisher", "queue", "orders.q"),
+                Map.of("mode", "Publisher", "exchange", "orders"),
+                Map.of("mode", "Publisher", "exchange", "", "routingKey", "created"),
+                Map.of("mode", "Publisher", "exchange", "audit", "routingKey", "created"),
+                Map.of("mode", "Producer", "queue", "orders.q", "exchange", "orders"),
+                Map.of("mode", "producer"))) {
+            var refused = AmqpTestSupport.behavior(new AmqpTestSupport.FakeProtocol());
+            assertEquals("REJECTED", AmqpTestSupport.output(
+                    refused.create(AmqpTestSupport.configuration(invalid)), AmqpTestSupport.payload()).get("status"));
+        }
+
+        var overrideProtocol = new AmqpTestSupport.FakeProtocol();
+        behavior = AmqpTestSupport.behavior(overrideProtocol);
+        assertEquals("REJECTED", AmqpTestSupport.output(behavior.create(AmqpTestSupport.configuration(
+                Map.of("mode", "Publisher", "exchange", "orders", "routingKey", "created"))),
+                payloadWith("exchange", "")).get("status"));
+        assertEquals(0, overrideProtocol.connects.get());
+    }
+
+    @Test
     void savedPublisherProfilesAreRevalidatedForTheDestinationTenantWithoutCredentials() {
         AtomicInteger credentials = new AtomicInteger();
         AtomicInteger profiles = new AtomicInteger();

@@ -31,7 +31,8 @@ final class AmqpConsumerTestSupport {
 
     static AmqpConsumerPolicy policy() {
         return new AmqpConsumerPolicy(AmqpTestSupport.TENANT, AmqpTestSupport.PROFILE, "orders.q", 4,
-                Set.of("trace", "identity"), "", 4_096, 1_024, 100, 1_000, 3, "dead-letter", 10);
+                Set.of("trace", "identity"), "", 4_096, 1_024, 100, 1_000, 3, "dead-letter", 10,
+                Set.of("orders.topic"), Set.of("orders.*", "orders:#"), 4);
     }
 
     static AmqpConsumerProtocol.Delivery delivery(long tag, String id, boolean redelivered) {
@@ -47,6 +48,7 @@ final class AmqpConsumerTestSupport {
         final CountDownLatch openEntered = new CountDownLatch(1);
         volatile CountDownLatch openGate = new CountDownLatch(0);
         volatile int observedPrefetch;
+        volatile AmqpConsumerProtocol.Destination observedDestination;
         FakeProtocol(Object... owners) { opens.addAll(List.of(owners)); }
         FakeProtocol gateOpen() { openGate = new CountDownLatch(1); return this; }
         void releaseOpen() { openGate.countDown(); }
@@ -56,6 +58,11 @@ final class AmqpConsumerTestSupport {
             Object next = opens.remove();
             if (next instanceof Failure failure) throw failure;
             return (Owner) next;
+        }
+        @Override public Owner open(AmqpProfile profile, AmqpConsumerPolicy policy, char[] password,
+                                    int prefetch, AmqpConsumerProtocol.Destination destination) throws Failure {
+            observedDestination = destination;
+            return open(profile, policy, password, prefetch);
         }
     }
 
@@ -99,13 +106,17 @@ final class AmqpConsumerTestSupport {
 
     static final class Context implements InboundSourceContext {
         final Ingress ingress;
+        final String nodeId;
         final AtomicInteger healthy = new AtomicInteger();
         final List<String> degraded = new CopyOnWriteArrayList<>();
         final CountDownLatch healthyLatch;
         Context(Ingress ingress) { this(ingress, 1); }
-        Context(Ingress ingress, int healthyCount) { this.ingress = ingress; healthyLatch = new CountDownLatch(healthyCount); }
+        Context(Ingress ingress, int healthyCount) { this(ingress, healthyCount, "consume"); }
+        Context(Ingress ingress, int healthyCount, String nodeId) {
+            this.ingress = ingress; this.nodeId = nodeId; healthyLatch = new CountDownLatch(healthyCount);
+        }
         @Override public DeploymentId deploymentId() { return DeploymentId.of("amqp-test"); }
-        @Override public String nodeId() { return "consume"; }
+        @Override public String nodeId() { return nodeId; }
         @Override public SecurityContext identity() {
             return new SecurityContext("request", AmqpTestSupport.TENANT, "consumer", PrincipalType.WORKLOAD, "issuer");
         }
@@ -140,7 +151,8 @@ final class AmqpConsumerTestSupport {
             payloads.add((Map<String, Object>) payload); keys.add(idempotentKey); offered.countDown(); await(offerGate);
             IngressReceipt receipt;
             if (!receipts.isEmpty()) receipt = receipts.removeFirst();
-            else if (deduplicate && !durableKeys.add(idempotentKey)) receipt = new IngressReceipt.Duplicate(idempotentKey);
+            else if (deduplicate && !durableKeys.add(sourceId + "\0" + idempotentKey))
+                receipt = new IngressReceipt.Duplicate(idempotentKey);
             else receipt = new IngressReceipt.DurablyCommitted(idempotentKey);
             outcomes.add(receipt.getClass().getSimpleName());
             return receipt;

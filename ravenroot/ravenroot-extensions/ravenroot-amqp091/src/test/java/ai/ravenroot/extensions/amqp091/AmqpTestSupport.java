@@ -32,9 +32,9 @@ final class AmqpTestSupport {
 
     static AmqpProfile profile(String tenant, String name, int concurrency, int rate, int timeout, int retries) {
         return new AmqpProfile(tenant, name, "broker.example.test", 5671, true, "/tenant-a", "publisher",
-                "amqp-orders", "orders", Set.of("audit"), "created", Set.of("updated"),
+                "amqp-orders", "orders", Set.of("", "audit"), "created", Set.of("orders.q", "updated"),
                 Set.of("trace", "source"), Set.of("responses"), true, 5, 60_000,
-                concurrency, rate, timeout, 4_096, retries);
+                concurrency, rate, timeout, 4_096, retries, Set.of("orders"));
     }
 
     static NodeConfiguration configuration() {

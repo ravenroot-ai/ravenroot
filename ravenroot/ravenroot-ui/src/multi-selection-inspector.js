@@ -75,6 +75,16 @@ function descriptorValuesFromProperties(descriptor, properties) {
 function isTrustedEditableProperty(property, descriptor, values) {
   const type = String(property?.type || '').toUpperCase();
   if (!property?.name || !SUPPORTED_TYPES.has(type)) return false;
+  // AMQP mode and Producer queue changes can replace the node's destination shape. The single-node
+  // Inspector owns that normalization because it can preserve the hidden draft while removing
+  // inactive fields from the submitted map. Batch editing only produces touched-key patches, so
+  // these controls could retain an old queue or route and create a node the runtime rejects.
+  const amqpBehavior = descriptor?.behavior === 'amqp.consume'
+    || descriptor?.behavior === 'amqp.publish';
+  if ((property.name === 'mode' && amqpBehavior)
+      || (property.name === 'queue' && descriptor?.behavior === 'amqp.publish')) {
+    return false;
+  }
   if (property.name === descriptor?.natureProperty) return false;
   // The same fail-closed boundary for `execution.bypass`, and the for
   // `runtime.maxConcurrency`. Each property's `validateShape` refuses any descriptor that declares

@@ -184,6 +184,51 @@ describe('a closed choice with no default must not be declared by merely opening
       expect(Object.keys(properties)).not.toContain(CLOSED_NO_DEFAULT_CONDITIONAL.name);
     });
 
+  it('generic conditional fields retain authored values while hidden', async () => {
+    const { catalogPropertyFieldsHtml, readCatalogPropertyEditor } = await loadEditor();
+    const consumer = { ...DRIVER, name: 'mode', defaultValue: 'Consumer', allowedValues: ['Consumer', 'Subscriber'] };
+    const queue = { ...CLOSED_WITH_DEFAULT, name: 'queue', defaultValue: 'orders.q', allowedValues: [],
+      visibleWhen: { contract: CONTRACT, property: 'mode', operator: 'EQUALS', values: ['Consumer'] } };
+    const exchange = { ...CLOSED_WITH_DEFAULT, name: 'exchange', defaultValue: 'orders.topic', allowedValues: [],
+      visibleWhen: { contract: CONTRACT, property: 'mode', operator: 'EQUALS', values: ['Subscriber'] } };
+    const pattern = { ...exchange, name: 'bindingPattern', defaultValue: 'orders.*' };
+
+    let form = renderForm(catalogPropertyFieldsHtml, descriptorWith(consumer, queue, exchange, pattern),
+      { mode: 'Subscriber', queue: 'legacy.q', exchange: 'orders.topic', bindingPattern: 'orders.*' });
+    let saved = readCatalogPropertyEditor(form).properties;
+    expect(saved).toEqual({
+      mode: 'Subscriber', queue: 'legacy.q', exchange: 'orders.topic', bindingPattern: 'orders.*',
+    });
+
+    form.remove();
+    form = renderForm(catalogPropertyFieldsHtml, descriptorWith(consumer, queue, exchange, pattern),
+      { ...saved, mode: 'Consumer', queue: 'orders.q' });
+    saved = readCatalogPropertyEditor(form).properties;
+    expect(saved).toEqual({
+      mode: 'Consumer', queue: 'orders.q', exchange: 'orders.topic', bindingPattern: 'orders.*',
+    });
+  });
+
+  it('an inactive retained queue draft cannot hide the Publisher destination fields', async () => {
+    const { catalogPropertyFieldsHtml, readCatalogPropertyEditor } = await loadEditor();
+    const mode = { ...DRIVER, name: 'mode', defaultValue: 'Producer', allowedValues: ['Producer', 'Publisher'] };
+    const queue = { ...CLOSED_WITH_DEFAULT, name: 'queue', defaultValue: '', allowedValues: [],
+      visibleWhen: { contract: CONTRACT, property: 'mode', operator: 'EQUALS', values: ['Producer'] } };
+    const exchange = { ...CLOSED_WITH_DEFAULT, name: 'exchange', defaultValue: '', allowedValues: [],
+      visibleWhen: { contract: CONTRACT, property: 'queue', operator: 'BLANK', values: [] } };
+    const routingKey = { ...exchange, name: 'routingKey' };
+    const descriptor = { ...descriptorWith(mode, queue, exchange, routingKey), behavior: 'amqp.publish' };
+    const form = renderForm(catalogPropertyFieldsHtml, descriptor,
+      { mode: 'Publisher', queue: 'old.queue', exchange: 'orders.topic', routingKey: 'orders.created' });
+
+    expect(form.querySelector('[data-catalog-property="queue"]').closest('.catalog-property').hidden).toBe(true);
+    expect(form.querySelector('[data-catalog-property="exchange"]').closest('.catalog-property').hidden).toBe(false);
+    expect(form.querySelector('[data-catalog-property="routingKey"]').closest('.catalog-property').hidden).toBe(false);
+    expect(readCatalogPropertyEditor(form).properties).toEqual({
+      mode: 'Publisher', queue: 'old.queue', exchange: 'orders.topic', routingKey: 'orders.created',
+    });
+  });
+
   it('the absence is REPRESENTED in the control, not merely in the model: a first, empty, selected "Not declared" option',
     async () => {
       const { catalogPropertyFieldsHtml } = await loadEditor();

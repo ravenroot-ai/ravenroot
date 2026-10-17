@@ -58,6 +58,8 @@ class EmbedBrowserPlaywrightIntegrationTest {
         Path ui = locateUi();
         assertTrue(Files.isRegularFile(ui.resolve("dist/embed-bootstrap.js")),
                 "the UI build must contain the production embed bootstrap");
+        assertTrue(Files.isRegularFile(ui.resolve("dist/embed-localization.js")),
+                "the UI build must contain the pre-viewer localization entry");
         assertTrue(Files.isRegularFile(ui.resolve("dist/embed-viewer.js")),
                 "the UI build must contain the isolated viewer entry");
         assertTrue(Files.isRegularFile(ui.resolve("dist/embed-viewer.css")),

@@ -30,16 +30,6 @@
   const boundedString = (value, maximum = 256) =>
     typeof value === 'string' && value.length > 0 && value.length <= maximum;
 
-  const earlyCatalogMatches = (catalogLocale, selectedLocale) => {
-    try {
-      const [catalog] = Intl.getCanonicalLocales(String(catalogLocale).replaceAll('_', '-'));
-      const [selected] = Intl.getCanonicalLocales(String(selectedLocale).replaceAll('_', '-'));
-      return catalog === selected || catalog === new Intl.Locale(selected).language;
-    } catch {
-      return false;
-    }
-  };
-
   const base64url = (bytes) => {
     let binary = '';
     for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
@@ -235,7 +225,7 @@
     return { cursor, terminal: true };
   };
 
-  const readBootstrap = () => {
+  const readBootstrap = ({ requireFresh = true } = {}) => {
     const node = document.getElementById('ravenroot-embed-bootstrap');
     if (node === null) throw new Error('bootstrap unavailable');
     const value = JSON.parse(node.textContent);
@@ -265,7 +255,9 @@
         || window.parent === window) {
       throw new Error('bootstrap invalid');
     }
-    if (Date.parse(value.expiresAt) <= Date.now()) throw new EmbedRequestFailure('expired');
+    if (requireFresh && Date.parse(value.expiresAt) <= Date.now()) {
+      throw new EmbedRequestFailure('expired');
+    }
     const revision = BigInt(value.grantRevision);
     if (revision > 9223372036854775807n) throw new Error('bootstrap invalid');
     return { ...value, locale: value.locale || 'en', catalog: value.catalog || '', revision };
@@ -280,7 +272,6 @@
   };
 
   let localization = null;
-  let earlyCatalog = null;
   const showFailure = kind => {
     const state = FAILURE_STATES.includes(kind) ? kind : 'error';
     const root = document.getElementById('ravenroot-embed-viewer');
@@ -288,36 +279,29 @@
     if (root === null || status === null) return;
     root.dataset.viewerState = state;
     const key = `embed.state.${state}`;
-    const early = earlyCatalog?.messages?.[key];
     if (localization) status.textContent = localization.text(key);
-    else if (typeof early === 'string' && early.length <= 8_192) status.textContent = early;
     else status.textContent = status.dataset[`i18n${state[0].toUpperCase()}${state.slice(1)}`] || '';
   };
 
   let viewer = null;
   let observation = null;
   const run = async () => {
-    const bootstrap = readBootstrap();
-    if (bootstrap.catalog) {
-      const candidate = JSON.parse(bootstrap.catalog);
-      if (candidate?.schema === 'ravenroot.ui-catalog/v1'
-          && earlyCatalogMatches(candidate.locale, bootstrap.locale)
-          && candidate.messages && typeof candidate.messages === 'object'
-          && !Array.isArray(candidate.messages)) earlyCatalog = candidate;
-    }
+    const bootstrap = readBootstrap({ requireFresh: false });
+    // Scrub the one-use credential before either same-origin module request can carry it as a
+    // referrer. Presentation metadata remains bounded and does not grant exchange authority.
+    history.replaceState(null, '', '/v1/embed/launch');
+    const localizationModule = await import('/embed-localization.js');
+    const candidate = bootstrap.catalog ? JSON.parse(bootstrap.catalog) : null;
+    const validated = localizationModule.validateEmbedLocaleChange(bootstrap.locale, candidate);
+    localization = localizationModule.createEmbedLocalization({ locale: validated.locale,
+      catalog: validated.catalog, document });
+    if (Date.parse(bootstrap.expiresAt) <= Date.now()) throw new EmbedRequestFailure('expired');
     const viewerModule = await import('/embed-viewer.js');
-    localization = viewerModule.createEmbedLocalization({ locale: 'en', document });
-    const catalog = bootstrap.catalog ? JSON.parse(bootstrap.catalog) : null;
-    if (catalog !== null) localization.registerCatalog(catalog);
-    localization.setLocale(bootstrap.locale);
     const theme = initialTheme(bootstrap.theme);
     if (document.documentElement.dataset.theme !== theme) {
       document.documentElement.dataset.theme = theme;
     }
     document.documentElement.style.colorScheme = theme;
-    // The one-use launch ticket has served its purpose. Remove it before any network request, history
-    // entry, referrer or parent-visible steady state can retain the credential-bearing query string.
-    history.replaceState(null, '', '/v1/embed/launch');
     const sendToParent = (type, correlation, extra = {}) => window.parent.postMessage({
       protocolVersion: PROTOCOL_VERSION,
       channelId: bootstrap.channelId,

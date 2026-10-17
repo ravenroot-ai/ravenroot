@@ -43,6 +43,11 @@ const localizedCatalog = {
     'embed.state.ready': '⟦Graph ready.⟧',
   },
 };
+const regionalCatalog = {
+  schema: 'ravenroot.ui-catalog/v1', locale: 'az', direction: 'rtl', messages: {
+    'embed.controls.fit': 'Sığdır', 'embed.state.loading': 'Yüklənir…',
+  },
+};
 
 const createSession = (registrationId, presentation = null) => new Promise((resolve, reject) => {
   const creationBody = JSON.stringify({ registrationId, ...(presentation || {}) });
@@ -396,10 +401,13 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
     ['/theme-auto-light', 'theme-auto-light'], ['/theme-auto-dark', 'theme-auto-dark'],
     ['/theme-invalid', 'theme-invalid'], ['/deployment', 'live-registration'],
     ['/deployment-stale', 'live-stale-registration'], ['/localized', 'browser-registration'],
+    ['/localized-regional', 'browser-registration'],
   ]).get(request.url) ?? 'browser-registration';
   try {
     const presentation = request.url === '/localized'
-      ? { locale: 'en-XA', catalog: JSON.stringify(localizedCatalog) } : null;
+      ? { locale: 'en-XA', catalog: JSON.stringify(localizedCatalog) }
+      : request.url === '/localized-regional'
+        ? { locale: 'az-IR', catalog: JSON.stringify(regionalCatalog) } : null;
     const freshLaunchUrl = await createSession(registration, presentation);
     if (registration === 'theme-invalid') {
       const invalid = new URL(freshLaunchUrl);

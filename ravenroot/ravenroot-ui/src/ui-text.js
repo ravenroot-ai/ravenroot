@@ -524,8 +524,8 @@ const MAX_CATALOG_KEYS = 4_096;
 const MAX_MESSAGE_LENGTH = 8_192;
 const MAX_LOCALE_LENGTH = 64;
 const PLURAL_CATEGORIES = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);
-const RTL_SCRIPTS = new Set(['Arab', 'Hebr', 'Nkoo', 'Rohg', 'Syrc', 'Thaa']);
-const RTL_LANGUAGES = new Set(['ar', 'dv', 'fa', 'he', 'ku', 'nqo', 'ps', 'sd', 'ug', 'ur', 'yi']);
+// Compatibility fallback for engines without Intl.Locale text-direction metadata.
+const RTL_SCRIPTS = new Set(['Adlm', 'Arab', 'Hebr', 'Nkoo', 'Rohg', 'Syrc', 'Thaa']);
 
 function plainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -551,7 +551,10 @@ export function uiLocaleDirection(locale, declaredDirection) {
   }
   if (declaredDirection) return declaredDirection;
   const parsed = new Intl.Locale(normalizeUiLocale(locale));
-  return RTL_SCRIPTS.has(parsed.script) || RTL_LANGUAGES.has(parsed.language) ? 'rtl' : 'ltr';
+  const textInfo = typeof parsed.getTextInfo === 'function' ? parsed.getTextInfo() : parsed.textInfo;
+  if (textInfo?.direction === 'ltr' || textInfo?.direction === 'rtl') return textInfo.direction;
+  const script = parsed.script || parsed.maximize().script;
+  return RTL_SCRIPTS.has(script) ? 'rtl' : 'ltr';
 }
 
 export function hasUiText(key) {
@@ -609,7 +612,7 @@ export function validateUiCatalog(input, { sourceMessages = ENGLISH_MESSAGES } =
     throw productError("workspace.error.ui.text.ui.catalog.schema.must.be", new TypeError(`UI catalog schema must be "${UI_CATALOG_SCHEMA}".`), { value1: UI_CATALOG_SCHEMA });
   }
   const locale = normalizeUiLocale(input.locale);
-  const direction = uiLocaleDirection(locale, input.direction);
+  uiLocaleDirection(locale, input.direction);
   if (!plainObject(input.messages)) throw productError("workspace.error.ui.text.ui.catalog.messages.must.be.an.object", new TypeError('UI catalog messages must be an object.'));
   const entries = Object.entries(input.messages);
   if (entries.length > MAX_CATALOG_KEYS) throw productError("workspace.error.ui.text.ui.catalog.has.too.many.messages", new RangeError('UI catalog has too many messages.'));
@@ -622,7 +625,8 @@ export function validateUiCatalog(input, { sourceMessages = ENGLISH_MESSAGES } =
     validateMessage(key, message, sourceMessages[key]);
     messages[key] = typeof message === 'string' ? message : Object.freeze({ ...message });
   }
-  return Object.freeze({ schema: UI_CATALOG_SCHEMA, locale, direction,
+  return Object.freeze({ schema: UI_CATALOG_SCHEMA, locale,
+    ...(input.direction === undefined ? {} : { direction: input.direction }),
     messages: Object.freeze(messages) });
 }
 
@@ -726,7 +730,7 @@ export function createUiLocalization({ locale = 'en', catalogs = {}, onDiagnosti
     const normalized = normalizeUiLocale(catalogLocale);
     const catalog = messages?.schema === UI_CATALOG_SCHEMA ? validateUiCatalog(messages)
       : Object.freeze({ schema: UI_CATALOG_SCHEMA, locale: normalized,
-        direction: uiLocaleDirection(normalized), messages: catalogMessages(messages, normalized) });
+        messages: catalogMessages(messages, normalized) });
     available.set(normalized, catalog);
   }
   const textCatalogs = () => Object.fromEntries([...available]
@@ -738,8 +742,13 @@ export function createUiLocalization({ locale = 'en', catalogs = {}, onDiagnosti
   };
   const context = Object.freeze({
     get locale() { return activeLocale; },
-    get direction() { return uiLocaleDirection(activeLocale,
-      available.get(activeLocale)?.direction); },
+    get direction() {
+      const language = new Intl.Locale(activeLocale).language;
+      const catalog = uiLocaleCandidates(activeLocale)
+        .filter(candidate => candidate !== 'en' || language === 'en')
+        .map(candidate => available.get(candidate)).find(Boolean);
+      return uiLocaleDirection(activeLocale, catalog?.direction);
+    },
     text: (key, params) => text(key, params),
     number: (value, options) => text.number(value, options),
     dateTime: (value, options) => text.dateTime(value, options),

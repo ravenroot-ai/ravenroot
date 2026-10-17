@@ -46,8 +46,12 @@ plural categories are `zero`, `one`, `two`, `few`, `many`, and `other`.
 Catalog values are plain text. Markup and quotes are displayed as text and cannot create elements or
 attributes. Parameters use meaningful names such as `{count}`, `{name}`, and `{status}`. Counts use
 `Intl.NumberFormat` and `Intl.PluralRules`; dates use `Intl.DateTimeFormat`; durations use localized
-unit formatting. `direction` may be `ltr` or `rtl`. When omitted, Ravenroot derives it from the
-locale. Applying a locale updates the document `lang` and `dir` attributes.
+unit formatting. `direction` may be `ltr` or `rtl`. A requested regional locale uses an exact
+catalog when present, otherwise its base-language catalog; an explicit direction on that selected
+catalog is authoritative. When the selected catalog omits direction, Ravenroot derives it from the
+complete requested locale, including any script subtag. The optional field remains omitted when a
+catalog is validated or persisted. Applying a locale updates the document `lang` and `dir`
+attributes.
 
 ## Workspace deployment and selection
 
@@ -200,10 +204,12 @@ request for a regional locale may carry the validated base-language catalog (for
 with an `it` catalog); the viewer keeps `it-IT` as the active locale, uses the `it` messages, and
 falls back to English per missing key. A catalog for an unrelated locale is refused. Invalid
 messages are ignored atomically. Origin, source window, channel, direction, correlation, protocol,
-and post-handshake checks remain mandatory. An iframe that fails before loading the viewer module
-uses a valid selected catalog for its failure state when possible and otherwise uses the keyed
-server-rendered English fallback. Backend diagnostic content remains authored content inside this
-localized product frame.
+and post-handshake checks remain mandatory. Before loading the viewer module, the bootstrap uses the
+same complete catalog validator to apply the selected language, direction, and failure text. A
+valid expired launch may therefore present a localized inert failure, but cannot exchange a ticket,
+send an authorized message, or start a handshake. An invalid catalog or a failure to load the
+localization module retains the keyed server-rendered English fallback. Backend diagnostic content
+remains authored content inside this localized product frame.
 
 ## Ownership and verification
 

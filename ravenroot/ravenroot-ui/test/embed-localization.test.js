@@ -43,6 +43,24 @@ describe('embedded viewer localization', () => {
     expect(() => validateEmbedLocaleChange('it-IT', catalog('en', 'Loading')))
       .toThrow(/must match/);
   });
+
+  it('keeps the requested regional locale while applying base text and declared direction', () => {
+    const dom = new JSDOM('<html><body><p data-i18n="embed.state.loading"></p></body></html>');
+    const base = { ...catalog('az', 'Yüklənir'), direction: 'rtl' };
+    const localization = createEmbedLocalization({ locale: 'az-IR', catalog: base,
+      document: dom.window.document });
+    expect(dom.window.document.documentElement.lang).toBe('az-IR');
+    expect(dom.window.document.documentElement.dir).toBe('rtl');
+    expect(dom.window.document.querySelector('p').textContent).toBe('Yüklənir');
+    expect(localization.locale).toBe('az-IR');
+
+    const exact = validateEmbedLocaleChange('az-IR', { ...catalog('az-IR', 'Dəqiq'),
+      direction: 'ltr' });
+    localization.registerCatalog(exact.catalog);
+    localization.setLocale(exact.locale);
+    expect(localization.direction).toBe('ltr');
+    expect(localization.text('embed.state.loading')).toBe('Dəqiq');
+  });
 });
 
 

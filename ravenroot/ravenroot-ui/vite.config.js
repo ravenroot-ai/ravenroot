@@ -16,13 +16,14 @@ export default defineConfig({
       preserveEntrySignatures: 'exports-only',
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        'embed-localization': fileURLToPath(new URL('./src/embed-localization.js', import.meta.url)),
         'embed-viewer': fileURLToPath(new URL('./src/embed-viewer-entry.js', import.meta.url)),
       },
       output: {
-        // The server launch document has one stable, same-origin module seam. Shared implementation
-        // chunks remain content hashed; only this small entry name is part of the server contract.
-        entryFileNames: chunk => chunk.name === 'embed-viewer'
-          ? 'embed-viewer.js'
+        // The server launch document has stable same-origin localization and viewer module seams.
+        // Shared implementation chunks remain content hashed; only these entry names are contracts.
+        entryFileNames: chunk => ['embed-localization', 'embed-viewer'].includes(chunk.name)
+          ? `${chunk.name}.js`
           : 'assets/[name]-[hash].js',
       },
     },

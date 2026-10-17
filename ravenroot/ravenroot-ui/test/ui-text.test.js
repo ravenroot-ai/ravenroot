@@ -72,6 +72,51 @@ describe('UI text catalogs', () => {
       'closeAll.sessions.item.many': '{name}',
     } })).toThrow(/incompatible named parameters/);
     expect(() => validateUiCatalog({ ...input, direction: 'sideways' })).toThrow(/direction/);
+    const omitted = validateUiCatalog({ ...input, direction: undefined });
+    expect(omitted).not.toHaveProperty('direction');
+    expect(validateUiCatalog(JSON.parse(JSON.stringify(omitted)))).not.toHaveProperty('direction');
+  });
+
+  it('uses the selected exact or base catalog direction without English fallback leakage', () => {
+    const messages = { 'commands.file.open.label': 'Aç' };
+    const catalog = (locale, direction) => ({ schema: UI_CATALOG_SCHEMA, locale,
+      ...(direction ? { direction } : {}), messages });
+    const base = createUiLocalization({ locale: 'az-IR', catalogs: { az: catalog('az', 'rtl') } });
+    expect(base.text('commands.file.open.label')).toBe('Aç');
+    expect(base.direction).toBe('rtl');
+
+    const exact = createUiLocalization({ locale: 'az-IR', catalogs: {
+      az: catalog('az', 'rtl'), 'az-IR': catalog('az-IR', 'ltr'),
+    } });
+    expect(exact.direction).toBe('ltr');
+
+    const partialExact = createUiLocalization({ locale: 'az-IR', catalogs: {
+      az: catalog('az', 'ltr'), 'az-IR': { schema: UI_CATALOG_SCHEMA, locale: 'az-IR', messages: {} },
+    } });
+    expect(partialExact.text('commands.file.open.label')).toBe('Aç');
+    expect(partialExact.direction).toBe('rtl');
+
+    expect(createUiLocalization({ locale: 'az-Arab-IR', catalogs: {
+      az: catalog('az'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'az-IR', catalogs: {
+      az: catalog('az'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'ar-Latn', catalogs: {
+      ar: catalog('ar'),
+    } }).direction).toBe('ltr');
+    expect(createUiLocalization({ locale: 'ar-Latn', catalogs: {
+      ar: catalog('ar', 'rtl'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'ff-Adlm', catalogs: {
+      ff: catalog('ff'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'zz-ZZ', catalogs: {
+      en: catalog('en', 'rtl'),
+    } }).direction).toBe('ltr');
+    expect(createUiLocalization({ locale: 'en-GB', catalogs: {
+      en: catalog('en', 'rtl'),
+    } }).direction).toBe('rtl');
   });
 
   it('supports plurals and locale-aware number, date, direction and duration formatting', () => {

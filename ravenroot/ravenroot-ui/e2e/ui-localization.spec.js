@@ -469,27 +469,89 @@ test('keeps independent embedded localization contexts isolated across live chan
   await expect(two.locator('#label')).toContainText('نص واجهة طويل للاختبار');
 });
 
-test('localizes module-load failure early and keeps malformed bootstrap safe', async ({ page }) => {
-  const early = {
-    schema: 'ravenroot.ui-catalog/v1', locale: 'it',
-    messages: { 'embed.state.error': 'Errore iniziale localizzato.' },
+test('validates and applies locale metadata before the viewer module can fail', async ({ page }) => {
+  const catalogs = {
+    ar: { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
+      messages: { 'embed.state.error': 'تعذر تحميل العارض.' } },
+    az: { schema: 'ravenroot.ui-catalog/v1', locale: 'az', direction: 'rtl',
+      messages: { 'embed.state.error': 'Baxış yüklənmədi.', 'embed.state.expired': 'Baxış vaxtı bitdi.' } },
+    invalid: { schema: 'ravenroot.ui-catalog/v1', locale: 'az', direction: 'rtl',
+      messages: { 'embed.state.unknown': 'Etibarsız' } },
+    unrelated: { schema: 'ravenroot.ui-catalog/v1', locale: 'it', direction: 'rtl',
+      messages: { 'embed.state.error': 'Non deve apparire.' } },
   };
-  await page.route('**/embed-viewer.js', route => route.abort('failed'));
-  await page.route('**/early-embed', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
-    <main id="ravenroot-embed-viewer"><p data-viewer-status data-i18n-error="Viewer unavailable."></p></main>
+  const launch = ({ locale = 'az-IR', catalog = catalogs.az, channelId = 'channel',
+    expiresAt = '2099-01-01T00:00:00.000Z' } = {}) => `<!doctype html><html lang="en"><body>
+    <main id="ravenroot-embed-viewer"><p data-viewer-status data-i18n-error="Viewer unavailable."
+      data-i18n-expired="Viewer session expired."></p></main>
     <script id="ravenroot-embed-bootstrap" type="application/json">${JSON.stringify({
-      acknowledgementId: 'ack', challenge: 'challenge', channelId: 'channel', exchangeId: 'exchange',
-      expiresAt: '2099-01-01T00:00:00.000Z', grantRevision: '1', parentOrigin: UI_ORIGIN,
-      theme: null, viewerOrigin: UI_ORIGIN, locale: 'it-IT', catalog: JSON.stringify(early),
-    })}</script><script src="/embed-bootstrap.js"></script></body></html>` }));
+      acknowledgementId: 'ack', challenge: 'challenge', channelId, exchangeId: 'exchange',
+      expiresAt, grantRevision: '1', parentOrigin: UI_ORIGIN,
+      theme: null, viewerOrigin: UI_ORIGIN, locale, catalog: JSON.stringify(catalog),
+    })}</script><script src="/embed-bootstrap.js"></script></body></html>`;
+  await page.route('**/embed-viewer.js', route => route.abort('failed'));
+  await page.route('**/early-embed*', route => {
+    const kind = new URL(route.request().url()).searchParams.get('case');
+    const variants = {
+      ar: { locale: 'ar', catalog: catalogs.ar }, az: {}, invalid: { catalog: catalogs.invalid },
+      unrelated: { catalog: catalogs.unrelated },
+      expired: { expiresAt: '2020-01-01T00:00:00.000Z', channelId: 'expired-channel' },
+    };
+    route.fulfill({ contentType: 'text/html', body: launch(variants[kind]) });
+  });
   await page.route('**/malformed-embed', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
     <main id="ravenroot-embed-viewer"><p data-viewer-status data-i18n-error="Viewer unavailable."></p></main>
     <script id="ravenroot-embed-bootstrap" type="application/json">{"invalid":true}</script>
     <script src="/embed-bootstrap.js"></script></body></html>` }));
-  await page.setContent(`<iframe id="early" src="${UI_ORIGIN}/early-embed"></iframe>
+  await page.goto('/');
+  await page.evaluate(() => { window.__embedMessages = []; addEventListener('message', event => {
+    window.__embedMessages.push(event.data);
+  }); });
+  await page.setContent(`<iframe id="ar" src="${UI_ORIGIN}/early-embed?case=ar&ticket=secret"></iframe>
+    <iframe id="az" src="${UI_ORIGIN}/early-embed?case=az&ticket=secret"></iframe>
+    <iframe id="invalid" src="${UI_ORIGIN}/early-embed?case=invalid"></iframe>
+    <iframe id="unrelated" src="${UI_ORIGIN}/early-embed?case=unrelated"></iframe>
+    <iframe id="expired" src="${UI_ORIGIN}/early-embed?case=expired&ticket=secret"></iframe>
     <iframe id="malformed" src="${UI_ORIGIN}/malformed-embed"></iframe>`);
-  await expect(page.frameLocator('#early').locator('[data-viewer-status]')).toHaveText('Errore iniziale localizzato.');
+  await expect(page.frameLocator('#ar').locator('[data-viewer-status]')).toHaveText('تعذر تحميل العارض.');
+  await expect(page.frameLocator('#ar').locator('html')).toHaveAttribute('lang', 'ar');
+  await expect(page.frameLocator('#ar').locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.frameLocator('#az').locator('[data-viewer-status]')).toHaveText('Baxış yüklənmədi.');
+  await expect(page.frameLocator('#az').locator('html')).toHaveAttribute('lang', 'az-IR');
+  await expect(page.frameLocator('#az').locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.frameLocator('#expired').locator('[data-viewer-status]')).toHaveText('Baxış vaxtı bitdi.');
+  await expect(page.frameLocator('#expired').locator('html')).toHaveAttribute('lang', 'az-IR');
+  await expect(page.frameLocator('#expired').locator('html')).toHaveAttribute('dir', 'rtl');
+  for (const id of ['invalid', 'unrelated']) {
+    await expect(page.frameLocator(`#${id}`).locator('[data-viewer-status]')).toHaveText('Viewer unavailable.');
+    await expect(page.frameLocator(`#${id}`).locator('html')).toHaveAttribute('lang', 'en');
+  }
   await expect(page.frameLocator('#malformed').locator('[data-viewer-status]')).toHaveText('Viewer unavailable.');
+  for (const id of ['ar', 'az', 'expired']) {
+    await expect.poll(() => page.frameLocator(`#${id}`).locator('html')
+      .evaluate(() => location.search)).toBe('');
+  }
+  expect(await page.evaluate(() => window.__embedMessages
+    .filter(message => message?.channelId === 'expired-channel').length)).toBe(0);
+});
+
+test('keeps server English when the pre-viewer localization module cannot load', async ({ page }) => {
+  const arabicFailure = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
+    messages: { 'embed.state.error': 'تعذر تحميل العارض.' } };
+  await page.route('**/embed-localization.js', route => route.abort('failed'));
+  await page.route('**/missing-localization', route => route.fulfill({ contentType: 'text/html',
+    body: `<!doctype html><html lang="en"><body><main id="ravenroot-embed-viewer">
+      <p data-viewer-status data-i18n-error="Viewer unavailable."></p></main>
+      <script id="ravenroot-embed-bootstrap" type="application/json">${JSON.stringify({
+        acknowledgementId: 'ack', challenge: 'challenge', channelId: 'channel', exchangeId: 'exchange',
+        expiresAt: '2099-01-01T00:00:00.000Z', grantRevision: '1', parentOrigin: UI_ORIGIN,
+        theme: null, viewerOrigin: UI_ORIGIN, locale: 'ar', catalog: JSON.stringify(arabicFailure),
+      })}</script><script src="/embed-bootstrap.js"></script></body></html>`,
+  }));
+  await page.setContent(`<iframe id="missing" src="${UI_ORIGIN}/missing-localization"></iframe>`);
+  await expect(page.frameLocator('#missing').locator('[data-viewer-status]')).toHaveText('Viewer unavailable.');
+  await expect(page.frameLocator('#missing').locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.frameLocator('#missing').locator('html')).not.toHaveAttribute('dir', 'rtl');
 });
 
 // These flows exercise the product controllers through the shipped page, including messages
@@ -619,6 +681,48 @@ test('imports and persists the actual complete CLI catalog through the language 
   await page.getByRole('menuitem', { name: 'Language…' }).click();
   await expect(page.locator('.language-current-source')).toContainText('Imported');
   await expect(page.locator('#language-selection')).toHaveValue('it');
+});
+
+test('preserves declared versus derived direction through IndexedDB catalog round trips', async ({ page }) => {
+  const stored = () => page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('ravenroot-ui-catalogs-v1', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const read = database.transaction('catalogs').objectStore('catalogs').get('az');
+      read.onerror = () => reject(read.error);
+      read.onsuccess = () => { resolve(read.result); database.close(); };
+    };
+  }));
+  const upload = async catalog => {
+    await openLanguageDialog(page);
+    await page.locator('.language-dialog input[type="file"]').setInputFiles({
+      name: 'az.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(catalog)),
+    });
+  };
+  await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'en', catalogs: [] });
+  await page.goto('/');
+  const explicit = { schema: 'ravenroot.ui-catalog/v1', locale: 'az', direction: 'rtl',
+    messages: { 'shell.menu-file.text': 'Fayl' } };
+  await upload(explicit);
+  await page.evaluate(() => localStorage.setItem('ravenroot.ui.locale.v1', 'az-IR'));
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'az-IR');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.locator('#menu-file')).toHaveText('Fayl');
+  expect(await stored()).toMatchObject({ locale: 'az', direction: 'rtl' });
+
+  await openLanguageDialog(page);
+  await page.locator('.language-dialog .danger').click();
+  await page.locator('.language-dialog button[type="submit"]').click();
+  const omitted = { schema: 'ravenroot.ui-catalog/v1', locale: 'az',
+    messages: { 'shell.menu-file.text': 'Fayl' } };
+  await upload(omitted);
+  await page.evaluate(() => localStorage.setItem('ravenroot.ui.locale.v1', 'az-Arab-IR'));
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'az-Arab-IR');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  expect(await stored()).not.toHaveProperty('direction');
 });
 
 test('represents and removes a regional preference backed by an imported base catalog', async ({ page }) => {

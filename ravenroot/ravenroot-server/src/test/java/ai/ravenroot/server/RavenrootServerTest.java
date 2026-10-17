@@ -325,6 +325,7 @@ class RavenrootServerTest {
         Files.writeString(uiDirectory.resolve("index.html"), "<html><body>Ravenroot UI</body></html>");
         Files.createDirectory(uiDirectory.resolve("assets"));
         Files.writeString(uiDirectory.resolve("assets/app.js"), "export const ready = true;");
+        Files.writeString(uiDirectory.resolve("embed-localization.js"), "export const localization = true;");
         Files.writeString(uiDirectory.resolve("embed-viewer.js"), "export const viewer = true;");
         Files.writeString(uiDirectory.resolve("embed-viewer.css"), ".embed-viewer{}");
         Files.writeString(uiDirectory.resolve("frontend-plugin-sandbox.html"), "<!doctype html><title>Plugin sandbox</title>");
@@ -363,7 +364,8 @@ class RavenrootServerTest {
             assertEquals(200, asset.statusCode());
             assertTrue(asset.headers().firstValue("Cache-Control").orElse("").contains("immutable"));
 
-            for (String stableEmbedAsset : java.util.List.of("embed-viewer.js", "embed-viewer.css")) {
+            for (String stableEmbedAsset : java.util.List.of(
+                    "embed-localization.js", "embed-viewer.js", "embed-viewer.css")) {
                 var embedAsset = client.send(HttpRequest.newBuilder(
                         URI.create("http://localhost:" + server.port() + "/" + stableEmbedAsset)).GET().build(),
                         HttpResponse.BodyHandlers.ofString());

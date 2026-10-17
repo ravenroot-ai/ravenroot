@@ -97,6 +97,34 @@ test('localizes a real server session and accepts only the authenticated locale 
   await expect(viewer.locator('#ravenroot-embed-viewer')).toHaveAttribute('data-viewer-state', 'ready');
 });
 
+test('keeps a regional locale while applying base direction on the real server channel', async ({ page }) => {
+  const viewer = await readyViewer(page, '/localized-regional');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'az-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Sığdır');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+
+  await page.evaluate(() => window.postViewerLocale('az-IR', {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'az-IR', direction: 'ltr',
+    messages: { 'embed.controls.fit': 'Dəqiq sığdır' },
+  }));
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('az-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('dir', 'ltr');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Dəqiq sığdır');
+
+  await page.evaluate(() => window.postViewerLocale('az-Arab-IR', {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'az',
+    messages: { 'embed.controls.fit': 'Ərəb qrafikası' },
+  }));
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('az-Arab-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'az-Arab-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Ərəb qrafikası');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+});
+
 for (const scenario of [
   { path: '/theme-light', system: 'dark', expected: 'light' },
   { path: '/theme-dark', system: 'light', expected: 'dark' },

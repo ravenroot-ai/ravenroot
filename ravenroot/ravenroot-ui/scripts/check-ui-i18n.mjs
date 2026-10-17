@@ -82,18 +82,46 @@ function recordKeyExpression(node) {
   }
 }
 
+function bindingValue(bindings, identifier) {
+  return typeof bindings === 'function' ? bindings(identifier) : bindings.get(identifier.name);
+}
+
+function createBindingResolver(ast) {
+  const declarations = [];
+  walk.ancestor(ast, {
+    VariableDeclarator(node, ancestors) {
+      if (node.id.type !== 'Identifier' || !node.init) return;
+      const scope = [...ancestors].reverse().find(ancestor => ancestor !== node
+        && ['BlockStatement', 'Program', 'FunctionDeclaration', 'FunctionExpression',
+          'ArrowFunctionExpression'].includes(ancestor.type)) || ast;
+      declarations.push({ name: node.id.name, value: node.init, scope, start: node.start });
+    },
+  });
+  return identifier => declarations.filter(declaration => declaration.name === identifier.name
+      && declaration.start < identifier.start
+      && declaration.scope.start <= identifier.start && declaration.scope.end >= identifier.end)
+    .sort((left, right) => (left.scope.end - left.scope.start) - (right.scope.end - right.scope.start)
+      || right.start - left.start)[0]?.value;
+}
+
 function outputLiterals(node, output = [], bindings = new Map(), seen = new Set()) {
   if (!node) return output;
-  if (localizationCall(node)) return output;
-  if (node.type === 'Identifier' && bindings.has(node.name) && !seen.has(node.name)) {
-    seen.add(node.name);
-    outputLiterals(bindings.get(node.name), output, bindings, seen);
+  if (localizationCall(node)) {
+    outputLiterals(node.arguments[1], output, bindings, seen);
+    return output;
+  }
+  if (node.type === 'Identifier' && !seen.has(node.start)) {
+    const value = bindingValue(bindings, node);
+    if (!value) return output;
+    seen.add(node.start);
+    outputLiterals(value, output, bindings, seen);
     return output;
   }
   if (node.type === 'MemberExpression' && !node.computed && node.object.type === 'Identifier') {
-    const object = bindings.get(node.object.name);
+    const object = bindingValue(bindings, node.object);
     if (object?.type === 'ObjectExpression') {
-      const property = object.properties.find(item => (item.key.name ?? item.key.value) === node.property.name);
+      const property = object.properties.find(item => item.type === 'Property'
+        && (item.key.name ?? item.key.value) === node.property.name);
       if (property) outputLiterals(property.value, output, bindings, seen);
     }
     return output;
@@ -115,17 +143,17 @@ function outputLiterals(node, output = [], bindings = new Map(), seen = new Set(
     outputLiterals(node.left, output, bindings, seen);
     outputLiterals(node.right, output, bindings, seen); return output;
   }
+  if (node.type === 'ObjectExpression') {
+    node.properties.forEach(property => outputLiterals(property.value, output, bindings, seen));
+  } else if (node.type === 'ArrayExpression') {
+    node.elements.forEach(element => outputLiterals(element, output, bindings, seen));
+  }
   return output;
 }
 
 export function findPresentationSinkViolations(source, { sourceType = 'module' } = {}) {
   const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType, locations: true });
-  const bindings = new Map();
-  walk.simple(ast, { VariableDeclarator(node) {
-    if (node.id.type === 'Identifier' && node.init) {
-      bindings.set(node.id.name, bindings.has(node.id.name) ? null : node.init);
-    }
-  } });
+  const bindings = createBindingResolver(ast);
   const violations = [];
   const inspect = node => violations.push(...outputLiterals(node, [], bindings).map(item => item.loc.start.line));
   const presentationRecordProperties = new Set(['label', 'shortLabel', 'caption', 'help', 'title',
@@ -193,14 +221,7 @@ function auditJavascript() {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     const lines = source.split('\n');
     const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType, locations: true });
-    const bindings = new Map();
-    walk.simple(ast, {
-      VariableDeclarator(node) {
-        if (node.id.type === 'Identifier' && node.init) {
-          bindings.set(node.id.name, bindings.has(node.id.name) ? null : node.init);
-        }
-      },
-    });
+    const bindings = createBindingResolver(ast);
     const reportLiteral = literal => {
       const line = literal.loc.start.line;
       const exemption = [lines[line - 1], lines[line - 2]].find(value =>

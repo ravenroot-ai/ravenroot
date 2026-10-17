@@ -1,4 +1,4 @@
-import { uiDateTime, uiText } from './ui-text.js';
+import { uiDateTime, uiErrorReason, uiText } from './ui-text.js';
 import { humanTaskActionDisplayLabel, humanTaskActionLabelKey, utf8Length,
   validateDecisionComment } from './human-task-attention.js';
 
@@ -221,7 +221,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
 
   function identify(value) {
     prompt.textContent = value.presentation?.prompt || '';
-    identity.textContent = uiText("workspace.human.task.ui.task.value1.process.value2", { taskId: value.taskId, processInstanceId: value.processInstanceId || 'pending' })
+    identity.textContent = uiText("workspace.human.task.ui.task.value1.process.value2", { taskId: value.taskId, processInstanceId: value.processInstanceId || uiText('common.pending') })
       + (value.traversalId ? uiText("workspace.humanTask.traversalSuffix", {
         traversalId: value.traversalId,
       }) : '')

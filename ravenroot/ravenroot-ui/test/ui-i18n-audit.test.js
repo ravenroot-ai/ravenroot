@@ -17,6 +17,23 @@ describe('UI localization source audit fixtures', () => {
     `)).toEqual([2]);
   });
 
+  it('resolves the nearest scoped binding when a common presentation name is reused', () => {
+    expect(findPresentationSinkViolations(`
+      function unrelated() { const label = 'Unrelated authored value'; return label; }
+      function paint(name) {
+        const label = \`Overview — \${name || 'document'}\`;
+        node.textContent = label;
+      }
+    `)).toEqual([4]);
+  });
+
+  it('finds inline product text passed indirectly as a localized message parameter', () => {
+    expect(findPresentationSinkViolations(`
+      const rendererName = mode === 'monitoring' ? 'Monitoring' : 'Design';
+      node.title = uiText('fixture.renderer', { rendererName });
+    `)).toEqual([2]);
+  });
+
   it('finds product copy in a dynamic presentation record', () => {
     expect(findPresentationSinkViolations(`
       renderDialog({ title: 'Inline dialog title', message: 'Inline dialog message' });

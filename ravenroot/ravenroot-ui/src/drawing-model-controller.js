@@ -1,4 +1,4 @@
-import { uiText } from './ui-text.js';
+import { uiErrorReason, uiText } from './ui-text.js';
 import {
   FRONTEND_DRAWING_MODEL_PROPERTY,
   FRONTEND_PRESENTATION_PROPERTY,
@@ -170,7 +170,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     }
     let mapping;
     try { mapping = readPresentationMapping(current.graph); }
-    catch (cause) { fallback(`Presentation mapping is invalid: ${cause.message}`); return; }
+    catch (cause) { fallback(`Presentation mapping is invalid: ${uiErrorReason(cause)}`); return; }
     if (!mapping) { fallback('This drawing model needs an explicit presentation mapping.'); return; }
     abort = new AbortController();
     const layoutSandbox = createFrontendPluginSandbox(layoutPackage.files[layoutProvider.entry], { target: document_.body, timeout: 3000 });
@@ -198,7 +198,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     } catch (cause) {
       if (cause.name !== 'AbortError' && currentGeneration === generation
           && context()?.documentId === current.documentId) {
-        fallback(`Drawing model failed: ${cause.message}. Integrated Design remains active.`);
+        fallback(`Drawing model failed: ${uiErrorReason(cause)}. Integrated Design remains active.`);
       }
     }
   }
@@ -208,7 +208,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     // cannot remain live while the newly active document is still loading its provider catalog.
     stop(); clearOverlays(); fullFlowButton.hidden = true;
     try { packages = await listFrontendPackages(indexedDB); }
-    catch (cause) { packages = []; notify?.(cause.message, 'failed'); }
+    catch (cause) { packages = []; notify?.(uiErrorReason(cause), 'failed'); }
     const wanted = selectedKey();
     select.replaceChildren(option(document_, INTEGRATED, 'Integrated Design'));
     for (const package_ of packages) {
@@ -252,7 +252,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       await installFrontendPackage(package_, indexedDB);
       notify?.(`Installed frontend package ${package_.manifest.name} ${package_.manifest.version}`, 'completed');
       await reload();
-    } catch (cause) { notify?.(`Frontend package was not installed: ${cause.message}`, 'failed'); }
+    } catch (cause) { notify?.(`Frontend package was not installed: ${uiErrorReason(cause)}`, 'failed'); }
     finally { installInput.value = ''; }
   });
   const selectedReferencesPackage = packageId => {
@@ -269,7 +269,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     for (const package_ of packages) {
       const row = document_.createElement('div'); row.className = 'drawing-model-package-row';
       const description = document_.createElement('span');
-      description.textContent = uiText("workspace.drawing.model.controller.text", { name: package_.manifest.name, version: package_.manifest.version, disabled: package_.enabled ? 'enabled' : 'disabled' });
+      description.textContent = uiText("workspace.drawing.model.controller.text", { name: package_.manifest.name, version: package_.manifest.version, disabled: uiText(package_.enabled ? 'common.enabled' : 'common.disabled') });
       const toggle = document_.createElement('button'); toggle.type = 'button'; toggle.className = 'btn';
       toggle.textContent = package_.enabled ? uiText("workspace.drawing.model.controller.disable") : uiText("workspace.drawing.model.controller.enable");
       toggle.setAttribute('aria-label', uiText("workspace.drawing.model.controller.text.2", { textContent: toggle.textContent, name: package_.manifest.name }));
@@ -308,7 +308,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       const value = presentationMappingValue(JSON.parse(textarea.value), current.graph);
       editGraphProperties?.({ [FRONTEND_PRESENTATION_PROPERTY]: value }, [], 'Edit drawing model mapping');
       error.textContent = ''; dialog.close(); void render();
-    } catch (cause) { error.textContent = cause.message; }
+    } catch (cause) { error.textContent = uiErrorReason(cause); }
   });
   function scheduleRefresh(documentId = context()?.documentId) {
     if (!documentId || context()?.documentId !== documentId) return;

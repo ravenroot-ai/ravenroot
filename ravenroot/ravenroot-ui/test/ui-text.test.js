@@ -5,11 +5,18 @@ import {
   createUiLocalization,
   createUiText,
   formatUiDuration,
+  uiErrorReason,
   uiLocaleDirection,
   validateUiCatalog,
 } from '../src/ui-text.js';
+import { productError } from '../src/product-error.js';
 
 describe('UI text catalogs', () => {
+  it('translates structured product validation reasons while preserving unknown diagnostics', () => {
+    expect(uiErrorReason(productError('humanTasks.validation.failed', 'developer detail')))
+      .toBe('The Human Task response failed client validation.');
+    expect(uiErrorReason(new Error('service diagnostic'))).toBe('service diagnostic');
+  });
   it('prefers an exact locale, then its base language, then English', () => {
     const catalogs = {
       fr: { 'commands.file.new.label': 'Nouveau document' },

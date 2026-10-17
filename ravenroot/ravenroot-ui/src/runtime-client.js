@@ -1,3 +1,7 @@
+import { productError } from './product-error.js';
+
+const runtimeClientValidationError = message => productError('runtimeClient.validation.failed', message);
+
 import {
   validateHumanTaskAttention,
   validateHumanTaskCapability,
@@ -43,14 +47,14 @@ export function validateRuntimeConfiguration(value) {
       || value.graphDocumentMaxBytes < 1
       || value.graphDocumentMaxBytes > MAX_GRAPH_DOCUMENT_BYTES
       || !validProgramAuthoring(authoring)) {
-    throw new Error('Runtime configuration is not a supported versioned document');
+    throw runtimeClientValidationError('Runtime configuration is not a supported versioned document');
   }
   let workspace = null;
   if (value.workspace !== undefined) {
     if (!value.workspace || typeof value.workspace !== 'object' || Array.isArray(value.workspace)
         || typeof value.workspace.tenantId !== 'string' || value.workspace.tenantId.length === 0
         || Object.keys(value.workspace).some(key => key !== 'tenantId')) {
-      throw new Error('Runtime configuration workspace scope is malformed');
+      throw runtimeClientValidationError('Runtime configuration workspace scope is malformed');
     }
     workspace = Object.freeze({ tenantId: value.workspace.tenantId });
   }
@@ -160,7 +164,7 @@ export function validateDiagnosticFinding(value) {
       || ((value.nodeId === undefined) !== (value.nodeRef === undefined))
       || (value.propertyName !== undefined && (!PROPERTY_TOKEN.test(value.propertyName)
         || !safeDiagnosticToken(value.propertyName, 64)))) {
-    throw new Error('Graph admission finding is malformed');
+    throw runtimeClientValidationError('Graph admission finding is malformed');
   }
   return Object.freeze({ ...value });
 }
@@ -173,7 +177,7 @@ export function validateStartupFailure(value) {
       || (value.nodeId !== undefined && !safeDiagnosticToken(value.nodeId, 128))
       || (value.nodeRef !== undefined && !NODE_REF.test(value.nodeRef))
       || ((value.nodeId === undefined) !== (value.nodeRef === undefined))) {
-    throw new Error('Startup failure is malformed');
+    throw runtimeClientValidationError('Startup failure is malformed');
   }
   return Object.freeze({ ...value });
 }
@@ -219,10 +223,10 @@ function validateProgramBuildSnapshot(value, expectedBuildId = '') {
       || typeof value.buildId !== 'string' || !value.buildId
       || !Number.isSafeInteger(value.revision) || value.revision < 1
       || typeof value.terminal !== 'boolean' || !Array.isArray(value.programs)) {
-    throw new Error('Program build response is not a valid durable snapshot');
+    throw runtimeClientValidationError('Program build response is not a valid durable snapshot');
   }
   if (expectedBuildId && value.buildId !== expectedBuildId) {
-    throw new Error(`Program build response id ${value.buildId} does not match ${expectedBuildId}`);
+    throw runtimeClientValidationError(`Program build response id ${value.buildId} does not match ${expectedBuildId}`);
   }
   return value;
 }
@@ -251,10 +255,10 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
         try { validateStartupFailure(value.failure); return false; } catch { return true; }
       })())
       || (value.failure !== null && value.failure !== undefined && value.state !== 'FAILED')) {
-    throw new Error('Source session response is not a valid process-local status');
+    throw runtimeClientValidationError('Source session response is not a valid process-local status');
   }
   if (expectedSessionId && value.sessionId !== expectedSessionId) {
-    throw new Error(`Source session response id ${value.sessionId} does not match ${expectedSessionId}`);
+    throw runtimeClientValidationError(`Source session response id ${value.sessionId} does not match ${expectedSessionId}`);
   }
   return value;
 }
@@ -283,7 +287,7 @@ export function validateLifecycleCapabilities(value, expectedScope) {
       || value.contractVersion !== 1 || value.scope !== expectedScope
       || !Array.isArray(value.commands) || value.commands.length === 0
       || (value.drainBound !== undefined && (typeof value.drainBound !== 'string' || !value.drainBound))) {
-    throw new Error('Lifecycle capabilities are not a supported versioned contract');
+    throw runtimeClientValidationError('Lifecycle capabilities are not a supported versioned contract');
   }
   const seen = new Set();
   const allowed = LIFECYCLE_COMMANDS_BY_SCOPE[expectedScope];
@@ -294,7 +298,7 @@ export function validateLifecycleCapabilities(value, expectedScope) {
         || (item.unavailableReason !== null && typeof item.unavailableReason !== 'string')
         || (item.available && item.unavailableReason !== null)
         || (!item.available && !item.unavailableReason)) {
-      throw new Error('Lifecycle capabilities contain an invalid command');
+      throw runtimeClientValidationError('Lifecycle capabilities contain an invalid command');
     }
     seen.add(item.command);
     return Object.freeze({ ...item });
@@ -315,7 +319,7 @@ function ambiguousDeploymentDelivery(error) {
 export function validateDeploymentCommandOutcome(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || !DEPLOYMENT_COMMAND_OUTCOMES.has(value.outcome)) {
-    throw new Error('Deployment command response is not a valid durable outcome');
+    throw runtimeClientValidationError('Deployment command response is not a valid durable outcome');
   }
   const valid = (() => {
     switch (value.outcome) {
@@ -346,7 +350,7 @@ export function validateDeploymentCommandOutcome(value) {
         return false;
     }
   })();
-  if (!valid) throw new Error('Deployment command response is not a valid durable outcome');
+  if (!valid) throw runtimeClientValidationError('Deployment command response is not a valid durable outcome');
   return value;
 }
 
@@ -361,7 +365,7 @@ function validateExecutionControlResult(value, expectedExecutionId, operation) {
       || !EXECUTION_CONTROL_OUTCOMES[operation]?.has(value.outcome)
       || value.traversalId !== expectedExecutionId
       || typeof value.note !== 'string') {
-    throw new Error(`Execution ${operation} response is invalid`);
+    throw runtimeClientValidationError(`Execution ${operation} response is invalid`);
   }
   return value;
 }
@@ -391,17 +395,17 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
         try { validateStartupFailure(value.failure); return false; } catch { return true; }
       })())
       || (value.failure !== null && value.failure !== undefined && value.state !== 'FAILED')) {
-    throw new Error('Deployment response is not a valid process-local status');
+    throw runtimeClientValidationError('Deployment response is not a valid process-local status');
   }
   if (expectedDeploymentId && value.deploymentId !== expectedDeploymentId) {
-    throw new Error(`Deployment response id ${value.deploymentId} does not match ${expectedDeploymentId}`);
+    throw runtimeClientValidationError(`Deployment response id ${value.deploymentId} does not match ${expectedDeploymentId}`);
   }
   const durable = value.deploymentGeneration !== null && value.deploymentGeneration !== undefined;
   if (durable !== (value.continuity === 'DURABLE')
       || durable !== (value.deploymentRevision !== null)
       || durable !== (value.desiredState !== null)
       || durable !== (value.observedState !== null)) {
-    throw new Error('Deployment response carries inconsistent continuity metadata');
+    throw runtimeClientValidationError('Deployment response carries inconsistent continuity metadata');
   }
   if (value.lifecycleCapabilities !== undefined) {
     validateLifecycleCapabilities(value.lifecycleCapabilities, 'DEPLOYMENT');
@@ -414,7 +418,7 @@ export function validateProcessInventoryPage(value) {
       || !Number.isSafeInteger(value.maxPageSize) || value.maxPageSize < 1
       || typeof value.retainedFrom !== 'string'
       || (value.nextCursor !== null && (typeof value.nextCursor !== 'string' || !value.nextCursor))) {
-    throw new Error('Process inventory response is not a valid authoritative page');
+    throw runtimeClientValidationError('Process inventory response is not a valid authoritative page');
   }
   for (const item of value.items) {
     if (!item || typeof item !== 'object' || Array.isArray(item)
@@ -431,7 +435,7 @@ export function validateProcessInventoryPage(value) {
         || !Number.isSafeInteger(item.fencingToken) || item.fencingToken < 0
         || (item.controlState !== null && item.controlState !== undefined
           && (typeof item.controlState !== 'string' || !item.controlState))) {
-      throw new Error('Process inventory contains an invalid authoritative target');
+      throw runtimeClientValidationError('Process inventory contains an invalid authoritative target');
     }
     if (item.lifecycleCapabilities !== undefined) {
       validateLifecycleCapabilities(item.lifecycleCapabilities, 'PROCESS');
@@ -465,7 +469,7 @@ export class RavenrootRuntimeClient {
 
   connect(onEvent, onConnectionChange = () => {}) {
     this.disconnect();
-    if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
+    if (!this.fetchImpl) throw runtimeClientValidationError('Fetch API is not supported by this browser');
     const controller = new AbortController();
     this.connection = controller;
     void this.#consumeEvents(controller.signal, onEvent, onConnectionChange);
@@ -505,7 +509,7 @@ export class RavenrootRuntimeClient {
             response.status === 401 ? 'Authentication expired' : 'Insufficient permissions', response.status);
         }
         if (!response.ok || !response.body?.getReader) {
-          throw new Error(`Live events failed with HTTP ${response.status}`);
+          throw runtimeClientValidationError(`Live events failed with HTTP ${response.status}`);
         }
 
         refreshed = false;
@@ -545,13 +549,13 @@ export class RavenrootRuntimeClient {
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
       if (buffer.length > this.maxFrameBytes && !buffer.includes('\n\n')) {
         await reader.cancel?.();
-        throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
+        throw runtimeClientValidationError(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
       }
       let boundary;
       while ((boundary = buffer.indexOf('\n\n')) >= 0) {
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        if (frame.length > this.maxFrameBytes) throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
+        if (frame.length > this.maxFrameBytes) throw runtimeClientValidationError(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
         const parsed = parseEventFrame(frame);
         if (parsed.retry !== undefined) {
           reconnectDelay = Math.min(MAX_RETRY_DELAY_MS, Math.max(MIN_RETRY_DELAY_MS, parsed.retry));
@@ -561,7 +565,7 @@ export class RavenrootRuntimeClient {
             const event = normalizeRuntimeEvent(JSON.parse(parsed.data));
             if (Object.hasOwn(event, 'schemaVersion')) {
               executionEventCursor(parsed.id);
-              if (parsed.id !== event.id) throw new Error('Execution event identity mismatch');
+              if (parsed.id !== event.id) throw runtimeClientValidationError('Execution event identity mismatch');
             }
             await onEvent(event);
             if (signal.aborted) return reconnectDelay;
@@ -569,7 +573,7 @@ export class RavenrootRuntimeClient {
             if (parsed.id !== undefined && !parsed.id.includes('\0')) this.lastEventId = parsed.id;
           } catch {
             try { await reader.cancel?.(); } catch { /* Preserve the classified stream failure. */ }
-            throw new Error('Invalid or undelivered execution event');
+            throw runtimeClientValidationError('Invalid or undelivered execution event');
           }
         }
       }
@@ -588,7 +592,7 @@ export class RavenrootRuntimeClient {
 
   async inspectGraph(graphMl, purpose = 'EXECUTION') {
     if (!['EXECUTION', 'LOCAL_DEPLOYMENT', 'SOURCE_SESSION'].includes(purpose)) {
-      throw new Error('Unsupported graph admission purpose');
+      throw runtimeClientValidationError('Unsupported graph admission purpose');
     }
     const result = await this.#json(`/v1/graphs/inspect?purpose=${encodeURIComponent(purpose)}`, {
       method: 'POST',
@@ -596,16 +600,16 @@ export class RavenrootRuntimeClient {
       body: graphMl,
     });
     if (!result || typeof result !== 'object' || Array.isArray(result)
-        || typeof result.valid !== 'boolean') throw new Error('Graph inspection response is malformed');
+        || typeof result.valid !== 'boolean') throw runtimeClientValidationError('Graph inspection response is malformed');
     // `findings` was added after the inspection endpoint. An N-1 runtime still returns the
     // authoritative `valid` flag plus its legacy `violations` array; absence of the new field is
     // not itself a refusal and must not make optional preflight a dependency of start.
     if (result.findings === undefined) {
-      if (!Array.isArray(result.violations)) throw new Error('Graph inspection response is malformed');
+      if (!Array.isArray(result.violations)) throw runtimeClientValidationError('Graph inspection response is malformed');
       return Object.freeze({ ...result, findings: Object.freeze([]) });
     }
     if (!Array.isArray(result.findings) || result.findings.length > 1) {
-      throw new Error('Graph inspection response is malformed');
+      throw runtimeClientValidationError('Graph inspection response is malformed');
     }
     return Object.freeze({ ...result,
       findings: Object.freeze(result.findings.map(validateDiagnosticFinding)) });
@@ -621,7 +625,7 @@ export class RavenrootRuntimeClient {
 
   async startSourceSession(sessionId, graphMl) {
     const id = String(sessionId || '');
-    if (!id) throw new Error('Source session start requires an id');
+    if (!id) throw runtimeClientValidationError('Source session start requires an id');
     const result = await this.#json(`/v1/source-sessions?id=${encodeURIComponent(id)}`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/graphml+xml; charset=utf-8' },
@@ -632,7 +636,7 @@ export class RavenrootRuntimeClient {
 
   async sourceSession(sessionId, { signal } = {}) {
     const id = String(sessionId || '');
-    if (!id) throw new Error('Source session observation requires an id');
+    if (!id) throw runtimeClientValidationError('Source session observation requires an id');
     const result = await this.#json(`/v1/source-sessions/${encodeURIComponent(id)}`, {
       method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
@@ -641,7 +645,7 @@ export class RavenrootRuntimeClient {
 
   async stopSourceSession(sessionId) {
     const id = String(sessionId || '');
-    if (!id) throw new Error('Source session stop requires an id');
+    if (!id) throw runtimeClientValidationError('Source session stop requires an id');
     const result = await this.#json(`/v1/source-sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE', headers: { Accept: 'application/json' },
     });
@@ -658,7 +662,7 @@ export class RavenrootRuntimeClient {
       method: 'GET', headers: { Accept: 'application/json' },
     });
     if (!result || typeof result !== 'object' || !Array.isArray(result.deployments)) {
-      throw new Error('Deployment list response is not a valid process-local status list');
+      throw runtimeClientValidationError('Deployment list response is not a valid process-local status list');
     }
     return result.deployments.map(entry => validateLocalDeploymentStatus(entry));
   }
@@ -671,7 +675,7 @@ export class RavenrootRuntimeClient {
    */
   async registerDeployment(deploymentId, graphMl) {
     const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment registration requires an id');
+    if (!id) throw runtimeClientValidationError('Deployment registration requires an id');
     const result = await this.#json(`/v1/deployments?id=${encodeURIComponent(id)}`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/graphml+xml; charset=utf-8' },
@@ -683,7 +687,7 @@ export class RavenrootRuntimeClient {
   /** Observes one registered deployment; a 404 means this tenant holds no such id. */
   async deployment(deploymentId, { signal } = {}) {
     const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment observation requires an id');
+    if (!id) throw runtimeClientValidationError('Deployment observation requires an id');
     const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}`, {
       method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
@@ -693,7 +697,7 @@ export class RavenrootRuntimeClient {
   /** Resolves one immutable, tenant-scoped deployment presentation without returning raw GraphML. */
   async deploymentView(deploymentId, { signal } = {}) {
     const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment view requires an id');
+    if (!id) throw runtimeClientValidationError('Deployment view requires an id');
     const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/view`, {
       method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
@@ -779,13 +783,13 @@ export class RavenrootRuntimeClient {
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
       if (buffer.length > this.maxFrameBytes && !buffer.includes('\n\n')) {
         await reader.cancel?.();
-        throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
+        throw runtimeClientValidationError(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
       }
       let boundary;
       while ((boundary = buffer.indexOf('\n\n')) >= 0) {
         const raw = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        if (raw.length > this.maxFrameBytes) throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
+        if (raw.length > this.maxFrameBytes) throw runtimeClientValidationError(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
         const parsed = parseEventFrame(raw);
         if (parsed.retry !== undefined) {
           retryDelay = Math.min(MAX_RETRY_DELAY_MS, Math.max(MIN_RETRY_DELAY_MS, parsed.retry));
@@ -862,7 +866,7 @@ export class RavenrootRuntimeClient {
   async #deploymentCommand(deploymentId, action,
     { expectedGeneration, idempotencyKey, reason, disposition } = {}) {
     const id = String(deploymentId || '');
-    if (!id) throw new Error(`Deployment ${action} requires an id`);
+    if (!id) throw runtimeClientValidationError(`Deployment ${action} requires an id`);
     const path = action === 'undeploy' ? `/v1/deployments/${encodeURIComponent(id)}`
       : `/v1/deployments/${encodeURIComponent(id)}/${action}`;
     const method = action === 'undeploy' ? 'DELETE' : 'POST';
@@ -874,19 +878,19 @@ export class RavenrootRuntimeClient {
       return validateLocalDeploymentStatus(result, id);
     }
     if (!safeGeneration(expectedGeneration)) {
-      throw new Error('Deployment generation is outside JavaScript’s safe integer range');
+      throw runtimeClientValidationError('Deployment generation is outside JavaScript’s safe integer range');
     }
     if ((['pause', 'cancel', 'stop', 'undeploy'].includes(action))
         && (typeof reason !== 'string' || !reason.trim() || reason.length > 256)) {
-      throw new Error(`Deployment ${action} requires a reason of at most 256 characters`);
+      throw runtimeClientValidationError(`Deployment ${action} requires a reason of at most 256 characters`);
     }
     if (action === 'undeploy'
         && !['DRAIN_FIRST', 'CANCEL_IN_FLIGHT', 'REFUSE_IF_BUSY'].includes(disposition)) {
-      throw new Error('Deployment undeploy requires an explicit supported disposition');
+      throw runtimeClientValidationError('Deployment undeploy requires an explicit supported disposition');
     }
     const key = idempotencyKey || globalThis.crypto?.randomUUID?.();
     if (typeof key !== 'string' || !key) {
-      throw new Error('Secure deployment idempotency key generation is unavailable');
+      throw runtimeClientValidationError('Secure deployment idempotency key generation is unavailable');
     }
     const headers = {
       Accept: 'application/json',
@@ -959,7 +963,7 @@ export class RavenrootRuntimeClient {
 
   async #controlExecution(executionId, operation, { signal } = {}) {
     const id = String(executionId || '');
-    if (!id) throw new Error(`Execution ${operation} requires an id`);
+    if (!id) throw runtimeClientValidationError(`Execution ${operation} requires an id`);
     const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/${operation}`, {
       method: 'POST', headers: { Accept: 'application/json' }, signal,
     });
@@ -984,7 +988,7 @@ export class RavenrootRuntimeClient {
     const allowed = new Set(['pause', 'resume', 'cancel', 'drain', 'stop']);
     if (!id || !allowed.has(operation) || !Number.isSafeInteger(expectedGeneration)
         || expectedGeneration < 1 || typeof idempotencyKey !== 'string' || !idempotencyKey) {
-      throw new Error('Process lifecycle command is invalid');
+      throw runtimeClientValidationError('Process lifecycle command is invalid');
     }
     const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
     const result = await this.#json(`/v1/processes/${encodeURIComponent(id)}/${operation}${query}`, {
@@ -996,7 +1000,7 @@ export class RavenrootRuntimeClient {
     if (!result || result.processInstanceId !== id || !Number.isSafeInteger(result.generation)
         || typeof result.outcome !== 'string' || typeof result.state !== 'string'
         || typeof result.reason !== 'string' || !Array.isArray(result.traversals)) {
-      throw new Error(`Process ${operation} response is invalid`);
+      throw runtimeClientValidationError(`Process ${operation} response is invalid`);
     }
     return result;
   }
@@ -1046,7 +1050,7 @@ export class RavenrootRuntimeClient {
    */
   async processInstanceTraversals(processInstanceId, { signal } = {}) {
     const id = String(processInstanceId || '');
-    if (!id) throw new Error('Process instance traversals require an id');
+    if (!id) throw runtimeClientValidationError('Process instance traversals require an id');
     return this.#json(`/v1/executions/${encodeURIComponent(id)}/traversals`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
@@ -1057,14 +1061,14 @@ export class RavenrootRuntimeClient {
   /** Reads the bounded, payload-free saga and participant status for one process instance. */
   async processInstanceSagas(processInstanceId, { signal } = {}) {
     const id = String(processInstanceId || '');
-    if (!id) throw new Error('Process instance sagas require an id');
+    if (!id) throw runtimeClientValidationError('Process instance sagas require an id');
     const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/sagas`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal,
     });
     if (!result || !Array.isArray(result.sagas) || !Array.isArray(result.outbox)) {
-      throw new Error('Process saga response is invalid');
+      throw runtimeClientValidationError('Process saga response is invalid');
     }
     return result;
   }
@@ -1075,11 +1079,11 @@ export class RavenrootRuntimeClient {
 
   async derivedExecutionBoundaries(sourceProcessInstanceId, { signal } = {}) {
     const id = String(sourceProcessInstanceId || '');
-    if (!id) throw new Error('Derived boundary discovery requires a source process');
+    if (!id) throw runtimeClientValidationError('Derived boundary discovery requires a source process');
     const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived/boundaries`, {
       method: 'GET', signal, headers: { Accept: 'application/json' },
     });
-    if (!Array.isArray(result?.boundaries)) throw new Error('Derived boundary response is invalid');
+    if (!Array.isArray(result?.boundaries)) throw runtimeClientValidationError('Derived boundary response is invalid');
     return result.boundaries;
   }
 
@@ -1090,7 +1094,7 @@ export class RavenrootRuntimeClient {
   async #derivedExecution(sourceProcessInstanceId, request, preview, signal) {
     const id = String(sourceProcessInstanceId || '');
     if (!id || !request || !Array.isArray(request.boundaries) || request.boundaries.length === 0) {
-      throw new Error('Selective derived execution requires a source and boundary');
+      throw runtimeClientValidationError('Selective derived execution requires a source and boundary');
     }
     const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived${preview ? '/preview' : ''}`, {
       method: 'POST', signal, headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -1100,10 +1104,10 @@ export class RavenrootRuntimeClient {
         || !Array.isArray(result.inheritedInvocationIds) || !Array.isArray(result.possibleScopeNodeIds)
         || !Array.isArray(result.missingInputs) || !Array.isArray(result.externalEffectNodes)
         || typeof result.sourceOutcomeAmbiguous !== 'boolean')) {
-      throw new Error('Selective replay preview response is invalid');
+      throw runtimeClientValidationError('Selective replay preview response is invalid');
     }
     if (!preview && (!result?.processInstanceId || !result?.traversalId || !result?.graphVersion)) {
-      throw new Error('Derived execution response is invalid');
+      throw runtimeClientValidationError('Derived execution response is invalid');
     }
     return result;
   }
@@ -1124,12 +1128,12 @@ export class RavenrootRuntimeClient {
         || (!hasTask && (!hasGraph || hasDeployment === hasProcess))
         || (hasTask && hasContextPart && (!hasGraph || hasDeployment === hasProcess))
         || (hasGeneration && (!Number.isSafeInteger(filters.generation) || filters.generation < 1))) {
-      throw new Error('Human Task attention requires an exact task locator or graph and deployment or process context');
+      throw runtimeClientValidationError('Human Task attention requires an exact task locator or graph and deployment or process context');
     }
     const requestedLimit = filters?.limit ?? policy.attentionPageSize;
     if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1
         || requestedLimit > policy.attentionPageSizeMax) {
-      throw new Error('Human Task attention page size is outside the advertised policy');
+      throw runtimeClientValidationError('Human Task attention page size is outside the advertised policy');
     }
     const params = new URLSearchParams();
     for (const key of ['graphVersion', 'deploymentId', 'processInstanceId', 'traversalId', 'nodeId',
@@ -1153,7 +1157,7 @@ export class RavenrootRuntimeClient {
     const normalizedAction = String(action || '').toLowerCase();
     if (!id || !Number.isSafeInteger(generation) || generation < 1
         || !['resolve', 'deny', 'cancel'].includes(normalizedAction)) {
-      throw new Error('Human Task confirmation requires task id, generation, and a permitted action');
+      throw runtimeClientValidationError('Human Task confirmation requires task id, generation, and a permitted action');
     }
     const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/confirmation/`
       + `${normalizedAction}?generation=${generation}`, {
@@ -1164,7 +1168,7 @@ export class RavenrootRuntimeClient {
     if (!result || typeof result !== 'object' || Array.isArray(result)
         || result.schemaVersion !== 1 || !HUMAN_TASK_DECISION_OUTCOMES.has(result.outcome)
         || !result.task) {
-      throw new Error('Human Task confirmation response is invalid');
+      throw runtimeClientValidationError('Human Task confirmation response is invalid');
     }
     return Object.freeze({ schemaVersion: 1, outcome: result.outcome,
       task: validateHumanTaskRow(result.task, policy) });
@@ -1178,7 +1182,7 @@ export class RavenrootRuntimeClient {
     const normalizedAction = String(action || '').toUpperCase();
     if (!id || !Number.isSafeInteger(task?.generation) || task.generation < 1
         || !['RESOLVE', 'DENY', 'CANCEL'].includes(normalizedAction)) {
-      throw new Error('Human Task settlement requires task id, generation, and a permitted action');
+      throw runtimeClientValidationError('Human Task settlement requires task id, generation, and a permitted action');
     }
     const document = { schemaVersion: 1, action: normalizedAction, comment: String(comment ?? '') };
     if (normalizedAction === 'RESOLVE') {
@@ -1187,7 +1191,7 @@ export class RavenrootRuntimeClient {
         envelope = { contract: 'ravenroot.payload/1', schema: 'ravenroot.human-task.confirmation',
           schemaVersion: '1', kind: 'SCALAR', value: true };
       }
-      if (!envelope) throw new Error('Resolve requires a typed Human Task response');
+      if (!envelope) throw runtimeClientValidationError('Resolve requires a typed Human Task response');
       const bytes = new TextEncoder().encode(JSON.stringify(envelope));
       let binary = '';
       bytes.forEach(byte => { binary += String.fromCharCode(byte); });
@@ -1201,7 +1205,7 @@ export class RavenrootRuntimeClient {
     });
     if (!result || result.schemaVersion !== 1 || typeof result.outcome !== 'string'
         || result.taskId !== id || !Number.isSafeInteger(result.generation)) {
-      throw new Error('Human Task settlement response is invalid');
+      throw runtimeClientValidationError('Human Task settlement response is invalid');
     }
     return Object.freeze(result);
   }
@@ -1212,7 +1216,7 @@ export class RavenrootRuntimeClient {
     const id = String(task?.taskId || '');
     if (!id || !Number.isSafeInteger(task?.generation) || task.generation < 1
         || !['CUSTOM', 'EXTERNAL'].includes(task?.interactionPresentation?.kind)) {
-      throw new Error('Registered Human Task interaction requires an exact custom or external task');
+      throw runtimeClientValidationError('Registered Human Task interaction requires an exact custom or external task');
     }
     const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/interaction`
       + `?generation=${task.generation}`, {
@@ -1223,11 +1227,11 @@ export class RavenrootRuntimeClient {
         || typeof result.origin !== 'string' || result.taskId !== id
         || result.generation !== task.generation || !Array.isArray(result.actions)
         || !result.responseSchema || typeof result.responseSchema.maxBytes !== 'number') {
-      throw new Error('Human Task interaction launch response is invalid');
+      throw runtimeClientValidationError('Human Task interaction launch response is invalid');
     }
     const launch = new URL(result.launchUri);
     if (launch.origin !== result.origin || !['http:', 'https:'].includes(launch.protocol)) {
-      throw new Error('Human Task interaction launch origin is invalid');
+      throw runtimeClientValidationError('Human Task interaction launch origin is invalid');
     }
     return Object.freeze({ ...result, launchUri: launch.href });
   }
@@ -1235,7 +1239,7 @@ export class RavenrootRuntimeClient {
   /** Completes through the capability-only endpoint; no bearer or browser credentials are sent. */
   async completeHumanTaskInteraction(launch, action, comment = '', response = null, { signal } = {}) {
     if (!this.fetchImpl || !launch?.capability || !launch?.taskId) {
-      throw new Error('Human Task interaction capability is unavailable');
+      throw runtimeClientValidationError('Human Task interaction capability is unavailable');
     }
     const normalizedAction = String(action || '').toUpperCase();
     const document = { schemaVersion: 1, capability: launch.capability,
@@ -1243,7 +1247,7 @@ export class RavenrootRuntimeClient {
     if (normalizedAction === 'RESOLVE') {
       if (!response || typeof response.contentType !== 'string'
           || typeof response.payloadBase64 !== 'string') {
-        throw new Error('Registered Human Task resolve requires a bounded encoded response');
+        throw runtimeClientValidationError('Registered Human Task resolve requires a bounded encoded response');
       }
       document.response = { contentType: response.contentType, payloadBase64: response.payloadBase64 };
     }
@@ -1266,7 +1270,7 @@ export class RavenrootRuntimeClient {
     }
     if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.outcome !== 'string'
         || parsed.taskId !== launch.taskId || !Number.isSafeInteger(parsed.generation)) {
-      throw new Error('Human Task interaction completion response is invalid');
+      throw runtimeClientValidationError('Human Task interaction completion response is invalid');
     }
     return Object.freeze(parsed);
   }
@@ -1283,7 +1287,7 @@ export class RavenrootRuntimeClient {
 
   async nodeTypes() {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
-    if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');
+    if (!Array.isArray(result)) throw runtimeClientValidationError('Node catalog response is not an array');
     return result;
   }
 
@@ -1345,26 +1349,26 @@ export class RavenrootRuntimeClient {
   /** Starts or rejoins one durable server-owned graph readiness operation. */
   async buildProgramArtifacts(programs, authoring = LEGACY_PROGRAM_AUTHORING) {
     if (!validProgramAuthoring(authoring)) {
-      throw new Error('Program build requires valid authoring limits');
+      throw runtimeClientValidationError('Program build requires valid authoring limits');
     }
     if (!Array.isArray(programs) || programs.length < 1
         || programs.length > authoring.maxProgramsPerBuild) {
-      throw new Error(`Program build requires between 1 and ${authoring.maxProgramsPerBuild} programs`);
+      throw runtimeClientValidationError(`Program build requires between 1 and ${authoring.maxProgramsPerBuild} programs`);
     }
     const submission = programs.map((program, index) => {
       const nodeId = String(program?.nodeId ?? '');
       const language = String(program?.language ?? '');
       const source = String(program?.source ?? '');
       const testPayload = String(program?.testPayload ?? 'test payload');
-      if (!nodeId || !language) throw new Error(`Program build entry ${index + 1} requires nodeId and language`);
+      if (!nodeId || !language) throw runtimeClientValidationError(`Program build entry ${index + 1} requires nodeId and language`);
       if (new TextEncoder().encode(source).byteLength > authoring.maxSourceBytes) {
-        throw new Error(`Program build entry ${index + 1} exceeds the configured source byte limit`);
+        throw runtimeClientValidationError(`Program build entry ${index + 1} exceeds the configured source byte limit`);
       }
       return { nodeId, language, source, testPayload };
     });
     const body = JSON.stringify({ programs: submission });
     if (new TextEncoder().encode(body).byteLength > authoring.maxBuildRequestBytes) {
-      throw new Error('Program build request exceeds the configured byte limit');
+      throw runtimeClientValidationError('Program build request exceeds the configured byte limit');
     }
     const result = await this.#json('/v1/program-artifacts/build', {
       method: 'POST',
@@ -1377,7 +1381,7 @@ export class RavenrootRuntimeClient {
   /** Observes a durable build through the caller's authenticated tenant boundary. */
   async programArtifactBuild(buildId, { signal } = {}) {
     const id = String(buildId ?? '');
-    if (!id) throw new Error('Program build observation requires a build id');
+    if (!id) throw runtimeClientValidationError('Program build observation requires a build id');
     const result = await this.#json(`/v1/program-artifacts/builds/${encodeURIComponent(id)}`, {
       method: 'GET', headers: { Accept: "application/json" }, signal,
     });
@@ -1387,21 +1391,21 @@ export class RavenrootRuntimeClient {
   /** One independently-authenticated graph-level approval; never a per-node lifecycle loop. */
   async approveProgramArtifactBatch(artifactIds, reason) {
     if (!Array.isArray(artifactIds) || artifactIds.length < 1 || artifactIds.length > 256) {
-      throw new Error('Program batch approval requires between 1 and 256 artifact ids');
+      throw runtimeClientValidationError('Program batch approval requires between 1 and 256 artifact ids');
     }
     const body = {
       artifactIds: artifactIds.map(id => String(id)),
       reason: String(reason ?? ''),
     };
     if (body.artifactIds.some(id => !id) || !body.reason.trim()) {
-      throw new Error('Program batch approval requires artifact ids and a reason');
+      throw runtimeClientValidationError('Program batch approval requires artifact ids and a reason');
     }
     const result = await this.#json('/v1/program-artifacts/approve-batch', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify(body),
     });
-    if (!Array.isArray(result?.artifacts)) throw new Error('Program approval response has no artifacts array');
+    if (!Array.isArray(result?.artifacts)) throw runtimeClientValidationError('Program approval response has no artifacts array');
     return result.artifacts;
   }
 
@@ -1413,7 +1417,7 @@ export class RavenrootRuntimeClient {
    */
   async programLanguages() {
     const result = await this.#json('/v1/program-languages', { method: 'GET', headers: { Accept: 'application/json' } });
-    if (!Array.isArray(result)) throw new Error('Program language catalog response is not an array');
+    if (!Array.isArray(result)) throw runtimeClientValidationError('Program language catalog response is not an array');
     return result;
   }
 
@@ -1423,7 +1427,7 @@ export class RavenrootRuntimeClient {
    * creating an artifact in a language nobody chose.
    */
   async createProgramArtifact(source, { language, name = '' } = {}) {
-    if (!language) throw new Error('createProgramArtifact requires an explicit language (no default)');
+    if (!language) throw runtimeClientValidationError('createProgramArtifact requires an explicit language (no default)');
     const query = `language=${encodeURIComponent(language)}&name=${encodeURIComponent(name)}`;
     return this.#json(`/v1/program-artifacts?${query}`, {
       method: 'POST',
@@ -1461,12 +1465,12 @@ export class RavenrootRuntimeClient {
    */
   async testProgramArtifact(id, payload = '', { mediaType = 'text/plain' } = {}) {
     if (mediaType !== 'application/json' && mediaType !== 'text/plain') {
-      throw new Error('Program test payload mediaType must be application/json or text/plain');
+      throw runtimeClientValidationError('Program test payload mediaType must be application/json or text/plain');
     }
     let body;
     if (mediaType === 'application/json' && typeof payload !== 'string') {
       body = JSON.stringify(payload);
-      if (body === undefined) throw new Error('Program test JSON payload is not serializable');
+      if (body === undefined) throw runtimeClientValidationError('Program test JSON payload is not serializable');
     } else {
       body = String(payload ?? '');
     }
@@ -1499,7 +1503,7 @@ export class RavenrootRuntimeClient {
       { method: 'GET', headers: { Accept: 'application/json' } });
   }
   runnerAudit(afterOffset = 0) {
-    if (!Number.isSafeInteger(afterOffset) || afterOffset < 0) throw new Error('Invalid runner audit offset');
+    if (!Number.isSafeInteger(afterOffset) || afterOffset < 0) throw runtimeClientValidationError('Invalid runner audit offset');
     return this.#json('/v1/runner-plane/audit?afterOffset=' + afterOffset,
       { method: 'GET', headers: { Accept: 'application/json' } });
   }
@@ -1509,7 +1513,7 @@ export class RavenrootRuntimeClient {
   }
   saveRunnerResource(resource) {
     const body = JSON.stringify(resource);
-    if (new TextEncoder().encode(body).length > 1_048_576) throw new Error('Runner definition exceeds the document limit');
+    if (new TextEncoder().encode(body).length > 1_048_576) throw runtimeClientValidationError('Runner definition exceeds the document limit');
     return this.#json('/v1/runner-plane/catalog', { method: 'PUT',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body });
   }
@@ -1522,14 +1526,14 @@ export class RavenrootRuntimeClient {
       { method: 'GET', headers: { Accept: 'application/json' } });
   }
   stopRunnerWorkspace(processId, nodeId, expectedRevision) {
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !nodeId) throw new Error('Exact Workspace and revision required');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !nodeId) throw runtimeClientValidationError('Exact Workspace and revision required');
     return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
       + '/resources/' + encodeURIComponent(nodeId) + '/abort',
     { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ expectedRevision }) });
   }
   runnerOperation(processId, jobId, operation) {
-    if (!['cancel', 'reconcile'].includes(operation)) throw new Error('Unsupported operator runner action');
+    if (!['cancel', 'reconcile'].includes(operation)) throw runtimeClientValidationError('Unsupported operator runner action');
     return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
       + '/jobs/' + encodeURIComponent(jobId) + '/' + operation,
     { method: 'POST', headers: { Accept: 'application/json' } });
@@ -1541,7 +1545,7 @@ export class RavenrootRuntimeClient {
   }
   resolveRunnerContinuation(processId, jobId, expectedRevision, resolution) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
-        || !['RESUME', 'ACKNOWLEDGE', 'ABANDON'].includes(resolution)) throw new Error('Explicit runner continuation revision and resolution required');
+        || !['RESUME', 'ACKNOWLEDGE', 'ABANDON'].includes(resolution)) throw runtimeClientValidationError('Explicit runner continuation revision and resolution required');
     return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
       + '/jobs/' + encodeURIComponent(jobId) + '/resolve-continuation',
     { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -1549,7 +1553,7 @@ export class RavenrootRuntimeClient {
   }
 
   async #json(path, options) {
-    if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
+    if (!this.fetchImpl) throw runtimeClientValidationError('Fetch API is not supported by this browser');
     const credential = await this.#requestCredential();
     const method = options.method || 'GET';
     let response;
@@ -1623,7 +1627,7 @@ export class RavenrootRuntimeClient {
     const providerSnapshot = await this.tokenProvider.getAccessTokenSnapshot();
     if (!providerSnapshot || typeof providerSnapshot !== 'object'
         || typeof providerSnapshot.accessToken !== 'string') {
-      throw new Error('Access token provider returned an invalid credential snapshot');
+      throw runtimeClientValidationError('Access token provider returned an invalid credential snapshot');
     }
     return Object.freeze({ accessToken: providerSnapshot.accessToken, providerSnapshot });
   }
@@ -1670,10 +1674,10 @@ export function validateDeploymentViewEnvelope(value, expectedDeploymentId = '')
       || typeof value.lifecycle !== 'string'
       || projection?.viewerContractVersion !== '1.0'
       || !Array.isArray(projection.nodes) || !Array.isArray(projection.edges)) {
-    throw new Error('Deployment view response is not a valid immutable projection');
+    throw runtimeClientValidationError('Deployment view response is not a valid immutable projection');
   }
   if (expectedDeploymentId && source.deploymentId !== expectedDeploymentId) {
-    throw new Error(`Deployment view id ${source.deploymentId} does not match ${expectedDeploymentId}`);
+    throw runtimeClientValidationError(`Deployment view id ${source.deploymentId} does not match ${expectedDeploymentId}`);
   }
   return value;
 }
@@ -1683,7 +1687,7 @@ export function validateDeploymentViewFrame(frame) {
       || typeof frame.deploymentId !== 'string' || !frame.deploymentId
       || typeof frame.graphVersion !== 'string' || !frame.graphVersion
       || typeof frame.incarnationId !== 'string' || !frame.incarnationId) {
-    throw new Error('Deployment observation frame is invalid');
+    throw runtimeClientValidationError('Deployment observation frame is invalid');
   }
   if (frame.type === 'execution') frame = { ...frame, event: normalizeRuntimeEvent(frame.event) };
   return frame;
@@ -1710,20 +1714,20 @@ export function deploymentExecutionEvent(payload) {
 // Validate the declared wire variant before adding those UI aliases; unknown members survive.
 export function normalizeRuntimeEvent(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('execution event must be an object');
+    throw runtimeClientValidationError('execution event must be an object');
   }
   const type = value.eventType ?? value.type;
   const executionId = value.executionId ?? value.traversalId;
   if (value.type != null && value.eventType != null && value.type !== value.eventType) {
-    throw new Error('type and eventType disagree');
+    throw runtimeClientValidationError('type and eventType disagree');
   }
   if (value.executionId != null && value.traversalId != null
       && value.executionId !== value.traversalId) {
-    throw new Error('executionId and traversalId disagree');
+    throw runtimeClientValidationError('executionId and traversalId disagree');
   }
-  if (typeof type !== 'string' || !type) throw new Error('execution event type is missing');
+  if (typeof type !== 'string' || !type) throw runtimeClientValidationError('execution event type is missing');
   if (typeof executionId !== 'string' || !executionId) {
-    throw new Error('execution event traversal id is missing');
+    throw runtimeClientValidationError('execution event traversal id is missing');
   }
   if (Object.hasOwn(value, 'schemaVersion')) validateVersionedRuntimeEvent(value);
   return { ...value, type, executionId };
@@ -1738,13 +1742,13 @@ const LIVE_EVENT_FIELDS = [
 const DURABLE_EVENT_FIELDS = ['journalOffset', 'streamSequence', 'eventId', 'causationId', 'handlerId'];
 
 function validateVersionedRuntimeEvent(value) {
-  const invalid = () => { throw new Error('execution event is not a valid schema version 1 envelope'); };
+  const invalid = () => { throw runtimeClientValidationError('execution event is not a valid schema version 1 envelope'); };
   const text = field => typeof value[field] === 'string' && value[field].length > 0;
   const uuid = field => typeof value[field] === 'string' && EVENT_UUID.test(value[field]);
   const nullableUuid = field => value[field] === null || uuid(field);
-  if (value.schemaVersion !== 1) throw new Error('unsupported execution event schema version');
+  if (value.schemaVersion !== 1) throw runtimeClientValidationError('unsupported execution event schema version');
   if (value.source !== 'RING' && value.source !== 'DURABLE') {
-    throw new Error('unsupported execution event source');
+    throw runtimeClientValidationError('unsupported execution event source');
   }
   if (!text('eventType') || !text('occurredAt') || !uuid('processInstanceId') || !uuid('traversalId')) invalid();
   if (Object.hasOwn(value, 'type') && typeof value.type !== 'string') invalid();
@@ -1752,7 +1756,7 @@ function validateVersionedRuntimeEvent(value) {
   const id = executionEventCursor(value.id);
   const forbidden = value.source === 'RING' ? DURABLE_EVENT_FIELDS : LIVE_EVENT_FIELDS;
   if (forbidden.some(field => Object.hasOwn(value, field))) {
-    throw new Error('execution event contains fields from the other source');
+    throw runtimeClientValidationError('execution event contains fields from the other source');
   }
   for (const field of ['graphVersion', 'description']) {
     if (Object.hasOwn(value, field) && typeof value[field] !== 'string') invalid();
@@ -1796,11 +1800,11 @@ function validateVersionedRuntimeEvent(value) {
 
 function executionEventCursor(value) {
   if (typeof value !== 'string' || value.length > 20 || !/^(0|-?[1-9][0-9]*)$/.test(value)) {
-    throw new Error('execution event id must be a canonical signed-long decimal string');
+    throw runtimeClientValidationError('execution event id must be a canonical signed-long decimal string');
   }
   const id = BigInt(value);
   if (id < -9223372036854775808n || id > 9223372036854775807n) {
-    throw new Error('execution event id is outside the signed-long range');
+    throw runtimeClientValidationError('execution event id is outside the signed-long range');
   }
   return id;
 }
@@ -1857,6 +1861,6 @@ function normalizeBaseUrl(value) {
   const baseUrl = String(value || '').trim().replace(/\/$/, '');
   if (!baseUrl) return '';
   const parsed = new URL(baseUrl, globalThis.location?.origin || 'http://localhost');
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Service URL must use HTTP(S)');
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw runtimeClientValidationError('Service URL must use HTTP(S)');
   return parsed.origin + parsed.pathname.replace(/\/$/, '');
 }

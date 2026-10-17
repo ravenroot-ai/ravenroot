@@ -1,5 +1,5 @@
 import { humanTaskContext, nextHumanTaskBackoff } from './human-task-attention.js';
-import { uiText } from './ui-text.js';
+import { uiErrorReason, uiText } from './ui-text.js';
 
 const EMPTY_COUNTS = Object.freeze({ pending: 0, escalated: 0 });
 
@@ -98,9 +98,9 @@ export function createHumanTaskController({ onChange = () => {}, setTimer = setT
         return refresh();
       }
       backoff = nextHumanTaskBackoff(backoff, capability);
-      state = { ...state, kind: 'error', message: uiText('humanTasks.refresh.failed', { reason: error.message }),
+      state = { ...state, kind: 'error', message: uiText('humanTasks.refresh.failed', { reason: uiErrorReason(error) }),
         page: { ...state.page, kind: 'error', message:
-          uiText('humanTasks.refresh.failed', { reason: error.message }) } };
+          uiText('humanTasks.refresh.failed', { reason: uiErrorReason(error) }) } };
       publish();
       schedule(backoff);
       return state;

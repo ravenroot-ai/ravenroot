@@ -1,4 +1,4 @@
-import { uiText } from './ui-text.js';
+import { uiErrorReason, uiText } from './ui-text.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TERMINAL = new Set(['COMPLETED', 'CANCELLED', 'DEADLINE_EXCEEDED']);
 
@@ -33,7 +33,7 @@ export function createRunnerWindow({ dialog }) {
       if (version !== generation || owner !== client) return;
       render?.(); status.textContent = uiText("workspace.runner.panel.updated.from.the.authenticated.tenant.control.plane");
     } catch (error) {
-      if (version === generation && owner === client) status.textContent = error.message || uiText("workspace.runner.panel.runner.request.failed");
+      if (version === generation && owner === client) status.textContent = uiErrorReason(error) || uiText("workspace.runner.panel.runner.request.failed");
     }
   };
   const refresh = () => request(async owner => {

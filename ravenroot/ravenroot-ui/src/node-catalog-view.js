@@ -73,7 +73,7 @@ function catalogButton(document, type, iconFor, onActivate, onDragStart, selecte
     button.draggable = true;
     button.setAttribute('aria-pressed', String(button.dataset.catalogAdd === selectedBehavior));
     button.classList.toggle('selected', button.dataset.catalogAdd === selectedBehavior);
-    button.setAttribute('aria-label', uiText("workspace.node.catalog.view.add.node", { displayName: displayName, detail: category ? `, category ${category}` : '' }));
+    button.setAttribute('aria-label', uiText("workspace.node.catalog.view.add.node", { displayName: displayName, detail: category ? uiText('workspace.catalog.categoryDetail', { category }) : '' }));
 
     button.dataset.tooltip = uiText(category
       ? "workspace.node.catalog.view.add.node.category.tooltip"

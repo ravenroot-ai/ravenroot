@@ -108,6 +108,8 @@
   items:
     - title: Architecture overview
       url: /architecture/
+    - title: UI internationalization
+      url: /architecture/ui-internationalization.html
     - title: Operational configuration audit
       url: /architecture/operational-configuration-audit.html
     - title: Product boundaries and authority

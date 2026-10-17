@@ -52,6 +52,7 @@ async function createDirtyDraft(page) {
   await page.locator('#node-editor input[name="name"]').fill('Unsubmitted localized draft');
   return page.evaluate(() => ({
     documentId: window.ravenroot.activeDocument().id,
+    displayName: window.ravenroot.activeDocument().displayName,
     nodes: window.cy.nodes().length,
     selected: window.cy.nodes(':selected').map(node => node.id()),
   }));
@@ -75,6 +76,8 @@ test('switches a complete catalog live while preserving a dirty selected documen
   await expect(page.locator('#node-catalog .catalog-empty')).toContainText('⟦IT⟧');
   await expect(page.locator('#activity-log .activity-title').last()).toContainText('⟦IT⟧');
   await expect(page.locator('#btn-program-approve')).toHaveText('⟦IT⟧Approve program batch⟦IT⟧');
+  await expect(page.locator('#minimap-label')).toHaveText(`⟦IT⟧Overview — ${before.displayName}⟦IT⟧`);
+  await expect(page.locator('#minimap-canvas')).toHaveAttribute('aria-label', /⟦IT⟧Design⟦IT⟧/u);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(await page.locator('#btn-program-approve').evaluate(button => {
     const bounds = button.getBoundingClientRect();
@@ -84,6 +87,7 @@ test('switches a complete catalog live while preserving a dirty selected documen
   await expect(page.locator('#dirty-state')).toContainText('unsaved changes');
   await expect.poll(() => page.evaluate(() => ({
     documentId: window.ravenroot.activeDocument().id,
+    displayName: window.ravenroot.activeDocument().displayName,
     nodes: window.cy.nodes().length,
     selected: window.cy.nodes(':selected').map(node => node.id()),
   }))).toEqual(before);

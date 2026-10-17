@@ -21,7 +21,13 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import audit_operational_configuration as audit  # noqa: E402
-from scripts.prepare_release import bump_ui_examples, latest_release, prepare, product_version  # noqa: E402
+from scripts.prepare_release import (  # noqa: E402
+    bump_surfaces,
+    bump_ui_examples,
+    latest_release,
+    prepare,
+    product_version,
+)
 from scripts.release_contract import expected_next, parse_tag  # noqa: E402
 
 
@@ -244,40 +250,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 )
                 return str(prepared["version"])
 
-            source_version = str(latest_release(ROOT))
-            current_version = product_version(ROOT)
             source_fixture = isolated_tree("source", ROOT, "HEAD")
-            if current_version != source_version:
-                preparation_revision = None
-                for revision in subprocess.run(
-                        ["git", "rev-list", "--topo-order", "HEAD"], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                ).stdout.splitlines():
-                    ancestry = subprocess.run(
-                        ["git", "rev-list", "--parents", "-n", "1", revision], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                    ).stdout.split()
-                    if len(ancestry) != 2:
-                        continue
-                    parent = ancestry[1]
-                    prepared_pom = subprocess.run(
-                        ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                    ).stdout
-                    source_pom = subprocess.run(
-                        ["git", "show", f"{parent}:ravenroot/pom.xml"], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                    ).stdout
-                    if f"<version>{current_version}</version>" in prepared_pom \
-                            and f"<version>{source_version}</version>" in source_pom:
-                        preparation_revision = revision
-                        break
-                if preparation_revision is None:
-                    self.fail("no exact release-preparation revision is reachable from the prepared tree")
-                reverse_release_preparation_delta(source_fixture, preparation_revision, current_version)
-                for path, contents in bump_ui_examples(
-                        source_fixture, current_version, source_version).items():
-                    path.write_bytes(contents.encode())
+            source_version = normalize_release_fixture_source(source_fixture)
+            if fixture_git(source_fixture, "status", "--porcelain"):
                 self.assertEqual(source_version, product_version(source_fixture))
                 self.assertEqual(
                     [],
@@ -8515,29 +8490,10 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 ).stdout.strip()
 
             def normalize_prepared_source(root: Path) -> str:
-                source_version = str(latest_release(root))
-                current_version = product_version(root)
-                if current_version == source_version:
-                    return source_version
-                preparation_revision = None
-                for revision in fixture_git(root, "rev-list", "--topo-order", "HEAD").splitlines():
-                    ancestry = fixture_git(
-                        root, "rev-list", "--parents", "-n", "1", revision).split()
-                    if len(ancestry) != 2:
-                        continue
-                    parent = ancestry[1]
-                    prepared_pom = fixture_git(root, "show", f"{revision}:ravenroot/pom.xml")
-                    source_pom = fixture_git(root, "show", f"{parent}:ravenroot/pom.xml")
-                    if f"<version>{current_version}</version>" in prepared_pom \
-                            and f"<version>{source_version}</version>" in source_pom:
-                        preparation_revision = revision
-                        break
-                if preparation_revision is None:
-                    self.fail("no exact release-preparation revision is reachable from the prepared tree")
-                reverse_release_preparation_delta(
-                    root, preparation_revision, current_version)
-                fixture_git(root, "add", ".")
-                fixture_git(root, "commit", "-qm", "normalize prepared authoritative source")
+                source_version = normalize_release_fixture_source(root)
+                if fixture_git(root, "status", "--porcelain"):
+                    fixture_git(root, "add", ".")
+                    fixture_git(root, "commit", "-qm", "normalize prepared authoritative source")
                 self.assertEqual(source_version, product_version(root))
                 return source_version
 
@@ -8786,6 +8742,229 @@ def rewrite_ravenroot_pom_version(
     for start, end in sorted(set(replacements), reverse=True):
         updated = updated[:start] + source_version + updated[end:]
     return updated
+
+
+class ReleaseFixtureDevelopmentNormalizationTest(unittest.TestCase):
+    def test_malformed_nonforward_inconsistent_and_other_stage_versions_are_refused(self):
+        for version, findings in (("malformed", []), ("0.6.0-alpha.1", []),
+                                  ("0.8.0-beta.1", []), ("0.8.0-alpha.1", ["mirror mismatch"])):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as location:
+                root = Path(location)
+                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                with mock.patch(__name__ + ".latest_release", return_value=parse_tag("v0.7.0-alpha.1")), \
+                        mock.patch(__name__ + ".product_version", return_value=version), \
+                        mock.patch("scripts.check_product_version.errors", return_value=findings), \
+                        mock.patch("scripts.prepare_release.bump_surfaces") as bump:
+                    with self.assertRaises((AssertionError, ValueError)):
+                        normalize_release_fixture_source(root)
+                    bump.assert_not_called()
+
+    def test_missing_release_notes_cannot_be_reinterpreted_as_a_development_bump(self):
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            git("init", "-q"); git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            pom = root / "ravenroot/pom.xml"; pom.parent.mkdir()
+            fragment = root / ".changes/example.fix.md"; fragment.parent.mkdir()
+            pom.write_text("<project><version>0.7.0-alpha.1</version></project>")
+            fragment.write_text("Original release change.")
+            git("add", "."); git("commit", "-qm", "source"); git("tag", "v0.7.0-alpha.1")
+            pom.write_text("<project><version>0.8.0-alpha.1</version></project>")
+            fragment.unlink()
+            git("add", "."); git("commit", "-qm", "corrupt preparation without notes")
+            before = pom.read_bytes()
+            with mock.patch("scripts.check_product_version.errors", return_value=[]), \
+                    mock.patch("scripts.prepare_release.bump_surfaces") as bump:
+                with self.assertRaisesRegex(AssertionError, "did not add its release notes"):
+                    normalize_release_fixture_source(root)
+                bump.assert_not_called()
+            self.assertEqual(before, pom.read_bytes())
+            self.assertEqual("", git("status", "--porcelain"))
+
+    def test_development_alignment_requires_exact_generated_version_surface_bytes(self):
+        target_version = product_version(ROOT)
+        transition = None
+        for revision in subprocess.run(
+                ["git", "log", "--format=%H", "HEAD", "--", "ravenroot/pom.xml"], cwd=ROOT,
+                check=True, capture_output=True, text=True,
+        ).stdout.splitlines():
+            ancestry = subprocess.run(
+                ["git", "rev-list", "--parents", "-n", "1", revision], cwd=ROOT,
+                check=True, capture_output=True, text=True,
+            ).stdout.split()
+            if len(ancestry) != 2:
+                continue
+            parent = ancestry[1]
+            if _revision_product_version(ROOT, revision) == target_version \
+                    and _revision_product_version(ROOT, parent) != target_version:
+                transition = (parent, _revision_product_version(ROOT, parent))
+                break
+        self.assertIsNotNone(transition)
+        assert transition is not None
+        parent, source_version = transition
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location) / "alignment"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(root)], check=True)
+            subprocess.run(["git", "checkout", "--quiet", parent], cwd=root, check=True)
+            bump_surfaces(root, source_version, target_version)
+            readme = root / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8") + "\nUnrelated semantic mutation.\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "invalid development alignment"], cwd=root, check=True)
+            with self.assertRaisesRegex(AssertionError, "non-version content"):
+                normalize_release_fixture_source(root)
+
+
+def normalize_release_fixture_source(root: Path) -> str:
+    """Normalize an isolated source fixture; never authorize a production version transition."""
+    from scripts.check_product_version import errors as version_surface_errors
+
+    if root.resolve() == ROOT.resolve():
+        raise AssertionError("version normalization requires an isolated source fixture")
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(["git", *arguments], cwd=root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    common = Path(git("rev-parse", "--git-common-dir"))
+    if not common.is_absolute():
+        common = root / common
+    if common.resolve() != (root / ".git").resolve():
+        raise AssertionError("version normalization requires an independent cloned repository")
+    if git("status", "--porcelain"):
+        raise AssertionError("authoritative source fixture must start clean")
+    source_version = str(latest_release(root))
+    current_version = product_version(root)
+    findings = version_surface_errors(current_version, root)
+    if findings:
+        raise AssertionError("source fixture has inconsistent version surfaces: " + "; ".join(findings))
+    if current_version == source_version:
+        return source_version
+    current = parse_tag(f"v{current_version}")
+    previous = parse_tag(f"v{source_version}")
+    if not current.prerelease or current.prerelease != previous.prerelease \
+            or current.semantic_key() <= previous.semantic_key():
+        raise AssertionError("source fixture requires a coherent forward development prerelease")
+
+    # Inspect the actual version-changing commit, not every unrelated source commit. A genuine
+    # preparation must still pass its existing exact inverse, including notes and fragment rules.
+    transition = None
+    transition_parent = None
+    transition_source_version = None
+    changes = []
+    for revision in git("log", "--format=%H", "HEAD", "--", "ravenroot/pom.xml").splitlines():
+        ancestry = git("rev-list", "--parents", "-n", "1", revision).split()
+        if len(ancestry) != 2:
+            continue
+        parent = ancestry[1]
+        prepared = _revision_product_version(root, revision)
+        original = _revision_product_version(root, parent)
+        if prepared != current_version or original == current_version:
+            continue
+        if parse_tag("v" + original).semantic_key() >= current.semantic_key():
+            raise AssertionError("development fixture transition must move forward")
+        transition = revision
+        transition_parent = parent
+        transition_source_version = original
+        changes = [line.split("\t") for line in git("diff", "--name-status", parent, revision).splitlines()]
+        has_preparation_evidence = (root / f"docs/releases/v{current_version}.md").exists() or any(
+            len(row) != 2 or row[1].startswith("docs/releases/")
+            or row[0] == "D" and row[1].startswith(".changes/") for row in changes)
+        if original == source_version and has_preparation_evidence:
+            reverse_release_preparation_delta(root, revision, current_version)
+            for path, contents in bump_ui_examples(root, current_version, source_version).items():
+                path.write_text(contents, encoding="utf-8")
+            if version_surface_errors(source_version, root):
+                raise AssertionError("release inverse left inconsistent fixture version surfaces")
+            return source_version
+        break
+    if transition is None:
+        raise AssertionError("no exact version transition is reachable from the source fixture")
+    notes = f"docs/releases/v{current_version}.md"
+    if (root / notes).exists() or any(
+            len(row) != 2 or row[1].startswith("docs/releases/")
+            or row[0] == "D" and row[1].startswith(".changes/") for row in changes):
+        raise AssertionError("development normalization cannot bypass release-preparation evidence")
+
+    # A development alignment may share its commit with feature work, but every coordinated version
+    # surface must still be the exact output of bump_surfaces for the source and target versions.
+    # Compare only that generated path set, so unrelated feature files neither authorize nor block
+    # the fixture-only normalization.
+    assert transition_parent is not None and transition_source_version is not None
+    with tempfile.TemporaryDirectory() as location:
+        expected = Path(location) / "expected-version-surfaces"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--no-local", str(root), str(expected)], check=True,
+        )
+        subprocess.run(["git", "checkout", "--quiet", transition_parent], cwd=expected, check=True)
+        bump_surfaces(expected, transition_source_version, current_version)
+        expected_changes = [line.split("\t") for line in subprocess.run(
+            ["git", "diff", "--name-status"], cwd=expected,
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()]
+        actual_status = {row[1]: row[0] for row in changes if len(row) == 2}
+        for row in expected_changes:
+            if len(row) != 2 or row[0] != "M" or actual_status.get(row[1]) != "M":
+                raise AssertionError(
+                    f"development alignment omitted or reshaped a version surface: {row}")
+            committed = subprocess.run(
+                ["git", "show", f"{transition}:{row[1]}"], cwd=root,
+                check=True, capture_output=True,
+            ).stdout
+            if committed != (expected / row[1]).read_bytes():
+                raise AssertionError(
+                    f"development alignment changed non-version content: {row[1]}")
+
+    # The clone may retain immutable notes for an earlier, still untagged preparation. Moving
+    # mirrors backwards would collide with those notes when testing a minor preparation. Give
+    # this isolated fixture a local released baseline at its coherent development version instead.
+    # No product bytes change, no ref is replaced, and no shared repository is a push destination.
+    before = {path: (root / path).read_bytes() for path in git("ls-files").splitlines()
+              if (root / path).is_file()}
+    before_tree = git("write-tree")
+    source_tags = git("show-ref", "--tags")
+    # latest_release intentionally recognizes only public-shaped v<semver> tags, so this isolated
+    # test input uses that spelling. It is never release provenance: the clone has no remotes, the
+    # tag never leaves the temporary fixture, and real release-like evidence took the exact inverse
+    # path above instead of reaching this branch.
+    synthetic_tag = "v" + current_version
+    if git("tag", "--list", synthetic_tag):
+        raise AssertionError("development fixture baseline must not replace an existing tag")
+    # Remove push destinations in the independent clone before adding the synthetic fixture ref.
+    for remote in git("remote").splitlines():
+        git("remote", "remove", remote)
+    git("tag", synthetic_tag, "HEAD")
+    if git("remote") or git("write-tree") != before_tree or git("status", "--porcelain"):
+        raise AssertionError("development fixture baseline changed source or retained a remote")
+    if any((root / path).read_bytes() != contents for path, contents in before.items()):
+        raise AssertionError("development fixture baseline changed protected source bytes")
+    after_tags = git("show-ref", "--tags").splitlines()
+    expected_tags = source_tags.splitlines() + [git("rev-parse", "HEAD") + " refs/tags/" + synthetic_tag]
+    if sorted(after_tags) != sorted(expected_tags) or str(latest_release(root)) != current_version:
+        raise AssertionError("development fixture baseline changed an unrelated tag")
+    return current_version
+
+
+def _revision_product_version(root: Path, revision: str) -> str:
+    source = subprocess.run(
+        ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    project = ET.fromstring(source)
+    namespace = project.tag.split("}")[0] + "}" if "}" in project.tag else ""
+    version = project.find(namespace + "version")
+    if version is None or not version.text:
+        raise AssertionError("historical source fixture has no direct product version")
+    return str(parse_tag("v" + version.text.strip()))
 
 
 def reverse_release_preparation_delta(

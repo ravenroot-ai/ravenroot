@@ -6635,6 +6635,7 @@ function readNodeEditorPatch(form, model) {
   const additionalGroups = readAdditionalPropertyGroupEditor(
     form, catalogDescriptor(behavior));
   const catalog = readCatalogPropertyEditor(form);
+  const kind = String(values.get('kind'));
   // Conditional catalog fields retain their draft and serialized value by default. AMQP destination
   // modes are narrower: their runtime schemas reject inactive destination fields, so remove only
   // those fields here, in the single read path shared by submit, autosave and draft comparison.
@@ -6672,7 +6673,6 @@ function readNodeEditorPatch(form, model) {
   const bypass = readBypassEditor(form);
   const runtimeConcurrency = readMaxConcurrencyEditor(form);
   const join = readJoinEditor(form, model, graphData);
-  const kind = String(values.get('kind'));
   return {
     name: String(values.get('name') || id).trim() || id,
     kind,

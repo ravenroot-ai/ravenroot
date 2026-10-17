@@ -118,7 +118,7 @@ This subset covers viewer controls, status and accessibility text, visual-group 
 labels, and Monitoring tooltips; it is not limited to `embed.*`. The current English subset is
 4,689 UTF-16 code units when compactly serialized with the schema, `en-XA` locale and messages.
 Translated text and optional fields can change that size: check the final serialized catalog and
-complete request against the limits below. Missing messages fall back to English. A larger
+complete request against the limits below. Missing messages fall back to English. The canonical empty `embed.state.idle` value means no status announcement and may stay empty in a catalog; other labels, accessibility text and plural variants must remain nonempty. A larger
 workspace catalog remains usable in the full UI within its separate 512 KiB import/configuration
 limit. The live `SET_LOCALE` channel uses the same catalog schema and per-viewer localization context;
 it does not expand the initial session request limits.

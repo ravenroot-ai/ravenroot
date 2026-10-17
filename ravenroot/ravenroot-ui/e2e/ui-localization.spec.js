@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 
 import { ENGLISH_MESSAGES } from '../src/ui-text.js';
 import { UI_ORIGIN } from './ports.mjs';
@@ -324,4 +325,26 @@ test('repaints a startup URL rejection after a live catalog change', async ({ pa
   await page.locator('#language-selection').selectOption('it');
   await expect(page.locator('#startup-import-status')).toHaveText('⟦IT⟧The graph URL must use HTTP or HTTPS.⟦IT⟧');
   await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'failed');
+});
+
+
+test('imports and persists the actual complete CLI catalog through the language dialog', async ({ page }) => {
+  const output = execFileSync(process.execPath,
+    [new URL('../scripts/export-ui-catalog.mjs', import.meta.url).pathname, 'it']);
+  await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'en', catalogs: [] });
+  await page.goto('/');
+  await openLanguageDialog(page);
+  await page.locator('.language-dialog input[type="file"]').setInputFiles({
+    name: 'it.json', mimeType: 'application/json', buffer: output,
+  });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'it');
+  await expect(page.locator('.language-current-source')).toContainText('Imported');
+  await expect(page.locator('.language-status')).toContainText('it');
+  await expect(page.locator('#menu-file')).toHaveText('File');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'it');
+  await page.locator('#menu-view').click();
+  await page.getByRole('menuitem', { name: 'Language…' }).click();
+  await expect(page.locator('.language-current-source')).toContainText('Imported');
+  await expect(page.locator('#language-selection')).toHaveValue('it');
 });

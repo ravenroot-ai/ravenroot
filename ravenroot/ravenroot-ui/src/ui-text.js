@@ -586,7 +586,10 @@ function validateMessage(key, message, sourceMessage) {
   const variants = messageVariants(message, key);
   const sourceVariants = sourceMessage === undefined ? null : messageVariants(sourceMessage, key);
   for (const [category, template] of Object.entries(variants)) {
-    if (!template.length || template.length > MAX_MESSAGE_LENGTH) {
+    // An empty canonical status means no announcement (currently embed.state.idle).
+    // It does not authorize blank labels, accessibility text, or plural variants.
+    const intentionallyEmpty = sourceMessage === '' && typeof message === 'string';
+    if ((!template.length && !intentionallyEmpty) || template.length > MAX_MESSAGE_LENGTH) {
       throw productError("workspace.error.ui.text.ui.text.has.an.invalid.length", new TypeError(`UI text "${key}" has an invalid length.`), { value1: key });
     }
     const sourceTemplate = sourceVariants?.[category] ?? sourceVariants?.other;

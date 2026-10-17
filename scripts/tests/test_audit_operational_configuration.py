@@ -1364,7 +1364,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        self.assertEqual(1239, len(program["candidateIds"]))
+        # Issue #561 retires three display literals and adds one catalog key; READY and
+        # the empty protocol value retain their meanings through exact source migrations.
+        self.assertEqual(1237, len(program["candidateIds"]))
         self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {

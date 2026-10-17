@@ -4333,7 +4333,12 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         committed_entry = next((item for item in committed.get("entries", [])
                                 if isinstance(item, dict) and item.get("id") == identifier), None) \
             if isinstance(committed, dict) else None
-        if expected_metadata[identifier] != review["beforeMetadata"] \
+        remapped_before_holder: dict[str, object] = {
+            "entries": [copy.deepcopy(review["beforeMetadata"])],
+        }
+        remap_declared_candidate_references(remapped_before_holder, reference_replacements)
+        remapped_before = remapped_before_holder["entries"][0]
+        if expected_metadata[identifier] != remapped_before \
                 or committed_entry is None \
                 or candidate_semantic_payload(committed_entry) != review["beforeMetadata"]:
             errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")

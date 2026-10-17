@@ -6384,6 +6384,76 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             refused_review["semanticReviews"][0]["approved"] = False
             self.assertTrue(audit.reconciliation_plan_errors(root, refreshed, (candidate,), refused_review)[0])
 
+    def test_semantic_review_before_metadata_is_source_anchored_before_identity_remap(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            inventory.parent.mkdir(parents=True)
+            def entry(identifier: str, line: int, default_evidence: list[str]) -> dict[str, object]:
+                evidence = f"evidence {identifier}"
+                return {
+                    "id": identifier, "path": "runtime/Policy.java", "line": line,
+                    "symbol": "Policy", "kind": "fixed-declaration", "role": "TOKEN",
+                    "expression": '"v1"', "expressionDigest": audit.hashlib.sha256(b'"v1"').hexdigest(),
+                    "evidenceDigest": audit.hashlib.sha256(evidence.encode()).hexdigest(),
+                    "surface": "java", "status": "retained",
+                    "classification": "protocol-or-format-invariant",
+                    "rationale": "Stable source metadata.", "defaultEvidence": default_evidence,
+                }
+            old = entry("oc-old", 1, ["oc-old"])
+            stable = entry("oc-stable", 2, ["oc-old", "oc-stable"])
+            source_document = {
+                "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+                "entries": [old, stable], "retiredEntries": [], "migrationHistory": [],
+                "reconciliationHistory": [], "semanticReviewHistory": [],
+                "normalizedIdentityReappearanceHistory": [],
+                "evidenceRecords": {old["evidenceDigest"]: "evidence oc-old",
+                                    stable["evidenceDigest"]: "evidence oc-stable"},
+            }
+            inventory.write_text(json.dumps(source_document, indent=2) + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "scripts/operational-configuration-inventory.json"],
+                           cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "source inventory"],
+                           cwd=root, check=True)
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            moved = audit.Candidate(
+                "oc-new", "runtime/Policy.java", 3, "Policy", "fixed-declaration", "TOKEN",
+                '"v1"', old["expressionDigest"], "new evidence",
+                audit.hashlib.sha256(b"new evidence").hexdigest(), "java")
+            unchanged = audit.Candidate(
+                "oc-stable", "runtime/Policy.java", 2, "Policy", "fixed-declaration", "TOKEN",
+                '"v1"', stable["expressionDigest"], "evidence oc-stable",
+                stable["evidenceDigest"], "java")
+            after = audit.candidate_semantic_payload(stable)
+            after["defaultEvidence"] = ["oc-new", "oc-stable"]
+            after["rationale"] = "Approved integrated metadata."
+            plan = {
+                "id": "identity-and-semantic-review", "issue": "#561",
+                "sourceRevision": revision, "targetRevision": revision,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": audit.hashlib.sha256(inventory.read_bytes()).hexdigest(),
+                "targetCandidateDigest": audit.candidate_set_digest([moved.id, unchanged.id]),
+                "mappings": [{"fromId": "oc-old", "toId": "oc-new", "approved": True,
+                    "rationale": "Same atom moved.", "equivalence": {"kind": "same-atom-v1",
+                    "beforeEvidenceDigest": old["evidenceDigest"],
+                    "afterEvidenceDigest": moved.evidence_digest}}],
+                "retirements": [], "additions": [], "semanticReviews": [{
+                    "candidateId": "oc-stable", "approved": True,
+                    "rationale": "Approve the integrated metadata after identity migration.",
+                    "beforeMetadata": audit.candidate_semantic_payload(stable),
+                    "afterMetadata": after,
+                }],
+            }
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                refreshed, errors = audit.apply_reconciliation(
+                    root, source_document, (moved, unchanged), plan)
+            self.assertEqual([], errors)
+            self.assertEqual([], audit.reconciliation_history_errors(
+                root, refreshed, (moved, unchanged)))
+
     def test_unresolved_operator_authority_stays_deferred_and_exact(self) -> None:
         candidate = audit.Candidate(
             "oc-unresolved", "runtime/Policy.java", 1, "Policy", "fixed-declaration",

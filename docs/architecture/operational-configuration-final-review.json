@@ -8504,7 +8504,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/monitoring-runtime-state.js",
-          "digest": "6ef4886814fc320fc66ace8561eb91dbaa2b3cb4f5d180858db4e096a442bec1",
+          "digest": "a17b1a04cae9bf042177a553ff4abbea2fcabf6d6d6e432e2f73e393824496f3",
           "assertion": "Consumer selects the bound by scope and evicts oldest cursors after insertion."
         },
         {
@@ -8533,7 +8533,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
+          "digest": "f365ba021eb13b7dc06832cb20def7c935536c1b895944369a2db3a56ac620b6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         },
         {
@@ -8669,7 +8669,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "ca72fbaa3b0a386b577c257052fcc816bcd27fb312d04b6d88a14923b0fd18e3",
+          "digest": "f04d7ca967a1d87c015dbab8a4a3f2a4339b5b4017d48c52ad7a736459c264fc",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         }
       ],
@@ -8824,12 +8824,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "ca72fbaa3b0a386b577c257052fcc816bcd27fb312d04b6d88a14923b0fd18e3",
+          "digest": "f04d7ca967a1d87c015dbab8a4a3f2a4339b5b4017d48c52ad7a736459c264fc",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
+          "digest": "f365ba021eb13b7dc06832cb20def7c935536c1b895944369a2db3a56ac620b6",
           "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         }
       ],
@@ -8982,12 +8982,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "3e2b00eb7c66a14f0944d207f0934fca89cf85227d72fc1fd33022eee5ab28bf",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
+          "digest": "f365ba021eb13b7dc06832cb20def7c935536c1b895944369a2db3a56ac620b6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         }
       ],
@@ -9052,7 +9052,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "3e2b00eb7c66a14f0944d207f0934fca89cf85227d72fc1fd33022eee5ab28bf",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -10766,12 +10766,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
+          "digest": "f365ba021eb13b7dc06832cb20def7c935536c1b895944369a2db3a56ac620b6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
-          "digest": "f441abc77df5d04d81f0affbec17f4078ec7e4044cbc7b699028caa9e3e01f00",
+          "digest": "a3f0e3733a25b385e549d1727ac86342f9e1a77902144baaca32719e875b07d8",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -10901,7 +10901,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "3e2b00eb7c66a14f0944d207f0934fca89cf85227d72fc1fd33022eee5ab28bf",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,12 +11429,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
+          "digest": "f365ba021eb13b7dc06832cb20def7c935536c1b895944369a2db3a56ac620b6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "32aa18811fd68f0ae9a3482c800a33d30b4f51104882b7fecbe20f79cc438ef2",
+          "digest": "945871f07c018b69e6b794b35e71a8180fc5ade86840ede65b71860b82b59919",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],

@@ -6,6 +6,7 @@ import java.util.regex.Pattern;
 /** Bounded, non-authoritative locale configuration carried by one embed launch ticket. */
 public record EmbedPresentation(String locale, String catalogJson) {
     private static final Pattern LOCALE = Pattern.compile("[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*");
+    /** Maximum decoded Java/JavaScript UTF-16 code units, not UTF-8 bytes. */
     public static final int MAX_CATALOG_CHARACTERS = 48 * 1024;
 
     public EmbedPresentation {

@@ -208,6 +208,7 @@ export function drawingModelSnapshot(graph, mapping, operational = {}) {
     positions: valid.positions,
     evidence: Object.freeze({
       activeNodeIds: Object.freeze([...activeNodes]), activeEdgeIds: Object.freeze([...activeEdges]),
+      // i18n-audit-exempt: protocol-token - Stable provider snapshot description is wire data; the UI renders its own localized evidence notice.
       description: 'Highlights report mapped workflow evidence; they do not assert formal automaton acceptance.',
     }),
   });

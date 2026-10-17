@@ -213,3 +213,84 @@ test('localizes module-load failure early and keeps malformed bootstrap safe', a
   await expect(page.frameLocator('#early').locator('[data-viewer-status]')).toHaveText('Errore iniziale localizzato.');
   await expect(page.frameLocator('#malformed').locator('[data-viewer-status]')).toHaveText('Viewer unavailable.');
 });
+
+// These flows exercise the product controllers through the shipped page, including messages
+// created before a change. Package names and authored graph values remain verbatim.
+test('repaints extension framing, deployment statuses, runner controls, form errors', async ({ page }, testInfo) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.stack));
+  await configure(page);
+  await page.goto('/');
+  await page.locator('#btn-new').click();
+  await page.locator('#drawing-model-package-input').setInputFiles(
+    new URL('../public/examples/frontend-plugins/textbook-automata/', import.meta.url).pathname);
+  await expect(page.locator('#drawing-model-select')).toContainText('Textbook DFA/NFA');
+  await expect(page.locator('#activity-log')).toContainText('Installed frontend package');
+  await page.locator('#btn-modify').click();
+  await page.locator('#btn-add-node').click();
+  const form = page.locator('#node-editor');
+  const duplicate = await page.evaluate(() => window.cy.nodes()[0].id());
+  await form.locator('[name="id"]').fill(duplicate);
+  await form.locator('button[type="submit"]').click();
+  await expect(form.locator('.validation-list')).toContainText('already exists');
+  await openLanguageDialog(page);
+  expect(await form.evaluate(node => ({ error: typeof node._localizedError, render: typeof node._localeRender }))).toEqual({ error: 'function', render: 'function' });
+  await page.locator('#language-selection').selectOption('it');
+  expect(errors).toEqual([]);
+  await expect(form.locator('.validation-list')).toContainText('⟦IT⟧');
+  await expect(page.locator('#activity-log')).toContainText('⟦IT⟧Installed frontend package');
+  await expect(page.locator('#drawing-model-select option').first()).toContainText('⟦IT⟧');
+  await page.locator('.language-dialog button[type="submit"]').click();
+  await page.locator('.drawing-model-actions').evaluate(node => { node.open = true; });
+  await page.locator('#drawing-model-manage').click();
+  await expect(page.locator('#drawing-model-package-list')).toContainText('Textbook automata');
+  await expect(page.locator('#drawing-model-package-list button').first()).toContainText('⟦IT⟧');
+  await page.locator('[data-drawing-model-package-close]').click();
+  await page.locator('#menu-run').click();
+  await page.getByRole('menuitem', { name: /Deployments/ }).click();
+  await page.locator('#deployment-id-input').fill('');
+  await page.locator('#deployment-register').click();
+  await expect(page.locator('#deployment-id-error')).toContainText('⟦IT⟧');
+  await page.locator('#deployment-id-input').fill('user-owned-id');
+  await page.locator('#deployment-register').click();
+  await expect(page.locator('#deployment-status')).toContainText('⟦IT⟧');
+  // Drive the same select change handler while the deployment dialog remains mounted.
+  await page.locator('#language-selection').evaluate(node => { node.value = 'ar'; node.dispatchEvent(new Event('change', { bubbles: true })); });
+  await expect(page.locator('#deployment-status')).toContainText('⟦نص واجهة طويل للاختبار⟧');
+  await expect(page.locator('#deployment-id-input')).toHaveValue('user-owned-id');
+  await page.locator('#deployments-dialog').evaluate(node => node.close());
+  await page.locator('#menu-run').click();
+  await page.getByRole('menuitem', { name: /Agents and runners/ }).click();
+  await expect(page.locator('#runner-dialog h2')).toContainText('⟦نص واجهة طويل للاختبار⟧');
+  await page.locator('#language-selection').evaluate(node => { node.value = 'it'; node.dispatchEvent(new Event('change', { bubbles: true })); });
+  await expect(page.locator('#runner-dialog h2')).toContainText('⟦IT⟧');
+  await page.locator('#runner-dialog').evaluate(node => node.close());
+  await page.screenshot({ path: testInfo.outputPath('localized-controller-flows.png'), fullPage: true });
+});
+
+test('localizes native lifecycle prompts after a live change without altering target identity', async ({ page }) => {
+  await configure(page);
+  await page.route('**/v1/deployments**', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ deployments: [{
+      deploymentId: 'author-owned-target', tenantId: 'tenant-a', state: 'READY', sourceCount: 0,
+      graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null, continuity: 'DURABLE',
+      deploymentGeneration: 1, deploymentRevision: 1, desiredState: 'RUNNING', observedState: 'READY', recoveryFailure: null,
+      lifecycleCapabilities: { contractVersion: 1, scope: 'DEPLOYMENT', commands: [{
+        command: 'STOP', available: true, reasonRequired: true, unavailableReason: null,
+      }] },
+    }] }),
+  }));
+  await page.goto('/');
+  await openLanguageDialog(page);
+  await page.locator('#language-selection').selectOption('it');
+  await page.locator('.language-dialog button[type="submit"]').click();
+  await page.locator('#menu-run').click();
+  await page.getByRole('menuitem', { name: /Deployments/ }).click();
+  const prompts = [];
+  page.once('dialog', async dialog => { prompts.push({ type: dialog.type(), message: dialog.message() }); await dialog.accept(''); });
+  await page.locator('[data-deployment-action="stop"]').click();
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0].type).toBe('prompt');
+  expect(prompts[0].message).toContain('⟦IT⟧');
+  expect(prompts[0].message).toContain('author-owned-target');
+  await expect(page.locator('#deployment-status')).toContainText('⟦IT⟧');
+});

@@ -66,10 +66,10 @@ export function deploymentRowActions(state) {
 const actionLabel = action => uiText(`workspace.deployment.action.${action}`);
 
 const UNAVAILABLE_REASON = Object.freeze({
-  NOT_AUTHORIZED: 'Not authorized for this target.',
-  TERMINAL_TARGET: 'The target has already reached a terminal state.',
-  INCOMPATIBLE_STATE: 'The authoritative state does not permit this operation.',
-  DURABLE_AUTHORITY_UNAVAILABLE: 'Durable lifecycle authority is unavailable.',
+  NOT_AUTHORIZED: "workspace.deployment.reason.not.authorized",
+  TERMINAL_TARGET: "workspace.deployment.reason.terminal.target",
+  INCOMPATIBLE_STATE: "workspace.deployment.reason.incompatible.state",
+  DURABLE_AUTHORITY_UNAVAILABLE: "workspace.deployment.reason.durable.authority.unavailable",
 });
 
 function advertisedCommands(target, scope) {
@@ -80,16 +80,16 @@ function advertisedCommands(target, scope) {
 }
 
 function boundedReason(doc, label, action) {
-  const value = doc.defaultView?.prompt?.(`Why should ${label} ${action}?`);
+  const value = doc.defaultView?.prompt?.(uiText("workspace.deployment.panel.why.should", { label: label, action: actionLabel(action) }));
   if (value === null) return null;
   const reason = String(value).trim();
   return reason && reason.length <= 256 ? reason : undefined;
 }
 
 function unavailableExplanation(capability) {
-  return UNAVAILABLE_REASON[capability.unavailableReason]
-    || capability.unavailableReason
-    || 'The server did not provide a reason.';
+  return (UNAVAILABLE_REASON[capability.unavailableReason]
+    ? uiText(UNAVAILABLE_REASON[capability.unavailableReason]) : capability.unavailableReason)
+    || uiText("workspace.deployment.panel.the.server.did.not.provide.a.reason");
 }
 
 function reasonId(scope, targetId, action) {
@@ -108,14 +108,14 @@ function appendUnavailableReason(doc, row, button, capability, scope, targetId) 
 
 function drainExplanation(bound) {
   return bound === 'UNTIL_ACCEPTED_WORK_SETTLES'
-    ? 'Drain closes new admission immediately; work already accepted continues until it settles.'
-    : `Drain closes new admission immediately; work already accepted may continue for up to ${bound} before completion.`;
+    ? uiText("workspace.deployment.panel.drain.closes.new.admission.immediately.work.already.accepted.continues")
+    : uiText("workspace.deployment.panel.drain.closes.new.admission.immediately.work.already.accepted.may", { bound: bound });
 }
 
 function validateDeploymentId(value) {
   const id = String(value ?? '').trim();
-  if (!id) return { ok: false, error: 'Choose an id to register this deployment under.' };
-  if (id.length > 200) return { ok: false, error: `An id may be at most 200 characters; this one is ${id.length}.` };
+  if (!id) return { ok: false, error: uiText("workspace.deployment.idRequired") };
+  if (id.length > 200) return { ok: false, error: uiText("workspace.deployment.idTooLong", { length: id.length }) };
   return { ok: true, id };
 }
 
@@ -141,6 +141,25 @@ export function createDeploymentsWindow({
     };
   }
   const doc = dialog.ownerDocument;
+  // Keep message recipes, not translated snapshots, for mounted asynchronous status text.
+  const localizedText = new Map();
+  function paintText(node, value) {
+    if (!node) return;
+    if (typeof value === 'function') localizedText.set(node, value);
+    else localizedText.delete(node);
+    node.textContent = typeof value === 'function' ? value() : value;
+  }
+  function appendText(node, render) {
+    const previous = localizedText.get(node) || (() => '');
+    paintText(node, () => previous() + render());
+  }
+  function refreshText() {
+    for (const [node, render] of localizedText) {
+      if (dialog.contains(node)) node.textContent = render();
+      else localizedText.delete(node);
+    }
+  }
+
   const element = id => dialog.querySelector(`#${id}`);
 
   const form = element('deployment-register-form');
@@ -214,7 +233,7 @@ export function createDeploymentsWindow({
       derivedBoundaryChoice.replaceChildren();
       const option = doc.createElement('option');
       option.value = '';
-      option.textContent = uiText("workspace.deployment.panel.discover.retained.boundaries.for.this.source");
+      paintText(option, () => uiText("workspace.deployment.panel.discover.retained.boundaries.for.this.source"));
       derivedBoundaryChoice.append(option);
     }
   }
@@ -223,7 +242,7 @@ export function createDeploymentsWindow({
     if (derivedBusy) return;
     const source = derivedSource?.value.trim();
     if (!source) {
-      derivedStatus.textContent = uiText("workspace.deployment.panel.select.or.enter.a.source.process.before");
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.select.or.enter.a.source.process.before"));
       return;
     }
     const generation = ++derivedGeneration;
@@ -231,7 +250,7 @@ export function createDeploymentsWindow({
     derivedDiscoverButton.disabled = true;
     derivedPreviewButton.disabled = true;
     derivedStartButton.disabled = true;
-    derivedStatus.textContent = uiText("workspace.deployment.panel.reading.retained.positively.settled.boundary.evidence");
+    paintText(derivedStatus, () => uiText("workspace.deployment.panel.reading.retained.positively.settled.boundary.evidence"));
     try {
       const boundaries = await client.derivedExecutionBoundaries(source);
       if (disposed || generation !== derivedGeneration) return;
@@ -239,22 +258,22 @@ export function createDeploymentsWindow({
       derivedBoundaryChoice.replaceChildren();
       const placeholder = doc.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = boundaries.length
-        ? uiText("workspace.deployment.panel.choose.a.retained.boundary") : uiText("workspace.deployment.panel.no.retained.downstream.boundaries.are.available");
+      paintText(placeholder, () => boundaries.length
+        ? uiText("workspace.deployment.panel.choose.a.retained.boundary") : uiText("workspace.deployment.panel.no.retained.downstream.boundaries.are.available"));
       derivedBoundaryChoice.append(placeholder);
       boundaries.forEach((boundary, index) => {
         const option = doc.createElement('option');
         option.value = String(index);
-        option.textContent = uiText("workspace.deployment.panel.text", { predecessorNodeId: boundary.predecessorNodeId, nodeId: boundary.nodeId, outcome: boundary.outcome });
+        paintText(option, () => uiText("workspace.deployment.panel.text", { predecessorNodeId: boundary.predecessorNodeId, nodeId: boundary.nodeId, outcome: boundary.outcome }));
         derivedBoundaryChoice.append(option);
       });
-      derivedStatus.textContent = boundaries.length
+      paintText(derivedStatus, () => boundaries.length
         ? uiText("workspace.deployment.panel.value1.retained.boundary.choice.value2.available", { count: boundaries.length })
-        : uiText("workspace.deployment.panel.no.retained.downstream.boundary.can.be.selected");
+        : uiText("workspace.deployment.panel.no.retained.downstream.boundary.can.be.selected"));
     } catch (error) {
       if (generation !== derivedGeneration) return;
       derivedBoundaryOptions = [];
-      derivedStatus.textContent = uiText("workspace.deployment.panel.boundary.discovery.failed", { reason: uiErrorReason(error) });
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.boundary.discovery.failed", { reason: uiErrorReason(error) }));
     } finally {
       derivedBusy = false;
       if (generation === derivedGeneration) {
@@ -273,16 +292,16 @@ export function createDeploymentsWindow({
     derivedBoundaryChoice.replaceChildren();
     const placeholder = doc.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = derivedBoundaryOptions.length
+    paintText(placeholder, () => derivedBoundaryOptions.length
       ? uiText('workspace.deployment.panel.choose.a.retained.boundary')
-      : uiText('workspace.deployment.panel.no.retained.downstream.boundaries.are.available');
+      : uiText('workspace.deployment.panel.no.retained.downstream.boundaries.are.available'));
     derivedBoundaryChoice.append(placeholder);
     derivedBoundaryOptions.forEach((boundary, index) => {
       const option = doc.createElement('option');
       option.value = String(index);
-      option.textContent = uiText('workspace.deployment.panel.text', {
+      paintText(option, () => uiText('workspace.deployment.panel.text', {
         predecessorNodeId: boundary.predecessorNodeId, nodeId: boundary.nodeId, outcome: boundary.outcome,
-      });
+      }));
       derivedBoundaryChoice.append(option);
     });
     if ([...derivedBoundaryChoice.options].some(option => option.value === selected)) {
@@ -301,28 +320,28 @@ export function createDeploymentsWindow({
       derivedBusy = true;
       derivedPreviewButton.disabled = true;
       derivedDiscoverButton.disabled = true;
-      derivedStatus.textContent = uiText("workspace.deployment.panel.checking.retained.evidence.pins.causal.closure.and");
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.checking.retained.evidence.pins.causal.closure.and"));
       const preview = await client.previewDerivedExecution(source, request);
       if (generation !== derivedGeneration || fingerprint !== JSON.stringify([source, derivedRequest()])) return;
-      const lines = [preview.admissible ? 'Ready to submit.' : 'Submission is refused.',
-        `Refusals: ${preview.refusalCodes.join(', ') || 'none'}`,
-        `Inherited invocation evidence: ${preview.inheritedInvocationIds.join(', ') || 'none'}`,
-        `Possible downstream scope: ${preview.possibleScopeNodeIds.join(', ') || 'none'}`,
-        `Missing inputs: ${preview.missingInputs.join(', ') || 'none'}`,
-        `External effect nodes: ${preview.externalEffectNodes.join(', ') || 'none'}`,
-        `Source outcome ambiguous: ${preview.sourceOutcomeAmbiguous ? 'yes' : 'no'}`,
-        `Graph pin: ${preview.graphContentId || 'unavailable'}`,
-        `Manifest pin: ${preview.manifestDigest || 'unavailable'}`];
-      derivedOutput.textContent = lines.join('\n');
+      const lines = () => [preview.admissible ? uiText("workspace.deployment.panel.ready.to.submit") : uiText("workspace.deployment.panel.submission.is.refused"),
+        uiText("workspace.deployment.refusals", { codes: preview.refusalCodes.join(', ') || uiText("workspace.common.none") }),
+        uiText("workspace.deployment.panel.inherited.invocation.evidence", { value: preview.inheritedInvocationIds.join(', ') || uiText("workspace.common.none") }),
+        uiText("workspace.deployment.panel.possible.downstream.scope", { value: preview.possibleScopeNodeIds.join(', ') || uiText("workspace.common.none") }),
+        uiText("workspace.deployment.panel.missing.inputs", { value: preview.missingInputs.join(', ') || uiText("workspace.common.none") }),
+        uiText("workspace.deployment.panel.external.effect.nodes", { value: preview.externalEffectNodes.join(', ') || uiText("workspace.common.none") }),
+        uiText("workspace.deployment.panel.source.outcome.ambiguous", { value: preview.sourceOutcomeAmbiguous ? uiText("workspace.common.yes") : uiText("workspace.common.no") }),
+        uiText("workspace.deployment.panel.graph.pin", { value: preview.graphContentId || uiText("workspace.common.unavailable") }),
+        uiText("workspace.deployment.panel.manifest.pin", { value: preview.manifestDigest || uiText("workspace.common.unavailable") })];
+      paintText(derivedOutput, () => lines().join('\n'));
       derivedOutput.hidden = false;
-      derivedStatus.textContent = preview.admissible
+      paintText(derivedStatus, () => preview.admissible
         ? uiText("workspace.deployment.panel.preview.is.admissible.review.the.possible.scope")
-        : uiText("workspace.deployment.panel.preview.refused.correct.the.named.evidence.or");
+        : uiText("workspace.deployment.panel.preview.refused.correct.the.named.evidence.or"));
       derivedPreviewFingerprint = preview.admissible ? fingerprint : null;
       derivedStartButton.disabled = !preview.admissible;
     } catch (error) {
       invalidateDerivedPreview();
-      derivedStatus.textContent = uiText("workspace.deployment.panel.preview.failed", { reason: uiErrorReason(error) });
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.preview.failed", { reason: uiErrorReason(error) }));
     } finally {
       derivedBusy = false;
       if (derivedPreviewButton) derivedPreviewButton.disabled = false;
@@ -343,13 +362,13 @@ export function createDeploymentsWindow({
       derivedBusy = true;
       derivedPreviewButton.disabled = true;
       derivedDiscoverButton.disabled = true;
-      derivedStatus.textContent = uiText("workspace.deployment.panel.admitting.the.fresh.derived.execution");
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.admitting.the.fresh.derived.execution"));
       const started = await client.startDerivedExecution(source, request);
-      derivedStatus.textContent = uiText("workspace.deployment.panel.derived.process.started.at.traversal", { processInstanceId: started.processInstanceId, traversalId: started.traversalId });
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.derived.process.started.at.traversal", { processInstanceId: started.processInstanceId, traversalId: started.traversalId }));
       invalidateDerivedPreview();
       await refreshProcesses();
     } catch (error) {
-      derivedStatus.textContent = uiText("workspace.deployment.panel.derived.execution.was.not.started", { reason: uiErrorReason(error) });
+      paintText(derivedStatus, () => uiText("workspace.deployment.panel.derived.execution.was.not.started", { reason: uiErrorReason(error) }));
       invalidateDerivedPreview();
     } finally {
       derivedBusy = false;
@@ -358,10 +377,10 @@ export function createDeploymentsWindow({
     }
   }
 
-  if (scope) scope.textContent = deploymentScopeText();
+  if (scope) paintText(scope, deploymentScopeText());
 
   function say(message, kind = 'info') {
-    status.textContent = message;
+    paintText(status, message);
     status.dataset.state = kind;
   }
 
@@ -369,14 +388,14 @@ export function createDeploymentsWindow({
     idInput?.removeAttribute('aria-invalid');
     idInput?.removeAttribute('aria-errormessage');
     if (idError) {
-      idError.textContent = '';
+      paintText(idError, '');
       idError.hidden = true;
     }
   }
 
   function showIdError(message) {
     if (!idError || !idInput) return;
-    idError.textContent = message;
+    paintText(idError, message);
     idError.hidden = false;
     idInput.setAttribute('aria-invalid', 'true');
     idInput.setAttribute('aria-errormessage', idError.id);
@@ -395,12 +414,13 @@ export function createDeploymentsWindow({
   // ── RENDERING ────────────────────────────────────────────────────────────────────────────────
 
   function renderList() {
+    refreshText();
     const deployments = listing.deployments || [];
     if (empty) {
       empty.hidden = deployments.length > 0;
-      empty.textContent = listing.loaded
+      paintText(empty, () => listing.loaded
         ? uiText("workspace.deployment.panel.you.hold.no.deployments.yet.register.one")
-        : uiText("workspace.deployment.panel.connect.to.your.ravenroot.service.to.see");
+        : uiText("workspace.deployment.panel.connect.to.your.ravenroot.service.to.see"));
     }
     list.hidden = deployments.length === 0;
     list.replaceChildren(...deployments.map(entry => {
@@ -411,33 +431,33 @@ export function createDeploymentsWindow({
       const head = doc.createElement('div');
       head.className = 'deployment-item-head';
       const name = doc.createElement('b');
-      name.textContent = entry.deploymentId;
+      paintText(name, entry.deploymentId);
       const state = doc.createElement('span');
       state.className = `deployment-state deployment-state-${entry.state.toLowerCase()}`;
-      state.textContent = stateLabel(entry.state);
+      paintText(state, stateLabel(entry.state));
       head.append(name, state);
 
       const detail = doc.createElement('small');
       const sourceText = entry.sourceCount > 0
         ? uiText('workspace.deployment.inboundSources', { count: entry.sourceCount })
         : uiText('workspace.deployment.noInboundSources');
-      detail.textContent = uiText("workspace.deployment.panel.tenant.value1.graph.value2", { tenantId: entry.tenantId, unavailable: entry.graphVersion || uiText('common.unavailable') })
-        + uiText("workspace.deployment.panel.value1.scope.value2.continuity.value3", { sourceText: sourceText, scope: entry.scope, continuity: entry.continuity });
+      paintText(detail, () => uiText("workspace.deployment.panel.tenant.value1.graph.value2", { tenantId: entry.tenantId, unavailable: entry.graphVersion || uiText('common.unavailable') })
+        + uiText("workspace.deployment.panel.value1.scope.value2.continuity.value3", { sourceText: sourceText, scope: entry.scope, continuity: entry.continuity }));
       if (entry.deploymentGeneration !== undefined && entry.deploymentGeneration !== null) {
-        detail.textContent += uiText("workspace.deployment.panel.generation", { deploymentGeneration: entry.deploymentGeneration });
+        appendText(detail, () => uiText("workspace.deployment.panel.generation", { deploymentGeneration: entry.deploymentGeneration }));
       }
-      if (entry.deploymentRevision !== null) detail.textContent += uiText("workspace.deployment.panel.registry.revision", { deploymentRevision: entry.deploymentRevision });
+      if (entry.deploymentRevision !== null) appendText(detail, () => uiText("workspace.deployment.panel.registry.revision", { deploymentRevision: entry.deploymentRevision }));
       if (entry.desiredState !== null || entry.observedState !== null) {
-        detail.textContent += uiText("workspace.deployment.panel.reconciliation.desired.observed", { unknown: entry.desiredState || uiText('common.unknown'), unknown2: entry.observedState || uiText('common.unknown') });
+        appendText(detail, () => uiText("workspace.deployment.panel.reconciliation.desired.observed", { unknown: entry.desiredState || uiText('common.unknown'), unknown2: entry.observedState || uiText('common.unknown') }));
       }
-      if (entry.recoveryFailure) detail.textContent += uiText("workspace.deployment.panel.recovery.failure", { recoveryFailure: entry.recoveryFailure });
+      if (entry.recoveryFailure) appendText(detail, () => uiText("workspace.deployment.panel.recovery.failure", { recoveryFailure: entry.recoveryFailure }));
 
       item.append(head, detail);
 
       if (entry.diagnostic) {
         const diagnostic = doc.createElement('small');
         diagnostic.className = 'deployment-diagnostic';
-        diagnostic.textContent = entry.diagnostic;
+        paintText(diagnostic, entry.diagnostic);
         item.append(diagnostic);
       }
 
@@ -448,17 +468,17 @@ export function createDeploymentsWindow({
       const view = doc.createElement('button');
       view.type = 'button';
       view.className = 'btn deployment-view';
-      view.textContent = uiText("workspace.deployment.panel.open.read.only.view");
+      paintText(view, () => uiText("workspace.deployment.panel.open.read.only.view"));
       view.dataset.deploymentView = entry.deploymentId;
       view.disabled = busy;
       actionsRow.append(view);
       if (busy) {
         const pending = doc.createElement('small');
-        pending.textContent = uiText("workspace.deployment.panel.working");
+        paintText(pending, () => uiText("workspace.deployment.panel.working"));
         actionsRow.append(pending);
       } else if (capabilities.length === 0) {
         const pending = doc.createElement('small');
-        pending.textContent = uiText("workspace.deployment.panel.no.server.advertised.lifecycle.operations");
+        paintText(pending, () => uiText("workspace.deployment.panel.no.server.advertised.lifecycle.operations"));
         if (pending.textContent) actionsRow.append(pending);
       } else {
         for (const capability of capabilities) {
@@ -466,7 +486,7 @@ export function createDeploymentsWindow({
           const button = doc.createElement('button');
           button.type = 'button';
           button.className = `btn deployment-action${action === 'undeploy' ? ' danger' : ''}`;
-          button.textContent = actionLabel(action);
+          paintText(button, actionLabel(action));
           button.dataset.deploymentAction = action;
           button.dataset.deploymentId = entry.deploymentId;
           if (capability.available) actionsRow.append(button);
@@ -476,7 +496,7 @@ export function createDeploymentsWindow({
       if (entry.lifecycleCapabilities?.drainBound) {
         const drain = doc.createElement('small');
         drain.className = 'lifecycle-drain-bound';
-        drain.textContent = drainExplanation(entry.lifecycleCapabilities.drainBound);
+        paintText(drain, drainExplanation(entry.lifecycleCapabilities.drainBound));
         actionsRow.append(drain);
       }
       item.append(actionsRow);
@@ -484,7 +504,7 @@ export function createDeploymentsWindow({
       use.type = 'button';
       use.className = 'btn deployment-context-action';
       use.dataset.deploymentContext = entry.deploymentId;
-      use.textContent = uiText("workspace.deployment.panel.use.for.active.graph.tasks");
+      paintText(use, () => uiText("workspace.deployment.panel.use.for.active.graph.tasks"));
       use.disabled = !entry.graphVersion;
       if (!entry.graphVersion) use.title = uiText("workspace.deployment.panel.this.service.did.not.provide.the.deployment");
       item.append(use);
@@ -492,8 +512,8 @@ export function createDeploymentsWindow({
       operate.type = 'button';
       operate.className = 'btn deployment-operational-target';
       operate.dataset.deploymentOperational = entry.deploymentId;
-      operate.textContent = selectedDeploymentId === entry.deploymentId
-        ? uiText("workspace.deployment.panel.selected.operational.target") : uiText("workspace.deployment.panel.select.deployment.and.processes");
+      paintText(operate, () => selectedDeploymentId === entry.deploymentId
+        ? uiText("workspace.deployment.panel.selected.operational.target") : uiText("workspace.deployment.panel.select.deployment.and.processes"));
       operate.setAttribute('aria-pressed', String(selectedDeploymentId === entry.deploymentId));
       item.append(operate);
       return item;
@@ -501,6 +521,7 @@ export function createDeploymentsWindow({
   }
 
   function renderProcesses() {
+    refreshText();
     if (!processList) return;
     processList.hidden = processes.length === 0;
     processList.replaceChildren(...processes.map(entry => {
@@ -511,23 +532,23 @@ export function createDeploymentsWindow({
       const head = doc.createElement('div');
       head.className = 'deployment-item-head';
       const identity = doc.createElement('b');
-      identity.textContent = entry.processInstanceId;
+      paintText(identity, entry.processInstanceId);
       const state = doc.createElement('span');
       state.className = 'deployment-state';
-      state.textContent = uiText("workspace.deployment.panel.status", { status: entry.status });
+      paintText(state, () => uiText("workspace.deployment.panel.status", { status: entry.status }));
       head.append(identity, state);
       const detail = doc.createElement('small');
-      detail.textContent = uiText("workspace.deployment.panel.tenant.value1.deployment.value2.graph.value3", { tenantId: entry.tenantId, transient: entry.deploymentId || uiText('common.transient'), graphVersion: entry.graphVersion })
+      paintText(detail, () => uiText("workspace.deployment.panel.tenant.value1.deployment.value2.graph.value3", { tenantId: entry.tenantId, transient: entry.deploymentId || uiText('common.transient'), graphVersion: entry.graphVersion })
         + uiText("workspace.deployment.panel.revision.value1.lifecycle.generation.value2", { revision: entry.revision, lifecycleGeneration: entry.lifecycleGeneration })
         + uiText("workspace.deployment.panel.fence.value1.recovery.value2", { fencingToken: entry.fencingToken, disposition: entry.disposition })
-        + uiText("workspace.deployment.panel.control.value1", { unavailable: entry.controlState || uiText('common.unavailable') });
-      if (entry.terminationReason) detail.textContent += uiText("workspace.deployment.panel.terminal.reason", { reason: entry.terminationReason });
-      if (entry.cancelled) detail.textContent += uiText("workspace.deployment.panel.cancellation.recorded");
+        + uiText("workspace.deployment.panel.control.value1", { unavailable: entry.controlState || uiText('common.unavailable') }));
+      if (entry.terminationReason) appendText(detail, () => uiText("workspace.deployment.panel.terminal.reason", { reason: entry.terminationReason }));
+      if (entry.cancelled) appendText(detail, () => uiText("workspace.deployment.panel.cancellation.recorded"));
       const select = doc.createElement('button');
       select.type = 'button';
       select.className = 'btn process-select';
       select.dataset.processSelect = entry.processInstanceId;
-      select.textContent = selected ? uiText("workspace.deployment.panel.selected.process") : uiText("workspace.deployment.panel.select.process");
+      paintText(select, () => selected ? uiText("workspace.deployment.panel.selected.process") : uiText("workspace.deployment.panel.select.process"));
       select.setAttribute('aria-pressed', String(selected));
       item.append(head, detail, select);
       if (selected) {
@@ -540,7 +561,7 @@ export function createDeploymentsWindow({
           button.className = `btn process-action${['cancel', 'stop'].includes(capability.action) ? ' danger' : ''}`;
           button.dataset.processAction = capability.action;
           button.dataset.processId = entry.processInstanceId;
-          button.textContent = actionLabel(capability.action);
+          paintText(button, actionLabel(capability.action));
           button.disabled = processBusy.has(entry.processInstanceId);
           if (capability.available) actions.append(button);
           else appendUnavailableReason(doc, actions, button, capability, 'process', entry.processInstanceId);
@@ -548,33 +569,33 @@ export function createDeploymentsWindow({
         if (entry.lifecycleCapabilities?.drainBound) {
           const drain = doc.createElement('small');
           drain.className = 'lifecycle-drain-bound';
-          drain.textContent = drainExplanation(entry.lifecycleCapabilities.drainBound);
+          paintText(drain, drainExplanation(entry.lifecycleCapabilities.drainBound));
           actions.append(drain);
         }
         item.append(actions);
         if (entry.sagaError) {
           const diagnostic = doc.createElement('small');
           diagnostic.className = 'deployment-diagnostic';
-          diagnostic.textContent = uiText("workspace.deployment.panel.saga.status.unavailable", { reason: entry.sagaError });
+          paintText(diagnostic, () => uiText("workspace.deployment.panel.saga.status.unavailable", { reason: entry.sagaError }));
           item.append(diagnostic);
         } else if (Array.isArray(entry.sagas)) {
           const sagas = doc.createElement('ul');
           sagas.className = 'lifecycle-saga-list';
           if (entry.sagas.length === 0) {
             const none = doc.createElement('li');
-            none.textContent = uiText("workspace.deployment.panel.no.saga.scope.has.entered.this.process");
+            paintText(none, () => uiText("workspace.deployment.panel.no.saga.scope.has.entered.this.process"));
             sagas.append(none);
           }
           for (const saga of entry.sagas) {
             const row = doc.createElement('li');
             const headline = doc.createElement('b');
-            headline.textContent = uiText("workspace.deployment.panel.text.2", { scope: saga.scope, disposition: saga.disposition });
+            paintText(headline, () => uiText("workspace.deployment.panel.text.2", { scope: saga.scope, disposition: saga.disposition }));
             const detail = doc.createElement('small');
             const steps = Array.isArray(saga.steps)
               ? saga.steps.map(step => `${step.stepId}: ${step.status}`).join(' · ') : '';
-            detail.textContent = uiText("workspace.deployment.panel.revision.value1", { revision: saga.revision })
+            paintText(detail, () => uiText("workspace.deployment.panel.revision.value1", { revision: saga.revision })
               + `${saga.actionableReason ? ` · ${saga.actionableReason}` : ''}`
-              + `${steps ? ` · ${steps}` : ''}`;
+              + `${steps ? ` · ${steps}` : ''}`);
             row.append(headline, detail);
             sagas.append(row);
           }
@@ -584,9 +605,9 @@ export function createDeploymentsWindow({
             outbox.className = 'lifecycle-saga-outbox';
             for (const command of entry.sagaOutbox) {
               const row = doc.createElement('li');
-              row.textContent = `${command.commandType} · ${command.status}`
+              paintText(row, () => `${command.commandType} · ${command.status}`
                 + uiText("workspace.deployment.panel.attempts.value1.value2", { attempts: command.attempts, maxAttempts: command.maxAttempts })
-                + `${command.lastFailure ? ` · ${command.lastFailure}` : ''}`;
+                + `${command.lastFailure ? ` · ${command.lastFailure}` : ''}`);
               outbox.append(row);
             }
             item.append(outbox);
@@ -608,7 +629,7 @@ export function createDeploymentsWindow({
       listing = { loaded: false, deployments: [] };
       renderList();
       publish();
-      say('Connect to your Ravenroot service to see and register deployments.');
+      say(() => uiText("workspace.deployment.panel.connect.to.your.ravenroot.service.to.see.and.register"));
       return;
     }
     try {
@@ -628,7 +649,7 @@ export function createDeploymentsWindow({
       listing = { loaded: false, deployments: [] };
       renderList();
       publish();
-      say(`The deployments you hold could not be read: ${uiErrorReason(error)}`, 'error');
+      say(() => uiText("workspace.deployment.panel.the.deployments.you.hold.could.not.be.read", { reason: uiErrorReason(error) }), 'error');
     }
   }
 
@@ -656,14 +677,14 @@ export function createDeploymentsWindow({
         selectedProcessId = null;
       }
       renderProcesses();
-      processStatus.textContent = rows.length
+      paintText(processStatus, () => rows.length
         ? uiText("workspace.deployment.panel.value1.authoritative.process.instance.value2.for.value3", { count: rows.length, selectedDeploymentId })
-        : uiText("workspace.deployment.panel.no.durable.process.instances.are.recorded.for", { selectedDeploymentId: selectedDeploymentId });
+        : uiText("workspace.deployment.panel.no.durable.process.instances.are.recorded.for", { selectedDeploymentId: selectedDeploymentId }));
       if (selectedProcessId) void refreshSagas(selectedProcessId);
     } catch (error) {
       processes = [];
       renderProcesses();
-      processStatus.textContent = uiText("workspace.deployment.panel.process.inventory.could.not.be.reconciled", { reason: uiErrorReason(error) });
+      paintText(processStatus, () => uiText("workspace.deployment.panel.process.inventory.could.not.be.reconciled", { reason: uiErrorReason(error) }));
     }
   }
 
@@ -690,17 +711,17 @@ export function createDeploymentsWindow({
     }
     clearIdError();
     if (!client) {
-      say('There is no connection to your service, so nothing was registered.', 'error');
+      say(() => uiText("workspace.deployment.panel.there.is.no.connection.to.your.service.so.nothing"), 'error');
       return;
     }
     const source = currentDocument();
     if (!source) {
-      say('Open or create a graph first -- Register and start uses the active document’s current graph.',
+      say(() => uiText("workspace.deployment.panel.open.or.create.a.graph.first.register.and.start"),
         'error');
       return;
     }
     setRegistering(true);
-    say(`Registering “${check.id}” from “${source.displayName}”…`);
+    say(() => uiText("workspace.deployment.panel.registering.from", { id: check.id, displayName: source.displayName }));
     try {
       const registered = await client.registerDeployment(check.id, source.graphMl);
       onRegistered(registered, source);
@@ -711,12 +732,12 @@ export function createDeploymentsWindow({
         await client.startDeployment(check.id, { expectedGeneration: registered.deploymentGeneration });
       }
       if (disposed) return;
-      say(`“${check.id}” is registered and starting. It appears below once the server answers.`, 'ok');
+      say(() => uiText("workspace.deployment.panel.is.registered.and.starting.it.appears.below.once.the", { id: check.id }), 'ok');
       if (idInput) idInput.value = '';
       await refresh();
     } catch (error) {
       if (disposed) return;
-      say(`“${check.id}” was not registered: ${uiErrorReason(error)}`, 'error');
+      say(() => uiText("workspace.deployment.panel.was.not.registered", { id: check.id, reason: uiErrorReason(error) }), 'error');
     } finally {
       if (!disposed) setRegistering(false);
     }
@@ -731,10 +752,10 @@ export function createDeploymentsWindow({
       .find(candidate => candidate.action === action);
     if (!capability?.available) return;
     if (durable && capability.reasonRequired && action !== 'undeploy') {
-      const reason = boundedReason(doc, `deployment “${deploymentId}”`, action);
+      const reason = boundedReason(doc, uiText("workspace.deployment.panel.deployment", { deploymentId: deploymentId }), action);
       if (reason === null) return;
       if (!reason) {
-        say(uiText("workspace.deployment.panel.was.not.sent.a.bounded.reason.is", {
+        say(() => uiText("workspace.deployment.panel.was.not.sent.a.bounded.reason.is", {
           action: actionLabel(action),
         }), 'error');
         return;
@@ -749,17 +770,17 @@ export function createDeploymentsWindow({
       if (!confirmed) return;
       if (durable) {
         const disposition = doc.defaultView?.prompt?.(
-          'Choose exactly one undeploy disposition: DRAIN_FIRST, CANCEL_IN_FLIGHT, or REFUSE_IF_BUSY');
+          uiText("workspace.deployment.panel.choose.exactly.one.undeploy.disposition.drain.first.cancel.in"));
         if (disposition === null) return;
         const normalized = String(disposition).trim().toUpperCase();
         if (!['DRAIN_FIRST', 'CANCEL_IN_FLIGHT', 'REFUSE_IF_BUSY'].includes(normalized)) {
-          say('Undeploy was not sent: choose a supported disposition explicitly.', 'error');
+          say(() => uiText("workspace.deployment.panel.undeploy.was.not.sent.choose.a.supported.disposition.explicitly"), 'error');
           return;
         }
-        const reason = doc.defaultView?.prompt?.(`Why should “${deploymentId}” be undeployed?`);
+        const reason = doc.defaultView?.prompt?.(uiText("workspace.deployment.panel.why.should.be.undeployed", { deploymentId: deploymentId }));
         if (reason === null) return;
         if (!String(reason).trim()) {
-          say('Undeploy was not sent: a durable undeploy requires a reason.', 'error');
+          say(() => uiText("workspace.deployment.panel.undeploy.was.not.sent.a.durable.undeploy.requires.a"), 'error');
           return;
         }
         command.disposition = normalized;
@@ -784,19 +805,18 @@ export function createDeploymentsWindow({
         ? await client.undeployDeployment(deploymentId, command) : await client.undeployDeployment(deploymentId);
       if (result?.outcome) {
         const outcome = result.outcome.outcome === 'REPLAYED'
-          ? `REPLAYED ${result.outcome.original.outcome}` : result.outcome.outcome;
-        say(`${actionLabel(action)} on “${deploymentId}”: ${outcome}.`,
+          ? uiText("workspace.deployment.panel.replayed", { outcome: result.outcome.original.outcome }) : result.outcome.outcome;
+        say(() => uiText("workspace.deployment.panel.on", { value: actionLabel(action), deploymentId: deploymentId, outcome: outcome }),
           ['REFUSED', 'FAILED', 'STALE_GENERATION', 'SUPERSEDED', 'IDEMPOTENCY_CONFLICT']
             .includes(result.outcome.outcome) ? 'error' : 'ok');
       } else if (result?.reconciliation?.delivery === 'AMBIGUOUS') {
         const evidence = result.reconciliation.authoritative === 'NOT_FOUND'
-          ? 'the deployment is no longer registered'
-          : `the deployment is now ${String(result.status?.state || 'present').toLowerCase()}`;
-        say(`${actionLabel(action)} on “${deploymentId}” lost both command responses; `
-          + `authoritative reconciliation shows ${evidence}, but the command outcome is unknown.`, 'error');
+          ? uiText("workspace.deployment.panel.the.deployment.is.no.longer.registered")
+          : uiText("workspace.deployment.panel.the.deployment.is.now", { value: String(result.status?.state || 'present').toLowerCase() });
+        say(() => uiText("workspace.deployment.panel.on.lost.both.command.responses.authoritative.reconciliation.shows.but", { value: actionLabel(action), deploymentId: deploymentId, evidence: evidence }), 'error');
       }
     } catch (error) {
-      if (!disposed) say(`${actionLabel(action)} on “${deploymentId}” failed: ${uiErrorReason(error)}`,
+      if (!disposed) say(() => uiText("workspace.deployment.panel.on.failed", { value: actionLabel(action), deploymentId: deploymentId, reason: uiErrorReason(error) }),
         'error');
     } finally {
       rowBusy.delete(deploymentId);
@@ -811,28 +831,28 @@ export function createDeploymentsWindow({
     if (!entry || !capability?.available) return;
     let reason = '';
     if (capability.reasonRequired) {
-      const supplied = boundedReason(doc, `process “${processInstanceId}”`, action);
+      const supplied = boundedReason(doc, uiText("workspace.deployment.panel.process", { processInstanceId: processInstanceId }), action);
       if (supplied === null) return;
       if (!supplied) {
-        processStatus.textContent = uiText("workspace.deployment.panel.was.not.sent.a.bounded.reason.is", { action: actionLabel(action) });
+        paintText(processStatus, () => uiText("workspace.deployment.panel.was.not.sent.a.bounded.reason.is", { action: actionLabel(action) }));
         return;
       }
       reason = supplied;
     }
     const idempotencyKey = doc.defaultView?.crypto?.randomUUID?.();
     if (!idempotencyKey) {
-      processStatus.textContent = uiText("workspace.deployment.panel.a.secure.process.command.identity.could.not");
+      paintText(processStatus, () => uiText("workspace.deployment.panel.a.secure.process.command.identity.could.not"));
       return;
     }
     processBusy.add(processInstanceId);
     renderProcesses();
-    processStatus.textContent = uiText("workspace.deployment.panel.is.being.reconciled.for.process", { action: actionLabel(action), processInstanceId: processInstanceId });
+    paintText(processStatus, () => uiText("workspace.deployment.panel.is.being.reconciled.for.process", { action: actionLabel(action), processInstanceId: processInstanceId }));
     try {
       const outcome = await client.controlProcess(processInstanceId, action, entry.revision,
         { idempotencyKey, reason });
-      processStatus.textContent = uiText("workspace.deployment.panel.authoritative.state.will.be.read.again", { action: actionLabel(action), outcome: outcome.outcome });
+      paintText(processStatus, () => uiText("workspace.deployment.panel.authoritative.state.will.be.read.again", { action: actionLabel(action), outcome: outcome.outcome }));
     } catch (error) {
-      processStatus.textContent = uiText("workspace.deployment.panel.response.was.refused.or.ambiguous.re.reading", { action: actionLabel(action), reason: uiErrorReason(error) });
+      paintText(processStatus, () => uiText("workspace.deployment.panel.response.was.refused.or.ambiguous.re.reading", { action: actionLabel(action), reason: uiErrorReason(error) }));
     } finally {
       processBusy.delete(processInstanceId);
       await refreshProcesses();
@@ -843,15 +863,15 @@ export function createDeploymentsWindow({
     if (!client || rowBusy.has(deploymentId)) return;
     rowBusy.add(deploymentId);
     renderList();
-    say(`Opening a read-only live view of “${deploymentId}”…`);
+    say(() => uiText("workspace.deployment.panel.opening.a.read.only.live.view.of", { deploymentId: deploymentId }));
     try {
       await onOpenDeployment(deploymentId, client);
       if (!disposed) {
-        say(`“${deploymentId}” is open in a read-only deployment canvas.`, 'ok');
+        say(() => uiText("workspace.deployment.panel.is.open.in.a.read.only.deployment.canvas", { deploymentId: deploymentId }), 'ok');
         close();
       }
     } catch (error) {
-      if (!disposed) say(`“${deploymentId}” could not be opened: ${uiErrorReason(error)}`, 'error');
+      if (!disposed) say(() => uiText("workspace.deployment.panel.could.not.be.opened", { deploymentId: deploymentId, reason: uiErrorReason(error) }), 'error');
     } finally {
       rowBusy.delete(deploymentId);
       if (!disposed) renderList();
@@ -912,7 +932,7 @@ export function createDeploymentsWindow({
         entry.deploymentId === contextButton.dataset.deploymentContext);
       if (selected?.graphVersion) {
         onDeploymentSelected(selected);
-        say(`“${selected.deploymentId}” is the active graph’s Human Task context.`, 'ok');
+        say(() => uiText("workspace.deployment.panel.is.the.active.graph.s.human.task.context", { deploymentId: selected.deploymentId }), 'ok');
         close();
       }
       return;
@@ -924,7 +944,7 @@ export function createDeploymentsWindow({
       processes = [];
       renderList();
       renderProcesses();
-      if (processScope) processScope.textContent = uiText("workspace.deployment.panel.deployment.is.selected.its.process.instances.are", { selectedDeploymentId: selectedDeploymentId });
+      if (processScope) paintText(processScope, () => uiText("workspace.deployment.panel.deployment.is.selected.its.process.instances.are", { selectedDeploymentId: selectedDeploymentId }));
       void refreshProcesses();
       return;
     }
@@ -975,7 +995,11 @@ export function createDeploymentsWindow({
     register,
     openDeployment,
     listing: () => ({ loaded: listing.loaded, deployments: listing.deployments }),
-    refreshLocale() { renderList(); renderProcesses(); renderDerivedBoundaryChoices(); },
+    refreshLocale() { refreshText(); renderList(); renderProcesses(); renderDerivedBoundaryChoices();
+      if (idInput?.getAttribute('aria-invalid') === 'true') {
+        paintText(idError, validateDeploymentId(idInput.value).error || '');
+      }
+    },
     setClient(next) {
       client = next;
       if (!next) {
@@ -991,6 +1015,7 @@ export function createDeploymentsWindow({
       return dialog.open ? refresh() : Promise.resolve();
     },
     destroy() {
+      localizedText.clear();
       disposed = true;
       stopPolling();
       form.removeEventListener('submit', onSubmit);

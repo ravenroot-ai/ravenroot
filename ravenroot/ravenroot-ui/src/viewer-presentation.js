@@ -99,6 +99,7 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     { selector: 'node', style: {
       shape: 'roundrectangle', width: 'data(nw)', height: 'data(nh)',
       'background-color': palette.nodeSurface, 'border-width': 2,
+      // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
       'border-color': palette.nodeBorder, label: 'data(label)', color: palette.nodeText,
       'font-size': '20px',
       'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -139,6 +140,7 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
       { selector: 'node', style: {
         shape: 'roundrectangle', width: 80, height: 80,
         'border-width': 2.5,
+        // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
         label: 'data(cardLabel)',
         'text-valign': 'bottom', 'text-halign': 'center',
         'text-margin-x': 0, 'text-margin-y': 10,
@@ -182,6 +184,7 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     { selector: 'node:active', style: { 'overlay-opacity': 0.1 } },
     { selector: 'edge', style: {
       width: 1.5, 'line-color': edge.default, 'target-arrow-shape': 'triangle',
+      // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
       'target-arrow-color': edge.default, 'curve-style': 'bezier', label: 'data(label)',
       'font-size': '10px', color: palette.edgeLabel, 'text-background-opacity': 1,
       'text-background-color': palette.edgeLabelSurface, 'text-background-padding': '2px',

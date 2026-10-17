@@ -161,17 +161,17 @@ export function createDrawingModelController({ document: document_, getContext, 
       rendererProvider = rendererPackage?.manifest.renderers.find(item => item.id === parts[4]);
     }
     if (!layoutProvider || !rendererProvider) {
-      fallback('The selected drawing model is unavailable. Integrated Design remains active.'); return;
+      fallback(() => uiText("workspace.drawing.model.controller.the.selected.drawing.model.is.unavailable.integrated.design.remains")); return;
     }
     const compatibility = providerCompatibility(layoutProvider, rendererProvider);
     if (!compatibility.compatible) {
-      fallback(`The selected layout and renderer are incompatible (${[...compatibility.missingForRenderer,
-        ...compatibility.missingForLayout].join(', ')}).`); return;
+      fallback(() => uiText("workspace.drawing.model.controller.the.selected.layout.and.renderer.are.incompatible", { value: [...compatibility.missingForRenderer,
+        ...compatibility.missingForLayout].join(', ') })); return;
     }
     let mapping;
     try { mapping = readPresentationMapping(current.graph); }
-    catch (cause) { fallback(`Presentation mapping is invalid: ${uiErrorReason(cause)}`); return; }
-    if (!mapping) { fallback('This drawing model needs an explicit presentation mapping.'); return; }
+    catch (cause) { fallback(() => uiText("workspace.drawing.model.controller.presentation.mapping.is.invalid", { reason: uiErrorReason(cause) })); return; }
+    if (!mapping) { fallback(() => uiText("workspace.drawing.model.controller.this.drawing.model.needs.an.explicit.presentation.mapping")); return; }
     abort = new AbortController();
     const layoutSandbox = createFrontendPluginSandbox(layoutPackage.files[layoutProvider.entry], { target: document_.body, timeout: 3000 });
     const rendererSandbox = layoutPackage.id === rendererPackage.id && layoutProvider.entry === rendererProvider.entry
@@ -188,7 +188,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       overlay.className = 'drawing-model-overlay';
       const notice = document_.createElement('p');
       notice.className = 'drawing-model-evidence-note';
-      notice.textContent = snapshot.evidence.description;
+      notice.textContent = uiText("workspace.drawing.evidence");
       overlay.append(sceneSvg(document_, scene, (role, id) => {
         if (currentGeneration === generation) evidence(role, id, mapping, current);
       }), notice);
@@ -198,7 +198,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     } catch (cause) {
       if (cause.name !== 'AbortError' && currentGeneration === generation
           && context()?.documentId === current.documentId) {
-        fallback(`Drawing model failed: ${uiErrorReason(cause)}. Integrated Design remains active.`);
+        fallback(() => uiText("workspace.drawing.model.controller.drawing.model.failed.integrated.design.remains.active", { reason: uiErrorReason(cause) }));
       }
     }
   }
@@ -210,10 +210,10 @@ export function createDrawingModelController({ document: document_, getContext, 
     try { packages = await listFrontendPackages(indexedDB); }
     catch (cause) { packages = []; notify?.(uiErrorReason(cause), 'failed'); }
     const wanted = selectedKey();
-    select.replaceChildren(option(document_, INTEGRATED, 'Integrated Design'));
+    select.replaceChildren(option(document_, INTEGRATED, uiText("workspace.drawing.model.controller.integrated.design")));
     for (const package_ of packages) {
       for (const model of package_.manifest.drawingModels) {
-        const label = `${model.name} — ${package_.manifest.name}${package_.enabled ? '' : ' (disabled)'}`;
+        const label = `${model.name} — ${package_.manifest.name}${package_.enabled ? '' : uiText("workspace.drawing.model.controller.disabled")}`;
         const item = option(document_, modelKey(package_.id, model.id), label);
         item.disabled = !package_.enabled;
         select.append(item);
@@ -238,11 +238,11 @@ export function createDrawingModelController({ document: document_, getContext, 
 
   select.addEventListener('change', () => {
     const value = select.value;
-    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: value }, [], 'Select drawing model');
+    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: value }, [], uiText("workspace.drawing.model.controller.select.drawing.model"));
     void render();
   });
   fullFlowButton.addEventListener('click', () => {
-    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Show full operational flow');
+    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], uiText("workspace.drawing.model.controller.show.full.operational.flow"));
     select.value = INTEGRATED; fallback();
   });
   installButton.addEventListener('click', () => installInput.click());
@@ -250,9 +250,9 @@ export function createDrawingModelController({ document: document_, getContext, 
     try {
       const package_ = await packageFromFiles(installInput.files);
       await installFrontendPackage(package_, indexedDB);
-      notify?.(`Installed frontend package ${package_.manifest.name} ${package_.manifest.version}`, 'completed');
+      notify?.(() => uiText("workspace.drawing.model.controller.installed.frontend.package", { name: package_.manifest.name, version: package_.manifest.version }), 'completed');
       await reload();
-    } catch (cause) { notify?.(`Frontend package was not installed: ${uiErrorReason(cause)}`, 'failed'); }
+    } catch (cause) { notify?.(() => uiText("workspace.drawing.model.controller.frontend.package.was.not.installed", { reason: uiErrorReason(cause) }), 'failed'); }
     finally { installInput.value = ''; }
   });
   const selectedReferencesPackage = packageId => {
@@ -276,7 +276,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       toggle.addEventListener('click', async () => {
         await setFrontendPackageEnabled(package_.id, !package_.enabled, indexedDB);
         if (package_.enabled && selectedReferencesPackage(package_.id)) {
-          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
+          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], uiText("workspace.drawing.model.controller.use.integrated.drawing.model"));
         }
         await reload(); renderPackageManager();
       });
@@ -285,7 +285,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       remove.addEventListener('click', async () => {
         await removeFrontendPackage(package_.id, indexedDB);
         if (selectedReferencesPackage(package_.id)) {
-          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
+          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], uiText("workspace.drawing.model.controller.use.integrated.drawing.model"));
         }
         await reload(); renderPackageManager();
       });
@@ -306,7 +306,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     try {
       const current = context();
       const value = presentationMappingValue(JSON.parse(textarea.value), current.graph);
-      editGraphProperties?.({ [FRONTEND_PRESENTATION_PROPERTY]: value }, [], 'Edit drawing model mapping');
+      editGraphProperties?.({ [FRONTEND_PRESENTATION_PROPERTY]: value }, [], uiText("workspace.drawing.model.controller.edit.drawing.model.mapping"));
       error.textContent = ''; dialog.close(); void render();
     } catch (cause) { error.textContent = uiErrorReason(cause); }
   });
@@ -318,7 +318,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       if (context()?.documentId === documentId) void render();
     });
   }
-  return Object.freeze({ reload, refresh: render, refreshLocale() { renderPackageManager(); void render(); }, scheduleRefresh, destroy() {
+  return Object.freeze({ reload, refresh: render, refreshLocale() { renderPackageManager(); void reload(); }, scheduleRefresh, destroy() {
     if (refreshFrame != null) cancelAnimationFrame(refreshFrame);
     stop(); clearOverlays();
   } });

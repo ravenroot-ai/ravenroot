@@ -592,6 +592,7 @@ function createStylesheet(palette = rendererPalette) {
   { selector: 'node', style: {
     shape: 'roundrectangle', width: 'data(nw)', height: 'data(nh)',
     'background-color': palette.nodeSurface, 'border-width': 2, 'border-color': palette.nodeBorder,
+    // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
     label: 'data(label)', color: palette.nodeText,
     'font-size': '20px',
     'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -692,6 +693,7 @@ function createStylesheet(palette = rendererPalette) {
     width: 1.5, 'line-color': edge.default,
     'target-arrow-shape': 'triangle', 'target-arrow-color': edge.default,
     'curve-style': 'bezier',
+    // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
     label: 'data(label)', 'font-size': '10px', color: palette.edgeLabel,
     'text-background-opacity': 1, 'text-background-color': palette.edgeLabelSurface,
     'text-background-padding': '2px', 'text-background-shape': 'roundrectangle',
@@ -929,7 +931,7 @@ function flushWorkspacePersistence({ allowSuspended = false } = {}) {
   }).catch(error => {
     if (generation === workspacePersistenceGeneration && scope === activeWorkspaceScope) {
       workspacePersistenceWritable = false;
-      workspacePersistenceReason = `Workspace persistence is unavailable: ${uiErrorReason(error)}`;
+      workspacePersistenceReason = uiText("workspace.app.workspace.persistence.is.unavailable", { value: uiErrorReason(error) });
       syncPaneHeaders();
     }
   });
@@ -963,13 +965,13 @@ async function switchWorkspacePersistence(configuration, client) {
   if (!activeWorkspaceScope && nextScope && workspace.documents.length
       && !(workspace.documents.length === 1 && graphName === 'untitled.graphml'
         && !editHistory.isDirty())) {
-    workspacePersistenceReason = 'Session-only documents remain open and exportable. Close or export them before reconnecting to restore the authenticated workspace.';
+    workspacePersistenceReason = uiText("workspace.app.session.only.documents.remain.open.and.exportable.close.or");
     syncPaneHeaders();
     return workspaceSwitchFailure('current-session-conflict');
   }
   if (activeWorkspaceScope) {
     if (!workspacePersistenceWritable) {
-      workspacePersistenceReason = 'This workspace could not be saved, so it remains open to prevent data loss.';
+      workspacePersistenceReason = uiText("workspace.app.this.workspace.could.not.be.saved.so.it.remains");
       syncPaneHeaders();
       return workspaceSwitchFailure('persistence-unavailable');
     }
@@ -983,7 +985,7 @@ async function switchWorkspacePersistence(configuration, client) {
     removeAllWorkspaceDocuments();
     activeWorkspaceScope = null;
     workspacePersistenceWritable = false;
-    workspacePersistenceReason = 'Session only: no authenticated workspace scope is available.';
+    workspacePersistenceReason = uiText("workspace.app.session.only.no.authenticated.workspace.scope.is.available");
     openDocument({ tenantId: null });
     return null;
   }
@@ -995,7 +997,7 @@ async function switchWorkspacePersistence(configuration, client) {
     if (transition !== workspacePersistenceGeneration) return workspaceSwitchFailure('stale-transition');
     captureActiveDocument();
     if (!workspaceMatchesRestoreBaseline(workspace, restoreBaseline)) {
-      workspacePersistenceReason = 'Stored documents are ready, but the current session changed while they were loading. Your current documents remain open; reconnect when you are ready to restore the stored workspace.';
+      workspacePersistenceReason = uiText("workspace.app.stored.documents.are.ready.but.the.current.session.changed");
       syncActiveDocumentChrome();
       return workspaceSwitchFailure('current-session-changed');
     }
@@ -1008,7 +1010,7 @@ async function switchWorkspacePersistence(configuration, client) {
     }
     removeAllWorkspaceDocuments();
     activeWorkspaceScope = nextScope;
-    workspacePersistenceReason = 'Stored for this authenticated Ravenroot workspace.';
+    workspacePersistenceReason = uiText("workspace.app.stored.for.this.authenticated.ravenroot.workspace");
     if (restored?.documents.length) {
       for (const stored of restored.documents) {
         openDocument({
@@ -1021,7 +1023,7 @@ async function switchWorkspacePersistence(configuration, client) {
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
         activateDocument(restored.activeDocumentId);
       }
-      if (restored.recoveredStaleSelection) workspacePersistenceReason += ' The stale selection was repaired.';
+      if (restored.recoveredStaleSelection) workspacePersistenceReason += uiText("workspace.app.the.stale.selection.was.repaired");
     } else {
       openDocument({ tenantId: nextScope.tenantId });
     }
@@ -1031,7 +1033,7 @@ async function switchWorkspacePersistence(configuration, client) {
     if (transition !== workspacePersistenceGeneration) return workspaceSwitchFailure('stale-transition');
     // Keep both the unreadable snapshot and current visible workspace untouched. Writes never open
     // for the failed scope, so a recovery view cannot overwrite recoverable stored documents.
-    workspacePersistenceReason = 'Stored documents could not be restored. Current documents and stored data were left unchanged; reconnect to retry.';
+    workspacePersistenceReason = uiText("workspace.app.stored.documents.could.not.be.restored.current.documents.and");
     return workspaceSwitchFailure('restore-failed');
   } finally {
     if (transition === workspacePersistenceGeneration) {
@@ -1342,7 +1344,7 @@ async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneratio
       && item.generation === locator.generation);
     if (!task) {
       humanTaskDecisionDialog.unavailable(
-        'This task detail is unavailable. It may be stale, settled, or outside your current authority.');
+        uiText("workspace.app.this.task.detail.is.unavailable.it.may.be.stale"));
       clearHumanTaskSelection();
       return;
     }
@@ -1352,7 +1354,7 @@ async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneratio
     // only the locator and let the next authenticated reconnect try again; never cache the row.
     if (recoveryGeneration === humanTaskRecoveryGeneration) {
       humanTaskDecisionDialog.unavailable(
-        'Authorized task detail could not be loaded. Refresh or reconnect before deciding.');
+        uiText("workspace.app.authorized.task.detail.could.not.be.loaded.refresh.or"));
     }
   }
 }
@@ -1597,7 +1599,7 @@ function destroySelectionOverlay(instance) {
 }
 
 function nodeActionLabel(node) {
-  return node?.data('name') || node?.id() || 'node';
+  return node?.data('name') || node?.id() || uiText("workspace.app.node");
 }
 
 function nodeActionPointerType(event) {
@@ -1973,7 +1975,7 @@ function toggleVisualGroup(groupId, collapsed, owner = workspace.active) {
   });
 }
 
-function visualGroupDialog(title, { value = null, detail = '', submit = 'Save', onCommit }) {
+function visualGroupDialog(title, { value = null, detail = '', submit = uiText("workspace.groups.save"), onCommit }) {
   const origin = document.activeElement;
   const owner = workspace.active;
   const incarnation = owner?.incarnation;
@@ -2011,8 +2013,8 @@ function createVisualGroupAction(captured = null) {
   return runAfterInspectorDraft(() => {
     if (workspace.active !== owner || owner?.incarnation !== incarnation) return false;
     if (!groupAuthoringAllowed() || selected.length < 2) return false;
-    return visualGroupDialog('Group selection', { value: `Group ${readVisualGroups(graphData).groups.length + 1}`,
-      detail: `${selected.length} selected nodes. Visual groups do not change execution.`, submit: 'Create group',
+    return visualGroupDialog(uiText("workspace.app.group.selection"), { value: `Group ${readVisualGroups(graphData).groups.length + 1}`,
+      detail: uiText("workspace.groups.selectionHelp", { count: selected.length }), submit: uiText("workspace.groups.create"),
       onCommit: name => {
         finishVisualGroups(); syncGraphPositions();
         const anchor = selected.includes(graphCursorId) ? graphCursorId : [...selected].sort()[0];
@@ -2043,17 +2045,17 @@ function manageVisualGroup(action, suppliedGroup = null) {
       else groups = groups.map(item => item.id !== group.id ? item : action === 'rename' ? { ...item, name }
         : { ...item, memberNodeIds: selected, anchorNodeId: selected.includes(item.anchorNodeId)
           ? item.anchorNodeId : [...selected].sort()[0] });
-      editVisualGroups(graphData, groups, editHistory, action === 'ungroup' ? `Ungroup ${group.name}` : `${action === 'rename' ? 'Rename' : action === 'replace' ? 'Replace members of' : 'Remove metadata for'} visual group`);
+      editVisualGroups(graphData, groups, editHistory, action === 'ungroup' ? `Ungroup ${group.name}` : uiText("workspace.app.visual.group", { value: action === 'rename' ? 'Rename' : action === 'replace' ? 'Replace members of' : 'Remove metadata for' }));
       refreshVisualGroups(); updateHistoryUi();
       if (action === 'ungroup' || action === 'repair') { owner.selectedVisualGroupId = null; closeInfo(); }
       else showVisualGroupInfo(groups.find(item => item.id === group.id));
     };
     if (action === 'ungroup') { commit(); return true; }
-    return visualGroupDialog(action === 'rename' ? 'Rename group' : action === 'replace' ? 'Replace members with selection' : 'Remove visual group metadata', {
+    return visualGroupDialog(action === 'rename' ? uiText("workspace.app.rename.group") : action === 'replace' ? uiText("workspace.app.replace.members.with.selection") : uiText("workspace.app.remove.visual.group.metadata"), {
       value: action === 'rename' ? group.name : null,
-      detail: action === 'replace' ? `Replace ${group.memberNodeIds.length} members with ${selected.length} selected real nodes? Nodes and edges remain intact.`
-        : action === 'repair' ? 'Remove the unsupported visual group metadata? All real nodes and edges remain intact. This is undoable.' : '',
-      submit: action === 'replace' ? 'Replace members' : action === 'repair' ? 'Remove metadata' : 'Save', onCommit: commit });
+      detail: action === 'replace' ? uiText("workspace.groups.replaceHelp", { members: group.memberNodeIds.length, selected: selected.length })
+        : action === 'repair' ? uiText("workspace.groups.removeHelp") : '',
+      submit: action === 'replace' ? uiText("workspace.groups.replaceMembers") : action === 'repair' ? uiText("workspace.groups.removeMetadata") : uiText("workspace.groups.save"), onCommit: commit });
   });
 }
 
@@ -2076,12 +2078,12 @@ function showVisualGroupInfo(group, owner = workspace.active) {
       if (workspace.active === owner && owner.incarnation === incarnation) handler();
     }); actions.append(button);
   };
-  action(owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse', () => toggleVisualGroup(group.id, undefined, owner));
+  action(owner.visualGroupState[group.id]?.collapsed ? uiText("workspace.app.expand") : uiText("workspace.app.collapse"), () => toggleVisualGroup(group.id, undefined, owner));
   const editable = groupAuthoringAllowed();
-  action('Rename group', () => manageVisualGroup('rename', group), editable, 'Available in editable Design documents');
-  action('Replace members with selection', () => manageVisualGroup('replace', group), editable && selectedRealNodeIds().length >= 2,
-    'Select at least two real nodes in editable Design');
-  action('Ungroup', () => manageVisualGroup('ungroup', group), editable, 'Available in editable Design documents');
+  action(uiText("workspace.app.rename.group"), () => manageVisualGroup('rename', group), editable, uiText("workspace.app.available.in.editable.design.documents"));
+  action(uiText("workspace.app.replace.members.with.selection"), () => manageVisualGroup('replace', group), editable && selectedRealNodeIds().length >= 2,
+    uiText("workspace.app.select.at.least.two.real.nodes.in.editable.design"));
+  action(uiText("workspace.app.ungroup"), () => manageVisualGroup('ungroup', group), editable, uiText("workspace.app.available.in.editable.design.documents"));
   const help = document.createElement('p'); help.id = 'visual-group-edit-help'; help.className = 'visual-group-help';
   help.textContent = editable ? uiText("workspace.app.to.replace.membership.select.at.least.two")
     : uiText("workspace.app.rename.membership.changes.and.ungrouping.are.available");
@@ -2142,14 +2144,14 @@ function nodeActionCatalog(owner, instance, nodeId) {
     },
   });
   const groups = [
-    { id: 'group', glyph: '▦', label: 'Group selection', enabled: Boolean(authoring && selected.length >= 2
+    { id: 'group', glyph: '▦', label: uiText("workspace.groups.selection"), enabled: Boolean(authoring && selected.length >= 2
       && ['none', 'valid'].includes(metadata.status) && !selected.some(id => metadata.groups.some(item => item.memberNodeIds.includes(id)))),
     run: () => createVisualGroupAction(selected) },
-    { id: 'toggleGroup', glyph: '↔', label: group && owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse group',
+    { id: 'toggleGroup', glyph: '↔', label: group && owner.visualGroupState[group.id]?.collapsed ? uiText("workspace.groups.expand") : uiText("workspace.groups.collapse"),
       enabled: Boolean(group || memberGroup), run: () => toggleVisualGroup((group || memberGroup).id, group ? undefined : true, owner) },
-    { id: 'renameGroup', label: 'Rename group', enabled: Boolean(authoring && group), run: () => manageVisualGroup('rename', group) },
-    { id: 'replaceGroup', label: 'Replace members with selection', enabled: Boolean(authoring && group && selected.length >= 2), run: () => manageVisualGroup('replace', group) },
-    { id: 'ungroup', label: 'Ungroup', enabled: Boolean(authoring && group), run: () => manageVisualGroup('ungroup', group) },
+    { id: 'renameGroup', label: uiText("workspace.groups.rename"), enabled: Boolean(authoring && group), run: () => manageVisualGroup('rename', group) },
+    { id: 'replaceGroup', label: uiText("workspace.groups.replace"), enabled: Boolean(authoring && group && selected.length >= 2), run: () => manageVisualGroup('replace', group) },
+    { id: 'ungroup', label: uiText("workspace.groups.ungroup"), enabled: Boolean(authoring && group), run: () => manageVisualGroup('ungroup', group) },
   ];
   return [...actions, ...groups];
 }
@@ -2672,6 +2674,7 @@ function applyActiveDocument() {
   activeDocumentIncarnation = document_?.incarnation ?? null;
   editHistory = document_?.history ?? createCommandHistory();
   activeAuthoring = document_?.authoring ?? null;
+  // i18n-audit-exempt: protocol-token - portable default filename is persisted and exported as document identity.
   graphName = document_?.name ?? 'untitled.graphml';
   graphDisplayName = document_?.displayName ?? graphName;
   const presentation = documentPresentationState(document_);
@@ -2869,30 +2872,30 @@ function paneIsDirty(document_) {
 }
 
 function documentModeLabel(document_) {
-  if (!document_) return 'No document';
+  if (!document_) return uiText("workspace.app.no.document");
   const authoring = document_.authoring;
   if (authoring?.providerDocumentId) {
     const { sourceState, version, releaseState, publicationState } = repositorySourceStatus(authoring);
     const revision = authoring.draftDeleted ? authoring.revision?.release
       : authoring.revision?.draft !== 'absent' ? authoring.revision?.draft : authoring.revision?.release;
     const sourceRevision = typeof revision === 'string' && revision !== 'absent'
-      ? revision.split(':', 1)[0].slice(0, 12) : 'revision pending';
-    const editState = authoring.saveFlight ? 'Saving…' : authoring.saveError ? 'Save failed'
-      : graphAuthoringUnavailable ? 'Repository unavailable'
-        : paneIsDirty(document_) ? 'Unsaved edits' : null;
+      ? revision.split(':', 1)[0].slice(0, 12) : uiText("workspace.app.revision.pending");
+    const editState = authoring.saveFlight ? uiText("workspace.app.saving") : authoring.saveError ? uiText("workspace.app.save.failed")
+      : graphAuthoringUnavailable ? uiText("workspace.app.repository.unavailable.status")
+        : paneIsDirty(document_) ? uiText("workspace.app.unsaved.edits") : null;
     return [sourceState, version, sourceRevision, releaseState, publicationState, editState]
       .filter(Boolean).join(' · ');
   }
-  const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
-    : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
-  const local = document_.tenantId === null ? `${label} · session only` : label;
+  const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? uiText("workspace.app.deployed")
+    : document_.mode === DOCUMENT_MODES.TEST ? uiText("workspace.app.test") : uiText("workspace.app.draft");
+  const local = document_.tenantId === null ? uiText("workspace.app.session.only", { label: label }) : label;
   if (graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.PENDING) {
-    return `${local} · Authoring capability pending`;
+    return uiText("workspace.app.authoring.capability.pending", { local: local });
   }
   if (graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.UNAVAILABLE) {
-    return `${local} · Authoring unavailable`;
+    return uiText("workspace.app.authoring.unavailable", { local: local });
   }
-  return graphAuthoringUnavailable ? `${local} · Repository unavailable` : local;
+  return graphAuthoringUnavailable ? uiText("workspace.app.repository.unavailable", { local: local }) : local;
 }
 
 function syncGraphModeLabel() {
@@ -3118,8 +3121,8 @@ function syncPaneHeaders() {
     }
 
     header.querySelector('.doc-pane-state').textContent =
-      [active ? 'active document' : '', documentModeLabel(document_), dirty ? 'modified' : '',
-        document_.layoutBusy ? 'layout in progress' : '', deploymentStatus]
+      [active ? uiText("workspace.app.active.document") : '', documentModeLabel(document_), dirty ? 'modified' : '',
+        document_.layoutBusy ? uiText("workspace.app.layout.in.progress") : '', deploymentStatus]
         .filter(Boolean).join(', ');
 
     pane.classList.toggle('doc-pane--active', active);
@@ -3690,7 +3693,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
       result.terminal ? 'failed' : 'completed');
     }
   };
-  const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message) => {
+  const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message, renderMessage) => {
     if (connectionState === 'revoked') {
       resetDeploymentViewRuntime(state, 'DETACHED', 'AUTHORITY_CHANGED');
     } else if (connectionState === 'error') {
@@ -3701,7 +3704,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     }
     if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
     syncPaneHeaders();
-    if (workspace.active === owner) addActivityMessage(uiMessage("workspace.notice.deployment.3"), message,
+    if (workspace.active === owner) addActivityMessage(uiMessage("workspace.notice.deployment.3"), renderMessage ? uiComputed(renderMessage) : message,
       ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
   });
   owner.deploymentView = { envelope, state, disconnect };
@@ -4546,7 +4549,7 @@ function initCy(elements, gd, options = {}) {
       }
     }
     if (!moveNodesTo(snapshot.graph, positions, snapshot.history,
-      snapshot.groupMoves?.length ? 'Move visual group' : null)) return;
+      snapshot.groupMoves?.length ? uiText("workspace.app.move.visual.group") : null)) return;
     refreshVisualGroups(snapshot.owner);
     updateHistoryUi();
   });
@@ -5039,6 +5042,7 @@ function applyElasticVisualStyle() {
       'curve-style': 'bezier',
       'source-endpoint': 'outside-to-node',
       'target-endpoint': 'outside-to-node',
+      // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
       label: 'data(label)',
       'font-size': Math.max(8, Math.min(11, Math.round(fontPx * 0.55))) + 'px',
       color,
@@ -5581,7 +5585,7 @@ function retireInitialLayoutWithFallback(job, diagnostic) {
 
 function renderModeLabel(mode) {
   const semanticMode = normalizeRenderMode(mode);
-  return commandRegistry.get(`layout.${semanticMode}`)?.label || 'Graph';
+  return commandRegistry.get(`layout.${semanticMode}`)?.label || uiText("workspace.app.graph");
 }
 
 function syncOwnedLayoutBusy(owner) {
@@ -5671,7 +5675,7 @@ function finishOwnedLayout(token) {
   if (publish && job.revealInitialLayout && isLayeredMode(token.mode)
       && !layeredDrawingOf(job.isolatedLayoutCy)) {
     retireInitialLayoutWithFallback(job,
-      'Initial layered arrangement failed; deterministic fallback positions were restored.');
+      uiText("workspace.app.initial.layered.arrangement.failed.deterministic.fallback.positions.were.restored"));
     return;
   }
   if (publish) {
@@ -5811,7 +5815,7 @@ function runOwnedLayout(token) {
   const fail = error => {
     if (job.revealInitialLayout) {
       retireInitialLayoutWithFallback(job,
-        `Initial graph arrangement failed; deterministic fallback positions were restored. ${error}`);
+        uiText("workspace.app.initial.graph.arrangement.failed.deterministic.fallback.positions.were.restored", { error: error }));
     } else {
       console.error('Graph arrangement failed; positions are unchanged.', error);
       settleOwnedLayout(token);
@@ -6009,7 +6013,7 @@ function setLayout(name, options = {}) {
     job.initialExposureTimeout = setTimeout(() => {
       if (layoutJobs.get(request.token.generation) !== job) return;
       retireInitialLayoutWithFallback(job,
-        'Initial graph arrangement exceeded its visibility deadline; deterministic fallback positions were restored.');
+        uiText("workspace.app.initial.graph.arrangement.exceeded.its.visibility.deadline.deterministic.fallback"));
     }, INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS);
   }
   syncOwnedLayoutBusy(owner);
@@ -6081,7 +6085,7 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
     keepPositions: name === 'keep',
     recordPositions: !arrangement.preservePositions,
     fitAfterLayout: !arrangement.preservePositions,
-    commandLabel: commandRegistry.get(`layout.arrange.${name}`)?.label || 'Arrange graph',
+    commandLabel: commandRegistry.get(`layout.arrange.${name}`)?.label || uiText("workspace.app.arrange.graph"),
   });
   scheduleWorkspacePersistence();
   return true;
@@ -6106,8 +6110,8 @@ function renderActiveMode({ skipDraftGuard = false } = {}) {
     recordPositions: !arrangement?.preservePositions,
     fitAfterLayout: !arrangement?.preservePositions,
     commandLabel: designArrangement
-      ? commandRegistry.get(`layout.arrange.${designArrangement}`)?.label || 'Render graph'
-      : 'Render graph',
+      ? commandRegistry.get(`layout.arrange.${designArrangement}`)?.label || uiText("workspace.app.render.graph")
+      : uiText("workspace.app.render.graph"),
   });
   return true;
 }
@@ -6462,7 +6466,7 @@ function multiNodePropertyControl(property, controlId) {
     : (property.type === 'BOOLEAN' ? ['false', 'true'] : null);
   if (choices) {
     const unchanged = state === MULTI_PROPERTY_STATE.SAME ? ''
-      : '<option value="" data-batch-action="unchanged" selected>Leave unchanged</option>';
+      : `<option value="" data-batch-action="unchanged" selected>${escapeHtml(uiText("workspace.property.leaveUnchanged"))}</option>`;
     const options = choices.map(value => `<option value="${escapeAttribute(value)}"
       ${state === MULTI_PROPERTY_STATE.SAME && value === current ? 'selected' : ''}>${escapeHtml(value)}</option>`)
       .join('');
@@ -6470,9 +6474,9 @@ function multiNodePropertyControl(property, controlId) {
   }
 
   const placeholder = property.type === 'SECRET_REFERENCE'
-    ? 'Enter a replacement reference'
-    : state === MULTI_PROPERTY_STATE.MIXED ? 'Mixed values — type to replace'
-      : state === MULTI_PROPERTY_STATE.ABSENT ? 'Not declared — type to add' : '';
+    ? uiText("workspace.property.replacementReference")
+    : state === MULTI_PROPERTY_STATE.MIXED ? uiText("workspace.property.mixedPlaceholder")
+      : state === MULTI_PROPERTY_STATE.ABSENT ? uiText("workspace.property.absentPlaceholder") : '';
   if (property.type === 'TEXT' || property.type === 'CEL_EXPRESSION') {
     return `<textarea ${common} placeholder="${escapeAttribute(placeholder)}">${escapeHtml(current)}</textarea>`;
   }
@@ -6497,9 +6501,9 @@ function bindMultiNodeEditor(nodes, properties) {
   form.addEventListener('change', markTouched);
   form.addEventListener('submit', event => {
     event.preventDefault();
-    if (layoutBusy) return showFormError(form, 'Layout in progress');
+    if (layoutBusy) return showFormError(form, () => uiText("workspace.app.layout.in.progress"));
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) {
-      return showFormError(form, 'Modify mode is OFF');
+      return showFormError(form, () => uiText("workspace.app.modify.mode.is.off"));
     }
     const changes = [...form.querySelectorAll('[data-multi-property-input]')].map(control => {
       const action = control.tagName === 'SELECT'
@@ -6512,16 +6516,16 @@ function bindMultiNodeEditor(nodes, properties) {
     });
     const currentNodes = nodes.map(node => graphData.nodeMap?.[node.id]).filter(Boolean);
     if (currentNodes.length !== nodes.length) {
-      return showFormError(form, 'A selected node is no longer part of the document');
+      return showFormError(form, () => uiText("workspace.app.a.selected.node.is.no.longer.part.of.the"));
     }
     const plan = planMultiPropertyUpdate(currentNodes, properties, changes, nodeTypeCatalog);
     if (plan.errors.length) return showFormError(form, plan.errors.join('. '));
-    if (!plan.entries.length) return showFormError(form, 'Change at least one common property first');
+    if (!plan.entries.length) return showFormError(form, () => uiText("workspace.app.change.at.least.one.common.property.first"));
     if (!globalThis.confirm(uiText("workspace.app.apply.changes.to.selected.nodes", { count: nodes.length }))) return;
     try {
       updateNodePropertiesBatch(graphData, plan.entries, editHistory);
     } catch (error) {
-      return showFormError(form, uiErrorReason(error) || 'The selected nodes could not be updated');
+      return showFormError(form, () => uiErrorReason(error) || uiText("workspace.app.the.selected.nodes.could.not.be.updated"));
     }
     const ids = nodes.map(node => node.id);
     rebuildGraph();
@@ -6557,7 +6561,7 @@ function showNodeInfo(node) {
   if (!model) return;
   document.getElementById('info-title').textContent = model.name || model.id;
   if (graphData.format === 'graphify') {
-    showReadOnlyElement(model, 'Graphify node');
+    showReadOnlyElement(model, uiText("workspace.app.graphify.node"));
     humanTaskController?.selectNode(null);
     return;
   }
@@ -6571,7 +6575,7 @@ function showNodeInfo(node) {
       humanTaskController?.selectNode(null);
       return;
     }
-    showReadOnlyElement(model, 'Workflow node');
+    showReadOnlyElement(model, uiText("workspace.app.workflow.node"));
     if (model.behavior === 'human-task') {
       void humanTaskController?.selectNode(model.id);
     } else humanTaskController?.selectNode(null);
@@ -6591,11 +6595,11 @@ function edgeEndpointLabel(edge) {
 function selectionBadgeLabel(instance) {
   const nodes = instance.nodes(':selected');
   const edges = instance.edges(':selected');
-  if (nodes.length > 1 && edges.empty()) return `${nodes.length} nodes`;
+  if (nodes.length > 1 && edges.empty()) return uiText("workspace.app.nodes", { count: nodes.length });
   if (nodes.length === 1 && edges.empty()) return nodes.first().data('name');
   if (edges.length === 1 && nodes.empty()) return edgeEndpointLabel(edges.first());
   const count = nodes.length + edges.length;
-  return count ? `${count} elements` : '—';
+  return count ? uiText("workspace.app.elements", { count: count }) : '—';
 }
 
 function showEdgeInfo(edge) {
@@ -6625,11 +6629,11 @@ function showEdgeInfo(edge) {
   document.getElementById('info-title').textContent =
     uiText("workspace.app.text.3", { edge: edgeEndpointLabel(edge), detail: descriptor ? ` · ${descriptor}` : '' });
   if (graphData.format === 'graphify') {
-    showReadOnlyElement(model, 'Graphify relation');
+    showReadOnlyElement(model, uiText("workspace.app.graphify.relation"));
     return;
   }
   if (!modifyEnabled) {
-    showReadOnlyElement(model, 'Workflow edge');
+    showReadOnlyElement(model, uiText("workspace.app.workflow.edge"));
     return;
   }
   renderEdgeForm(model, false);
@@ -7162,6 +7166,7 @@ function renderNodeForm(model, creating) {
       </div>
     </form>`;
   const form = document.getElementById('node-editor');
+  form._localeRender = () => renderNodeForm(model, creating);
   form.elements.catalogBehavior.addEventListener('change', event => {
     const selected = catalogDescriptor(event.target.value);
     if (!selected) return;
@@ -7214,14 +7219,14 @@ function renderNodeForm(model, creating) {
   });
   form.addEventListener('submit', event => {
     event.preventDefault();
-    if (layoutBusy) return showFormError(form, 'Layout in progress');
-    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
+    if (layoutBusy) return showFormError(form, () => uiText("workspace.app.layout.in.progress"));
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, () => uiText("workspace.app.modify.mode.is.off"));
     const values = new FormData(form);
     const id = String(values.get('id') || '').trim();
     const owner = workspace.active;
     const target = cy;
     const selectedIds = target?.$(':selected').map(element => element.id()) || [];
-    if (creating && graphData.nodeMap[id]) return showFormError(form, `Node ID ${id} already exists`);
+    if (creating && graphData.nodeMap[id]) return showFormError(form, () => uiText("workspace.app.node.id.already.exists", { id: id }));
     const patch = readNodeEditorPatch(form, model);
     // Creating applies the values to a detached node and inserts it as one command; editing patches
     // the document node. Either way the mutation is a command, never a write from the form.
@@ -7235,13 +7240,13 @@ function renderNodeForm(model, creating) {
       savedDraft = draft;
       if (draft) {
         const assessment = inspectInspectorDraft(draft);
-        if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
+        if (!assessment.valid) return showFormError(form, () => uiText('inspector.unsaved.invalidDescription'));
         if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
-          return showFormError(form, 'This node is no longer part of the document');
+          return showFormError(form, () => uiText("workspace.app.this.node.is.no.longer.part.of.the.document"));
         }
       } else if (nodePatchChanged(model, patch)) {
         if (!updateNodeFields(graphData, model.id, patch, editHistory)) {
-          return showFormError(form, 'This node is no longer part of the document');
+          return showFormError(form, () => uiText("workspace.app.this.node.is.no.longer.part.of.the.document"));
         }
         syncAutosavedNodeRenderer(model.id);
       }
@@ -7311,8 +7316,8 @@ function secretReferenceOptionsHtml(stringValue) {
   // perfectly good declaration.
   const foreign = stringValue !== '' && !known
     ? `<option value="${escapeAttribute(stringValue)}" selected>${held?.loaded
-      ? `Kept as declared — not one of your credentials: ${escapeHtml(stringValue)}`
-      : `Kept as declared — connect to your service to choose: ${escapeHtml(stringValue)}`}</option>`
+      ? escapeHtml(uiText("workspace.app.kept.as.declared.not.one.of.your.credentials", { stringValue: stringValue }))
+      : escapeHtml(uiText("workspace.app.kept.as.declared.connect.to.your.service.to.choose", { stringValue: stringValue }))}</option>`
     : '';
   const options = credentials.map(entry =>
     `<option value="${escapeAttribute(entry.reference)}" ${String(entry.reference) === stringValue ? 'selected' : ''}>${escapeHtml(entry.label || entry.reference)}</option>`).join('');
@@ -7485,7 +7490,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     let helpText = baseText;
     let stateText = '';
     if (unconfigured) {
-      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
+      stateText = uiText("workspace.app.not.configured.yet.this.node.will.refuse.when.execution");
       // For a node that invokes a MODEL provider, the UI also states where the thing it is
       // waiting for is declared. Without this the sentence above tells an author their node will
       // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
@@ -7498,14 +7503,14 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
       // and configure a model provider would be a confident instruction to the wrong place. See
       // `invokesModelProvider`, which reads the same capability set the runtime reads.
-      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
+      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, uiText("workspace.generative.capability.this.names.a.model.provider.the.deployment.itself.composed"));
     }
     if (property.maximumUtf8Bytes > 0) {
       helpText = appendSentence(helpText, `Maximum ${property.maximumUtf8Bytes} UTF-8 bytes.`);
     }
     if (property.maximumItems > 0) {
       helpText = appendSentence(helpText,
-        `Maximum ${property.maximumItems} comma-separated items; ${property.maximumItemUtf8Bytes} UTF-8 bytes each.`);
+        uiText("workspace.app.maximum.comma.separated.items.utf.8.bytes.each", { maximumItems: property.maximumItems, maximumItemUtf8Bytes: property.maximumItemUtf8Bytes }));
     }
     const numericBounds = `${property.minimumValue != null && property.minimumValue !== '' ? ` min="${escapeAttribute(property.minimumValue)}"` : ''}`
       + `${property.maximumValue != null && property.maximumValue !== '' ? ` max="${escapeAttribute(property.maximumValue)}"` : ''}`;
@@ -7521,7 +7526,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // property's own `description`, which the catalog owns.
     if (undeclarable) {
       helpText = appendSentence(helpText,
-        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+        uiText("workspace.app.not.declared.is.a.state.of.its.own.it"));
     }
     const hintText = helpText.trim();
     const describedBy = describedByAttribute(
@@ -7704,9 +7709,9 @@ function describeConditionalChanges(before, after) {
     const is = after[i];
     if (!was || was.name !== is.name) continue; // defensive: same descriptor, so this should not happen
     if (was.visible !== is.visible) {
-      parts.push(`${is.displayName} is now ${is.visible ? (is.requiredNow ? 'visible and required' : 'visible') : 'hidden'}.`);
+      parts.push(uiText("workspace.app.is.now", { displayName: is.displayName, value: is.visible ? (is.requiredNow ? 'visible and required' : 'visible') : 'hidden' }));
     } else if (is.visible && was.requiredNow !== is.requiredNow) {
-      parts.push(`${is.displayName} is now ${is.requiredNow ? 'required' : 'optional'}.`);
+      parts.push(uiText("workspace.app.is.now", { displayName: is.displayName, value: is.requiredNow ? 'required' : 'optional' }));
     }
   }
   return parts.join(' ');
@@ -7780,13 +7785,13 @@ function validateCatalogEncodedField(field) {
   const maximumItems = Number(field.dataset.maximumItems || 0);
   const maximumItem = Number(field.dataset.maximumItemUtf8Bytes || 0);
   let error = maximum > 0 && byteLength(value) > maximum
-    ? `Maximum ${maximum} UTF-8 bytes.` : '';
+    ? uiText("workspace.validation.maximumBytes", { maximum }) : '';
   const items = value === '' ? [] : value.split(',');
   if (!error && maximumItems > 0 && items.length > maximumItems) {
-    error = `Maximum ${maximumItems} comma-separated items.`;
+    error = uiText("workspace.validation.maximumItems", { maximum: maximumItems });
   }
   if (!error && maximumItem > 0 && items.some(item => byteLength(item.trim()) > maximumItem)) {
-    error = `Each item is limited to ${maximumItem} UTF-8 bytes.`;
+    error = uiText("workspace.validation.maximumItemBytes", { maximum: maximumItem });
   }
   field.setCustomValidity(error);
 }
@@ -7837,7 +7842,7 @@ function bypassFieldHtml(descriptor, model, graph) {
     return `${title}
       <div class="node-bypass-fixed">
         <div class="bypass-refused" role="status">
-          <strong>${escapeHtml(uiText("workspace.template.app.this.node.carries"))} ${escapeHtml(propertyName)}.</strong> ${escapeHtml(uiText("workspace.template.app.the.runtime.refuses.that.property.on.a"))} ${escapeHtml(String(model.kind || 'non-behavior'))} ${escapeHtml(uiText("workspace.template.app.node.even.set.to"))}
+          <strong>${escapeHtml(uiText("workspace.template.app.this.node.carries"))} ${escapeHtml(propertyName)}.</strong> ${escapeHtml(uiText("workspace.template.app.the.runtime.refuses.that.property.on.a"))} ${escapeHtml(String(model.kind || uiText("workspace.app.non.behavior")))} ${escapeHtml(uiText("workspace.template.app.node.even.set.to"))}
           <code>${escapeHtml(uiText("workspace.template.app.false"))}</code> ${escapeHtml(uiText("workspace.template.app.because.there.is.no.behaviour.to.skip.and"))}
         </div>
       </div>`;
@@ -7845,8 +7850,8 @@ function bypassFieldHtml(descriptor, model, graph) {
   const untaken = untakenBypassOutcomes(graph?.edges, model.id);
   const consequence = bypassRoutingConsequence(untaken);
   const stateText = declared.state === 'on'
-    ? 'Switched off. This node does not execute.'
-    : 'Executing normally.';
+    ? uiText("workspace.app.switched.off.this.node.does.not.execute")
+    : uiText("workspace.app.executing.normally");
   const unreadable = declared.state === 'unreadable'
     ? `<div class="bypass-refused" role="status">
         <strong>${escapeHtml(uiText("workspace.template.app.the.document.declares"))} ${escapeHtml(propertyName)} = ${escapeHtml(declared.raw)}.</strong>
@@ -7965,7 +7970,7 @@ function natureFieldHtml(descriptor, model) {
   // the consequence that currently applies stay programmatically associated.
   return `${title}
     <div class="editor-field full node-nature">
-      <label for="node-nature-select">${escapeHtml(uiText("workspace.template.app.runtime.nature"))} <span class="nature-state" data-nature-state>${stateText}</span></label>
+      <label for="node-nature-select">${escapeHtml(uiText("workspace.template.app.runtime.nature"))} <span class="nature-state" data-nature-state>${escapeHtml(stateText)}</span></label>
       <select id="node-nature-select" name="runtimeNature" data-nature-property="${escapeAttribute(natureProperty)}"
         data-default-nature="${escapeAttribute(defaultIdentifier)}"
         aria-describedby="nature-risk">
@@ -8167,7 +8172,7 @@ function joinFieldHtml(graph, model) {
       </div>
       <div class="join-timeout-field" ${declared.kind === 'none' || unrecognized ? 'hidden' : ''}>
         <label for="node-join-timeout">${escapeHtml(uiText("workspace.template.app.timeout.iso.8601.duration.optional"))}</label>
-        <input id="node-join-timeout" name="joinTimeout" placeholder="PT30S" value="${escapeAttribute(timeoutRaw)}">
+        <input id="node-join-timeout" name="joinTimeout" placeholder="${escapeAttribute(uiText("workspace.join.durationExample"))}" value="${escapeAttribute(timeoutRaw)}">
       </div>
       ${quorumCollisionNote}
       ${endWarning}
@@ -8335,9 +8340,9 @@ function programGraph(owner) {
 
 function programResultDetail(result) {
   const identity = result.artifactId ? ` · Artifact ${result.artifactId}` : '';
-  const reused = result.phase === 'READY' ? ` · ${result.reused ? 'server reused' : 'server built'}` : '';
+  const reused = result.phase === 'READY' ? ` · ${result.reused ? uiText("workspace.app.server.reused") : uiText("workspace.app.server.built")}` : '';
   const diagnostic = result.diagnostic ? ` · ${result.diagnostic}` : '';
-  return `${result.phase || 'Readiness request failed'}${identity}${reused}${diagnostic}`;
+  return `${result.phase || uiText("workspace.app.readiness.request.failed")}${identity}${reused}${diagnostic}`;
 }
 
 function programPhase(owner, nodeId, result) {
@@ -8481,7 +8486,7 @@ function syncProgramReadinessOverlay(owner) {
   if (!overlay || overlay.hidden) return;
   const nodes = programNodes(programGraph(owner));
   const rows = nodes.map(node => {
-    const phase = state.phases.get(node.id)?.phase || 'Awaiting server snapshot';
+    const phase = state.phases.get(node.id)?.phase || uiText("workspace.app.awaiting.server.snapshot");
     return `<li><span>${escapeHtml(node.id)}</span><strong>${escapeHtml(phase)}</strong></li>`;
   }).join('');
   const settled = nodes.filter(node => Boolean(state.phases.get(node.id)?.phase)).length;
@@ -8580,7 +8585,7 @@ function applyProgramServerResult(owner, node, result) {
   if (!result || result.nodeId !== node.id) {
     programPhase(owner, node.id, {
       phase: '', ready: false, reused: false, transportError: true,
-      diagnostic: `Build snapshot omitted a valid result for ${node.id}`,
+      diagnostic: uiText("workspace.app.build.snapshot.omitted.a.valid.result.for", { id: node.id }),
     });
     return;
   }
@@ -8590,7 +8595,7 @@ function applyProgramServerResult(owner, node, result) {
   if (result.ready && !result.artifactId) {
     programPhase(owner, node.id, {
       ...result, phase: '', ready: false, transportError: true,
-      diagnostic: `READY snapshot omitted artifact identity for ${node.id}`,
+      diagnostic: uiText("workspace.app.ready.snapshot.omitted.artifact.identity.for", { id: node.id }),
     });
     return;
   }
@@ -8701,7 +8706,7 @@ function startProgramReadinessFlight(owner, plan, generation, {
     if (!isCurrent()) return false;
     plan.nodes.forEach(node => programPhase(owner, node.id, {
       phase: '', ready: false, reused: false, transportError: true,
-      diagnostic: uiErrorReason(error), detail: `Readiness request failed · ${uiErrorReason(error)}`,
+      diagnostic: uiErrorReason(error), detail: uiText("workspace.program.readinessFailure", { reason: uiErrorReason(error) }),
     }));
     state.settledGeneration = generation;
     addActivityMessage(activity, uiErrorReason(error), 'failed');
@@ -8743,10 +8748,10 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   const authoringLimits = currentProgramAuthoringLimits();
   const batchLimit = authoringLimits.maxProgramsPerBuild;
   if (plan.programs.length > batchLimit) {
-    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${batchLimit}`;
+    const message = uiText("workspace.program.tooManyNodes", { count: plan.programs.length, maximum: batchLimit });
     plan.nodes.forEach(node => programPhase(owner, node.id, {
       phase: '', ready: false, reused: false, transportError: true,
-      diagnostic: message, detail: `Readiness request failed · ${message}`,
+      diagnostic: message, detail: uiText("workspace.program.readinessFailure", { reason: message }),
     }));
     state.settledGeneration = generation;
     syncProgramReadinessChrome(owner);
@@ -8835,12 +8840,12 @@ ${escapeHtml(storedSource)}</textarea>
     </div>
     <div class="program-lifecycle">
       <button class="btn primary program-build" type="button" data-program-operation="build"
-        aria-disabled="true" data-tooltip-disabled="Loading the languages this runtime supports">${artifactId
-          ? 'Rebuild' : 'Build'}</button>
+        aria-disabled="true" data-tooltip-disabled="${escapeAttribute(uiText("workspace.program.loadingLanguages"))}">${artifactId
+          ? escapeHtml(uiText("workspace.app.rebuild")) : escapeHtml(uiText("workspace.app.build"))}</button>
     </div>
     <div class="program-status">${artifactId
-      ? `Artifact ${escapeHtml(artifactId)} · readiness is checked graph-wide`
-      : 'Not checked by the server yet.'}</div>
+      ? escapeHtml(uiText("workspace.app.artifact.readiness.is.checked.graph.wide", { artifactId: artifactId }))
+      : escapeHtml(uiText("workspace.app.not.checked.by.the.server.yet"))}</div>
     <ol class="program-timeline" aria-label="${escapeHtml(uiText("workspace.template.app.program.build.phases"))}"></ol>
     <output class="program-output" hidden></output>
   </div>`;
@@ -9300,8 +9305,7 @@ function renderEdgeForm(model, creating) {
     // outcome the source cannot produce selects this edge on no run. The 'continue' retry cannot
     // rescue it either — that returns edges wired to 'continue', and this one is not, which is the
     // exemption above.
-    setOutcomeWarning(`${source.name || source.id} cannot emit this outcome,`
-      + ' so this edge will never be taken.');
+    setOutcomeWarning(uiText("workspace.app.cannot.emit.this.outcome.so.this.edge.will.never", { value: source.name || source.id }));
   }
 
   function revalidateEdgeForm() {
@@ -9340,13 +9344,13 @@ function renderEdgeForm(model, creating) {
 
   form.addEventListener('submit', event => {
     event.preventDefault();
-    if (layoutBusy) return showFormError(form, 'Layout in progress');
-    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
+    if (layoutBusy) return showFormError(form, () => uiText("workspace.app.layout.in.progress"));
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, () => uiText("workspace.app.modify.mode.is.off"));
     const values = new FormData(form);
     // Stable edge identity is exact across inspector, GraphML, runtime events and D3. Do not trim:
     // leading/trailing whitespace is significant and validated without normalization.
     const id = String(values.get('id') || '');
-    if (creating && graphData.edges.some(edge => edge.id === id)) return showFormError(form, `Edge ID ${id} already exists`);
+    if (creating && graphData.edges.some(edge => edge.id === id)) return showFormError(form, () => uiText("workspace.app.edge.id.already.exists", { id: id }));
     const patch = readEdgeEditorPatch(form, model);
     if (creating) {
       const created = createEdge(id, patch.source, patch.target, patch.outcome);
@@ -9356,13 +9360,13 @@ function renderEdgeForm(model, creating) {
       const draft = inspectorDraft?.form === form ? inspectorDraft : null;
       if (draft) {
         const assessment = inspectInspectorDraft(draft);
-        if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
+        if (!assessment.valid) return showFormError(form, () => uiText('inspector.unsaved.invalidDescription'));
         if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
-          return showFormError(form, 'This edge is no longer part of the document');
+          return showFormError(form, () => uiText("workspace.app.this.edge.is.no.longer.part.of.the.document"));
         }
       } else if (edgePatchChanged(model, patch)) {
         if (!updateEdgeFields(graphData, model.id, patch, editHistory)) {
-          return showFormError(form, 'This edge is no longer part of the document');
+          return showFormError(form, () => uiText("workspace.app.this.edge.is.no.longer.part.of.the.document"));
         }
         syncAutosavedEdgeRenderer(model.id);
       }
@@ -9498,11 +9502,11 @@ function readAdditionalPropertyGroupEditor(form, descriptor) {
 function propertyRowHtml(property = { name: '', type: 'string', value: '' }) {
   const types = ['string', 'boolean', 'int', 'long', 'float', 'double'];
   return `<div class="property-row">
-    <input data-property-name placeholder="name" value="${escapeAttribute(property.name)}">
+    <input data-property-name placeholder="${escapeAttribute(uiText("workspace.property.namePlaceholder"))}" value="${escapeAttribute(property.name)}">
     <select data-property-type>${types.map(type => `<option ${type === property.type ? 'selected' : ''}>${type}</option>`).join('')}</select>
-    <input data-property-value placeholder="value" value="${escapeAttribute(property.value)}">
+    <input data-property-value placeholder="${escapeAttribute(uiText("workspace.property.valuePlaceholder"))}" value="${escapeAttribute(property.value)}">
     <button class="property-remove" type="button" data-remove-property
-      aria-label="${escapeHtml(uiText("workspace.template.app.remove.property"))}" data-tooltip="Remove property">×</button>
+      aria-label="${escapeHtml(uiText("workspace.template.app.remove.property"))}" data-tooltip="${escapeAttribute(uiText("workspace.template.app.remove.property"))}">×</button>
   </div>`;
 }
 
@@ -9527,11 +9531,11 @@ function showReadOnlyElement(model, label) {
   const definitions = isNode ? KNOWN_NODE_FIELDS : KNOWN_EDGE_FIELDS;
   const valueFor = name => name === 'nodeType' ? model.nodeType
     : name === 'name' && !isNode ? model.edgeName : model[name];
-  const fields = [{ label: 'ID', value: model.id }]
+  const fields = [{ label: uiText("workspace.property.id"), value: model.id }]
     .concat(definitions.map(field => ({ label: field.label, value: valueFor(field.name) })))
     .concat(isNode ? [
-      { label: 'Visual type', value: model.nodeType },
-      { label: 'Catalog type', value: model.behavior },
+      { label: uiText("workspace.property.visualType"), value: model.nodeType },
+      { label: uiText("workspace.property.catalogType"), value: model.behavior },
     ] : [])
     .concat(Object.entries(model.properties || {}).map(([name, value]) => ({ label: name, value })))
     .filter(field => field.value !== undefined && field.value !== null)
@@ -9544,8 +9548,12 @@ function showReadOnlyElement(model, label) {
 }
 
 function showFormError(form, message) {
+  form._localizedError = message;
   form.querySelector('.validation-list')?.remove();
-  form.insertAdjacentHTML('afterbegin', `<ul class="validation-list"><li>${escapeHtml(message)}</li></ul>`);
+  const list = document.createElement('ul'); list.className = 'validation-list';
+  const item = document.createElement('li');
+  item.textContent = typeof message === 'function' ? message() : message;
+  list.append(item); form.prepend(list);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -9679,7 +9687,7 @@ function renderPersonalPalettes() {
     onCreatePalette: async name => paletteMutation(() => runtimeClient.createNodePalette(name)),
     onSave: palette => saveSelectedNodeTemplate(palette),
     onRename: palette => {
-      const name = globalThis.prompt('Palette name', palette.name)?.trim();
+      const name = globalThis.prompt(uiText("workspace.app.palette.name"), palette.name)?.trim();
       if (name && name !== palette.name) void paletteMutation(
         () => runtimeClient.renameNodePalette(palette.id, palette.version, name));
     },
@@ -9693,7 +9701,7 @@ function renderPersonalPalettes() {
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
     },
     onRenameTemplate: template => {
-      const name = globalThis.prompt('Saved node name', template.name)?.trim();
+      const name = globalThis.prompt(uiText("workspace.app.saved.node.name"), template.name)?.trim();
       if (name && name !== template.name) void paletteMutation(() => runtimeClient.updateNodeTemplate(
         template.id, template.version, template.paletteId, name));
     },
@@ -9724,7 +9732,7 @@ async function loadPersonalPalettes(client = runtimeClient) {
     nodePaletteState = { pending: false, error: '', palettes: result.palettes, templates: result.templates };
   } catch (error) {
     if (client !== runtimeClient) return;
-    nodePaletteState = { pending: false, error: uiErrorReason(error) || 'Personal palettes are unavailable',
+    nodePaletteState = { pending: false, error: uiErrorReason(error) || uiText("workspace.palettes.unavailable"),
       palettes: [], templates: [] };
   }
   renderPersonalPalettes();
@@ -9749,7 +9757,7 @@ function saveSelectedNodeTemplate(palette) {
   }
   const node = graphData.nodeMap[selected.first().id()];
   if (!node) return;
-  const name = globalThis.prompt('Saved node name', node.name || node.id)?.trim();
+  const name = globalThis.prompt(uiText("workspace.app.saved.node.name"), node.name || node.id)?.trim();
   if (!name) return;
   void paletteMutation(() => runtimeClient.createNodeTemplate(palette.id, name, {
     name: node.name, kind: node.kind, behavior: node.behavior || '',
@@ -10159,6 +10167,7 @@ function newWorkflow() {
   // stack and the dirty flag of the one it replaced.
   editHistory.reset();
   updateHistoryUi();
+  // i18n-audit-exempt: protocol-token - portable default filename is persisted and exported as document identity.
   graphName = 'untitled.graphml';
   document.getElementById('graph-title').textContent = graphName;
   document.title = graphName + uiText("workspace.app.ravenroot.ui.2");
@@ -10175,6 +10184,7 @@ function createStartupImportPlaceholder() {
   graphData = createEmptyWorkflowDocument();
   editHistory.reset();
   updateHistoryUi();
+  // i18n-audit-exempt: protocol-token - portable default filename is persisted and exported as document identity.
   graphName = 'untitled.graphml';
   document.getElementById('graph-title').textContent = graphName;
   document.title = graphName + uiText("workspace.app.ravenroot.ui.2");
@@ -10195,7 +10205,7 @@ function showAddNodeForm({ skipDraftGuard = false } = {}) {
     uiText("workspace.notice.graphify.json.is.view.only.create.or.load.a"));
   const id = uniqueId('node', graphData.nodes);
   document.getElementById('info-title').textContent = uiText("workspace.app.add.node");
-  renderNodeForm(createNode(id, 'New node', 'PASSTHROUGH'), true);
+  renderNodeForm(createNode(id, uiText("workspace.app.new.node"), 'PASSTHROUGH'), true);
 }
 
 function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}) {
@@ -10231,15 +10241,15 @@ function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}
   const form = document.getElementById('register-machine-preset-editor');
   form.addEventListener('submit', event => {
     event.preventDefault();
-    if (layoutBusy) return showFormError(form, 'Layout in progress');
-    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
+    if (layoutBusy) return showFormError(form, () => uiText("workspace.app.layout.in.progress"));
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, () => uiText("workspace.app.modify.mode.is.off"));
     const values = Object.fromEntries(new FormData(form));
     let inserted;
     try {
       inserted = insertRegisterMachinePreset(graphData, presetId, values,
         { x: 120 + graphData.nodes.length * 16, y: 120 + graphData.nodes.length * 8 }, editHistory);
     } catch (error) {
-      return showFormError(form, error?.message || 'Cannot insert register-machine expansion');
+      return showFormError(form, () => uiErrorReason(error) || uiText("workspace.app.cannot.insert.register.machine.expansion"));
     }
     retireInspectorDraft(form);
     rebuildGraph({ syncPositions: false });
@@ -10393,14 +10403,14 @@ function undoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canUndo()
       || !finalizeInspectorBeforeHistory()) return;
   suspendVisualGroups(workspace.active);
-  applyHistoryStep(editHistory.undo(graphData), 'Undo');
+  applyHistoryStep(editHistory.undo(graphData), uiText("workspace.app.undo"));
 }
 
 function redoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canRedo()
       || !finalizeInspectorBeforeHistory()) return;
   suspendVisualGroups(workspace.active);
-  applyHistoryStep(editHistory.redo(graphData), 'Redo');
+  applyHistoryStep(editHistory.redo(graphData), uiText("workspace.app.redo"));
 }
 
 function finalizeInspectorBeforeHistory() {
@@ -10416,7 +10426,7 @@ function finalizeInspectorBeforeHistory() {
     retireInspectorDraft(draft.form);
     return true;
   }
-  showFormError(draft.form, uiText('inspector.history.pending'));
+  showFormError(draft.form, () => uiText('inspector.history.pending'));
   draft.form.querySelector(':invalid')?.focus();
   return false;
 }
@@ -11380,11 +11390,11 @@ function announcePointerGestureTransition(previous, current, candidateId) {
   setEdgeGestureSemanticState(current.phase);
   let description;
   if (current.phase === 'dragging') {
-    description = `${describeEdgeGesture(session.gesture, session.graph, null)} Release on the canvas cancels.`;
+    description = uiText("workspace.app.release.on.the.canvas.cancels", { value: describeEdgeGesture(session.gesture, session.graph, null) });
   } else {
     description = describeEdgeGesture(session.gesture, session.graph, candidateId);
-    if (current.phase === 'target-self') description += ' Release to create a self-loop.';
-    else if (current.phase === 'target-valid') description += ' Release to connect.';
+    if (current.phase === 'target-self') description += uiText("workspace.app.release.to.create.a.self.loop");
+    else if (current.phase === 'target-valid') description += uiText("workspace.app.release.to.connect");
   }
   showInspectorMessage(description);
   announceGraph(description);
@@ -11499,7 +11509,7 @@ function moveGraphCursor(direction) {
     if (!best || score < best.score) best = { id: node.id(), score };
   });
   if (!best) {
-    announceGraph(uiText("workspace.notice.no.node.to.the", { direction: direction }));
+    announceGraph(uiText("workspace.notice.no.node.to.the", { direction: uiText(`workspace.direction.${direction}`) }));
     return;
   }
   setGraphCursor(best.id);
@@ -11780,7 +11790,7 @@ async function connectRuntime(atBoot = false) {
   try { rememberedConnection.select(baseUrl); } catch (error) {
     setRuntimeConnectionState('error', uiErrorReason(error));
     const outcome = { kind: 'error', code: 'invalid-service-url',
-      message: 'Enter a valid Ravenroot service URL, then retry the import.' };
+      message: uiText("workspace.import.invalidUrl") };
     startupImportController?.updateRuntime(outcome);
     return outcome;
   }
@@ -11792,9 +11802,9 @@ async function connectRuntime(atBoot = false) {
       target = new URL(baseUrl, location.origin);
       if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
     } catch {
-      setRuntimeConnectionState('error', 'Enter a valid HTTP(S) service URL');
+      setRuntimeConnectionState('error', uiText("workspace.app.enter.a.valid.http.s.service.url"));
       const outcome = { kind: 'error', code: 'invalid-service-url',
-        message: 'Enter a valid Ravenroot service URL, then retry the import.' };
+        message: uiText("workspace.import.invalidUrl") };
       startupImportController?.updateRuntime(outcome);
       return outcome;
     }
@@ -11804,7 +11814,7 @@ async function connectRuntime(atBoot = false) {
       // the token stays put and the decision waits for the user's next deliberate action.
       if (atBoot) {
         setRuntimeConnectionState('authentication-required',
-          'Confirm the external service origin to connect');
+          uiText("workspace.app.confirm.the.external.service.origin.to.connect"));
         const outcome = { kind: 'service-confirmation-required' };
         startupImportController?.updateRuntime(outcome);
         return outcome;
@@ -11830,7 +11840,7 @@ async function connectRuntime(atBoot = false) {
         refreshCommands();
         syncGraphModeLabel();
         void configureHumanTasks();
-        setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
+        setRuntimeConnectionState('authentication-required', uiText("workspace.app.external.service.connection.cancelled"));
         const outcome = { kind: 'service-confirmation-required' };
         startupImportController?.updateRuntime(outcome);
         return outcome;
@@ -11876,7 +11886,7 @@ async function connectRuntime(atBoot = false) {
       syncGraphModeLabel();
       if (result.error || !configuration) {
         failWorkspaceAuthority(connectedClient, authorityGeneration,
-          `Workspace authority could not be verified: ${result.error?.message || 'configuration unavailable'}`);
+          uiText("workspace.app.workspace.authority.could.not.be.verified", { value: result.error?.message || 'configuration unavailable' }));
         return result;
       }
       runtimeConfiguration = result;
@@ -11900,15 +11910,15 @@ async function connectRuntime(atBoot = false) {
   });
   const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
-    atBoot ? 'Connecting to the service' : 'Connecting to the selected service');
+    atBoot ? uiText("workspace.app.connecting.to.the.service") : uiText("workspace.app.connecting.to.the.selected.service"));
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
     runtimeDisconnect = runtimeClient.connect(
       event => deliverRuntimeEventAfterAuthority(event, connectedClient, connectedConfigurationRequest),
-      (status, message) => {
+      (status, message, renderMessage) => {
         if (runtimeClient !== connectedClient) return;
-        setRuntimeConnectionState(status, message);
+        setRuntimeConnectionState(status, renderMessage || message);
         if (status === 'connected') {
           void rememberedConnection.authenticated(confirmRememberConnection);
           void configureHumanTasks();
@@ -11954,7 +11964,7 @@ async function connectRuntime(atBoot = false) {
     setRuntimeConnectionState('error', uiErrorReason(error));
     addActivityMessage(uiMessage("workspace.notice.connection"), uiErrorReason(error), 'failed');
     const outcome = { kind: 'error', code: 'connection-failed',
-      message: 'The Ravenroot service connection failed. Retry when the service is available.' };
+      message: uiText("workspace.import.connectionFailed") };
     startupImportController?.updateRuntime(outcome);
     return outcome;
   }
@@ -11967,22 +11977,22 @@ async function connectRuntime(atBoot = false) {
     outcome = [401, 403].includes(configurationResult.error?.status)
       ? { kind: 'authentication-required' }
       : { kind: 'error', code: 'configuration-unavailable',
-        message: 'The service did not provide valid graph-loading configuration. Fix the connection and retry.' };
+        message: uiText("workspace.import.invalidConfiguration") };
   } else if (workspaceAuthority.state === 'ready' && workspaceAuthority.client === connectedClient
       && workspaceAuthority.generation === authorityGeneration && !workspaceRestoreInProgress) {
     outcome = { kind: 'ready', binding: startupImportBinding() };
   } else {
     const workspaceFailure = configurationResult.workspaceFailure;
     const failures = {
-      'current-session-conflict': 'Current session documents must remain open. Close or export them, reconnect, and retry the import.',
-      'current-session-changed': 'The stored workspace was not replaced because the current documents changed. Reconnect when you are ready, then retry the import.',
-      'persistence-unavailable': 'The current workspace could not be saved safely. Keep or export the open documents, then retry the connection.',
-      'restore-failed': 'The stored workspace could not be restored. Current documents and stored data were left unchanged; retry the connection.',
-      'stale-transition': 'The service or workspace changed before restoration completed. Retry in the current workspace.',
+      'current-session-conflict': uiText("workspace.app.current.session.documents.must.remain.open.close.or.export"),
+      'current-session-changed': uiText("workspace.app.the.stored.workspace.was.not.replaced.because.the.current"),
+      'persistence-unavailable': uiText("workspace.app.the.current.workspace.could.not.be.saved.safely.keep"),
+      'restore-failed': uiText("workspace.app.the.stored.workspace.could.not.be.restored.current.documents"),
+      'stale-transition': uiText("workspace.app.the.service.or.workspace.changed.before.restoration.completed.retry"),
     };
     outcome = { kind: 'error', code: workspaceFailure || 'workspace-not-ready',
       message: failures[workspaceFailure]
-        || 'The workspace is not ready for an import. Reconnect when ready, then retry.' };
+        || uiText("workspace.import.notReady") };
   }
   startupImportController?.updateRuntime(outcome);
   return outcome;
@@ -12020,7 +12030,7 @@ function authenticateRuntime() {
     return;
   }
   if (!token) {
-    setRuntimeConnectionState('authentication-required', 'Paste an access token to authenticate');
+    setRuntimeConnectionState('authentication-required', uiText("workspace.app.paste.an.access.token.to.authenticate"));
     input.focus();
     return;
   }
@@ -12050,7 +12060,7 @@ async function revokeRuntimeAccess(rejected = false) {
     new Error('Runtime access was revoked'));
   refreshCommands();
   syncGraphModeLabel();
-  workspacePersistenceReason = 'Workspace authority was revoked. Documents remain open for export.';
+  workspacePersistenceReason = uiText("workspace.app.workspace.authority.was.revoked.documents.remain.open.for.export");
   syncActiveDocumentChrome();
   suspendHumanTaskRecovery();
   void configureHumanTasks();
@@ -12074,24 +12084,27 @@ async function revokeRuntimeAccess(rejected = false) {
   nodeCatalogPending = false;
   renderNodeCatalog();
   setRuntimeConnectionState(rejected ? 'authentication-required' : 'revoked', rejected
-    ? 'The service rejected its token; authenticate with a replacement token'
-    : 'Browser token forgotten; service retained. A configured server token may still apply.');
+    ? uiText("workspace.app.the.service.rejected.its.token.authenticate.with.a.replacement")
+    : uiText("workspace.app.browser.token.forgotten.service.retained.a.configured.server.token"));
   refreshCommands();
   if (!rejected && startupServerAuth && connectionService(document.getElementById('service-url').value, location.origin) === startupService) {
     void connectRuntime();
   }
 }
 
+let runtimeConnectionPresentation = null;
 function setRuntimeConnectionState(status, message) {
+  runtimeConnectionPresentation = { status, message };
+  message = typeof message === 'function' ? message() : message;
   const state = document.getElementById('runtime-connection');
   state.className = `connection-state ${status}`;
-  state.textContent = status.replaceAll('-', ' ');
+  state.textContent = uiText(`workspace.runtime.state.${status}`);
   if (status === 'authentication-required' && !hasRuntimeToken) {
-    message += ' — Paste a service token. If the proxy uses an operator token, its operator must rotate it and restart the UI server.';
+    message += uiText("workspace.app.paste.a.service.token.if.the.proxy.uses.an");
   }
   if (rememberedConnection.notice) message += ` — ${rememberedConnection.notice}`;
   state.title = message;
-  state.setAttribute('aria-label', uiText("workspace.app.runtime.status", { textContent: status.replaceAll('-', ' '), notice: message }));
+  state.setAttribute('aria-label', uiText("workspace.app.runtime.status", { textContent: state.textContent, notice: message }));
 }
 
 function stopCurrentSourceSession() {
@@ -12130,7 +12143,7 @@ async function executionLifecycleCommand(action) {
     && executionCommandIsCurrent(flight);
   if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
   refreshCommands();
-  addActivityMessage(action, uiMessage("workspace.notice.requested.for.execution", { detail1: action[0].toUpperCase(), detail2: action.slice(1), shortId: shortId(flight.executionId) }));
+  addActivityMessage(uiMessage(`workspace.execution.action.${action}`), uiMessage("workspace.notice.requested.for.execution", { detail1: uiText(`workspace.execution.action.${action}`), detail2: '', shortId: shortId(flight.executionId) }));
   try {
     const result = await requestExecutionLifecycle(action, {
       client: flight.client,
@@ -12143,8 +12156,8 @@ async function executionLifecycleCommand(action) {
       setExecutionReconciliationState(owner, 'unknown');
       if (workspace.activeId === owner.id) {
         const reason = result.observationError?.message || result.commandError?.message
-          || 'the runtime returned no readable reason';
-        addActivityMessage(uiMessage("workspace.notice.status.unknown", { action: action }),
+          || uiText("workspace.app.the.runtime.returned.no.readable.reason");
+        addActivityMessage(uiMessage("workspace.notice.status.unknown", { action: uiText(`workspace.execution.action.${action}`) }),
           uiMessage("workspace.notice.execution.could.not.be.authoritatively.read.after.the.command", { shortId: shortId(flight.executionId), reason: reason }), 'failed');
         syncExecutionReconciliationChrome(true);
       }
@@ -12158,17 +12171,17 @@ async function executionLifecycleCommand(action) {
       settleReconciledExecution(owner, flight.executionId, flight.client, flight.generation, outcome, false);
     }
     if (workspace.activeId === owner.id) {
-      const commandOutcome = result.command?.outcome || 'transport outcome unavailable';
+      const commandOutcome = result.command?.outcome || uiText("workspace.app.transport.outcome.unavailable");
       const status = String(outcome?.status || 'active').toLowerCase();
-      const paused = outcome?.paused ? 'paused' : 'not paused';
-      addActivityMessage(action,
+      const paused = outcome?.paused ? uiText("workspace.app.paused") : uiText("workspace.app.not.paused");
+      addActivityMessage(uiMessage(`workspace.execution.action.${action}`),
         uiMessage("workspace.notice.authoritative.state.execution", { commandOutcome: commandOutcome, status: status, paused: paused, shortId: shortId(flight.executionId) }),
         result.commandError ? 'failed' : 'completed');
-      if (result.commandError) addActivityMessage(uiMessage("workspace.notice.request.response.unavailable", { action: action }),
+      if (result.commandError) addActivityMessage(uiMessage("workspace.notice.request.response.unavailable", { action: uiText(`workspace.execution.action.${action}`) }),
         uiMessage("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: result.commandError.message }),
         'failed');
       document.getElementById('activity-summary').textContent =
-        uiText("workspace.app.execution", { action: action[0].toUpperCase(), action2: action.slice(1), status: status, executionId: shortId(flight.executionId) });
+        uiText("workspace.app.execution", { action: uiText(`workspace.execution.action.${action}`), action2: '', status: status, executionId: shortId(flight.executionId) });
       document.getElementById('activity-summary').removeAttribute('aria-label');
     }
     return true;
@@ -12268,7 +12281,7 @@ async function observeSourceSession(owner, token) {
       if (error?.status === 404) {
         updateSourceSession(owner, {
           state: 'STOPPED', sourceCount: owner.sourceSession.sourceCount,
-          diagnostic: 'No source session exists in this server process.',
+          diagnostic: uiText("workspace.app.no.source.session.exists.in.this.server.process"),
         }, token);
         break;
       }
@@ -12320,11 +12333,11 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
     const explicitFailure = Number.isInteger(error?.status);
     updateSourceSession(owner, {
       state: explicitFailure ? 'FAILED' : 'UNKNOWN', sourceCount,
-      diagnostic: explicitFailure ? 'The server rejected the source session start.' : '',
+      diagnostic: explicitFailure ? uiText("workspace.app.the.server.rejected.the.source.session.start") : '',
       failure: error?.finding || null,
     }, token, { observationUnavailable: !explicitFailure, silentActivity: explicitFailure });
     if (owner === workspace.active && !error?.finding) addActivityMessage(uiMessage("workspace.notice.source.session.request.failed"),
-      explicitFailure ? uiMessage("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? ` · incident ${error.incidentId}` : '' }) : uiMessage("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
+      explicitFailure ? uiMessage("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? uiText("workspace.app.incident", { incidentId: error.incidentId }) : '' }) : uiMessage("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
     if (!explicitFailure && !session.stopRequested) void observeSourceSession(owner, token);
     return false;
   } finally {
@@ -12371,7 +12384,7 @@ async function stopActiveSourceSession(owner) {
         if (sourceSessionCommandIsCurrent(owner, token)) {
           updateSourceSession(owner, {
             state: 'STOPPED', sourceCount: session.sourceCount,
-            diagnostic: 'No source session exists in this server process.',
+            diagnostic: uiText("workspace.app.no.source.session.exists.in.this.server.process"),
           }, token);
         }
         return true;
@@ -12467,7 +12480,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
       onUnknown: ({ error, failureCount }) => {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
-        const reason = error?.message || 'the runtime returned no readable reason';
+        const reason = error?.message || uiText("workspace.app.the.runtime.returned.no.readable.reason");
         addActivityMessage(uiMessage("workspace.notice.execution.status.unknown"),
           uiMessage("workspace.notice.execution.could.not.be.reconciled.after.checks.test.and", { shortId: shortId(executionId), failureCount: failureCount, reason: reason }),
           'failed');
@@ -12741,7 +12754,7 @@ async function playGraph(mode = 'test') {
     void reconcileTestCompletion(owner, submission.executionId, executionClient);
     if (workspace.activeId !== owner.id) return;
     addActivityMessage(uiMessage("workspace.notice.accepted"),
-      uiMessage("workspace.notice.execution.graph", { detail1: submission.executionPolicy || 'policy unreported', shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
+      uiMessage("workspace.notice.execution.graph", { detail1: submission.executionPolicy || uiText("workspace.app.policy.unreported"), shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
       'completed');
     if (owner.execution.finished.has(submission.executionId)) refreshCommands();
     scheduleWorkspacePersistence();
@@ -12751,7 +12764,7 @@ async function playGraph(mode = 'test') {
     setDocumentExecution(owner, null, null);
     if (workspace.activeId !== owner.id) return;
     refreshCommands();
-    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, 'Execution refused');
+    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiText("workspace.app.execution.refused"));
     else {
       addActivityMessage(uiMessage("workspace.notice.request.failed"), uiErrorReason(error), 'failed');
       showInspectorMessage(uiErrorReason(error));
@@ -13043,7 +13056,7 @@ function runtimeCountLabel(name, instances, arrivals = 0, failures = 0) {
   const failed = failures > 0 ? `${failures} failed` : '';
   if (!(instances > 0)) return failed ? `${name} · ${failed}` : name;
   const noun = instances === 1 ? 'instance' : 'instances';
-  const queued = arrivals > instances ? ` · ${arrivals} in flight` : '';
+  const queued = arrivals > instances ? uiText("workspace.app.in.flight", { arrivals: arrivals }) : '';
   return `${name} · ${instances} ${noun}${queued}${failed ? ` · ${failed}` : ''}`;
 }
 
@@ -13608,7 +13621,7 @@ async function startAssistantConnection() {
     // Reported where the author is looking, and NOT as a transcript turn: nothing was asked of the
     // model, so a turn would put words in a conversation that did not happen.
     showAssistantConnectionProgress(String(error?.message
-      || 'The connection could not be started.'));
+      || uiText("workspace.app.the.connection.could.not.be.started")));
     renderAssistantState();
     return;
   }
@@ -13679,7 +13692,7 @@ async function pollAssistantConnection() {
     // again, which is a decision they can make and this loop cannot.
     stopAssistantConnectionTimer();
     showAssistantConnectionProgress(String(error?.message
-      || 'The connection could not be checked.'));
+      || uiText("workspace.app.the.connection.could.not.be.checked")));
     return;
   }
   if (!assistantConnection) return;
@@ -13789,7 +13802,7 @@ function renderAssistantTurn(entry, size) {
     ? ''
     : `<div class="assistant-turn-role">${escapeHtml(assistantRoleLabel(entry.role))}</div>`;
   log.insertAdjacentHTML('beforeend', `<div class="assistant-turn assistant-turn--${escapeAttribute(entry.role)}"${id}${described}>
-    ${role}<div class="assistant-turn-text">${escapeHtml(entry.text)}</div>${attached}</div>`);
+    ${role}<div class="assistant-turn-text">${escapeHtml(entry.role === DISCLOSURE_ROLE ? uiText("workspace.assistant.disclosure.you.are.interacting.with.an.ai.system.the.replies") : entry.text)}</div>${attached}</div>`);
   // Mirrors `appendTurn`'s cap exactly: the oldest turn that is NOT the disclosure. Removing
   // `firstElementChild` unconditionally would delete the disclosure element while the array kept
   // its entry, leaving every reply's `aria-describedby` pointing at nothing.
@@ -13806,9 +13819,9 @@ function renderAssistantTurn(entry, size) {
 }
 
 function assistantRoleLabel(role) {
-  if (role === AUTHOR) return 'You';
-  if (role === ASSISTANT) return 'Assistant';
-  return 'Ravenroot';
+  if (role === AUTHOR) return uiText("workspace.app.you");
+  if (role === ASSISTANT) return uiText("workspace.app.assistant");
+  return uiText("workspace.app.ravenroot");
 }
 
 function clearAssistantConversation() {
@@ -13890,7 +13903,7 @@ async function submitAssistantDraft() {
   } catch (error) {
     // Reported in the transcript AND in the state banner. Never a silent failure, and never a
     // fabricated answer standing in for one.
-    assistantError = { reason: error?.reason || null, message: error?.message || 'The assistant request failed.' };
+    assistantError = { reason: error?.reason || null, message: error?.message || uiText("workspace.assistant.requestFailed") };
     pushAssistantTurn({ role: NOTICE, text: assistantError.message });
     // A failure that tells us the service is gone updates availability too, so the panel settles
     // into the inert state that names the cause rather than staying in a transient error.
@@ -13922,7 +13935,7 @@ function renderAssistantProposal(proposal) {
   let planned = planAssistantGraphProposal(proposal, liveAssistantProposalContext());
   const proposalId = typeof proposal?.id === 'string' ? proposal.id : '';
   const duplicate = proposalId && assistantProposals.has(proposalId);
-  if (duplicate) planned = { ok: false, errors: ['This proposal id was already used in this conversation.'] };
+  if (duplicate) planned = { ok: false, errors: [uiText("workspace.app.this.proposal.id.was.already.used.in.this.conversation")] };
   const proposalKey = duplicate || !proposalId
     ? `invalid-proposal-${++assistantProposalSequence}` : proposalId;
   const card = document.createElement('section');
@@ -14062,7 +14075,7 @@ function escapeAttribute(value) {
 
 function contextualHelpButtonHtml(title, content) {
   if (!String(content || '').trim()) return '';
-  const accessibleName = `Help: ${title}`;
+  const accessibleName = uiText("workspace.app.help", { title: title });
   return `<button class="contextual-help-trigger" type="button"
       aria-label="${escapeAttribute(accessibleName)}" aria-expanded="false"
       aria-controls="contextual-help-popover" data-tooltip="${escapeAttribute(accessibleName)}"
@@ -15191,9 +15204,9 @@ document.addEventListener('pointerdown', beginPanelDrag);
 
 function documentAccessibleName(document_, index) {
   const states = [];
-  if (paneIsDirty(document_)) states.push('modified');
-  if (document_.id === workspace.activeId) states.push('current');
-  return `${document_.displayName}${states.length ? `, ${states.join(', ')}` : ''}, document ${index + 1} of ${workspace.size}`;
+  if (paneIsDirty(document_)) states.push(uiText("workspace.document.modified"));
+  if (document_.id === workspace.activeId) states.push(uiText("workspace.document.current"));
+  return uiText("workspace.app.document.of", { displayName: document_.displayName, value: states.length ? `, ${states.join(', ')}` : '', index: index, value2: 1, size: workspace.size });
 }
 
 function syncDocumentSwitcher() {
@@ -15618,13 +15631,14 @@ async function openRepositoryGraph(requested = null) {
       if (!page.items.length) return showInspectorMessage(uiText("workspace.notice.this.repository.has.no.graphs.in.your.workspace")) || false;
       const choices = page.items.flatMap(item => [
         ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
-          source: 'draft', label: `${item.documentId} [draft] · v${item.releaseVersion}`
-            + (item.released ? ` · released v${item.releasedVersion}${item.published ? ' · published' : ' · publication pending or failed'}` : '') }] : []),
+          source: 'draft', label: uiText("workspace.repository.draft.choice", { documentId: item.documentId, version: item.releaseVersion })
+            + (item.released ? uiText("workspace.repository.released.choice.suffix", { version: item.releasedVersion,
+              publication: item.published ? uiText("workspace.repository.published.suffix") : uiText("workspace.app.publication.pending.or.failed") }) : '') }] : []),
         ...(item.released ? [{ key: `${item.documentId} [released]`, documentId: item.documentId,
-          source: 'release', label: `${item.documentId} [released] · v${item.releasedVersion}`
-            + (item.published ? ' · published' : ' · publication pending or failed') }] : []),
+          source: 'release', label: uiText("workspace.repository.released.choice", { documentId: item.documentId, version: item.releasedVersion })
+            + (item.published ? uiText("workspace.repository.published.suffix") : uiText("workspace.app.publication.pending.or.failed")) }] : []),
       ]);
-      const selected = globalThis.prompt(`Open a repository graph:\n\n${choices.map(item => item.label).join('\n')}`,
+      const selected = globalThis.prompt(uiText("workspace.app.open.a.repository.graph", { value: choices.map(item => item.label).join('\n') }),
         choices[0].key)?.trim();
       const choice = choices.find(item => item.key === selected);
       if (!choice) return false;
@@ -15651,7 +15665,7 @@ async function saveRepositoryGraph() {
   const target = workspace.active;
   if (!gitAuthoringEnabled() || !target || target.authoring.saveFlight) return false;
   const providerDocumentId = target.authoring.providerDocumentId
-    || globalThis.prompt('Repository filename', target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
+    || globalThis.prompt(uiText("workspace.app.repository.filename"), target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
   if (!providerDocumentId) return false;
   const prepared = prepareDocumentDownload(target.id);
   if (!prepared) return false;
@@ -15676,7 +15690,7 @@ async function saveRepositoryGraph() {
     addActivityMessage(uiMessage("workspace.notice.editor.21"), uiMessage("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
     updateHistoryUi(); return true;
   } catch (error) {
-    target.authoring.saveError = uiErrorReason(error) || 'The repository save failed.';
+    target.authoring.saveError = uiErrorReason(error) || uiText("workspace.app.the.repository.save.failed");
     setGraphAuthoringAvailability(false);
     showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.repository.save.failed.refresh.and.retry")); return false;
   } finally {
@@ -15691,7 +15705,7 @@ async function repositoryHistory() {
   try {
     const page = await graphAuthoringClient.history(id);
     const lines = page.items.map(item => `${item.revision.slice(0, 12)} · ${item.summary} · ${item.author}`);
-    const revision = globalThis.prompt(`History for ${id}:\n\n${lines.join('\n')}\n\nEnter a full revision to restore, or leave blank to close:`, '')?.trim();
+    const revision = globalThis.prompt(uiText("workspace.app.history.for.enter.a.full.revision.to.restore.or", { id: id, value: lines.join('\n') }), '')?.trim();
     if (!revision) return true;
     if (!globalThis.confirm(uiText("workspace.app.restore.this.revision.as.a.new.draft"))) return false;
     const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
@@ -15731,7 +15745,7 @@ async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
   if (!gitAuthoringEnabled() || !id) return false;
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
-    addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", { detail1: result.reused ? 'Existing' : 'New', url: result.url }), 'completed'); return true;
+    addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", { detail1: result.reused ? uiText("workspace.app.existing") : uiText("workspace.app.new"), url: result.url }), 'completed'); return true;
   } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
 }
 
@@ -15741,7 +15755,7 @@ async function publishedArtifacts() {
     const page = await graphAuthoringClient.artifacts();
     if (!page.items.length) return showInspectorMessage(uiText("workspace.notice.no.verified.published.graph.versions.are.available")) || false;
     const choices = page.items.map(item => `${item.graphId}@${item.releaseVersion} · ${item.sha256.slice(0, 12)}`);
-    const selection = globalThis.prompt(`Published versions (selecting an older version performs rollback):\n\n${choices.join('\n')}\n\nEnter graphId@version to pin and register:`, '')?.trim();
+    const selection = globalThis.prompt(uiText("workspace.app.published.versions.selecting.an.older.version.performs.rollback.enter", { value: choices.join('\n') }), '')?.trim();
     if (!selection) return false;
     const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})@([1-9][0-9]*)$/.exec(selection);
     if (!match) throw new Error('Use graphId@version.');
@@ -15749,7 +15763,7 @@ async function publishedArtifacts() {
     const selected = page.items.find(item => item.graphId === match[1]
       && item.releaseVersion === releaseVersion);
     if (!selected) throw new Error('Select an exact version from the verified catalog shown above.');
-    const deploymentId = globalThis.prompt('Deployment name', `${match[1]}-${match[2]}`)?.trim();
+    const deploymentId = globalThis.prompt(uiText("workspace.app.deployment.name"), `${match[1]}-${match[2]}`)?.trim();
     if (!deploymentId) return false;
     await graphAuthoringClient.importArtifact(match[1], releaseVersion, selected.sha256, selected.artifactRef);
     const result = await graphAuthoringClient.deploy(match[1], releaseVersion, deploymentId,
@@ -16897,7 +16911,7 @@ const drawingModelController = createDrawingModelController({
     }));
     addActivityMessage(uiMessage("workspace.notice.drawing.model"), uiMessage("workspace.notice.inspected.mapped", { role: role, id: id }), 'completed');
   },
-  notify: (message, state) => addActivityMessage(uiMessage("workspace.notice.drawing.model.2"), message, state),
+  notify: (message, state) => addActivityMessage(uiMessage("workspace.notice.drawing.model.2"), typeof message === 'function' ? uiComputed(message) : message, state),
 });
 window.ravenroot.drawingModels = drawingModelController;
 
@@ -16923,6 +16937,8 @@ uiLocalization.subscribe(() => {
   // first so that their paint-only rebuild cannot reset history, selection, or an inspector draft.
   captureActiveDocument();
   const selectedIds = cy && !cy.destroyed() ? cy.elements(':selected').map(element => element.id()) : [];
+  const formErrors = [...document.querySelectorAll('form')].filter(form => form.getAttribute('id') && form._localizedError)
+    .map(form => [form.getAttribute('id'), form._localizedError]);
   const openEditor = document.getElementById('node-editor');
   const editorDraft = openEditor ? [...openEditor.elements].filter(control => control.name).map(control => ({
     name: control.name,
@@ -16934,6 +16950,7 @@ uiLocalization.subscribe(() => {
   syncActiveDocumentChrome();
   syncGraphModeLabel();
   syncSourceSessionChrome();
+  if (runtimeConnectionPresentation) setRuntimeConnectionState(runtimeConnectionPresentation.status, runtimeConnectionPresentation.message);
   updateHistoryUi();
   updateModifyAvailability();
   updateStats();
@@ -16948,15 +16965,20 @@ uiLocalization.subscribe(() => {
   scheduleMinimap();
   credentialsWindow?.refreshLocale?.();
   deploymentsWindow?.refreshLocale?.();
+  runnerWindow?.refreshLocale?.();
   drawingModelController?.refreshLocale?.();
   workspace.documents.forEach(owner => owner.visualGroupsRenderer?.refreshLocale?.());
   refreshCommands();
   renderShortcutHelp();
   refreshActivityLocale();
+  document.querySelectorAll(".assistant-turn--disclosure .assistant-turn-text").forEach(node => {
+    node.textContent = uiText("workspace.assistant.disclosure.you.are.interacting.with.an.ai.system.the.replies");
+  });
   if (selectedIds.length && cy && !cy.destroyed()) {
     cy.batch(() => selectedIds.forEach(id => cy.getElementById(id).select()));
     showSelectionInfo({ skipDraftGuard: true });
   }
+  openEditor?._localeRender?.();
   const localizedEditor = editorDraft && document.getElementById('node-editor');
   if (localizedEditor) {
     for (const saved of editorDraft) {
@@ -16967,6 +16989,10 @@ uiLocalization.subscribe(() => {
       control.dispatchEvent(new Event('input', { bubbles: true }));
     }
     localizedEditor.elements.namedItem(focusedEditorControl)?.focus?.();
+  }
+  for (const [id, message] of formErrors) {
+    const form = document.getElementById(id);
+    if (form) showFormError(form, message);
   }
   // Rail/catalog rebuilds can recreate statically annotated chrome. Reapply history presentation
   // last so a dirty document never inherits the shell's initial "saved" fallback.

@@ -284,7 +284,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           input.removeAttribute('aria-invalid');
           if (['TEXT', 'MULTILINE_TEXT'].includes(field.type)
               && utf8Length(input.value) > field.maxUtf8Bytes) {
-            const message = `${field.label} must be at most ${field.maxUtf8Bytes} UTF-8 bytes.`;
+            const message = uiText("workspace.human.task.ui.must.be.at.most.utf.8.bytes", { label: field.label, maxUtf8Bytes: field.maxUtf8Bytes });
             input.setCustomValidity(message);
             input.setAttribute('aria-invalid', 'true');
             say(message);
@@ -308,7 +308,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         isCurrent: () => isCurrent(token, sourceTask) });
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
-        say(failure?.message || 'The decision outcome is unknown. Refresh before trying another action.');
+        say(failure?.message || uiText("workspace.human.task.ui.the.decision.outcome.is.unknown.refresh.before.trying.another"));
         setBusy(false);
       }
       return;
@@ -362,15 +362,15 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
             || message.capabilityId !== launch.capabilityId
             || !['complete', 'close', 'failure', 'reconcile'].includes(message.type)) return;
         if (utf8Length(JSON.stringify(message)) > launch.responseSchema.maxBytes + 8_192) {
-          say('The registered presentation returned an oversized message. The task remains available.');
+          say(uiText("workspace.human.task.ui.the.registered.presentation.returned.an.oversized.message.the.task"));
           clearInteraction({ revoke: true });
           setBusy(false);
           return;
         }
         if (message.type === 'close' || message.type === 'failure') {
           say(message.type === 'failure'
-            ? 'The registered presentation reported a failure. The task remains available.'
-            : 'The registered presentation closed. The task remains available.');
+            ? uiText("workspace.human.task.ui.the.registered.presentation.reported.a.failure.the.task.remains")
+            : uiText("workspace.human.task.ui.the.registered.presentation.closed.the.task.remains.available"));
           clearInteraction({ revoke: true }); setBusy(false); return;
         }
         if (launch.kind === 'EXTERNAL') {
@@ -389,7 +389,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           if (isCurrent(token, sourceTask)) { clearInteraction(); setBusy(false); close(); }
         }).catch(failure => {
           if (isCurrent(token, sourceTask)) {
-            say(failure?.message || 'The interaction outcome is unknown. Refresh before retrying.');
+            say(failure?.message || uiText("workspace.human.task.ui.the.interaction.outcome.is.unknown.refresh.before.retrying"));
             setBusy(false);
           }
         });
@@ -415,11 +415,11 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       interactionTimer = setTimeout(() => {
         if (!isCurrent(token, sourceTask)) return;
         clearInteraction(); setBusy(false);
-        say('The presentation capability expired. The task remains available and can be reopened.');
+        say(uiText("workspace.human.task.ui.the.presentation.capability.expired.the.task.remains.available.and"));
       }, Math.min(remaining, 2_147_483_647));
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
-        say(failure?.message || 'The registered presentation could not be opened.');
+        say(failure?.message || uiText("workspace.human.task.ui.the.registered.presentation.could.not.be.opened"));
         setBusy(false);
       }
     }

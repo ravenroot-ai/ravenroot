@@ -978,6 +978,7 @@ export function parseGraphML(xmlText) {
       if (el) label = textOnly(el);
     }
 
+    // i18n-audit-exempt: protocol-token - continue is the persisted default edge outcome, not product framing.
     const outcome = (dataValByName(edgeEl, 'outcome') || label || 'continue').trim() || 'continue';
     const command = (dataValByName(edgeEl, 'command') || '').trim().toLowerCase();
     if (!label) label = outcome;

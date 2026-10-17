@@ -70,4 +70,32 @@ describe('UI localization source audit fixtures', () => {
       export const palette = [{ type: 'machine-value', label: 'Visible palette label' }];
     `)).toEqual([2]);
   });
+  it.each([
+    `const say = text => { status.textContent = text; }; say('Inline status');`,
+    `function first(value) { second(value); } function second(copy) { target.innerText = copy; } first('Indirect copy');`,
+    `function status() { return 'Returned copy'; } const value = status(); node.textContent = value;`,
+    `function paint(node, render) { node.textContent = render(); } paint(node, () => 'Deferred copy');`,
+    `function card({ content }) { target.textContent = content; } card({ content: 'Option copy' });`,
+    `function markup() { return '<span>Opaque HTML copy</span>'; } node.innerHTML = markup();`,
+    `const fragment = '<b>Opaque HTML copy</b>'; node.insertAdjacentHTML('beforeend', fragment);`,
+    `const values = ['First copy', 'Second copy']; node.textContent = values.join(' ');`,
+    `let result = ''; result = 'Assigned copy'; node.textContent = result;`,
+    `notify?.('Notification copy');`,
+    `function fallback(value) { notify?.(value); } fallback('Fallback copy');`,
+    `function showFormError(value) { error.textContent = value; } showFormError('Validation copy');`,
+    `window.prompt('Prompt copy');`,
+    `function markup(value) { return '<b>' + value + '</b>'; } node.innerHTML = markup(uiText('fixture.message'));`,
+  ])('rejects structurally derived presentation flow: %s', source => {
+    expect(findPresentationSinkViolations(source)).toEqual([1]);
+  });
+
+  it('accepts deferred localized text and authored values through opaque wrappers', () => {
+    expect(findPresentationSinkViolations(`
+      function paint(node, render) { node.textContent = render(); }
+      paint(node, () => uiText('fixture.message', { author: model.name }));
+      function markup() { return '<b>' + escapeHtml(uiText('fixture.message')) + '</b>'; }
+      node.innerHTML = markup();
+    `)).toEqual([]);
+  });
+
 });

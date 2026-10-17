@@ -99,7 +99,11 @@ class EmbedBrowserHttpIntegrationTest {
             raw.createContext(EmbedBrowserHttpHandler.DISCOVERY_PATH,
                     exchange -> handler.discoverDeployments(exchange, explicit));
             raw.createContext(EmbedBrowserHttpHandler.CREATE_PATH,
-                    exchange -> handler.createSession(exchange, explicit));
+                    exchange -> handler.createSession(exchange,
+                            "Bearer wrong-scope".equals(exchange.getRequestHeaders().getFirst("Authorization"))
+                                    ? explicit.withPrincipal(new AuthenticatedPrincipal("workload",
+                                            AuthenticatedPrincipal.Type.WORKLOAD, "issuer", "tenant",
+                                            Set.of(Role.VIEWER), Set.of())) : explicit));
             raw.createContext(EmbedBrowserHttpHandler.GRANT_PATH,
                     exchange -> handler.revokeGrant(exchange, explicit));
             raw.createContext(EmbedBrowserHttpHandler.LAUNCH_PATH,
@@ -143,6 +147,7 @@ class EmbedBrowserHttpIntegrationTest {
 
                 String dynamic = "{\"deploymentId\":\"orders\",\"incarnationId\":\"" + incarnation
                         + "\",\"graphVersion\":\"" + version + "\",\"parentOrigin\":\"" + PARENT + "\"}";
+                assertCatalogBoundaries(client, base, dynamic);
                 var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(dynamic)));
@@ -345,6 +350,79 @@ class EmbedBrowserHttpIntegrationTest {
         }
     }
 
+    private static void assertCatalogBoundaries(HttpClient client, String base, String source) throws Exception {
+        int maximum = ai.ravenroot.server.embed.EmbedPresentation.MAX_CATALOG_CHARACTERS;
+        // The same decoded catalog is transported literally in UTF-8 and with outer JSON escaping.
+        for (String character : List.of("a", "界", "😀", "\\\\")) {
+            for (int length : List.of(maximum - 1, maximum, maximum + 1)) {
+                String catalog = boundaryCatalog(character, length);
+                assertEquals(length, catalog.length());
+                String escaped = catalog.chars().mapToObj(unit -> String.format("\\u%04x", unit))
+                        .collect(java.util.stream.Collectors.joining());
+                String body = source.substring(0, source.length() - 1)
+                        + ",\"locale\":\"de\",\"catalog\":\"" + escaped + "\"}";
+                var result = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                        .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(body)));
+                assertEquals(length > maximum ? 400 : 201, result.statusCode(), result.body());
+                assertPrivate(result);
+            }
+        }
+        String catalog = boundaryCatalog("界", maximum);
+        String body = source.substring(0, source.length() - 1) + ",\"locale\":\"de\",\"catalog\":\""
+                + ai.ravenroot.server.audit.JsonStrings.escape(catalog) + "\"}";
+        assertTrue(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > maximum);
+        var utf8 = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)));
+        assertEquals(201, utf8.statusCode(), utf8.body());
+        // A well-formed near-limit catalog does not confer authority. Parsing bounds remain
+        // before authorization, and the denied response never reflects the supplied catalog.
+        var denied = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                .header("Authorization", "Bearer wrong-scope").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)));
+        assertEquals(403, denied.statusCode(), denied.body());
+        if (source.contains("registrationId")) assertTrue(denied.body().contains("\"code\":\"ACCESS_DENIED\""));
+        else assertEquals("{\"error\":\"EMBED_SESSION_UNAVAILABLE\"}", denied.body());
+        assertFalse(denied.body().contains("界"));
+        assertPrivate(denied);
+        int padding = EmbedBrowserHttpHandler.MAX_SESSION_BODY_BYTES
+                - body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        var deniedOversize = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                .header("Authorization", "Bearer wrong-scope").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body + " ".repeat(padding + 1))));
+        assertEquals(413, deniedOversize.statusCode(), deniedOversize.body());
+        assertPrivate(deniedOversize);
+        for (int excess : List.of(0, 1)) {
+            var response = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                    .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body + " ".repeat(padding + excess))));
+            assertEquals(excess == 0 ? 201 : 413, response.statusCode(), response.body());
+            assertPrivate(response);
+        }
+        // Catalog-free requests retain the existing 8 KiB body ceiling on this route.
+        var ordinary = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(source + " ".repeat(8193))));
+        assertEquals(413, ordinary.statusCode(), ordinary.body());
+    }
+
+    /** Valid client catalog: each message stays below 8,192 units; trailing JSON whitespace
+     * gives exact catalog-length boundaries without an unknown key or malformed escape. */
+    private static String boundaryCatalog(String character, int length) {
+        String value = character.repeat(3000 / character.length());
+        StringBuilder catalog = new StringBuilder("{\"schema\":\"ravenroot.ui-catalog/v1\",\"locale\":\"de\",\"messages\":{");
+        var keys = List.of("embed.state.error", "embed.state.expired", "embed.state.offline",
+                "embed.state.incompatible");
+        for (String key : keys) {
+            if (catalog.charAt(catalog.length() - 1) != '{') catalog.append(',');
+            catalog.append('"').append(key).append("\":\"")
+                    .append(ai.ravenroot.server.audit.JsonStrings.escape(value)).append('"');
+        }
+        catalog.append("}}");
+        return catalog + " ".repeat(length - catalog.length());
+    }
+
     private static String proofBody(KeyPair pair, String bearer, String nonce, String jti,
                                     String path, Instant time, boolean cursor) throws Exception {
         return "{\"nonce\":\"" + nonce + "\",\"jti\":\"" + jti + "\",\"issuedAt\":\"" + time
@@ -401,7 +479,7 @@ class EmbedBrowserHttpIntegrationTest {
                     Map.entry("{\"registrationId\":\"reg\",\"locale\":\"en\",\"catalog\":\"[]\"}", 400),
                     Map.entry("{\"registrationId\":\"reg\",\"locale\":\"en\",\"catalog\":\""
                             + "a".repeat(ai.ravenroot.server.embed.EmbedPresentation.MAX_CATALOG_CHARACTERS + 1)
-                            + "\"}", 413))) {
+                            + "\"}", 400))) {
                 var refusedPresentation = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
                         .header("Authorization", "Bearer workload")
                         .header("Content-Type", "application/json")
@@ -409,6 +487,8 @@ class EmbedBrowserHttpIntegrationTest {
                 assertEquals(invalidPresentation.getValue(), refusedPresentation.statusCode(), refusedPresentation.body());
                 assertPrivate(refusedPresentation);
             }
+
+            assertCatalogBoundaries(client, base, "{\"registrationId\":\"reg\"}");
 
             var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
                     .header("Authorization", "Bearer workload")

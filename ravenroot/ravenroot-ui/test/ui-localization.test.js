@@ -57,6 +57,34 @@ describe('UI localization controller', () => {
     controller.destroy();
   });
 
+  it.each(['de', null])('reuses precedence after Automatic and languagechange (default %s)', async defaultLocale => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/' });
+    const navigator = { languages: ['fr'] };
+    const events = new EventTarget();
+    vi.stubGlobal('addEventListener', events.addEventListener.bind(events));
+    vi.stubGlobal('removeEventListener', events.removeEventListener.bind(events));
+    const controller = await initializeUiLocalization({ document: dom.window.document,
+      storage: dom.window.localStorage, indexedDB: null, navigator, onDiagnostic: vi.fn(),
+      fetch: async () => new Response(JSON.stringify({ schema: UI_LOCALES_SCHEMA,
+        ...(defaultLocale ? { defaultLocale } : {}), catalogs: [french,
+          { schema: UI_CATALOG_SCHEMA, locale: 'de', messages: {} }] })),
+    });
+    try {
+      expect(controller.localization.locale).toBe(defaultLocale || 'fr');
+      controller.chooseLocale('en');
+      events.dispatchEvent(new Event('languagechange'));
+      expect(controller.localization.locale).toBe('en');
+      controller.useAutomaticLocale();
+      expect(controller.localization.locale).toBe(defaultLocale || 'fr');
+      navigator.languages = ['en'];
+      events.dispatchEvent(new Event('languagechange'));
+      expect(controller.localization.locale).toBe(defaultLocale || 'en');
+      navigator.languages = ['fr'];
+      events.dispatchEvent(new Event('languagechange'));
+      expect(controller.localization.locale).toBe(defaultLocale || 'fr');
+    } finally { controller.destroy(); vi.unstubAllGlobals(); }
+  });
+
   it('refuses configuration redirects and a final cross-origin response URL', async () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/' });
     const diagnostics = vi.fn();

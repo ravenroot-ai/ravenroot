@@ -105,6 +105,21 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
     };
   }
   const doc = dialog.ownerDocument;
+  // Keep message recipes, not translated snapshots, for mounted asynchronous status text.
+  const localizedText = new Map();
+  function paintText(node, value) {
+    if (!node) return;
+    if (typeof value === 'function') localizedText.set(node, value);
+    else localizedText.delete(node);
+    node.textContent = typeof value === 'function' ? value() : value;
+  }
+  function refreshText() {
+    for (const [node, render] of localizedText) {
+      if (dialog.contains(node)) node.textContent = render();
+      else localizedText.delete(node);
+    }
+  }
+
   const element = id => dialog.querySelector(`#${id}`);
 
   const form = element('credential-form');
@@ -128,13 +143,13 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
   let busy = false;
   let disposed = false;
 
-  if (scope) scope.textContent = uiText('workspace.credential.scope');
+  if (scope) paintText(scope, () => uiText('workspace.credential.scope'));
   if (controls.label) controls.label.maxLength = LABEL_MAX_LENGTH;
   if (controls.scheme && controls.scheme.options.length === 0) {
     controls.scheme.replaceChildren(...CREDENTIAL_SCHEMES.map(scheme => {
       const option = doc.createElement('option');
       option.value = scheme;
-      option.textContent = credentialSchemeLabel(scheme);
+      paintText(option, credentialSchemeLabel(scheme));
       return option;
     }));
   }
@@ -160,6 +175,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
   }
 
   function renderList() {
+    refreshText();
     const credentials = listing.credentials || [];
     if (empty) {
       // THREE STATES, NOT TWO, and the third one is why this is not `loaded ? … : …`. Measured in
@@ -170,9 +186,9 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       // status has already said it, once, in the right words. Saying it twice is the same defect the
       // model provider panel's `onModeChange` documents.
       empty.hidden = credentials.length > 0 || listing.surface === 'absent';
-      empty.textContent = listing.loaded
+      paintText(empty, () => listing.loaded
         ? uiText("workspace.credential.panel.you.hold.no.credentials.yet.the.first")
-        : uiText("workspace.credential.panel.connect.to.your.ravenroot.service.to.see");
+        : uiText("workspace.credential.panel.connect.to.your.ravenroot.service.to.see"));
     }
     list.hidden = credentials.length === 0;
     // textContent throughout. A label is text a person typed and this page renders author-authored
@@ -183,27 +199,27 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       item.dataset.credentialReference = credential.reference;
 
       const name = doc.createElement('b');
-      name.textContent = credential.label;
+      paintText(name, credential.label);
 
       const detail = doc.createElement('small');
       const created = credentialCreatedText(credential.createdAt);
-      detail.textContent = [
+      paintText(detail, [
         credentialSchemeLabel(credential.scheme),
         credential.username ? `user ${credential.username}` : '',
         created ? `stored ${created}` : '',
-      ].filter(Boolean).join(' · ');
+      ].filter(Boolean).join(' · '));
 
       // The reference, and nothing else about the credential, is what a node's property stores — so
       // it is shown verbatim and can be taken. There is no value beside it to be mistaken for one.
       const reference = doc.createElement('code');
       reference.className = 'credential-reference';
-      reference.textContent = credential.reference;
+      paintText(reference, credential.reference);
       reference.tabIndex = 0;
 
       const copy = doc.createElement('button');
       copy.type = 'button';
       copy.className = 'btn credential-copy';
-      copy.textContent = uiText("workspace.credential.panel.copy.reference");
+      paintText(copy, () => uiText("workspace.credential.panel.copy.reference"));
       copy.dataset.copyReference = credential.reference;
 
       const row = doc.createElement('div');
@@ -222,7 +238,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       if (!control || !slot) continue;
       control.removeAttribute('aria-invalid');
       control.removeAttribute('aria-errormessage');
-      slot.textContent = '';
+      paintText(slot, '');
       slot.hidden = true;
     }
   }
@@ -234,7 +250,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       const control = controls[name];
       const slot = element(`credential-${name}-error`);
       if (!control || !slot) continue;
-      slot.textContent = message;
+      paintText(slot, message);
       slot.hidden = false;
       control.setAttribute('aria-invalid', 'true');
       control.setAttribute('aria-errormessage', slot.id);
@@ -244,7 +260,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
   }
 
   function say(message, kind = 'info') {
-    status.textContent = message;
+    paintText(status, message);
     status.dataset.state = kind;
   }
 
@@ -266,7 +282,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       listing = { loaded: false, surface: 'none', credentials: [] };
       renderList();
       publish();
-      say('Connect to your Ravenroot service to see and store credentials.');
+      say(() => uiText("workspace.credential.panel.connect.to.your.ravenroot.service.to.see.and.store"));
       return;
     }
     try {
@@ -278,14 +294,14 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       renderList();
       publish();
       if (answer.surface === 'absent') {
-        say('This deployment does not offer credential storage.', 'blocked');
+        say(() => uiText("workspace.credential.panel.this.deployment.does.not.offer.credential.storage"), 'blocked');
       }
     } catch (error) {
       if (disposed) return;
       listing = { loaded: false, surface: 'none', credentials: [] };
       renderList();
       publish();
-      say(`The credentials you hold could not be read: ${error?.message || error}`, 'error');
+      say(() => uiText("workspace.credential.panel.the.credentials.you.hold.could.not.be.read", { value: error?.message || error }), 'error');
     }
   }
 
@@ -294,8 +310,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
     const check = validateCredentialDraft(current);
     if (!check.ok) {
       showFieldErrors(check.errors);
-      say('Some fields need correcting before this credential can be stored. Each one says what is '
-        + 'wrong next to the field itself.', 'error');
+      say(() => uiText("workspace.credential.panel.some.fields.need.correcting.before.this.credential.can.be"), 'error');
       return;
     }
     clearFieldErrors();
@@ -304,13 +319,12 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       // leaving it there so the author can "try again" is leaving it on screen for as long as the
       // tab is open.
       if (controls.value) controls.value.value = '';
-      say('There is no connection to your service, so nothing was stored. The value was cleared; '
-        + 'connect and paste it again.', 'error');
+      say(() => uiText("workspace.credential.panel.there.is.no.connection.to.your.service.so.nothing"), 'error');
       return;
     }
     const label = String(current.label).trim();
     setBusy(true);
-    say(`Storing “${label}”…`);
+    say(() => uiText("workspace.credential.panel.storing", { label: label }));
     try {
       await client.create(current);
       if (disposed) return;
@@ -319,16 +333,14 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       if (controls.value) controls.value.value = '';
       if (controls.label) controls.label.value = '';
       if (controls.username) controls.username.value = '';
-      say(`Stored “${label}”. The value is held by your service and is not shown here again — nodes `
-        + 'name this credential by its reference below.', 'ok');
+      say(() => uiText("workspace.credential.panel.stored.the.value.is.held.by.your.service.and", { label: label }), 'ok');
       await refresh();
     } catch (error) {
       if (disposed) return;
       // RULE 1 again, on the failure path, and the message is the SERVICE's prose about the request
       // — never the request's contents.
       if (controls.value) controls.value.value = '';
-      say(`“${label}” was not stored: ${error?.message || error} The value was cleared; paste it `
-        + 'again to retry.', 'error');
+      say(() => uiText("workspace.credential.panel.was.not.stored.the.value.was.cleared.paste.it", { label: label, value: error?.message || error }), 'error');
     } finally {
       if (!disposed) setBusy(false);
     }
@@ -375,7 +387,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       // Best effort and silent about the mechanism: a reference is short enough to select and read,
       // so a browser without clipboard permission loses a convenience, not the information.
       void doc.defaultView?.navigator?.clipboard?.writeText?.(copy.dataset.copyReference)
-        ?.then(() => { if (!disposed) say('Reference copied.'); })
+        ?.then(() => { if (!disposed) say(() => uiText("workspace.credential.panel.reference.copied")); })
         ?.catch(() => {});
       return;
     }
@@ -398,10 +410,10 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
     refresh,
     save,
     references: () => ({ loaded: listing.loaded, credentials: listing.credentials }),
-    refreshLocale() {
-      if (scope) scope.textContent = uiText('workspace.credential.scope');
+    refreshLocale() { refreshText();
+      if (scope) paintText(scope, () => uiText('workspace.credential.scope'));
       if (controls.scheme) for (const option of controls.scheme.options) {
-        option.textContent = credentialSchemeLabel(option.value);
+        paintText(option, credentialSchemeLabel(option.value));
       }
       renderList();
     },
@@ -416,6 +428,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       return refresh();
     },
     destroy() {
+      localizedText.clear();
       disposed = true;
       form.removeEventListener('submit', onSubmit);
       form.removeEventListener('change', onSchemeChange);

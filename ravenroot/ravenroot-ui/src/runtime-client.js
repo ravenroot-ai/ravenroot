@@ -1,3 +1,4 @@
+import { uiErrorReason, uiText } from './ui-text.js';
 import { productError } from './product-error.js';
 
 const runtimeClientValidationError = message => productError('runtimeClient.validation.failed', message);
@@ -79,6 +80,8 @@ export class RuntimeAuthorizationError extends Error {
   constructor(message, status) {
     super(message);
     this.name = 'RuntimeAuthorizationError';
+    this.uiMessageKey = status === 401 ? 'workspace.runtime.auth.expired'
+      : message === 'Deployment observation was revoked' ? 'workspace.runtime.auth.revoked' : 'workspace.runtime.auth.insufficient';
     this.status = status;
   }
 }
@@ -99,7 +102,7 @@ export class RuntimeAuthorizationError extends Error {
 // instead of picking one.
 export class RuntimeRequestError extends Error {
   constructor(reason, { status = null, method, path, code = null, correlationId = null,
-    incidentId = null, finding = null } = {}) {
+    incidentId = null, finding = null, uiReasonKey = null } = {}) {
     const route = String(path || '').split('?')[0];
     const where = status == null ? `${method} ${route}` : `HTTP ${status} ${method} ${route}`;
     const hint = status == null
@@ -109,6 +112,10 @@ export class RuntimeRequestError extends Error {
         : '';
     super(`${reason} (${where})${hint}`);
     this.name = 'RuntimeRequestError';
+    this.uiMessageKey = 'workspace.runtime.request.failure';
+    Object.defineProperty(this, 'uiMessageParams', { get: () => ({ reason: uiReasonKey ? uiText(uiReasonKey) : reason, where,
+      hint: status == null ? uiText('workspace.runtime.request.networkHint')
+        : status === 404 ? uiText('workspace.runtime.request.routeHint') : '' }) });
     this.status = status;
     this.method = method;
     this.path = path;
@@ -211,6 +218,9 @@ export class ProgramSourceRejectedError extends Error {
   constructor({ diagnostic = '', line = 0, column = 0, artifactId = '' } = {}) {
     super(`The program source was rejected: ${diagnostic || 'the runtime stated no reason'}`);
     this.name = 'ProgramSourceRejectedError';
+    this.uiMessageKey = 'workspace.runtime.program.rejected';
+    Object.defineProperty(this, 'uiMessageParams', { get: () => ({
+      diagnostic: diagnostic || uiText('workspace.runtime.program.noReason') }) });
     this.diagnostic = diagnostic;
     this.line = line;
     this.column = column;
@@ -513,30 +523,30 @@ export class RavenrootRuntimeClient {
         }
 
         refreshed = false;
-        onConnectionChange('connected', 'Live events connected');
+        onConnectionChange('connected', 'Live events connected', () => uiText("workspace.runtime.events.connected"));
         const reconnectDelay = await this.#readEventStream(response.body.getReader(), signal, onEvent,
           onConnectionChange);
         if (signal.aborted) return;
         failures += 1;
-        onConnectionChange('reconnecting', 'Live events disconnected');
+        onConnectionChange('reconnecting', 'Live events disconnected', () => uiText("workspace.runtime.events.disconnected"));
         await this.sleep(reconnectDelay);
       } catch (error) {
         if (signal.aborted) return;
         if (error instanceof RuntimeAuthorizationError) {
-          onConnectionChange(error.status === 403 ? 'revoked' : 'authentication-required', error.message);
+          onConnectionChange(error.status === 403 ? 'revoked' : 'authentication-required', error.message, () => uiErrorReason(error));
           return;
         }
         failures += 1;
         if (failures > this.maxRetries) {
-          onConnectionChange('error', `Live events stopped after ${this.maxRetries} retries: ${error.message}`);
+          onConnectionChange('error', `Live events stopped after ${this.maxRetries} retries: ${error.message}`, () => uiText("workspace.runtime.events.failed", { count: this.maxRetries, reason: uiErrorReason(error) }));
           return;
         }
-        onConnectionChange('reconnecting', error.message);
+        onConnectionChange('reconnecting', error.message, () => uiErrorReason(error));
         await this.sleep(this.retryDelayMs);
       }
     }
     if (!signal.aborted) {
-      onConnectionChange('error', `Live events stopped after ${this.maxRetries} retries`);
+      onConnectionChange('error', `Live events stopped after ${this.maxRetries} retries`, () => uiText("workspace.runtime.events.stopped", { count: this.maxRetries }));
     }
   }
 
@@ -743,31 +753,31 @@ export class RavenrootRuntimeClient {
             ? 'Authentication expired' : 'Deployment observation was revoked', response.status);
         }
         if (!response.ok || !response.body?.getReader) {
-          throw new RuntimeRequestError('Deployment event stream failed', {
+          throw new RuntimeRequestError('Deployment event stream failed', { uiReasonKey: 'workspace.runtime.request.streamFailed',
             status: response.status, method: 'GET', path,
           });
         }
-        onConnectionChange('connected', 'Deployment live observation connected');
+        onConnectionChange('connected', 'Deployment live observation connected', () => uiText("workspace.runtime.deployment.connected"));
         const read = await this.#readDeploymentStream(response.body.getReader(), signal, source, frame => {
           cursor = frame.cursor || cursor;
           onFrame(frame);
         });
         if (signal.aborted || read.terminal) return;
         failures += 1;
-        onConnectionChange('reconnecting', 'Deployment observation disconnected; reconnecting');
+        onConnectionChange('reconnecting', 'Deployment observation disconnected; reconnecting', () => uiText("workspace.runtime.deployment.disconnected"));
         await this.sleep(read.retryDelay);
       } catch (error) {
         if (signal.aborted) return;
         if (error instanceof RuntimeAuthorizationError) {
-          onConnectionChange('revoked', error.message);
+          onConnectionChange('revoked', error.message, () => uiErrorReason(error));
           return;
         }
         failures += 1;
         if (failures > this.maxRetries) {
-          onConnectionChange('error', `Deployment observation stopped: ${error.message}`);
+          onConnectionChange('error', `Deployment observation stopped: ${error.message}`, () => uiText("workspace.runtime.deployment.stopped", { reason: uiErrorReason(error) }));
           return;
         }
-        onConnectionChange('reconnecting', error.message);
+        onConnectionChange('reconnecting', error.message, () => uiErrorReason(error));
         await this.sleep(this.retryDelayMs);
       }
     }
@@ -1261,12 +1271,13 @@ export class RavenrootRuntimeClient {
       });
     } catch (failure) {
       throw new RuntimeRequestError(failure?.message || 'Human Task interaction request failed',
-        { method: 'POST', path });
+        { method: 'POST', path, uiReasonKey: failure?.message ? null : 'workspace.runtime.request.interactionFailed' });
     }
     const parsed = await responseMessage.json().catch(() => null);
     if (!responseMessage.ok) {
       throw new RuntimeRequestError(parsed?.message || parsed?.error || 'Human Task interaction was refused',
-        { status: responseMessage.status, method: 'POST', path });
+        { status: responseMessage.status, method: 'POST', path,
+          uiReasonKey: parsed?.message || parsed?.error ? null : 'workspace.runtime.request.interactionRefused' });
     }
     if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.outcome !== 'string'
         || parsed.taskId !== launch.taskId || !Number.isSafeInteger(parsed.generation)) {
@@ -1565,7 +1576,7 @@ export class RavenrootRuntimeClient {
         headers: this.#headers(options.headers, credential.accessToken),
       });
     } catch {
-      throw new RuntimeRequestError('Service request failed', { method, path });
+      throw new RuntimeRequestError('Service request failed', { method, path, uiReasonKey: 'workspace.runtime.request.failed' });
     }
     if (response.status === 401 || response.status === 403) {
       if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
@@ -1604,14 +1615,15 @@ export class RavenrootRuntimeClient {
       const reason = readFailed ? 'Service response could not be read'
         : envelope?.message || legacyCode || 'Service request failed';
       throw new RuntimeRequestError(reason, { status: response.status, method, path,
+        uiReasonKey: readFailed ? 'workspace.runtime.request.unreadable' : !(envelope?.message || legacyCode) ? 'workspace.runtime.request.failed' : null,
         code: envelope?.code || legacyCode, correlationId: envelope?.correlationId || null,
         incidentId: envelope?.incidentId || null, finding: envelope?.finding || null });
     }
     if (readFailed) {
-      throw new RuntimeRequestError('Service response could not be read', { status: response.status, method, path });
+      throw new RuntimeRequestError('Service response could not be read', { status: response.status, method, path, uiReasonKey: 'workspace.runtime.request.unreadable' });
     }
     if (body === null) {
-      throw new RuntimeRequestError('Service response is not valid JSON', { status: response.status, method, path });
+      throw new RuntimeRequestError('Service response is not valid JSON', { status: response.status, method, path, uiReasonKey: 'workspace.runtime.request.invalidJson' });
     }
     return body;
   }

@@ -105,7 +105,7 @@ function readClass(descriptor, source, budget) {
   const base = { id: descriptor.id, label: uiText(descriptor.labelKey), tier: descriptor.tier, truncated: false };
 
   if (typeof source !== 'function') {
-    return { ...base, state: UNAVAILABLE, reason: NOT_PROVIDED, detail: 'not available in this build' };
+    return { ...base, state: UNAVAILABLE, reason: NOT_PROVIDED, detail: uiText("workspace.assistant.context.notAvailable") };
   }
 
   let raw;
@@ -122,7 +122,7 @@ function readClass(descriptor, source, budget) {
   }
 
   if (raw === null || raw === undefined) {
-    return { ...base, state: UNAVAILABLE, reason: NO_DATA, detail: 'nothing to attach yet' };
+    return { ...base, state: UNAVAILABLE, reason: NO_DATA, detail: uiText("workspace.assistant.context.empty") };
   }
 
   const clamped = clampToBudget(raw, budget);
@@ -131,7 +131,7 @@ function readClass(descriptor, source, budget) {
     state: ATTACHED,
     reason: null,
     truncated: clamped.truncated,
-    detail: clamped.truncated ? `truncated · ${clamped.omittedBytes} bytes omitted` : '',
+    detail: clamped.truncated ? uiText("workspace.assistant.context.truncated", { bytes: clamped.omittedBytes }) : '',
     value: clamped.value,
   };
 }

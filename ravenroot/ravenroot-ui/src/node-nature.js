@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 // Ports the ADR 0024 §2 / runtime-nature contract to the Inspector. Read
 // `ai.ravenroot.api.catalog.NodeRuntimeNature`, `NodeRuntimeNatureProperty` and `NodeTypeDescriptor`
 // (ravenroot-application-api) first — this module implements exactly what those classes already
@@ -97,14 +98,10 @@ export function effectiveNature(descriptor, declaredValue) {
  */
 export function natureRiskText(identifier) {
   if (identifier === 'AUTHORITY') {
-    return 'AUTHORITY needs one durable, fenced owner for its whole cluster. Ravenroot does not '
-      + 'implement that ownership yet, so a graph that resolves to AUTHORITY is refused when you '
-      + 'run or deploy it — before any node starts, not partway through.';
+    return uiText("workspace.node.nature.authority.needs.one.durable.fenced.owner.for.its.whole");
   }
   if (identifier === 'KEYED') {
-    return 'KEYED needs one owner per key you declare. Ravenroot does not implement that per-key '
-      + 'ownership yet, so a graph that resolves to KEYED is refused when you run or deploy it — '
-      + 'before any node starts, not partway through.';
+    return uiText("workspace.node.nature.keyed.needs.one.owner.per.key.you.declare.ravenroot");
   }
   return '';
 }

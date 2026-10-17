@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import { productError } from './product-error.js';
 
 const humanTaskValidationError = message => productError('humanTasks.validation.failed', message);
@@ -392,14 +393,14 @@ export function validateDecisionComment(comment, mode, maximumUtf8Bytes) {
   const raw = String(comment ?? '');
   if ((typeof raw.isWellFormed === 'function' && !raw.isWellFormed())
       || /[\u0000-\u0008\u000b\u000c\u000d-\u001f\u007f]/u.test(raw)) {
-    return { ok: false, error: 'Comment contains a control character or malformed Unicode.' };
+    return { ok: false, error: uiText("workspace.humanTask.comment.invalid") };
   }
   const value = raw.trim();
-  if (mode === 'DISALLOWED' && value.length) return { ok: false, error: 'This task does not accept a comment.' };
-  if (mode === 'REQUIRED' && !value.trim()) return { ok: false, error: 'Enter the required comment.' };
+  if (mode === 'DISALLOWED' && value.length) return { ok: false, error: uiText("workspace.humanTask.comment.disallowed") };
+  if (mode === 'REQUIRED' && !value.trim()) return { ok: false, error: uiText("workspace.humanTask.comment.required") };
   const bytes = utf8Length(value);
   if (bytes > maximumUtf8Bytes) {
-    return { ok: false, error: `Comment uses ${bytes} UTF-8 bytes; the service permits ${maximumUtf8Bytes}.` };
+    return { ok: false, error: uiText("workspace.humanTask.comment.tooLong", { bytes, maximum: maximumUtf8Bytes }) };
   }
   return { ok: true, value, bytes };
 }

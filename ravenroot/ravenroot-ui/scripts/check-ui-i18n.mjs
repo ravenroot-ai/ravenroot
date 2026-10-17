@@ -9,7 +9,10 @@ import { ENGLISH_MESSAGES } from '../src/ui-text.js';
 const failures = [];
 const references = new Set();
 const root = path.resolve(import.meta.dirname, '..');
-const fail = (file, line, message) => failures.push(`${file}:${line}: ${message}`);
+const fail = (file, line, message) => {
+  const failure = `${file}:${line}: ${message}`;
+  if (!failures.includes(failure)) failures.push(failure);
+};
 const hasWords = value => /[A-Za-z]{2}/u.test(value || '');
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 const attributes = node => Object.fromEntries((node.attrs || []).map(item => [item.name, item.value]));
@@ -46,7 +49,7 @@ function auditHtml() {
 }
 
 const localizationCall = node => node?.type === 'CallExpression'
-  && ((node.callee.type === 'Identifier' && ['uiText', 't'].includes(node.callee.name))
+  && ((node.callee.type === 'Identifier' && ['uiText', 'uiMessage', 't'].includes(node.callee.name))
     || (node.callee.type === 'MemberExpression' && node.callee.property.name === 'text'));
 
 function unsafeLocalizedHtml(node, output = []) {
@@ -97,6 +100,13 @@ function createBindingResolver(ast) {
       declarations.push({ name: node.id.name, value: node.init, scope, start: node.start });
     },
   });
+  walk.ancestor(ast, { AssignmentExpression(node, ancestors) {
+    if (node.left.type !== 'Identifier') return;
+    const declaration = declarations.filter(item => item.name === node.left.name
+      && item.scope.start <= node.start && item.scope.end >= node.end)
+      .sort((a, b) => (a.scope.end - a.scope.start) - (b.scope.end - b.scope.start))[0];
+    if (declaration) declarations.push({ ...declaration, value: node.right, start: node.start });
+  } });
   return identifier => declarations.filter(declaration => declaration.name === identifier.name
       && declaration.start < identifier.start
       && declaration.scope.start <= identifier.start && declaration.scope.end >= identifier.end)
@@ -151,13 +161,206 @@ function outputLiterals(node, output = [], bindings = new Map(), seen = new Set(
   return output;
 }
 
+// Derive wrapper signatures from their bodies, rather than recognizing wrapper names.
+// A parameter reaching a DOM/native-dialog sink makes that argument a sink at every call,
+// transitively. Return expressions and lexical aliases are followed at the use site.
+function presentationFlow(ast) {
+  const bindings = createBindingResolver(ast);
+  const functions = [];
+  const owners = new Map();
+  const calls = [];
+  const sinks = [];
+  const signatures = new Map();
+  const functionTypes = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+  const nameOf = node => node?.type === 'MemberExpression'
+    ? (node.computed ? node.property.value : node.property.name) : node?.name;
+  const primitiveArguments = new Map([
+    ['alert', [0]], ['confirm', [0]], ['prompt', [0]], ['announce', [0]],
+    ['announceGraph', [0]], ['showToast', [0]], ['showInspectorMessage', [0]],
+    ['addActivityMessage', [0, 1]], ['contextualHelpButtonHtml', [0, 1]],
+    // Injected presentation callbacks are part of the UI component contract.
+    ['notify', [0]], ['setCustomValidity', [0]],
+  ]);
+  walk.ancestor(ast, {
+    Function(node, ancestors) {
+      const parent = ancestors.at(-2);
+      const name = node.id?.name || (parent?.type === 'VariableDeclarator' ? parent.id.name
+        : parent?.type === 'Property' ? nameOf(parent.key) : null);
+      const scope = [...ancestors.slice(0, -1)].reverse().find(item =>
+        functionTypes.has(item.type) || item.type === 'Program') || ast;
+      functions.push({ node, name, scope });
+      signatures.set(node, new Set());
+    },
+    CallExpression(node, ancestors) { calls.push(node); owners.set(node,
+      [...ancestors.slice(0, -1)].reverse().find(item => functionTypes.has(item.type))); },
+    AssignmentExpression(node, ancestors) {
+      if (node.left.type !== 'MemberExpression') return;
+      const property = nameOf(node.left);
+      if (['textContent', 'innerText', 'title', 'placeholder', 'ariaLabel', 'ariaDescription',
+        'ariaValueText', 'innerHTML', 'outerHTML'].includes(property)) sinks.push({ expression: node.right, html: ['innerHTML', 'outerHTML'].includes(property),
+        owner: [...ancestors].reverse().find(item => functionTypes.has(item.type)) });
+    },
+  });
+  const resolveFunction = callee => {
+    if (functionTypes.has(callee?.type)) return callee;
+    if (callee?.type !== 'Identifier') return null;
+    const alias = bindingValue(bindings, callee);
+    if (functionTypes.has(alias?.type)) return alias;
+    if (alias?.type === 'Identifier' && alias.name !== callee.name) return resolveFunction(alias);
+    return functions.filter(item => item.name === callee.name && item.scope.start <= callee.start
+      && item.scope.end >= callee.end).sort((a, b) =>
+      (a.scope.end - a.scope.start) - (b.scope.end - b.scope.start))[0]?.node;
+  };
+  const returns = fn => {
+    if (fn.body.type !== 'BlockStatement') return [fn.body];
+    const result = [];
+    walk.ancestor(fn.body, { ReturnStatement(node, ancestors) {
+      if (!ancestors.some(item => functionTypes.has(item.type))) result.push(node.argument);
+    } });
+    return result;
+  };
+  function trace(node, owner, onLiteral, visiting = new Set(), substitutions = new Map()) {
+    if (!node || visiting.has(node)) return;
+    const next = new Set(visiting).add(node);
+    const recur = child => trace(child, owner, onLiteral, next, substitutions);
+    if (node.type === 'ChainExpression') return recur(node.expression);
+    if (functionTypes.has(node.type)) return returns(node).forEach(recur);
+    if (localizationCall(node)) return recur(node.arguments[1]);
+    if (node.type === 'Identifier') {
+      if (substitutions.has(node.name)) return recur(substitutions.get(node.name));
+      owner?.params.forEach((raw, index) => {
+        const param = raw.type === 'AssignmentPattern' ? raw.left : raw;
+        if (param.type === 'Identifier' && param.name === node.name) {
+          signatures.get(owner)?.add(String(index));
+          if (raw.type === 'AssignmentPattern') recur(raw.right);
+        } else if (param.type === 'ObjectPattern') {
+          for (const property of param.properties) {
+            const value = property.value?.type === 'AssignmentPattern' ? property.value.left : property.value;
+            if (value?.name === node.name) {
+              signatures.get(owner)?.add(`${index}.${property.key.name || property.key.value}`);
+              if (property.value.type === 'AssignmentPattern') recur(property.value.right);
+            }
+          }
+        }
+      });
+      const value = bindingValue(bindings, node);
+      if (value) recur(value);
+    } else if (node.type === 'Literal') {
+      if (typeof node.value === 'string' && hasWords(node.value)) onLiteral(node);
+    } else if (node.type === 'TemplateLiteral') {
+      node.quasis.filter(item => hasWords(item.value.cooked)).forEach(onLiteral);
+      node.expressions.forEach(recur);
+    } else if (node.type === 'ConditionalExpression') {
+      recur(node.consequent); recur(node.alternate);
+    } else if (node.type === 'LogicalExpression' || (node.type === 'BinaryExpression' && node.operator === '+')) {
+      recur(node.left); recur(node.right);
+    } else if (node.type === 'ObjectExpression') {
+      node.properties.forEach(item => recur(item.value));
+    } else if (node.type === 'ArrayExpression') node.elements.forEach(recur);
+    else if (node.type === 'MemberExpression') {
+      let object = node.object;
+      if (object.type === 'Identifier') object = bindingValue(bindings, object) || object;
+      if (object.type === 'CallExpression' && nameOf(object.callee) === 'freeze') object = object.arguments[0];
+      if (object?.type === 'ObjectExpression') {
+        object.properties.filter(item => node.computed && node.property.type !== 'Literal'
+          || (item.key?.name ?? item.key?.value) === nameOf(node)).forEach(item => recur(item.value));
+      }
+    } else if (node.type === 'CallExpression') {
+      const name = nameOf(node.callee);
+      if (['escapeHtml', 'escapeAttribute', 'String'].includes(name)) return recur(node.arguments[0]);
+      if (node.callee.type === 'MemberExpression' && ['join', 'trim', 'toString'].includes(name)) return recur(node.callee.object);
+      if (node.callee.type === 'Identifier' && owner?.params.some(param => param.name === node.callee.name)) recur(node.callee);
+      const fn = resolveFunction(node.callee);
+      if (fn && !next.has(fn)) {
+        const mapped = new Map(substitutions);
+        fn.params.forEach((parameter, index) => {
+          const param = parameter.type === 'AssignmentPattern' ? parameter.left : parameter;
+          if (param.type === 'Identifier' && node.arguments[index]) mapped.set(param.name, node.arguments[index]);
+        });
+        for (const value of returns(fn)) trace(value, owner, onLiteral, new Set(next).add(fn), mapped);
+      }
+    }
+  }
+  function traceHtml(node, owner, onLiteral, seen = new Set(), substitutions = new Map()) {
+    if (!node || seen.has(node)) return;
+    const next = new Set(seen).add(node);
+    const recur = child => traceHtml(child, owner, onLiteral, next, substitutions);
+    if (localizationCall(node)) { onLiteral(node); return; }
+    if (node.type === 'Identifier') {
+      if (substitutions.has(node.name)) return recur(substitutions.get(node.name));
+      const value = bindingValue(bindings, node);
+      if (value) recur(value); else trace(node, owner, onLiteral);
+    } else if (node.type === 'ConditionalExpression') { recur(node.consequent); recur(node.alternate); }
+    else if (node.type === 'LogicalExpression' || node.type === 'BinaryExpression') { recur(node.left); recur(node.right); }
+    else if (node.type === 'Literal' || node.type === 'TemplateLiteral') {
+      const expressions = node.expressions || [];
+      const html = node.type === 'Literal' ? String(node.value || '') : node.quasis
+        .map((item, index) => item.value.cooked + (index < expressions.length ? `__EXPR_${index}__` : '')).join('');
+      const inspectText = text => {
+        if (hasWords(text.replaceAll(/__EXPR_\d+__/gu, ''))) onLiteral(node);
+        for (const match of text.matchAll(/__EXPR_(\d+)__/gu)) recur(expressions[Number(match[1])]);
+      };
+      const visit = item => {
+        if (item.nodeName === '#text') inspectText(item.value);
+        for (const attr of item.attrs || []) if (/^(?:title|placeholder|aria-(?:label|description|valuetext))$/u.test(attr.name)) inspectText(attr.value);
+        for (const child of item.childNodes || []) visit(child);
+      };
+      visit(parseFragment(html));
+    } else if (node.type === 'CallExpression') {
+      const name = nameOf(node.callee);
+      if (['escapeHtml', 'escapeAttribute'].includes(name)) trace(node.arguments[0], owner, onLiteral);
+      else if (name !== 'htmlText') {
+        const fn = resolveFunction(node.callee);
+        if (fn && !next.has(fn)) {
+          const mapped = new Map(substitutions);
+          fn.params.forEach((param, index) => { if (param.type === 'Identifier' && node.arguments[index]) mapped.set(param.name, node.arguments[index]); });
+          returns(fn).forEach(value => traceHtml(value, fn, onLiteral, new Set(next).add(fn), mapped));
+        }
+      }
+    }
+  }
+  const inspect = onLiteral => {
+    for (const { expression, owner, html } of sinks) (html ? traceHtml : trace)(expression, owner, onLiteral);
+    for (const call of calls) {
+      const name = nameOf(call.callee);
+      if (name === 'insertAdjacentHTML') traceHtml(call.arguments[1], owners.get(call), onLiteral);
+      const arguments_ = primitiveArguments.get(name) || signatures.get(resolveFunction(call.callee)) || [];
+      for (const path of arguments_) {
+        const [index, property] = String(path).split('.');
+        let value = call.arguments[index];
+        if (property) {
+          if (value?.type === 'Identifier') value = bindingValue(bindings, value);
+          value = value?.properties?.find(item => (item.key?.name ?? item.key?.value) === property)?.value;
+        }
+        trace(value, owners.get(call), onLiteral);
+      }
+      if (name === 'setAttribute' && /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u
+        .test(call.arguments[0]?.value || '')) trace(call.arguments[1], owners.get(call), onLiteral);
+    }
+  };
+  let count = -1;
+  while (count !== [...signatures.values()].reduce((sum, set) => sum + set.size, 0)) {
+    count = [...signatures.values()].reduce((sum, set) => sum + set.size, 0);
+    inspect(() => {});
+  }
+  return { inspect, resolveFunction, returns, bindings };
+}
+
+export function findIndirectPresentationLiterals(source) {
+  const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
+  const found = new Map();
+  presentationFlow(ast).inspect(node => found.set(node.start, node));
+  return [...found.values()];
+}
+
 export function findPresentationSinkViolations(source, { sourceType = 'module' } = {}) {
   const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType, locations: true });
   const bindings = createBindingResolver(ast);
   const violations = [];
+  presentationFlow(ast).inspect(item => violations.push(item.loc.start.line));
   const inspect = node => violations.push(...outputLiterals(node, [], bindings).map(item => item.loc.start.line));
   const presentationRecordProperties = new Set(['label', 'shortLabel', 'caption', 'help', 'title',
-    'message', 'emptyText', 'placeholder', 'ariaLabel', 'ariaDescription']);
+    'message', 'emptyText', 'placeholder', 'ariaLabel', 'ariaDescription', 'error', 'warning', 'description', 'detail', 'displayName', 'category']);
   walk.simple(ast, {
     AssignmentExpression(node) {
       if (node.left.type === 'MemberExpression'
@@ -213,7 +416,7 @@ function auditJavascript() {
   const presentationAttributes = /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u;
   const presentationRecordProperties = new Set([
     'label', 'shortLabel', 'caption', 'help', 'title', 'message', 'emptyText', 'placeholder',
-    'ariaLabel', 'ariaDescription',
+    'ariaLabel', 'ariaDescription', 'error', 'warning', 'description', 'detail', 'displayName', 'category',
   ]);
   for (const entry of sources) {
     const { file, sourceType } = entry;
@@ -230,6 +433,7 @@ function auditJavascript() {
         fail(file, line, 'inline product text reaches a presentation sink');
       }
     };
+    presentationFlow(ast).inspect(reportLiteral);
     const report = node => {
       for (const literal of outputLiterals(node, [], bindings)) {
         reportLiteral(literal);
@@ -363,6 +567,7 @@ function auditJavascript() {
       },
       Property(node) {
         const name = node.key?.name ?? node.key?.value;
+        if (presentationRecordProperties.has(name)) report(node.value);
         if (/Key$/u.test(name || '')
             && (node.value.type !== 'Literal' || Object.hasOwn(ENGLISH_MESSAGES, node.value.value))) {
           recordKeyExpression(node.value);

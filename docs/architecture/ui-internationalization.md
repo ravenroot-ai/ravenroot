@@ -104,7 +104,7 @@ loaded after the change use the current locale as well.
 The optional `locale` and `catalog` fields on `POST /v1/embed/sessions` are presentation-only. They
 do not change the grant, capabilities, tenant, source, origin checks, or expiry. `catalog` is a JSON
 string because the session request keeps its existing flat string-valued wire shape. The initial
-catalog string is limited to 48 KiB and must be a JSON object envelope.
+catalog string is limited to 49,152 UTF-16 code units after decoding the outer request JSON and must be a JSON object envelope. This counts a supplementary Unicode character as two units; it is not a UTF-8 byte limit. The catalog-bearing session-creation request is limited to 303,104 UTF-8 bytes in total, including the JSON envelope, whitespace, and escapes. This reserves 8,192 bytes for the envelope plus six bytes per catalog code unit, so even a catalog fully escaped as `\uXXXX` fits. Catalog-free session creation and every other embed route retain their 8,192-byte request limit. Catalog validation still limits each individual message to 8,192 UTF-16 units and requires known message keys with matching placeholders. Authentication, origin, authorization, and CSP checks are unchanged.
 
 A registered-source request may include:
 
@@ -180,7 +180,7 @@ remain authored content. Provider packages that own additional UI copy should us
 package namespace and must not redefine Ravenroot core keys.
 
 The source audit parses static HTML, Java-generated embed HTML, DOM sinks, templates and conditional
-builders, indirect bindings, presentation records, and supported localization aliases. It checks
+builders, indirect bindings, presentation records, and supported localization aliases. Local wrapper signatures are derived from their parameter flow into DOM and dialog sinks, including transitive calls, returned values, deferred callbacks, and opaque HTML helpers; fixtures reject unkeyed values passed through renamed wrappers. Metadata such as labels, display names, descriptions, and validation errors is checked even when consumed by another module. Persisted document identities, renderer expressions, and provider-authored diagnostics require narrowly documented exclusions when they resemble product text. It checks
 missing and unused keys, named parameters, constrained line-specific exclusions, HTML-context
 escaping, and production catalog contents. Run the supported checks from `ravenroot-ui`:
 

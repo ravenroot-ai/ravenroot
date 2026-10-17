@@ -1,8 +1,9 @@
+import { uiText } from './ui-text.js';
 import { memoryTokenProvider } from './runtime-client.js';
 
 export const CONNECTION_STORAGE_KEY = 'ravenroot.ui.connection';
 const MAX_RECORD_LENGTH = 24 * 1024;
-const STORAGE_FAILURE = 'Browser storage is unavailable. Authentication is memory only; clear this site’s browser data if a previously saved token could not be removed.';
+const storageFailure = () => uiText("workspace.remembered.connection.browser.storage.is.unavailable.authentication.is.memory.only.clear");
 
 /** Public browser authority, including API prefix; never the proxy's private upstream identity. */
 export function connectionService(value, origin = globalThis.location?.origin) {
@@ -26,9 +27,10 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
   let rejectedSnapshot = null;
   let asked = false;
   let notice = '';
-  const report = message => { notice = message; onNotice(message); };
+  const noticeText = () => typeof notice === 'function' ? notice() : notice;
+  const report = message => { notice = message; onNotice(noticeText()); };
   const publish = () => onChange({ hasToken: Boolean(memory.getAccessToken()),
-    remembered: Boolean(saved?.service === service && saved.token === memory.getAccessToken() && saved.token), notice });
+    remembered: Boolean(saved?.service === service && saved.token === memory.getAccessToken() && saved.token), notice: noticeText() });
   const write = record => {
     // If a write fails, also try removing the previous token-bearing record. Never claim removal
     // succeeded when the browser denied both operations.
@@ -36,7 +38,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
     catch {
       try { storage().removeItem(CONNECTION_STORAGE_KEY); } catch { /* notice explains uncertainty */ }
       saved = null;
-      report(STORAGE_FAILURE);
+      report(storageFailure);
       return false;
     }
   };
@@ -54,7 +56,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
     }
   } catch {
     try { storage().removeItem(CONNECTION_STORAGE_KEY); } catch { /* optional storage */ }
-    report('The saved connection could not be read. Authenticate explicitly; browser storage may be unavailable or the record unsupported.');
+    report(() => uiText("workspace.remembered.connection.the.saved.connection.could.not.be.read.authenticate.explicitly"));
   }
   const forget = () => {
     pending = null;
@@ -125,7 +127,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
       }
     },
     forget,
-    get notice() { return notice; },
+    get notice() { return noticeText(); },
     get hasSavedService() { return Boolean(saved); },
   };
 }

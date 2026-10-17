@@ -257,11 +257,11 @@ export async function initializeUiLocalization({
     try { explicit = normalizeUiLocale(explicitValue); }
     catch (failure) { report(onDiagnostic, 'PREFERENCE_INVALID', { reason: failure.message }); }
   }
-  const locale = matchingLocale(explicit ? [explicit] : [], available)
+  const resolveLocale = () => matchingLocale(explicit ? [explicit] : [], available)
     || matchingLocale(configuration.defaultLocale ? [configuration.defaultLocale] : [], available)
     || matchingLocale(navigator_?.languages || [navigator_?.language].filter(Boolean), available)
     || 'en';
-  const localization = createUiLocalization({ locale,
+  const localization = createUiLocalization({ locale: resolveLocale(),
     catalogs: Object.fromEntries([...catalogs].map(([key, catalog]) => [key, catalog])), onDiagnostic });
   const sources = new Map(configuration.catalogs.map(catalog => [catalog.locale, 'configured']));
   for (const catalog of imported) sources.set(catalog.locale, 'imported');
@@ -270,9 +270,7 @@ export async function initializeUiLocalization({
   const unsubscribe = localization.subscribe(apply);
   apply();
   const languageChange = () => {
-    if (safeStorageValue(storage, UI_LOCALE_STORAGE_KEY)) return;
-    const next = matchingLocale(navigator_?.languages || [navigator_?.language].filter(Boolean), available) || 'en';
-    localization.setLocale(next);
+    localization.setLocale(resolveLocale());
   };
   globalThis.addEventListener?.('languagechange', languageChange);
 
@@ -284,10 +282,12 @@ export async function initializeUiLocalization({
     sourceFor: locale_ => sources.get(normalizeUiLocale(locale_)) || 'fallback',
     chooseLocale(locale_) {
       const normalized = normalizeUiLocale(locale_);
+      explicit = normalized;
       setStorageValue(storage, UI_LOCALE_STORAGE_KEY, normalized);
-      localization.setLocale(normalized);
+      localization.setLocale(resolveLocale());
     },
     useAutomaticLocale() {
+      explicit = null;
       setStorageValue(storage, UI_LOCALE_STORAGE_KEY, null);
       languageChange();
     },
@@ -309,6 +309,7 @@ export async function initializeUiLocalization({
       const wasActive = localization.locale === normalized;
       localization.removeCatalog(normalized);
       if (wasActive) {
+        explicit = null;
         setStorageValue(storage, UI_LOCALE_STORAGE_KEY, null);
         languageChange();
       }

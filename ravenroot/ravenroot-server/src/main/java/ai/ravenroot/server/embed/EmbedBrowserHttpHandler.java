@@ -53,6 +53,8 @@ public final class EmbedBrowserHttpHandler {
     public static final String START_EXECUTION_PATH = "/v1/embed/executions";
     public static final String BOOTSTRAP_SCRIPT_PATH = "/embed-bootstrap.js";
     private static final int MAX_BODY_BYTES = 8 * 1024;
+    // Each UTF-16 catalog code unit may use six ASCII bytes as an outer JSON unicode escape.
+    public static final int MAX_SESSION_BODY_BYTES = MAX_BODY_BYTES + 6 * EmbedPresentation.MAX_CATALOG_CHARACTERS;
 
     private final EmbedBrowserConfiguration configuration;
     private final EmbedLaunchTicketAuthority tickets;
@@ -114,7 +116,7 @@ public final class EmbedBrowserHttpHandler {
                 Set.of("registrationId", "locale", "catalog"),
                 Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin"),
                 Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin", "locale"),
-                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin", "locale", "catalog")));
+                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin", "locale", "catalog")), MAX_SESSION_BODY_BYTES);
         if (body == null) return;
         final EmbedPresentation presentation;
         try {
@@ -1217,14 +1219,26 @@ public final class EmbedBrowserHttpHandler {
 
     private static Map<String, String> bodyOneOf(HttpExchange exchange, Set<Set<String>> schemas)
             throws IOException {
+        return bodyOneOf(exchange, schemas, MAX_BODY_BYTES);
+    }
+
+    private static Map<String, String> bodyOneOf(HttpExchange exchange, Set<Set<String>> schemas,
+                                               int maximumBytes) throws IOException {
         String contentType = optionalSingleHeader(exchange, "Content-Type");
         if (contentType == null || !contentType.toLowerCase(java.util.Locale.ROOT).startsWith("application/json")) {
             invalid(exchange); return null;
         }
         byte[] bytes;
-        try (var input = exchange.getRequestBody()) { bytes = input.readNBytes(MAX_BODY_BYTES + 1); }
-        if (bytes.length > MAX_BODY_BYTES) { error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null; }
-        try { return EmbedRequestJson.parseOneOf(bytes, schemas); }
+        try (var input = exchange.getRequestBody()) { bytes = input.readNBytes(maximumBytes + 1); }
+        if (bytes.length > maximumBytes) { error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null; }
+        try {
+            var parsed = EmbedRequestJson.parseOneOf(bytes, schemas);
+            // The extra allowance belongs exclusively to catalog-bearing session creation.
+            if (!parsed.containsKey("catalog") && bytes.length > MAX_BODY_BYTES) {
+                error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null;
+            }
+            return parsed;
+        }
         catch (IllegalArgumentException invalid) { invalid(exchange); return null; }
     }
 

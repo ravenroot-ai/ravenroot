@@ -8110,7 +8110,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'javascript',
   '',
   'ensureProgramGraphReady',
-  'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
+  '9ebcb027de55f8e7acb92f1c5543e9925719d55d953832a3493eae345f57ed34',
   1),
  ('compose.yaml', 'file', '', '', '3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57', 1),
  ('deploy/dev/sandbox-supervisor.sh',
@@ -8393,7 +8393,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '849c7d5b780e10adf8431d578fccc463689eb30d1299665da309024657fe7687',
+  'd127f0aa331571145dc1ebce8ff13386ed7e3632fb7f716f8688c01e198fc0c8',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -14756,7 +14756,7 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
         "fc6894ee287b9c0913f5c64a3ef0c2404d85a738ea7e2d22b2a3a1f92b0f9612",
     GRAPH_AUTHORING_STARTUP_IMPORT_PATH:
-        "c3f93cba9c62402622022c92bd49f2d96b5e582b7f62efaaebbf139573b2c6b7",
+        "5b8fddaca8630fec01e2bbeab7e9fbfe827833ec21b89efdf510ee209fce5724",
     GRAPH_AUTHORING_PUBLISHER_PATH:
         "d0419b38a9b27141904f35c58e589e88ed924fd6e746f088a57f86fd81511dc8",
 }
@@ -14829,15 +14829,15 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "primaryPersistenceUnavailable": "e6325797cadcfc282e01703089b6d50635473c5b8a4823209cb45609c2c17456",
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
     "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
-    "openRepositoryGraph": "bd1673de33f98e36820afd7ee9760286a44d53a87f1882c821a7d9939472320f",
-    "saveRepositoryGraph": "4e526f34f8e7dacb75eb20484d1d129d5c1a7a93e2736c8ddf09cea1cb082c66",
-    "repositoryHistory": "bb355befff4ea8b04c4e64863b7f431b1f7dc814b77eb8cace32b344a541c240",
+    "openRepositoryGraph": "ffc3c696d048e466efdbf3d7f6ada247479439ef81b88aaa7c67cacc28572483",
+    "saveRepositoryGraph": "04f9ff81ddd65d5880a221e558b786d1a05f024b1fc2ae1c41fb73784575e4c5",
+    "repositoryHistory": "d9e000b1797bcee8c49aafd346a98614ee4ddcdcb82c4e2e379fb09c6e7ab2d0",
     "repositoryDiscard": "be75ee53c19a19b4bca346023b085d0d1db797bdedd9dc5822bdf5f6b6371186",
     "repositoryDelete": "9536467e9e5975d388388ecac8fdcce7df2f03fb69647ba17a582dbb1acd800f",
-    "repositoryRelease": "49d641edcc2936280760645b50cbe3fdfcf74423347a18d7f0de413fa36ae2b9",
-    "publishedArtifacts": "f770dd4ca2ee47ab091d3bb7a387c1fe3d520ba9daec639c27257c06b97d331c",
-    "connectRuntime": "f6624bb684dd2f701f997662cd8686f75ed18d1acc3e337d01e471f947df93bb",
-    "createStartupImportPlaceholder": "651de7c5d71fe15900eb89fa9be6af66dc777a8d9cdccabb0930c1722122fb04",
+    "repositoryRelease": "6c81369d2f0946494ad305f8ab06d01e8f32856cf592ed67bf7790b47756f8c4",
+    "publishedArtifacts": "70708b4890cc1d2a1e34670cf844d7eb933619e7f17eb751228feef751b82084",
+    "connectRuntime": "296ed330cc5b1e350efb7539bac6601e5dbec5ce1b35638547413a1dfaf07330",
+    "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
     "startupImportBindingIsCurrent": "5b79d5f6babdfab051815044c3733970c2bb9cd701915b6ac68c098e7df150d4",
     "startupImportPlaceholderIsUntouched": "c7250f2af0a9444f5a61fd6a92dfdcd77d960a2cf8b682effa17287487c4e176",
@@ -14849,7 +14849,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
-        "16b610ebfeb286315828985a1b15c8ca884ae03c879a1d50b8784f84b7bb7f08",
+        "413ae14ef232086fb9a1c0ec233892efc5829de3ebe6e9416a378468fcefbc5d",
     (Path("ravenroot/ravenroot-ui/src/workspace.js"), "createDocumentRecord"):
         "1f8b17e9993198666b5110ee681dc30f3260cef271569525b8449d28b9ba0609",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):

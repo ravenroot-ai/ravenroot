@@ -241,6 +241,7 @@ export function forkDocumentRecord(source, { documentId = createDocumentIncarnat
   if (forkGraph?.nodes) forkGraph.nodeMap = Object.fromEntries(forkGraph.nodes.map(node => [node.id, node]));
   const fork = createDocumentRecord({
     id: documentId, documentId, tenantId, graph: forkGraph, history, name,
+    // i18n-audit-exempt: authored-content - fork displayName is persisted document identity, editable by its author, not repainted chrome.
     displayName: `${source.displayName || source.name || 'workflow'} — fork`,
     mode: DOCUMENT_MODES.DRAFT,
     provenance: {

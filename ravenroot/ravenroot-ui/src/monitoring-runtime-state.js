@@ -284,8 +284,8 @@ export function edgeFlowWidth(recent) {
   return Math.min(FLOW_MAX_WIDTH, FLOW_BASE_WIDTH + Math.sqrt(recent) * 2.2);
 }
 
-export function formatRuntimeTime(value) {
+export function formatRuntimeTime(value, dateTime = uiDateTime) {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : uiDateTime(date, { timeStyle: 'medium', hour12: false });
+  return Number.isNaN(date.getTime()) ? null : dateTime(date, { timeStyle: 'medium', hour12: false });
 }

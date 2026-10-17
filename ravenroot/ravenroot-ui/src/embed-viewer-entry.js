@@ -16,6 +16,8 @@ import {
   createViewerStylesheet,
   viewerCardImage,
   viewerNodeType,
+  viewerNodeLabel,
+  viewerCardLabel,
 } from './viewer-presentation.js';
 import {
   applyDeploymentViewFrame,
@@ -40,9 +42,9 @@ import {
 import { createEmbedDesignInspection } from './embed-design-inspection.js';
 import { createEmbedMaximizeController } from './embed-maximize.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
-import { edgeFlowSnapshot, FLOW_PULSE_MS } from './monitoring-runtime-state.js';
+import { edgeFlowSnapshot, FLOW_PULSE_MS, formatRuntimeTime } from './monitoring-runtime-state.js';
 import {
-  createUiLocalization, normalizeUiLocale, uiText, validateUiCatalog,
+  createUiLocalization, normalizeUiLocale, uiText, uiDateTime, validateUiCatalog,
 } from './ui-text.js';
 import { localizeDocument } from './ui-localization.js';
 
@@ -396,7 +398,7 @@ export function createEmbedViewer(container, {
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       cytoscapeAdapter.destroy();
     },
-  }));
+  }), undefined, t);
 
   const activeRenderer = () => isMonitoring() && elasticMount !== null ? elasticMount : core;
   const runCommand = command => {
@@ -447,6 +449,8 @@ export function createEmbedViewer(container, {
       palette,
       tooltip: runtimeTooltip,
       markerKey: 'embed',
+      t,
+      formatTime: value => formatRuntimeTime(value, localization?.dateTime || uiDateTime),
       isLive: () => !destroyed && isMonitoring(),
       onViewportChange: scheduleMinimap,
       initialTransform: saved?.transform || null,
@@ -507,7 +511,7 @@ export function createEmbedViewer(container, {
       else if (designStyle() === 'cyto') applyViewerDesignRoutes(instance, null);
       if (currentSnapshot?.groups?.length) {
         visualGroupsRenderer ||= createVisualGroupRenderer({ cy: instance,
-          isCurrent: () => !destroyed && !isMonitoring() });
+          isCurrent: () => !destroyed && !isMonitoring(), t });
         visualGroupsRenderer.setGroups(groupOptions());
       }
     }
@@ -818,6 +822,13 @@ export function createEmbedViewer(container, {
       lifecycle.refreshLocale();
       maximizeController.refreshLocale();
       designInspection.refresh();
+      visualGroupsRenderer?.refreshLocale();
+      elasticMount?.refreshLocale();
+      if (currentSnapshot) instance.batch(() => currentSnapshot.nodes.forEach(node => {
+        const rendered = instance.getElementById(node.id);
+        rendered.data('label', viewerNodeLabel(node, t));
+        rendered.data('cardLabel', viewerCardLabel(node, t));
+      }));
       if (currentSnapshot) metadata.textContent = t('embed.metadata.version', {
         version: currentSnapshot.graphVersionId,
       });

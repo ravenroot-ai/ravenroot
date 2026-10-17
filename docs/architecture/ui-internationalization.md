@@ -101,6 +101,28 @@ loaded after the change use the current locale as well.
 
 ## Embedded viewer
 
+The full workspace export includes editor-only messages and can exceed the initial embedded
+catalog limit. Do not pass that entire export as an embedded catalog. Use the same catalog schema
+with the viewer's compact message subset, including the shared rendering keys:
+
+```js
+const viewerMessages = Object.fromEntries(Object.entries(workspaceCatalog.messages)
+  .filter(([key]) => key.startsWith('embed.') || key.startsWith('common.')
+    || key.startsWith('visualGroup.') || key === 'workspace.node.bypassed.suffix'));
+const viewerCatalog = { ...workspaceCatalog, messages: viewerMessages };
+const catalog = JSON.stringify(viewerCatalog);
+if (catalog.length > 49_152) throw new Error('Shorten the embedded catalog before sending it.');
+```
+
+This subset covers viewer controls, status and accessibility text, visual-group framing, bypass
+labels, and Monitoring tooltips; it is not limited to `embed.*`. The current English subset is
+4,689 UTF-16 code units when compactly serialized with the schema, `en-XA` locale and messages.
+Translated text and optional fields can change that size: check the final serialized catalog and
+complete request against the limits below. Missing messages fall back to English. A larger
+workspace catalog remains usable in the full UI within its separate 512 KiB import/configuration
+limit. The live `SET_LOCALE` channel uses the same catalog schema and per-viewer localization context;
+it does not expand the initial session request limits.
+
 The optional `locale` and `catalog` fields on `POST /v1/embed/sessions` are presentation-only. They
 do not change the grant, capabilities, tenant, source, origin checks, or expiry. `catalog` is a JSON
 string because the session request keeps its existing flat string-valued wire shape. The initial

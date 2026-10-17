@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import { productError } from './product-error.js';
 import { createReadOnlyRendererAdapter } from './viewer-renderer-adapter.js';
 import { viewerProjectionElements } from './viewer-presentation.js';
@@ -90,7 +91,7 @@ function projectionGroups(value, nodeIds) {
  * Copy only the projection allowlist. Unknown fields never enter the
  * renderer snapshot, DOM, accessibility tree, or parent messaging surface.
  */
-export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
+export function createViewerSnapshot(projection, budget = VIEWER_BUDGET, t = uiText) {
   if (['1', '2'].includes(projection?.viewerSourceVersion) && projection.projection) {
     projection = projection.projection;
   }
@@ -111,7 +112,7 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
   }
   const groups = projectionGroups(projection.groups, nodeIds);
 
-  const elements = viewerProjectionElements(nodes, edges).map(element => Object.freeze({
+  const elements = viewerProjectionElements(nodes, edges, t).map(element => Object.freeze({
     data: Object.freeze(element.data),
     ...(element.position ? { position: Object.freeze(element.position) } : {}),
   }));
@@ -134,7 +135,7 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
   });
 }
 
-export function createReadOnlyViewerCore(renderer, budget = VIEWER_BUDGET) {
+export function createReadOnlyViewerCore(renderer, budget = VIEWER_BUDGET, t = uiText) {
   const adapter = createReadOnlyRendererAdapter(renderer);
   let state = 'idle';
   let destroyed = false;
@@ -151,7 +152,7 @@ export function createReadOnlyViewerCore(renderer, budget = VIEWER_BUDGET) {
       const operation = ++generation;
       state = 'loading';
       try {
-        const snapshot = createViewerSnapshot(projection, budget);
+        const snapshot = createViewerSnapshot(projection, budget, t);
         let timeout;
         await Promise.race([
           adapter.render(snapshot),

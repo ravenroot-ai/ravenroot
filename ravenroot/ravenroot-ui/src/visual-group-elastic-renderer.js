@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import * as d3 from 'd3';
 import { edgeFlowWidth } from './monitoring-runtime-state.js';
 import { projectVisualGroups } from './visual-group-projection.js';
@@ -7,7 +8,7 @@ import { createVisualGroupTransition } from './visual-group-transition.js';
 export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
   nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection,
   isLive, marker, nodeText, edgeLabel, onViewportChange,
-  groupFill = '#edf4ff', groupText = '#24354b', groupBorder = '#526780' }) {
+  t = uiText, groupFill = '#edf4ff', groupText = '#24354b', groupBorder = '#526780' }) {
   const layer = zoomGroup.append('g').attr('class', 'd3-visual-groups');
   // Projected paths are presentation only; their source endpoint must not cover a real
   // member's pointer/tooltip target when the adjacent group remains collapsed.
@@ -66,9 +67,9 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
       const amount = values.get(group.id) ?? Number(group.collapsed);
       const anchor = point(group.anchorNodeId);
       if (amount > 0) badges.push({ ...group, groupId: group.id, id: group.summaryId, role: 'summary', x: anchor.x,
-        y: anchor.y, r: 24, opacity: amount, action: 'Expand', amount });
+        y: anchor.y, r: 24, opacity: amount, action: 'expand', amount });
       if (amount < 1) badges.push({ ...group, groupId: group.id, id: group.headerId, role: 'header', x: anchor.x,
-        y: anchor.y - (anchor.r || 14) - 30, r: 12, opacity: 1-amount, action: 'Collapse', amount });
+        y: anchor.y - (anchor.r || 14) - 30, r: 12, opacity: 1-amount, action: 'collapse', amount });
       for (const id of group.memberNodeIds) {
         if (amount === 0) continue;
         hidden.add(id);
@@ -143,7 +144,7 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
       .attr('data-selected', group => String(group.groupId === selectedGroup))
       .attr('aria-expanded', group => String(group.role === 'header'))
       .attr('tabindex', group => final && group.opacity === 1 ? 0 : -1)
-      .attr('aria-label', group => `${group.action} visual group ${group.name}, ${group.memberNodeIds.length} members`)
+      .attr('aria-label', group => t('embed.inspect.group', { action: t(`embed.inspect.${group.action}`), name: group.name, count: group.memberNodeIds.length }))
       .style('cursor', 'pointer');
     const activate = group => {
       const collapsed = group.role === 'header';
@@ -222,7 +223,7 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
       });
     badge.select('text').attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
       .attr('fill', groupText).attr('font-size', 12)
-      .text(group => `▦ ${group.name.length > 19 ? `${group.name.slice(0, 18)}…` : group.name} · ${group.memberNodeIds.length}`);
+      .text(group => t('visualGroup.header', { name: group.name.length > 19 ? `${group.name.slice(0, 18)}…` : group.name, count: group.memberNodeIds.length }));
     badge.select('title').text(group => `${group.name} — ${group.memberNodeIds.map(id => canonicalNodes.get(id)?.label || id).join(', ')}`);
     const observations = group => group.memberNodeIds.reduce((counts, id) => {
       const member = canonicalNodes.get(id);
@@ -234,7 +235,7 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
     badge.filter(group => group.role === 'summary').select('text').each(function(group) {
       const counts = observations(group);
       const activity = ['active', 'failed', 'waiting'].filter(state => counts[state])
-        .map(state => `${counts[state]} ${state}`).join(' · ');
+        .map(state => t('embed.group.activity', { count: counts[state], state: t(`embed.runtime.state.${state}`) })).join(' · ');
       if (!activity) return;
       d3.select(this).attr('transform', 'translate(0,-8)').append('tspan')
         .attr('x', 0).attr('dy', 18).attr('font-size', 10).text(activity);

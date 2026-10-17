@@ -15212,7 +15212,7 @@ function documentAccessibleName(document_, index) {
   const states = [];
   if (paneIsDirty(document_)) states.push(uiText("workspace.document.modified"));
   if (document_.id === workspace.activeId) states.push(uiText("workspace.document.current"));
-  return uiText("workspace.app.document.of", { displayName: document_.displayName, value: states.length ? `, ${states.join(', ')}` : '', index: index, value2: 1, size: workspace.size });
+  return uiText("workspace.app.document.of", { displayName: document_.displayName, value: states.length ? `, ${states.join(', ')}` : '', index: index + 1, size: workspace.size });
 }
 
 function syncDocumentSwitcher() {

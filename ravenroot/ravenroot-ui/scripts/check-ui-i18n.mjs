@@ -447,8 +447,21 @@ function presentationFlow(ast, isExempt = () => false) {
     }
     for (const call of calls) {
       const name = nameOf(call.callee);
+      if (name === 'html') traceHtml(call.arguments[0], owners.get(call), onLiteral);
       if (name === 'insertAdjacentHTML') traceHtml(call.arguments[1], owners.get(call), onLiteral);
       const arguments_ = new Set(primitiveArguments.get(name) || []);
+      // Both localization contexts and D3 expose .text(). Follow the argument's
+      // lexical key shape; plain copy and callbacks remain presentation sinks.
+      const catalogKey = (value, seen = new Set()) => {
+        if (!value || seen.has(value)) return false;
+        const next = new Set(seen).add(value);
+        if (value.type === 'Identifier') return catalogKey(bindingValue(bindings, value), next);
+        const prefix = value.type === 'Literal' ? value.value
+          : value.type === 'TemplateLiteral' ? value.quasis[0]?.value.cooked : null;
+        return typeof prefix === 'string' && /^[a-zA-Z][\w-]*(?:\.[\w-]*)+$/u.test(prefix);
+      };
+      if (name === 'text' && call.callee.type === 'MemberExpression' && call.arguments.length === 1
+          && !catalogKey(call.arguments[0])) arguments_.add(0);
       for (const target of resolveCallables(call.callee, owners.get(call))) {
         for (const path of signatures.get(target) || []) arguments_.add(path);
       }
@@ -462,7 +475,7 @@ function presentationFlow(ast, isExempt = () => false) {
         }
         trace(value, owners.get(call), onLiteral, new Set(), new Map(), kind === 'error');
       }
-      if (name === 'setAttribute' && /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u
+      if (['setAttribute', 'attr'].includes(name) && /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u
         .test(call.arguments[0]?.value || '')) trace(call.arguments[1], owners.get(call), onLiteral);
     }
   };
@@ -665,7 +678,7 @@ function auditJavascript() {
           }
         }
         const name = node.callee.type === 'MemberExpression' ? node.callee.property.name : node.callee.name;
-        if (name === 'setAttribute' && node.arguments[0]?.type === 'Literal'
+        if (['setAttribute', 'attr'].includes(name) && node.arguments[0]?.type === 'Literal'
             && presentationAttributes.test(node.arguments[0].value)) report(node.arguments[1]);
         if (['alert', 'confirm', 'announce', 'announceGraph', 'showToast',
           'showInspectorMessage'].includes(name)) {

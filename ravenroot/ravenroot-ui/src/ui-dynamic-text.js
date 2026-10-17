@@ -1,5 +1,14 @@
 // Product-owned dynamic workspace messages. Every key is called from an explicit presentation sink.
 export const DYNAMIC_ENGLISH_MESSAGES = Object.freeze({
+  "embed.group.activity": "{count} {state}",
+  "embed.runtime.state.idle": "idle",
+  "embed.runtime.state.active": "active",
+  "embed.runtime.state.waiting": "waiting",
+  "embed.runtime.state.completed": "completed",
+  "embed.runtime.state.failed": "failed",
+  "embed.runtime.state.bypassed": "bypassed",
+  "embed.runtime.state.fallback": "fallback",
+
   "workspace.startup.failure.document-too-large": "The graph is larger than the connected service allows. Choose a smaller file and retry.",
   "workspace.startup.failure.not-found": "The graph file was not found. Check the source and retry.",
   "workspace.startup.failure.download-failed": "The graph could not be downloaded. Check browser access and retry.",
@@ -304,7 +313,7 @@ export const DYNAMIC_ENGLISH_MESSAGES = Object.freeze({
   "workspace.app.you": "You",
   "workspace.app.assistant": "Assistant",
   "workspace.app.ravenroot": "Ravenroot",
-  "workspace.app.document.of": "{displayName}{value}, document {index}{value2} of {size}",
+  "workspace.app.document.of": "{displayName}{value}, document {index} of {size}",
   "workspace.app.open.a.repository.graph": "Open a repository graph:\n\n{value}",
   "workspace.app.repository.filename": "Repository filename",
   "workspace.app.history.for.enter.a.full.revision.to.restore.or": "History for {id}:\n\n{value}\n\nEnter a full revision to restore, or leave blank to close:",

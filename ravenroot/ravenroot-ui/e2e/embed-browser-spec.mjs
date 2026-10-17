@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
+import { ENGLISH_MESSAGES } from '../src/ui-text.js';
+
+const viewerCatalog = (locale, marker) => ({ schema: 'ravenroot.ui-catalog/v1', locale, messages: Object.fromEntries(
+  Object.entries(ENGLISH_MESSAGES).filter(([key]) => key.startsWith('embed.') || key.startsWith('common.')
+    || key.startsWith('visualGroup.') || key === 'workspace.node.bypassed.suffix')
+    .map(([key, value]) => [key, typeof value === 'string' ? marker + value
+      : Object.fromEntries(Object.entries(value).map(([plural, text]) => [plural, marker + text]))])),
+});
+async function readyViewer(page, route) {
+  await page.goto(route);
+  await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId))).toBe(true);
+  expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+  await page.evaluate(() => window.postViewerAcknowledgement());
+  await expect.poll(() => page.evaluate(() => window.embedMessages.some(message => message.type === 'READY'))).toBe(true);
+  return page.frames().find(frame => frame.url().startsWith(viewerOrigin));
+}
+
 
 const parentOrigin = process.env.RR_EMBED_PARENT_ORIGIN;
 const viewerOrigin = process.env.RR_EMBED_VIEWER_ORIGIN;
@@ -31,6 +48,20 @@ test('localizes a real server session and accepts only the authenticated locale 
   await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
   await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('⟦Graph⟧');
   await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('⟦Fit⟧');
+  const otherPage = await page.context().newPage();
+  const otherViewer = await readyViewer(otherPage, '/localized');
+  const compact = viewerCatalog('en-XB', '⟦B⟧');
+  expect(JSON.stringify(compact).length).toBeLessThanOrEqual(49_152);
+  await page.evaluate(catalog => window.postViewerLocale('en-XB', catalog), compact);
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XB');
+  const bypassLabel = frame => frame.locator('[data-viewer-canvas]').evaluate(canvas =>
+    canvas._cyreg.cy.getElementById('behavior').data('cardLabel'));
+  await expect.poll(() => bypassLabel(viewer)).toBe('behavior⟦B⟧ · bypassed');
+  expect(await bypassLabel(otherViewer)).toBe('behavior · bypassed');
+  await expect(otherViewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await page.evaluate(() => window.postViewerLocale('en-XA', null));
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await otherPage.close();
   const before = await page.evaluate(() => window.embedMessages.length);
 
   await page.evaluate(() => window.postViewerLocale('en', null, { channelId: 'wrong-channel' }));
@@ -253,6 +284,22 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     await expect(memberTooltip).toContainText('Processing duration:');
     await expect(memberTooltip).toContainText('Fallback:');
     await expect(memberTooltip).toContainText('Bypassed:');
+    const otherPage = await page.context().newPage();
+    const otherViewer = await readyViewer(otherPage, '/deployment');
+    await page.evaluate(catalog => window.postViewerLocale('en-XA', catalog), viewerCatalog('en-XA', '⟦A⟧'));
+    await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+    await expect(viewer.getByRole('button', { name: /⟦A⟧.*Pipeline/ })).toBeVisible();
+    await viewer.locator('.d3-nodes circle[data-node-id="worker"]').hover();
+    await expect(memberTooltip).toContainText('⟦A⟧ID: worker');
+    await expect(memberTooltip).toContainText('⟦A⟧Bypassed:');
+    await expect(otherViewer.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(otherViewer.locator('[data-viewer-mode] option').first()).toHaveText('Design');
+    await page.evaluate(() => window.postViewerLocale('en', null));
+    await expect(viewer.locator('html')).toHaveAttribute('lang', 'en');
+    await viewer.locator('.d3-nodes circle[data-node-id="worker"]').hover();
+    await expect(memberTooltip).toContainText('ID: worker');
+    await expect(memberTooltip).not.toContainText('⟦A⟧');
+    await otherPage.close();
     const tooltipBox = await memberTooltip.boundingBox();
     const canvasBox = await viewer.locator('[data-viewer-canvas]').boundingBox();
     expect(tooltipBox.x).toBeGreaterThanOrEqual(canvasBox.x);

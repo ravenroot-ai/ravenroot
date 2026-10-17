@@ -61,6 +61,8 @@ export function mountD3ElasticRenderer({
   initialTransform = null,
   startSimulation = true,
   idleRadius = null,
+  t = uiText,
+  formatTime = formatRuntimeTime,
 }) {
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
@@ -171,14 +173,14 @@ export function mountD3ElasticRenderer({
     const tip = d3.select(tooltip);
     let tooltipPoint = null;
     const known = (labelKey, value) => value == null || value === ''
-      ? uiText('embed.tooltip.unavailable', { label: uiText(labelKey) })
-      : uiText('embed.tooltip.value', { label: uiText(labelKey), value });
-    const nodeText = runtimeNodeTooltipText;
+      ? t('embed.tooltip.unavailable', { label: t(labelKey) })
+      : t('embed.tooltip.value', { label: t(labelKey), value });
+    const nodeText = node => runtimeNodeTooltipText(node, t, formatTime);
     const edgeText = link => [link.label || link.id,
-      uiText('embed.tooltip.recentActivity', { count: link.flow?.recent ?? 0 }),
-      uiText('embed.tooltip.traversals', { count: link.flow?.count ?? 0 }),
+      t('embed.tooltip.recentActivity', { count: link.flow?.recent ?? 0 }),
+      t('embed.tooltip.traversals', { count: link.flow?.count ?? 0 }),
       known('embed.tooltip.lastTraversal', link.flow?.lastEvent),
-      known('embed.tooltip.lastTraversalTime', formatRuntimeTime(link.flow?.lastOccurredAt)),
+      known('embed.tooltip.lastTraversalTime', formatTime(link.flow?.lastOccurredAt)),
       known('embed.tooltip.configuredWeight', link.configuredWeight),
     ].join('\n');
     const positionTooltip = event => {
@@ -342,12 +344,13 @@ export function mountD3ElasticRenderer({
       node.fy = null;
     }));
 
-  visualGroups = createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
+  visualGroups = createElasticVisualGroupRenderer({ t, zoomGroup, nodes, links, simulation,
     nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection, isLive,
     marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange,
     groupFill: palette.nodeSurface, groupText: palette.nodeText, groupBorder: palette.nodeBorder });
 
   return {
+    refreshLocale() { refreshTooltip(); visualGroups.refresh(); },
     nodes,
     links,
     simulation,
@@ -493,18 +496,18 @@ export function mountD3ElasticRenderer({
   };
 }
 
-export function runtimeNodeTooltipText(node) {
+export function runtimeNodeTooltipText(node, t = uiText, formatTime = formatRuntimeTime) {
   const known = (labelKey, value) => value == null || value === ''
-    ? uiText('embed.tooltip.unavailable', { label: uiText(labelKey) })
-    : uiText('embed.tooltip.value', { label: uiText(labelKey), value });
-  const state = node.runtimeObserved ? node.runtimeState : null;
+    ? t('embed.tooltip.unavailable', { label: t(labelKey) })
+    : t('embed.tooltip.value', { label: t(labelKey), value });
+  const state = node.runtimeObserved ? t(`embed.runtime.state.${node.runtimeState}`) : null;
   return [node.label, known('embed.tooltip.id', node.id), known('embed.tooltip.state', state),
     known('embed.tooltip.activeInstances', node.runtimeObserved ? node.instances : null),
     known('embed.tooltip.inFlightArrivals', node.runtimeObserved ? node.arrivals : null),
     known('embed.tooltip.lastEvent', node.lastEventType),
-    known('embed.tooltip.lastEventTime', formatRuntimeTime(node.lastOccurredAt)),
+    known('embed.tooltip.lastEventTime', formatTime(node.lastOccurredAt)),
     known('embed.tooltip.processingDuration', node.processingDuration == null ? null : `${node.processingDuration}s`),
-    known('embed.tooltip.fallback', node.runtimeObserved ? uiText(node.fallback ? 'common.yes' : 'common.no') : null),
-    known('embed.tooltip.bypassed', node.runtimeObserved ? uiText(node.runtimeState === 'bypassed' ? 'common.yes' : 'common.no') : null),
+    known('embed.tooltip.fallback', node.runtimeObserved ? t(node.fallback ? 'common.yes' : 'common.no') : null),
+    known('embed.tooltip.bypassed', node.runtimeObserved ? t(node.runtimeState === 'bypassed' ? 'common.yes' : 'common.no') : null),
   ].join('\n');
 }

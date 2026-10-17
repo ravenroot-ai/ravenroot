@@ -1,6 +1,8 @@
 import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
 
+import { viewerProjectionElements } from '../src/viewer-presentation.js';
+import { runtimeNodeTooltipText } from '../src/viewer-elastic-renderer.js';
 import { UI_CATALOG_SCHEMA } from '../src/ui-text.js';
 import {
   createEmbedLocalization,
@@ -37,4 +39,24 @@ describe('embedded viewer localization', () => {
     expect(validateEmbedLocaleChange('it', catalog('it', 'Caricamento')))
       .toMatchObject({ locale: 'it', catalog: { locale: 'it' } });
   });
+});
+
+
+it('isolates shared bypass labels and Monitoring tooltips from workspace defaults', () => {
+  const make = (locale, marker) => createEmbedLocalization({ locale, document: new JSDOM('<html><body></body></html>').window.document,
+    catalog: { schema: UI_CATALOG_SCHEMA, locale, messages: {
+      'workspace.node.bypassed.suffix': marker + ' bypass', 'embed.tooltip.id': marker + ' ID',
+    } },
+  });
+  const first = make('it', 'IT'), second = make('fr', 'FR');
+  const node = { id: 'authored', kind: 'BEHAVIOR', bypassed: true, label: 'Authored name' };
+  const label = context => viewerProjectionElements([node], [], context.text)[0].data.cardLabel;
+  expect(label(first)).toBe('Authored nameIT bypass');
+  expect(label(second)).toBe('Authored nameFR bypass');
+  expect(runtimeNodeTooltipText(node, first.text)).toContain('IT ID: authored');
+  expect(runtimeNodeTooltipText(node, second.text)).toContain('FR ID: authored');
+  first.setLocale('en');
+  expect(label(first)).toBe('Authored name · bypassed');
+  expect(label(second)).toBe('Authored nameFR bypass');
+  expect(viewerProjectionElements([node], [])[0].data.cardLabel).toBe('Authored name · bypassed');
 });

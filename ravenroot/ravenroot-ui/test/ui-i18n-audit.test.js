@@ -90,6 +90,8 @@ describe('UI localization source audit fixtures', () => {
     `let result = ''; const paint = () => { node.textContent = result; }; function update() { result = 'Later assigned copy'; }`,
     `let message = ''; const state = () => ({ message }); function set(copy) { message = copy; } set('Later indirect copy');`,
     `function warning(message) { return message + ' Repair the document.'; } export function state() { return { warning: warning('Invalid document') }; }`,
+    `selection.text(() => 'Chart copy');`,
+    `selection.attr('aria-label', value => 'Graph control');`,
     `notify?.('Notification copy');`,
     `function fallback(value) { notify?.(value); } fallback('Fallback copy');`,
     `function showFormError(value) { error.textContent = value; } showFormError('Validation copy');`,

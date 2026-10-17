@@ -273,28 +273,28 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
   ];
 }
 
-export function viewerNodeLabel(node) {
+export function viewerNodeLabel(node, t = uiText) {
   const type = viewerNodeType(node);
   const label = String(node?.label || node?.name || node?.id || '');
   const bypassed = Boolean(node?.bypassed);
-  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? uiText("workspace.node.bypassed.suffix") : ''}`;
+  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? t("workspace.node.bypassed.suffix") : ''}`;
 }
 
-export function viewerCardLabel(node) {
+export function viewerCardLabel(node, t = uiText) {
   const label = String(node?.label || node?.name || node?.id || '');
-  return `${label}${node?.bypassed ? uiText("workspace.node.bypassed.suffix") : ''}`;
+  return `${label}${node?.bypassed ? t("workspace.node.bypassed.suffix") : ''}`;
 }
 
 /** Closed mapping from the allowlisted wire projection into renderer data. */
-export function viewerProjectionElements(nodes, edges) {
+export function viewerProjectionElements(nodes, edges, t = uiText) {
   return [
     ...nodes.map(node => ({
       // Kept here instead of each caller so static snapshots and deployment views compute the same
       // fallback bounds when a capture has no authored layout.
       data: {
         id: node.id,
-        label: viewerNodeLabel(node),
-        cardLabel: viewerCardLabel(node),
+        label: viewerNodeLabel(node, t),
+        cardLabel: viewerCardLabel(node, t),
         name: node.label || node.name || node.id,
         nodeType: viewerNodeType(node),
         bypassed: Boolean(node.bypassed),

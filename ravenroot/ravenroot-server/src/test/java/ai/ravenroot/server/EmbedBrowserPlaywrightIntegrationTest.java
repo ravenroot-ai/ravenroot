@@ -239,7 +239,7 @@ class EmbedBrowserPlaywrightIntegrationTest {
                         new EmbedGraphProjection.Node("start", "START",
                                 new EmbedGraphProjection.Layout(80, 120, 84, 84)),
                         new EmbedGraphProjection.Node("behavior", "BEHAVIOR",
-                                new EmbedGraphProjection.Layout(260, 120, 120, 56)),
+                                new EmbedGraphProjection.Layout(260, 120, 120, 56), null, null, true),
                         new EmbedGraphProjection.Node("end", "END",
                                 new EmbedGraphProjection.Layout(440, 120, 84, 84))),
                 List.of(new EmbedGraphProjection.Edge("start", "behavior"),

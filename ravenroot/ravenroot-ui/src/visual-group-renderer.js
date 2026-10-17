@@ -7,7 +7,7 @@ const MEMBER = 'rr-visual-member';
 
 /** Incremental Cytoscape presentation, with canonical elements stationary behind ghost glyphs. */
 export function createVisualGroupRenderer({ cy, isCurrent = () => true,
-  onSelection = () => {}, onUpdate = () => {}, transitionOptions = {} } = {}) {
+  onSelection = () => {}, onUpdate = () => {}, transitionOptions = {}, t = uiText } = {}) {
   let projection = null;
   let input = null;
   let positions = new Map();
@@ -62,9 +62,9 @@ export function createVisualGroupRenderer({ cy, isCurrent = () => true,
     const remaining = wrapAt < 0 ? '' : displayName.slice(wrapAt).trim();
     const secondLine = [...remaining].length > 14 ? `${[...remaining].slice(0, 13).join('')}…` : remaining;
     const wrappedName = [firstLine, secondLine].filter(Boolean).join('\n');
-    const label = header ? uiText('visualGroup.header', {
+    const label = header ? t('visualGroup.header', {
       name: displayName, count: group.memberNodeIds.length,
-    }) : uiText('visualGroup.summary', {
+    }) : t('visualGroup.summary', {
       name: wrappedName, count: group.memberNodeIds.length,
     });
     return {

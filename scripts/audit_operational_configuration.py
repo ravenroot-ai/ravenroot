@@ -11048,7 +11048,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                         'status': 'retained',
                         'rationale': 'The token is a DOM selector, field name, status, or editor protocol '
                                      'atom.',
-                        'candidateIds': ['oc-012d1725fb9a2daeadfd',
+                        'candidateIds': ['oc-3b0ac554de32088b63c0', 'oc-012d1725fb9a2daeadfd',
                                          'oc-cf3bbb71996b48c0f46e',
                                          'oc-82a8e52250a56ec2c985',
                                          'oc-0672ac3c8e380ee0ec5f',
@@ -11080,7 +11080,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
  'ui.editor-normalization': {'classification': 'derived',
                              'status': 'retained',
                              'rationale': 'The empty/zero value is local editor state normalization.',
-                             'candidateIds': ['oc-92a2477d557d100ff89b',
+                             'candidateIds': ['oc-5f403d81c5a84e919c95', 'oc-92a2477d557d100ff89b',
                                               'oc-da728b9d83ab6a52f4d4',
                                               'oc-f89271d05e6bb645ce56',
                                               'oc-f1a019d154a95a20c5b4',

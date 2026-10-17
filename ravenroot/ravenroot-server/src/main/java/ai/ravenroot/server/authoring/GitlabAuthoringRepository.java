@@ -720,9 +720,6 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         URI uri = api(endpoint);
         network.requireAllowed(uri);
         if (body != null) network.requireRequestWithinLimit(body);
-        int count = requestCount.get() + 1;
-        requestCount.set(count);
-        if (count > MAX_REQUESTS) throw failure(GraphAuthoringException.Failure.LIMIT_EXCEEDED);
         String token;
         try (var secret = credentials.resolve(configuration.credentialReference()).orElseThrow()) {
             char[] chars = secret.copy();
@@ -765,6 +762,10 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
             if (body != null) builder.header("Content-Type", "application/json; charset=utf-8");
             builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                     : HttpRequest.BodyPublishers.ofByteArray(body));
+            // Count every outbound attempt, including eligible GET retries, before sending.
+            int count = requestCount.get();
+            if (count >= MAX_REQUESTS) throw failure(GraphAuthoringException.Failure.LIMIT_EXCEEDED);
+            requestCount.set(count + 1);
             var response = client.send(builder.build(),
                     BoundedHttpResponseBody.upTo(providerResponseLimit, timeout));
             byte[] bytes = response.body();

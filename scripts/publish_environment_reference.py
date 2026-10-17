@@ -156,7 +156,7 @@ ROW_BOUNDARIES = {
         "maximum `120000` milliseconds"
     ),
     "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT": (
-        "additional retries for eligible GitHub `GET` failures; unset defaults to `1`; accepted "
+        "additional retries for eligible GitHub and GitLab `GET` failures; unset defaults to `1`; accepted "
         "range is 0 through 3 and mutations are never retried blindly"
     ),
     "RAVENROOT_ACTIVITY_CAPTURE_ENABLED": (

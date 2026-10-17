@@ -306,6 +306,51 @@ class GitlabAuthoringRepositoryTest {
         }
     }
 
+    @Test void retriesConsumeRemainingOutboundBudgetBeforeAttempt4097() throws Exception {
+        var api = new Gitlab(); api.retryGetResponses = 99;
+        var environment = environment(); environment.put("RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", "3");
+        try (var repository = new GitlabAuthoringRepository(GraphAuthoringConfiguration.fromEnvironment(environment),
+                ignored -> Optional.of(new SecretValue("server-secret".toCharArray())), (t,g,v,s,b) -> "absent",
+                ignored -> { }, api, Clock.systemUTC())) {
+            var field = GitlabAuthoringRepository.class.getDeclaredField("requestCount");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked") var counter = (ThreadLocal<Integer>) field.get(repository);
+            api.beforeSend = () -> {
+                // Model 4094 earlier successful sends in this operation. The transport is now
+                // receiving attempt 4095; retain the production 4096 ceiling without an operator seam.
+                assertEquals(1, counter.get());
+                counter.set(4095);
+            };
+            assertFailure(GraphAuthoringException.Failure.LIMIT_EXCEEDED,
+                    () -> repository.list(ALICE, "").toCompletableFuture().join());
+            assertEquals(2, api.totalRequests); // attempts 4095 and 4096; 4097 never reaches transport
+            assertEquals(0, api.postRequests);
+            // A new operation gets its own budget; the previous exhausted counter must be removed.
+            api.retryGetResponses = 0;
+            assertTrue(repository.list(ALICE, "").toCompletableFuture().join().items().isEmpty());
+        }
+    }
+
+    @Test void configuredGetRetryLimitDoesNotRetryPostMutations() {
+        for (int limit : List.of(0, 1, 3)) {
+            var api = new Gitlab(); api.retryGetResponses = 99;
+            var environment = environment();
+            environment.put("RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", Integer.toString(limit));
+            try (var repository = new GitlabAuthoringRepository(GraphAuthoringConfiguration.fromEnvironment(environment),
+                    ignored -> Optional.of(new SecretValue("server-secret".toCharArray())), (t,g,v,s,b) -> "absent",
+                    ignored -> { }, api, Clock.systemUTC())) {
+                assertFailure(GraphAuthoringException.Failure.UNAVAILABLE,
+                        () -> repository.list(ALICE, "").toCompletableFuture().join());
+                assertEquals(limit + 1, api.totalRequests);
+                api.retryGetResponses = 0; api.retryPostResponses = true;
+                assertFailure(GraphAuthoringException.Failure.UNAVAILABLE,
+                        () -> save(repository, "orders.graphml", "one", EMPTY, "post-retry-key-000001"));
+                assertEquals(1, api.postRequests);
+                assertEquals(0, api.writes);
+            }
+        }
+    }
+
     @Test void operationDeadlineBoundsTheTotalRequestChain() {
         var api = new Gitlab(); api.slowResponse = true;
         var environment = environment(); environment.put("RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS", "5");
@@ -379,7 +424,9 @@ class GitlabAuthoringRepositoryTest {
         int sequence = 10, writes;
         volatile boolean loseCommit, loseMr, unauthorized, rawProjectObserved, symlink, failTransport;
         volatile boolean oversizedResponse, malformedResponse, infiniteTree, slowResponse;
-        volatile int treeRequests, totalRequests;
+        volatile int treeRequests, totalRequests, postRequests, retryGetResponses;
+        volatile boolean retryPostResponses;
+        volatile Runnable beforeSend;
         volatile Runnable beforeCommit, afterCommit, beforeParentCapture;
         volatile int releaseRootReads;
         volatile java.util.concurrent.CyclicBarrier race, mrRace;
@@ -395,6 +442,12 @@ class GitlabAuthoringRepositoryTest {
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) throws IOException {
             assertEquals("server-secret", request.headers().firstValue("PRIVATE-TOKEN").orElseThrow());
             totalRequests++;
+            if (beforeSend != null) { var action = beforeSend; beforeSend = null; action.run(); }
+            if (request.method().equals("POST")) postRequests++;
+            if (request.method().equals("GET") && retryGetResponses-- > 0
+                    || request.method().equals("POST") && retryPostResponses) {
+                return (HttpResponse<T>) new FakeResponse(request, 503, new byte[0]);
+            }
             if (failTransport) throw new IOException("server-secret provider failure");
             if (slowResponse) {
                 try { Thread.sleep(20); } catch (InterruptedException interrupted) { throw new IOException(interrupted); }

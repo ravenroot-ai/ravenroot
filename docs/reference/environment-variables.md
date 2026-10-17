@@ -229,7 +229,7 @@ Detailed contract: [Graph source control and published artifacts](../operator-gu
 | `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME` | required for GitHub; operator-owned repository name, 1 through 100 ASCII letters, digits, `_`, `.`, or `-` |
 | `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER` | required for GitHub; operator-owned GitHub account or organization, 1 through 100 ASCII letters, digits, `_`, `.`, or `-` |
 | `RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS` | positive connect, request, and complete response-body deadline; unset defaults to `15000`; maximum `120000` milliseconds |
-| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | additional retries for eligible GitHub `GET` failures; unset defaults to `1`; accepted range is 0 through 3 and mutations are never retried blindly |
+| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | additional retries for eligible GitHub and GitLab `GET` failures; unset defaults to `1`; accepted range is 0 through 3 and mutations are never retried blindly |
 | `RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES` | required comma-separated `tenant=relative/path` grants; namespaces are confined, duplicate tenants and colliding derived draft branches are refused, and absent tenants receive no access |
 
 ## Graph execution

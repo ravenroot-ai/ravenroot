@@ -446716,22 +446716,7 @@
       "rationale": "Executable audit regression fixture, not a production configuration input. Reviewed issue #414 atom: RAVENROOT_RUNNER_CONFIG."
     },
     {
-      "id": "oc-ce2703cc016df479e0a5",
-      "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 2275,
-      "symbol": "test_runner_inventory_distinguishes_bounds_protocol_and_presentation",
-      "kind": "inline-script-operational",
-      "role": "inline",
-      "expression": "\"'Workspaces, named Agents and runners'\"",
-      "expressionDigest": "adeb0ce6d59fcb521984094fefee05244d7d966cc945689bb9e6c65bb930249d",
-      "evidenceDigest": "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53",
-      "surface": "test-fixture",
-      "status": "retained",
-      "classification": "test-fixture",
-      "rationale": "Executable conformance/negative-test data; not production configuration."
-    },
-    {
-      "id": "oc-926c547a00d2b489e61b",
+      "id": "oc-e8e9c8a93388d3d012e8",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2275,
       "symbol": "test_runner_inventory_distinguishes_bounds_protocol_and_presentation",
@@ -446739,34 +446724,45 @@
       "role": "inline",
       "expression": "\"presentation-text\"",
       "expressionDigest": "6e3e728d2387c81232ceeed341397b62e05bde298717634f32d1d1ac134af6f2",
-      "evidenceDigest": "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53",
+      "evidenceDigest": "c62ddf99a528b95589c0bcfe931eb445027262baf21433d80313a89be9366c64",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "rationale": "Executable audit regression fixture, not a production configuration input. Reviewed issue #414 atom: \"presentation-text\".",
       "identityMigration": {
-        "history": "issue-423-publication-and-wire-boundaries-v2",
-        "fromId": "oc-49fb9eaf6f41ca8f22c1"
+        "history": "issue-561-test-fixture-localization-v2",
+        "fromId": "oc-926c547a00d2b489e61b"
       }
     },
     {
-      "id": "oc-08290b50204c8f9601da",
+      "id": "oc-5dc06c5daa5365f5e21d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2275,
       "symbol": "test_runner_inventory_distinguishes_bounds_protocol_and_presentation",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "\"runner-panel.js\"",
-      "expressionDigest": "637fae7db420562fd0071973a6ec4f677de0cd28a3c38cbaa27e8b03c5dc217f",
-      "evidenceDigest": "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53",
+      "expression": "\"ui-dynamic-text.js\"",
+      "expressionDigest": "9ad394e4807053c48002ee32a73fa687965d3c905cc98af003fe375a8fe5900b",
+      "evidenceDigest": "c62ddf99a528b95589c0bcfe931eb445027262baf21433d80313a89be9366c64",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Executable audit regression fixture, not a production configuration input. Reviewed issue #414 atom: \"runner-panel.js\".",
-      "identityMigration": {
-        "history": "issue-423-publication-and-wire-boundaries-v2",
-        "fromId": "oc-66dbe79c0bbf3f49e650"
-      }
+      "rationale": "This literal is test-only evidence for the catalog-backed runner presentation classification."
+    },
+    {
+      "id": "oc-b6aa90ef70e7053c56d7",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2275,
+      "symbol": "test_runner_inventory_distinguishes_bounds_protocol_and_presentation",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'\"Workspaces, named Agents and runners\"'",
+      "expressionDigest": "651a7cc04b4858cb75116a5bd4d1ed4b8dca85b705a44b978143045e7b115d9a",
+      "evidenceDigest": "c62ddf99a528b95589c0bcfe931eb445027262baf21433d80313a89be9366c64",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is test-only evidence for the catalog-backed runner presentation classification."
     },
     {
       "id": "oc-c9189a3b820a9a2131c8",
@@ -597797,6 +597793,44 @@
       "remediationOwner": "#321",
       "retirementRationale": "Issue #561 replaces this product presentation atom with catalog-backed localization or removes the obsolete inline presentation path.",
       "evidence": "const edgeText = link => [link.label || link.id, `Recent activity: ${link.flow?.recent ?? 0}`, `Traversals: ${link.flow?.count ?? 0}`, known('Last traversal', link.flow?.lastEvent), known('Last traversal time', formatRuntimeTime(link.flow?.lastOccurredAt)), known('Configured weight', link.configuredWeight), ].join('\\n');"
+    },
+    {
+      "id": "oc-08290b50204c8f9601da",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2275,
+      "symbol": "test_runner_inventory_distinguishes_bounds_protocol_and_presentation",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"runner-panel.js\"",
+      "expressionDigest": "637fae7db420562fd0071973a6ec4f677de0cd28a3c38cbaa27e8b03c5dc217f",
+      "evidenceDigest": "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Executable audit regression fixture, not a production configuration input. Reviewed issue #414 atom: \"runner-panel.js\".",
+      "identityMigration": {
+        "history": "issue-423-publication-and-wire-boundaries-v2",
+        "fromId": "oc-66dbe79c0bbf3f49e650"
+      },
+      "retirementRationale": "Issue #561 replaces this obsolete localization audit test-fixture atom with its current catalog-backed assertion.",
+      "evidence": "(\"runner-panel.js\", \"'Workspaces, named Agents and runners'\"): \"presentation-text\","
+    },
+    {
+      "id": "oc-ce2703cc016df479e0a5",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2275,
+      "symbol": "test_runner_inventory_distinguishes_bounds_protocol_and_presentation",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"'Workspaces, named Agents and runners'\"",
+      "expressionDigest": "adeb0ce6d59fcb521984094fefee05244d7d966cc945689bb9e6c65bb930249d",
+      "evidenceDigest": "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Executable conformance/negative-test data; not production configuration.",
+      "retirementRationale": "Issue #561 replaces this obsolete localization audit test-fixture atom with its current catalog-backed assertion.",
+      "evidence": "(\"runner-panel.js\", \"'Workspaces, named Agents and runners'\"): \"presentation-text\","
     }
   ],
   "evidenceRecords": {
@@ -604676,7 +604710,6 @@
     "9f4ea6873892f14ce899f0620bc21d9b47e28620c7211eece7d87094bfde1781": "const routes = rendererRouteSet(target, 'cyto', null, owner);",
     "9f536d47eac1d011e668ed52997f1f524eb176897056673d4ae9512d4570f8a6": "private static final Set<String> CONFIGURATION = Set.of(\"brokerProfile\", \"queue\", \"prefetch\", \"maxInFlight\", \"retryBackoffMs\", \"maxRetryBackoffMs\", \"drainTimeoutMs\", \"poisonAttempts\", \"poisonPolicy\", \"deadLetterMode\", \"checkpointPolicy\", \"resourceMode\");",
     "9f553ad44b2893c89014c199f96821ebda3c45f6ee448c58b9029c03e3ba95c4": "const spatiallyAmbiguous = Math.abs(Number(event.clientX) - claim.clientX) <= 4 && Math.abs(Number(event.clientY) - claim.clientY) <= 4;",
-    "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53": "(\"runner-panel.js\", \"'Workspaces, named Agents and runners'\"): \"presentation-text\",",
     "9f5f007c43ce2efb01ea666e233c2f05a172e6a85f9752000e270d8407c5704f": "helm_base --set-string \"programTimeoutMs=$value\" >\"$TEMP_DIR/blank-$label.yaml\"",
     "9f619b39265706518093a0d8b419166a9042902aeda6814f173c582928fbbde0": "int resourceCount = versionThree ? count(in, MAX_BYTES) : 0;",
     "9f623c7033ec61ece482cdda7f581ca2211b5d572d9ef15bd2db7f1b3bf63f38": "- name: RAVENROOT_AI_MAX_LLM_CONCURRENCY",
@@ -606357,6 +606390,7 @@
     "c603fe6cd2b9e9b7acfcd0a4aaac6d2008f3337e7733dd42217f5bd6bf009311": "\"--entrypoint=python3\", image, \"/opt/security_acceptance.py\"])",
     "c61ee1b0bc95ad7abb62717acf55948407dcf67a573865f28c6123a95927ff23": "(audit.HELM_TEMPLATE_PATHS[1],",
     "c62051df78ad033310dfd5a1f6af7f2def4306d3ad7b6f77f26d040396a585ca": "if helm_base --set-string \"rateLimit.addressRequestsPerSecond=$value\" \\",
+    "c62ddf99a528b95589c0bcfe931eb445027262baf21433d80313a89be9366c64": "(\"ui-dynamic-text.js\", '\"Workspaces, named Agents and runners\"'): \"presentation-text\",",
     "c64070a3b72bc23b1a15af136214d6b138febcf5c1abb808b15c9c1bc86bd3c6": "public static final String PROJECTION_PATH = \"/v1/embed/projection\";",
     "c65bbf3723254bed8fd4a8cde68404206a83fa91c3600c7a541a192fb5e8e83e": "const RELEASE_VERSION_PROPERTY = 'ravenroot.authoring.releaseVersion';",
     "c65cadd4575f40c9784591587a68365fa8ca1f1b663ee3abfbaa024a3e4681c3": "} export function planWorkspaceLayout({ mode = 'horizontal', documents = [], availableWidth = 0, availableHeight = 0, columnShares, rowShares, overlays = [], gap = WORKSPACE_GRID_GAP, gridTopology = null, preserveGridColumnShares = false, preserveGridRowShares = false, } = {}) { const count = documents.length;",
@@ -915872,6 +915906,58 @@
             "status": "retained",
             "classification": "protocol-or-format-invariant",
             "rationale": "This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-561-test-fixture-localization-v2",
+      "issue": "#561",
+      "sourceRevision": "1f69a9059f5db9bc6d6ec6207f9817ef17fd705a",
+      "targetRevision": "1f69a9059f5db9bc6d6ec6207f9817ef17fd705a",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "1f2e8ffb17721defc5dfc3a7cdf7c74e0a2e41a3ef02cd22582301c001fb70d2",
+      "targetCandidateDigest": "cab868a9698efbec5cb6e7afbdf61bd3493e818147bdff702fd1912b76ce1f43",
+      "mappings": [
+        {
+          "fromId": "oc-926c547a00d2b489e61b",
+          "toId": "oc-e8e9c8a93388d3d012e8",
+          "approved": true,
+          "rationale": "Issue #561 preserves the exact presentation classification fixture atom while its neighboring source assertion changes.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "9f58fada3b7a41964bc17b825e878c68042bf29daee4fd34b10fe632f9f28c53",
+            "afterEvidenceDigest": "c62ddf99a528b95589c0bcfe931eb445027262baf21433d80313a89be9366c64"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-08290b50204c8f9601da",
+          "approved": true,
+          "rationale": "Issue #561 replaces this obsolete localization audit test-fixture atom with its current catalog-backed assertion."
+        },
+        {
+          "id": "oc-ce2703cc016df479e0a5",
+          "approved": true,
+          "rationale": "Issue #561 replaces this obsolete localization audit test-fixture atom with its current catalog-backed assertion."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-5dc06c5daa5365f5e21d",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is test-only evidence for the catalog-backed runner presentation classification."
+          }
+        },
+        {
+          "id": "oc-b6aa90ef70e7053c56d7",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is test-only evidence for the catalog-backed runner presentation classification."
           }
         }
       ]

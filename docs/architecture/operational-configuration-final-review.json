@@ -8669,7 +8669,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "108ca95b128d4a673c74fe22439521a2c0b6da3765dbd2ee7cd1730e56347363",
+          "digest": "a1c84df8eb311240792c7956230189e0d98c4e8e1bf8fbbc0108bfd80324fe10",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         }
       ],
@@ -8824,7 +8824,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "108ca95b128d4a673c74fe22439521a2c0b6da3765dbd2ee7cd1730e56347363",
+          "digest": "a1c84df8eb311240792c7956230189e0d98c4e8e1bf8fbbc0108bfd80324fe10",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         },
         {

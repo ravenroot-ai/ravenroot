@@ -6,6 +6,8 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.deployment.*;
 import ai.ravenroot.api.node.*;
 import ai.ravenroot.api.persistence.JournalCursor;
+import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.SourceCheckpointStore;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
@@ -14,6 +16,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -22,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -140,6 +145,87 @@ class DefaultGraphDeploymentStableConsumerTest {
         }
     }
 
+    @Test void blockedOwnershipOpenCannotDelayAdmissionOrDeactivationAndLateOwnerIsReleased() throws Exception {
+        Path database = directory.resolve("blocked-open.db");
+        try (var realStore = new SqliteExecutionStore(database, Clock.systemUTC());
+             var engine = new SameThreadExecutionEngine()) {
+            var ownership = new BlockingOwnershipStore(realStore, true, true, false);
+            var behavior = new SourceBehavior();
+            var deployment = deployment(engine, ownership.store(), behavior, GRAPH, Duration.ofMillis(500));
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            CompletableFuture<DurableConsumerIngress> opening = CompletableFuture.supplyAsync(() ->
+                    behavior.context.ingress().openDurableConsumer("reader"));
+            assertTrue(ownership.openEntered.await(10, TimeUnit.SECONDS));
+
+            long started = System.nanoTime();
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class,
+                    behavior.context.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                            "mailbox/42", "open-blocked"));
+            deployment.stop().toCompletableFuture().get(2, TimeUnit.SECONDS);
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 2_000,
+                    "ownership open must not hold the source lifecycle lock");
+            assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> opening.get(2, TimeUnit.SECONDS),
+                    "the open caller receives its bounded unresolved result");
+
+            ownership.releaseOpen.countDown();
+            assertTrue(ownership.closeEntered.await(10, TimeUnit.SECONDS),
+                    "an owner acquired after retirement must be closed instead of published");
+            ownership.releaseClose.countDown();
+        }
+    }
+
+    @Test void blockedOwnershipCloseCannotDelayAdmissionOrDeactivation() throws Exception {
+        Path database = directory.resolve("blocked-close.db");
+        try (var realStore = new SqliteExecutionStore(database, Clock.systemUTC());
+             var engine = new SameThreadExecutionEngine()) {
+            var ownership = new BlockingOwnershipStore(realStore, false, true, false);
+            var behavior = new SourceBehavior();
+            var deployment = deployment(engine, ownership.store(), behavior, GRAPH, Duration.ofMillis(500));
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var consumer = behavior.context.ingress().openDurableConsumer("reader");
+
+            var stopping = deployment.stop().toCompletableFuture();
+            assertTrue(ownership.closeEntered.await(10, TimeUnit.SECONDS));
+            assertInstanceOf(IngressReceipt.Refused.class,
+                    consumer.offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                            "mailbox/42", "close-blocked"),
+                    "revocation must be visible before ownership cleanup settles");
+            stopping.get(2, TimeUnit.SECONDS);
+
+            ownership.releaseClose.countDown();
+        }
+    }
+
+    @Test void queuedDeactivationCannotBeOvertakenAndAdmissionsRemainBounded() throws Exception {
+        Path database = directory.resolve("queued-deactivation.db");
+        try (var realStore = new SqliteExecutionStore(database, Clock.systemUTC());
+             var engine = new SameThreadExecutionEngine()) {
+            var ownership = new BlockingOwnershipStore(realStore, false, false, true);
+            var behavior = new SourceBehavior();
+            var deployment = deployment(engine, ownership.store(), behavior, GRAPH, Duration.ofMillis(400));
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var consumer = behavior.context.ingress().openDurableConsumer("reader");
+
+            CompletableFuture<IngressReceipt> first = CompletableFuture.supplyAsync(() ->
+                    consumer.offerDurably(IDENTITY, IngressTarget.start(), "first",
+                            "mailbox/42", "first"));
+            assertTrue(ownership.inboxEntered.await(10, TimeUnit.SECONDS));
+            var stopped = deployment.stop().toCompletableFuture();
+            long secondStarted = System.nanoTime();
+            IngressReceipt second = consumer.offerDurably(IDENTITY, IngressTarget.start(), "second",
+                    "mailbox/42", "second");
+
+            assertFalse(second.acknowledgeable(), "a reader queued behind deactivation cannot barge");
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - secondStarted) < 2_000,
+                    "lifecycle lock acquisition must spend from the wrapper's deadline");
+            assertInstanceOf(IngressReceipt.Ambiguous.class, first.get(2, TimeUnit.SECONDS));
+            stopped.get(2, TimeUnit.SECONDS);
+            ownership.releaseInbox.complete(true);
+        }
+    }
+
     private static SecurityContext identity(String tenant) {
         return new SecurityContext("request", tenant, "source", PrincipalType.WORKLOAD, "issuer");
     }
@@ -157,8 +243,13 @@ class DefaultGraphDeploymentStableConsumerTest {
                 "only a persisted invocation establishes scheduler checkpoint custody");
     }
 
-    private static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, SqliteExecutionStore store,
+    private static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
                                                        SourceBehavior behavior, String graph) {
+        return deployment(engine, store, behavior, graph, DefaultGraphDeployment.DEFAULT_STORE_CALL_BOUND);
+    }
+
+    private static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
+                                                       SourceBehavior behavior, String graph, Duration bound) {
         NodePackage nodePackage = new NodePackage() {
             @Override public String id() { return "test.source.package"; }
             @Override public String version() { return "1.0.0"; }
@@ -169,7 +260,83 @@ class DefaultGraphDeploymentStableConsumerTest {
                 NodePackages.register(new BehaviorRegistry(), nodePackage), new ExecutionMonitor(),
                 ExecutionIdentitySource.randomUuids(), graph.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
-                DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
+                DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "stable-consumer-test", Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                null, GraphExecutionLimits.DEFAULTS, null, null, null, null,
+                GraphRunner.DEFAULT_SHUTDOWN_BOUND, bound);
+    }
+
+    private static final class BlockingOwnershipStore {
+        private final ExecutionStore store;
+        private final ExecutionStore delegate;
+        private final boolean blockOpen;
+        private final boolean blockClose;
+        private final boolean blockInbox;
+        private final CountDownLatch openEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseOpen = new CountDownLatch(1);
+        private final CountDownLatch closeEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseClose = new CountDownLatch(1);
+        private final CountDownLatch inboxEntered = new CountDownLatch(1);
+        private final CompletableFuture<Boolean> releaseInbox = new CompletableFuture<>();
+
+        private BlockingOwnershipStore(ExecutionStore delegate, boolean blockOpen, boolean blockClose,
+                                       boolean blockInbox) {
+            this.delegate = delegate;
+            this.blockOpen = blockOpen;
+            this.blockClose = blockClose;
+            this.blockInbox = blockInbox;
+            this.store = (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                    new Class<?>[] { ExecutionStore.class }, this::invoke);
+        }
+
+        private ExecutionStore store() {
+            return store;
+        }
+
+        private Object invoke(Object proxy, java.lang.reflect.Method method, Object[] arguments) throws Throwable {
+            try {
+                if (method.getName().equals("openSourceCheckpointStore")) {
+                    openEntered.countDown();
+                    if (blockOpen) releaseOpen.await();
+                    SourceCheckpointStore opened = delegate.openSourceCheckpointStore(
+                            (String) arguments[0], (String) arguments[1]);
+                    return wrap(opened);
+                }
+                return method.invoke(delegate, arguments);
+            } catch (InvocationTargetException wrapped) {
+                throw wrapped.getCause();
+            }
+        }
+
+        private SourceCheckpointStore wrap(SourceCheckpointStore opened) {
+            return new SourceCheckpointStore() {
+                @Override public CompletionStage<JournalCursor> checkpoint(String sourceId) {
+                    return opened.checkpoint(sourceId);
+                }
+                @Override public CompletionStage<JournalCursor> advance(JournalCursor expected, long position) {
+                    return opened.advance(expected, position);
+                }
+                @Override public CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId,
+                                                                       Duration retention) {
+                    if (!blockInbox) return opened.recordInbox(sourceId, eventId, retention);
+                    inboxEntered.countDown();
+                    return releaseInbox;
+                }
+                @Override public CompletionStage<Boolean> containsInbox(String sourceId, UUID eventId) {
+                    return opened.containsInbox(sourceId, eventId);
+                }
+                @Override public void close() {
+                    closeEntered.countDown();
+                    try {
+                        if (blockClose) releaseClose.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        opened.close();
+                    }
+                }
+            };
+        }
     }
 
     private static final class SourceBehavior implements NodeBehavior, InboundSourceCapable {

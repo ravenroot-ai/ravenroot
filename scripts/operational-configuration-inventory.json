@@ -1004318,6 +1004318,19 @@
       "retirements": [],
       "additions": [],
       "semanticReviews": []
+    },
+    {
+      "id": "issue-561-attempt6-bounded-browser-replay-fixture",
+      "issue": "#561",
+      "sourceRevision": "f016211ac877584cb9d606c869529fb10b3b7deb",
+      "targetRevision": "34a404922a11a0cf25a2d33157698f81330482bf",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "89bd92dc4ad3d0a1d4385fe79a904493a003ab0b5059aea7fc5505eb57e77d8f",
+      "targetCandidateDigest": "f7ab3c93eee7e9ff280eb7dcf2fa3075e259b7e406b40ab289159be03b95e123",
+      "mappings": [],
+      "retirements": [],
+      "additions": [],
+      "semanticReviews": []
     }
   ],
   "semanticReviewHistory": [

@@ -1004305,6 +1004305,19 @@
         }
       ],
       "semanticReviews": []
+    },
+    {
+      "id": "issue-561-attempt6-exact-locale-acknowledgement",
+      "issue": "#561",
+      "sourceRevision": "04b5e0f1b1add248a7448fbb2ab0c24a64f66196",
+      "targetRevision": "a6975070347649cc9016407abcafe883cb4bd361",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "ac54cd7cef213a2802edc71d1898ad7e3e426613b757c973c890abaf35755c70",
+      "targetCandidateDigest": "f7ab3c93eee7e9ff280eb7dcf2fa3075e259b7e406b40ab289159be03b95e123",
+      "mappings": [],
+      "retirements": [],
+      "additions": [],
+      "semanticReviews": []
     }
   ],
   "semanticReviewHistory": [

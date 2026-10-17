@@ -32,7 +32,7 @@ the primary competitor documentation used below; the links are evidence sources,
 | Observability | [Execution events](execution-events.md) and [test/run/observe](../user-guide/test-run-observe.md) distinguish streams, durable records and projections | [Temporal monitoring](https://docs.temporal.io/self-hosted-guide/monitoring), [Airflow monitoring](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/index.html), [Camunda Operate](https://docs.camunda.io/docs/components/operate/operate-introduction/), [n8n executions](https://docs.n8n.io/workflows/executions/), [Node-RED logging](https://nodered.org/docs/user-guide/runtime/logging) |
 | Operational governance | [Graph source control](../operator-guide/graph-source-control.md), [lifecycle console](../operator-guide/lifecycle-console.md), and [trust/identity](../security/trust-identity.md) define publication, authority and audit boundaries | [Temporal security](https://docs.temporal.io/self-hosted-guide/security), [Airflow access control](https://airflow.apache.org/docs/apache-airflow/stable/security/access-control.html), [Camunda users and roles](https://docs.camunda.io/docs/components/hub/organization/users-and-roles/) |
 | Licensing | [Support and legal](../governance/support-legal.md) records Ravenroot's Apache-2.0 boundary | [Temporal server license](https://github.com/temporalio/temporal/blob/main/LICENSE), [Airflow core license](https://github.com/apache/airflow/blob/main/LICENSE), [Camunda licenses](https://docs.camunda.io/docs/reference/licenses/), [n8n license](https://github.com/n8n-io/n8n/blob/master/LICENSE.md), [Node-RED license](https://github.com/node-red/node-red/blob/main/LICENSE) |
-| Education | [Education](../education/) pairs a visual DFA projection with a separately executable register-machine exercise | [Temporal tutorials](https://learn.temporal.io/), [Airflow tutorials](https://airflow.apache.org/docs/apache-airflow/stable/tutorial/), [Camunda tutorials](https://docs.camunda.io/docs/guides/), [n8n courses](https://docs.n8n.io/courses/), [Node-RED tutorials](https://nodered.org/docs/tutorials/) |
+| Education | [Education](../education/) provides a bounded executable register-machine exercise with an exact expected result and explicit evidence limits | [Temporal tutorials](https://learn.temporal.io/), [Airflow tutorials](https://airflow.apache.org/docs/apache-airflow/stable/tutorial/), [Camunda tutorials](https://docs.camunda.io/docs/guides/), [n8n courses](https://docs.n8n.io/courses/), [Node-RED tutorials](https://nodered.org/docs/tutorials/) |
 
 ## Authoring and executable interchange
 
@@ -162,8 +162,8 @@ names: [Temporal monitoring](https://docs.temporal.io/self-hosted-guide/monitori
 
 ## Licensing and education
 
-Ravenroot is Apache-2.0. Its education pathway includes executable register-machine graphs, exact
-expected results, a separate DFA drawing-model exercise and explicit evidence boundaries. See
+Ravenroot is Apache-2.0. Its guided education pathway includes a bounded executable register-machine
+exercise with an exact expected result and explicit evidence boundaries. See
 [Education](../education/) and [support and legal](../governance/support-legal.md).
 
 - The selected [Temporal server repository](https://github.com/temporalio/temporal/blob/main/LICENSE)
@@ -179,6 +179,6 @@ expected results, a separate DFA drawing-model exercise and explicit evidence bo
 - [Node-RED core](https://github.com/node-red/node-red/blob/main/LICENSE) uses Apache License 2.0;
   independently installed nodes can use different licenses.
 
-Education material across projects varies in goal and format. Ravenroot's exercises establish only
-the recorded structural, validation and execution results; they do not claim broader curriculum
-coverage or superiority.
+Education material across projects varies in goal and format. Ravenroot's register-machine exercise
+establishes only the recorded structural, validation and execution results; it does not claim broader
+curriculum coverage or superiority.

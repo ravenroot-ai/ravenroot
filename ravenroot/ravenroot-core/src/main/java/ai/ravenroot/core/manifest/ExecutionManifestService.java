@@ -113,9 +113,23 @@ public final class ExecutionManifestService {
     public StoredExecutionManifest pin(ExecutionKey key, GraphContentId graphContentId,
                                        GraphDefinitionIdentity graphIdentity, ExecutionPolicy policy,
                                        Collection<String> behaviorNames) {
+        return await(pinAsync(key, graphContentId, graphIdentity, policy, behaviorNames));
+    }
+
+    /**
+     * Starts manifest pinning without choosing how long a caller may wait.
+     *
+     * <p>The store operation remains idempotent by manifest content when a caller stops waiting and
+     * the transaction later commits. Admission owns the deadline because it must share one bound
+     * across definition, manifest and execution persistence rather than resetting a separate timeout
+     * at every layer.</p>
+     */
+    public CompletionStage<StoredExecutionManifest> pinAsync(ExecutionKey key,
+            GraphContentId graphContentId, GraphDefinitionIdentity graphIdentity,
+            ExecutionPolicy policy, Collection<String> behaviorNames) {
         ExecutionManifest manifest = resolver.manifestFor(key, graphContentId, graphIdentity, policy,
                 Instant.now(clock), behaviorNames);
-        return await(store.pin(manifest));
+        return store.pin(manifest);
     }
 
     /**
@@ -171,8 +185,20 @@ public final class ExecutionManifestService {
     /** Resolves policy with exact graph-node proof for versioned external-I/O snapshots. */
     public ResolvedOperationalPolicy resolvePolicyForNodes(ExecutionKey key, ExecutionPolicy policy,
                                                            Collection<GraphNode> nodes) {
-        StoredExecutionManifest stored = await(store.load(key));
-        return resolver.resolvePolicyForNodes(stored.manifest(), policy, nodes);
+        return await(resolvePolicyForNodesAsync(key, policy, nodes));
+    }
+
+    /**
+     * Starts the verified manifest read used for hosted dispatch without blocking the caller's lock.
+     * The returned stage resolves policy only after the store has verified the persisted manifest.
+     */
+    public CompletionStage<ResolvedOperationalPolicy> resolvePolicyForNodesAsync(ExecutionKey key,
+            ExecutionPolicy policy, Collection<GraphNode> nodes) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(policy, "policy");
+        Objects.requireNonNull(nodes, "nodes");
+        return store.load(key).thenApply(stored ->
+                resolver.resolvePolicyForNodes(stored.manifest(), policy, nodes));
     }
 
     /** Restores verified graph limits before the pinned graph is parsed for full policy proof. */

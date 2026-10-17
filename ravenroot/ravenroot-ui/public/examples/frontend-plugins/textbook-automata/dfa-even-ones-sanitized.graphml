@@ -4,7 +4,7 @@
   <key id="name" for="node" attr.name="name" attr.type="string"/>
   <graph id="dfa-even-ones-sanitized" edgedefault="directed">
     <node id="start"><data key="kind">START</data></node>
-    <node id="state-q-even"><data key="kind">BEHAVIOR</data><data key="name">Executable state checkpoint</data></node>
+    <node id="state-q-even"><data key="kind">BEHAVIOR</data><data key="name">Projection evidence checkpoint</data></node>
     <node id="even-check-empty"><data key="kind">BEHAVIOR</data></node>
     <node id="even-decide-empty"><data key="kind">BEHAVIOR</data></node>
     <node id="even-read-symbol"><data key="kind">BEHAVIOR</data></node>
@@ -14,7 +14,7 @@
     <node id="even-decide-symbol"><data key="kind">BEHAVIOR</data></node>
     <node id="even-on-zero-consume"><data key="kind">BEHAVIOR</data></node>
     <node id="even-on-one-consume"><data key="kind">BEHAVIOR</data></node>
-    <node id="state-q-odd"><data key="kind">BEHAVIOR</data><data key="name">Executable state checkpoint</data></node>
+    <node id="state-q-odd"><data key="kind">BEHAVIOR</data><data key="name">Projection evidence checkpoint</data></node>
     <node id="odd-check-empty"><data key="kind">BEHAVIOR</data></node>
     <node id="odd-decide-empty"><data key="kind">BEHAVIOR</data></node>
     <node id="odd-read-symbol"><data key="kind">BEHAVIOR</data></node>

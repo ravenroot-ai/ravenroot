@@ -75,17 +75,23 @@ workflow node. Every transition names an ordered, contiguous list of real workfl
 first source and last target match the mapped states. Ravenroot validates the mapping before adding
 it to the undo history and persisting it as `ravenroot.frontendPresentation.v1`.
 
-The example directory includes `dfa-even-ones-presentation.json`. To apply it to the even-ones
-workflow, open the GraphML, choose **Edit mapping**, paste that file, save, and select **Textbook DFA/NFA**.
+The example directory includes `dfa-even-ones-presentation.json`. To apply it to the supplied
+inspection fixture, open `dfa-even-ones-sanitized.graphml`, choose **Edit mapping**, paste that file,
+save, and select **Textbook DFA/NFA**.
 The diagram shows `qEven` as initial and accepting, `qOdd`, both `0` loops, and both `1`
 transitions. Select a state or transition to select and inspect its underlying node or ordered edge
-path. Choose **Full operational flow** to return to every executable parsing, decision, consumption, routing,
-logging, and terminal node. Position values in the mapping are editable in Ravenroot and survive
+path. Choose **Full operational flow** to return to every node and edge in the underlying inspection fixture.
+Position values in the mapping are editable in Ravenroot and survive
 save, reopen, and export.
 
 Operational highlights mean only that mapped workflow nodes or edges have current execution
 evidence. They do not claim that the projection is a production finite-automaton runtime, prove
 acceptance, or replace the actual execution result.
+
+The supplied GraphML has generic `BEHAVIOR` nodes without behavior identifiers or runtime
+configuration. It demonstrates the browser-side mapping and renderer contract; it is not an
+executable DFA example. Its overview minimap and graph statistics continue to describe the
+underlying operational graph while the drawing-model overlay is active.
 
 ## Lifecycle and isolation
 

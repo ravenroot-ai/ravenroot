@@ -2697,36 +2697,12 @@ public final class GraphRunner implements AutoCloseable {
      *       failing worst under the load that motivates it.</li>
      * </ul>
      * <p>A virtual thread has nothing to size, own or shut down, and no queue in which one slow
-     * release delays the next. Its carrier cost differs across JDK versions because JEP 491 changes
-     * monitor pinning, as traced below.</p>
-     *
-     * <p>The chain, at the source. {@code ExecutionRecorder.record} is {@code synchronized} and waits
-     * on the write with {@code join()} inside that monitor. But the write itself does not run on the
-     * waiting thread: {@code SqliteExecutionStore.apply} goes through its {@code async} helper, which
-     * is {@code supplyAsync(operation, worker)}, and {@code worker} is a single-thread executor whose
-     * thread is an ordinary <em>platform</em> thread, {@code ravenroot-sqlite-<file>}. So the store's
-     * JNI frame — {@code sqlite-jdbc} does ship {@code org.sqlite.core.NativeDB} and a native library
-     * per platform — is <strong>never on the hop's virtual thread</strong>. That thread only waits.</p>
-     *
-     * <p>From which, by version:</p>
-     * <ul>
-     *   <li><strong>JDK 21–23:</strong> the virtual thread parks in {@code join()} <em>inside a
-     *       monitor</em>, so its carrier is pinned for the duration of a slow write. Real, and it is
-     *       the monitor that costs it — not the native frame.</li>
-     *   <li><strong>JDK 24+, so this project's supported ceiling of LTS 25:</strong> JEP 491 lifts
-     *       monitor pinning, that park becomes an ordinary one, and the carrier <em>unmounts</em>. No
-     *       carrier is charged by this path at all. The native frame still occupies
-     *       {@code ravenroot-sqlite-<file>} — but that is the store's own dedicated platform thread,
-     *       not a carrier, and it is occupied identically on every version and for every caller.</li>
-     * </ul>
-     *
-     * <p>What the control endpoint gives up therefore differs by version: on 21–23 it trades its own
-     * thread's wait for a scheduler carrier's, one per control call that finds a parked hop and never
-     * one per hop; on 24+ it gives
-     * up only the wait, and nothing is charged anywhere else. No claim is made here about the
-     * scheduler growing to compensate for a pinned carrier; the argument does not need it, because
-     * the required property is delivered by {@code Thread.start()} returning — the request
-     * thread is free before the scheduler does anything at all.</p>
+     * release delays the next. Execution state and recorder serialization use {@link
+     * java.util.concurrent.locks.ReentrantLock}, so a store wait on Java 21 unmounts from its carrier
+     * while retaining the same one-writer revision and lifecycle ordering. The store operation still
+     * runs on the adapter's own worker; the virtual thread only waits for its outcome. This matters
+     * here because a gate release can immediately enter a durable state write on the virtual thread
+     * it starts.</p>
      */
     private boolean releasePauseGate(UUID traversalId, GateRelease release, GateReleaseReason reason) {
         // The removal and the publication happen under this traversal's one control monitor, the
@@ -3075,6 +3051,13 @@ public final class GraphRunner implements AutoCloseable {
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), parentInvocationIds, invocationId, attemptId, command,
                 causedBy);
+        // Cancellation can arrive while the durable NODE_STARTED write is unresolved. The write may
+        // still commit, so it is not rolled back or relabelled as absent; once it returns, however,
+        // the cancelled traversal must not deliver the node effect that the caller already refused.
+        if (cancelledTraversals.contains(identity.traversalId())) {
+            return CompletableFuture.failedFuture(
+                    new TraversalCancelledException(identity.traversalId(), node.id()));
+        }
         return deliverAttempt(node, payload, attributes, parentInvocationIds, command, state, identity,
                 coordinator, iteration, definition, admissionLease, invocationId, attemptId,
                 FIRST_ATTEMPT_ORDINAL, startedEventId, hop);
@@ -5498,6 +5481,9 @@ public final class GraphRunner implements AutoCloseable {
         private final Clock clock;
         private final GraphExecutionLimits limits;
         private final ExecutionBudget budget;
+        /** Serializes aggregate folding and durable writes without an intrinsic monitor. */
+        private final java.util.concurrent.locks.ReentrantLock stateLock =
+                new java.util.concurrent.locks.ReentrantLock();
         /**
          * The traversal-accepted event, minted with the traversal and published with the first batch
          * that carries anything. Null when nothing is journalling.
@@ -5644,35 +5630,50 @@ public final class GraphRunner implements AutoCloseable {
         /** @see #endTerminalPayload */
         private volatile Object[] errorTerminalPayload;
 
-        private synchronized void recordEndTerminal(Object payload) {
-            if (!calledExecution) {
-                // Compatibility for ordinary execution: preserve the historical last-arrival rule.
-                endTerminalPayload = new Object[] {payload};
-                return;
+        private void recordEndTerminal(Object payload) {
+            stateLock.lock();
+            try {
+                if (!calledExecution) {
+                    // Compatibility for ordinary execution: preserve the historical last-arrival rule.
+                    endTerminalPayload = new Object[] {payload};
+                    return;
+                }
+                if (calledEndOutputs.size() >= limits.payload().maxCollectionSize()) {
+                    throw new IllegalStateException("called execution produced more than "
+                            + limits.payload().maxCollectionSize() + " END outputs");
+                }
+                byte[] canonical = ai.ravenroot.api.payload.PayloadJson.writeJava(payload, limits.payload());
+                calledEndOutputs.add(new CalledEndOutput(canonical, payload));
+            } finally {
+                stateLock.unlock();
             }
-            if (calledEndOutputs.size() >= limits.payload().maxCollectionSize()) {
-                throw new IllegalStateException("called execution produced more than "
-                        + limits.payload().maxCollectionSize() + " END outputs");
-            }
-            byte[] canonical = ai.ravenroot.api.payload.PayloadJson.writeJava(payload, limits.payload());
-            calledEndOutputs.add(new CalledEndOutput(canonical, payload));
         }
 
-        private synchronized Object[] calledEndTerminal() {
-            if (calledEndOutputs.isEmpty()) return null;
-            var ordered = new java.util.ArrayList<>(calledEndOutputs);
-            ordered.sort((left, right) -> java.util.Arrays.compareUnsigned(left.canonical(), right.canonical()));
-            if (ordered.size() == 1) return new Object[] {ordered.getFirst().payload()};
-            java.util.List<Object> outputs = ordered.stream().map(CalledEndOutput::payload).toList();
-            // The collection itself may exceed the same payload bound even when every member fit.
-            limits.payload().enforceAndMeasure(outputs);
-            return new Object[] {outputs};
+        private Object[] calledEndTerminal() {
+            stateLock.lock();
+            try {
+                if (calledEndOutputs.isEmpty()) return null;
+                var ordered = new java.util.ArrayList<>(calledEndOutputs);
+                ordered.sort((left, right) -> java.util.Arrays.compareUnsigned(left.canonical(), right.canonical()));
+                if (ordered.size() == 1) return new Object[] {ordered.getFirst().payload()};
+                java.util.List<Object> outputs = ordered.stream().map(CalledEndOutput::payload).toList();
+                // The collection itself may exceed the same payload bound even when every member fit.
+                limits.payload().enforceAndMeasure(outputs);
+                return new Object[] {outputs};
+            } finally {
+                stateLock.unlock();
+            }
         }
 
-        private synchronized java.util.List<ai.ravenroot.api.payload.PayloadValue> calledEndContinuation() {
-            return calledEndOutputs.stream()
-                    .map(output -> ai.ravenroot.api.payload.PayloadJson.read(output.canonical(), limits.payload()))
-                    .toList();
+        private java.util.List<ai.ravenroot.api.payload.PayloadValue> calledEndContinuation() {
+            stateLock.lock();
+            try {
+                return calledEndOutputs.stream()
+                        .map(output -> ai.ravenroot.api.payload.PayloadJson.read(output.canonical(), limits.payload()))
+                        .toList();
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         /**
@@ -5687,7 +5688,7 @@ public final class GraphRunner implements AutoCloseable {
          * {@code COMPLETED} with a {@code null} payload.</p>
          *
          * <h2>First writer wins, and what that does not settle</h2>
-         * <p>Written under {@code synchronized} and only when unset, so a graph with several
+         * <p>Written under the execution-state lock and only when unset, so a graph with several
          * dead-ending branches reports one of them rather than interleaving. That makes the value
          * <em>non-null</em>; it does not make it <em>determined</em>. When several branches dead-end,
          * which one is reported remains a semantic choice rather than a data race this field resolves.</p>
@@ -5704,20 +5705,30 @@ public final class GraphRunner implements AutoCloseable {
         /**
          * Records a dead-ending branch's payload, keeping the first.
          *
-         * <p>{@code synchronized} rather than {@code volatile} because this is a read-modify-write:
+         * <p>A lock rather than {@code volatile} is required because this is a read-modify-write:
          * the two dead-ending branches of one graph settle on different threads, and a plain
          * check-then-assign would let both pass the check. It shares the monitor with the lifecycle
          * writers above for the same reason they share it with each other.</p>
          */
-        private synchronized void recordDanglingTerminal(Object payload) {
-            if (danglingTerminalPayload == null) {
-                danglingTerminalPayload = new Object[] {payload};
+        private void recordDanglingTerminal(Object payload) {
+            stateLock.lock();
+            try {
+                if (danglingTerminalPayload == null) {
+                    danglingTerminalPayload = new Object[] {payload};
+                }
+            } finally {
+                stateLock.unlock();
             }
         }
 
         /** @see #danglingTerminalPayload */
-        private synchronized Object[] danglingTerminal() {
-            return danglingTerminalPayload;
+        private Object[] danglingTerminal() {
+            stateLock.lock();
+            try {
+                return danglingTerminalPayload;
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         /**
@@ -5939,10 +5950,15 @@ public final class GraphRunner implements AutoCloseable {
          * branch that is inside a node, that one catches a branch that has left its node and not yet
          * reached one.</p>
          */
-        private synchronized boolean hasUnfinishedInvocation() {
-            Traversal traversal = lifecycle.traversals().get(traversalId);
-            return traversal != null && traversal.invocations().values().stream()
-                    .anyMatch(invocation -> !invocation.status().terminal());
+        private boolean hasUnfinishedInvocation() {
+            stateLock.lock();
+            try {
+                Traversal traversal = lifecycle.traversals().get(traversalId);
+                return traversal != null && traversal.invocations().values().stream()
+                        .anyMatch(invocation -> !invocation.status().terminal());
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         /** Whether a durable hold can be written at all: a fence, and a store that stores holds. */
@@ -5959,13 +5975,18 @@ public final class GraphRunner implements AutoCloseable {
          * Commits the hold and folds the two {@code WAITING} transitions the store just accepted, so
          * the in-memory aggregate and the stored one continue to describe one history.
          */
-        private synchronized void holdDurably(
+        private void holdDurably(
                 ai.ravenroot.api.persistence.ExecutionPauseRegistration registration) {
-            recorder.commitExecutionPause(registration);
-            durablyHeld = true;
-            lifecycle = fold(lifecycle, List.of(
-                    new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING),
-                    new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING)));
+            stateLock.lock();
+            try {
+                recorder.commitExecutionPause(registration);
+                durablyHeld = true;
+                lifecycle = fold(lifecycle, List.of(
+                        new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING),
+                        new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING)));
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         /**
@@ -5981,47 +6002,67 @@ public final class GraphRunner implements AutoCloseable {
          * is ending anyway. Everything else clears the flag by settling, which is the ordinary way a
          * hold stops being one.</p>
          */
-        private synchronized void releaseHold() {
-            durablyHeld = false;
+        private void releaseHold() {
+            stateLock.lock();
+            try {
+                durablyHeld = false;
+            } finally {
+                stateLock.unlock();
+            }
         }
 
-        private synchronized void settleHold(
+        private void settleHold(
                 ai.ravenroot.api.persistence.ExecutionPauseTransition transition,
                 TraversalStatus traversalStatus, ProcessInstanceStatus processStatus) {
-            recorder.settleExecutionPause(transition, traversalId, traversalStatus, processStatus);
-            durablyHeld = false;
-            var applied = new ArrayList<ExecutionTransition>();
-            if (traversalStatus != null) {
-                applied.add(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus));
+            stateLock.lock();
+            try {
+                recorder.settleExecutionPause(transition, traversalId, traversalStatus, processStatus);
+                durablyHeld = false;
+                var applied = new ArrayList<ExecutionTransition>();
+                if (traversalStatus != null) {
+                    applied.add(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus));
+                }
+                if (processStatus != null) {
+                    applied.add(new ExecutionTransition.ProcessTransitioned(processStatus));
+                }
+                lifecycle = fold(lifecycle, applied);
+            } finally {
+                stateLock.unlock();
             }
-            if (processStatus != null) {
-                applied.add(new ExecutionTransition.ProcessTransitioned(processStatus));
-            }
-            lifecycle = fold(lifecycle, applied);
         }
 
-        private synchronized void reentryStarted() {
-            var transition = new ExecutionTransition.TraversalTransitioned(
-                    traversalId, TraversalStatus.RUNNING);
-            record(List.of(transition), List.of());
-            lifecycle = fold(lifecycle, List.of(transition));
+        private void reentryStarted() {
+            stateLock.lock();
+            try {
+                var transition = new ExecutionTransition.TraversalTransitioned(
+                        traversalId, TraversalStatus.RUNNING);
+                record(List.of(transition), List.of());
+                lifecycle = fold(lifecycle, List.of(transition));
+            } finally {
+                stateLock.unlock();
+            }
         }
 
-        private synchronized void runnerResumed(UUID invocationId, UUID attemptId) {
-            var transitions = new java.util.ArrayList<ExecutionTransition>();
-            var traversal = lifecycle.traversals().get(traversalId);
-            var invocation = traversal.invocations().get(invocationId);
-            if (lifecycle.status() != ProcessInstanceStatus.RUNNING)
-                transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING));
-            if (traversal.status() != TraversalStatus.RUNNING)
-                transitions.add(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING));
-            if (invocation.status() != NodeInvocationStatus.RUNNING)
-                transitions.add(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId, NodeInvocationStatus.RUNNING));
-            if (invocation.attempts().stream().noneMatch(value -> value.attemptId().equals(attemptId) && value.status() == NodeAttemptStatus.RUNNING))
-                transitions.add(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId, NodeAttemptStatus.RUNNING));
-            if (transitions.isEmpty()) return;
-            record(transitions, List.of());
-            lifecycle = fold(lifecycle, transitions);
+        private void runnerResumed(UUID invocationId, UUID attemptId) {
+            stateLock.lock();
+            try {
+                var transitions = new java.util.ArrayList<ExecutionTransition>();
+                var traversal = lifecycle.traversals().get(traversalId);
+                var invocation = traversal.invocations().get(invocationId);
+                if (lifecycle.status() != ProcessInstanceStatus.RUNNING)
+                    transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING));
+                if (traversal.status() != TraversalStatus.RUNNING)
+                    transitions.add(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING));
+                if (invocation.status() != NodeInvocationStatus.RUNNING)
+                    transitions.add(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId, NodeInvocationStatus.RUNNING));
+                if (invocation.attempts().stream().noneMatch(value -> value.attemptId().equals(attemptId) && value.status() == NodeAttemptStatus.RUNNING))
+                    transitions.add(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId, NodeAttemptStatus.RUNNING));
+                if (transitions.isEmpty()) return;
+                record(transitions, List.of());
+                lifecycle = fold(lifecycle, transitions);
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         private UUID traversalAcceptedEventId() {
@@ -6149,62 +6190,72 @@ public final class GraphRunner implements AutoCloseable {
          * @return the identity of the node-started event, for its own completion to name as cause,
          *         or {@code null} when nothing was journalled
          */
-        private synchronized UUID nodeStarted(String nodeId, Set<UUID> parentInvocationIds,
+        private UUID nodeStarted(String nodeId, Set<UUID> parentInvocationIds,
                                               UUID invocationId, UUID attemptId, NodeCommand command,
                                               UUID causedBy) {
-            visitedNodes.add(nodeId);
-            if (terminal) {
-                // A branch that outlived its traversal writes neither transitions nor events. The
-                // aggregate refuses the transition, and publishing the event alone would put an
-                // effect in the journal whose cause is there but whose own effects never can be.
-                // It stays visible on the monitor's live stream, which run() publishes unconditionally.
-                return null;
+            stateLock.lock();
+            try {
+                visitedNodes.add(nodeId);
+                if (terminal) {
+                    // A branch that outlived its traversal writes neither transitions nor events. The
+                    // aggregate refuses the transition, and publishing the event alone would put an
+                    // effect in the journal whose cause is there but whose own effects never can be.
+                    // It stays visible on the monitor's live stream, which run() publishes unconditionally.
+                    return null;
+                }
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.InvocationAdded(traversalId,
+                                new NodeInvocation(invocationId, nodeId, parentInvocationIds,
+                                        NodeInvocationStatus.SCHEDULED, List.of(), command)),
+                        new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                                NodeInvocationStatus.RUNNING),
+                        new ExecutionTransition.AttemptAdded(traversalId, invocationId,
+                                new NodeAttempt(attemptId, 1, NodeAttemptStatus.SCHEDULED)),
+                        new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                                NodeAttemptStatus.RUNNING));
+                UUID startedEventId = eventId();
+                // Durable before the engine send, because the caller invokes this immediately before it.
+                // This is the ordering PERS-04 reads as "sent, outcome unknown"; reversing it would make
+                // a crashed attempt indistinguishable from one that never started.
+                record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
+                        invocationId, attemptId));
+                lifecycle = fold(lifecycle, transitions);
+                return startedEventId;
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.InvocationAdded(traversalId,
-                            new NodeInvocation(invocationId, nodeId, parentInvocationIds,
-                                    NodeInvocationStatus.SCHEDULED, List.of(), command)),
-                    new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
-                            NodeInvocationStatus.RUNNING),
-                    new ExecutionTransition.AttemptAdded(traversalId, invocationId,
-                            new NodeAttempt(attemptId, 1, NodeAttemptStatus.SCHEDULED)),
-                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
-                            NodeAttemptStatus.RUNNING));
-            UUID startedEventId = eventId();
-            // Durable before the engine send, because the caller invokes this immediately before it.
-            // This is the ordering PERS-04 reads as "sent, outcome unknown"; reversing it would make
-            // a crashed attempt indistinguishable from one that never started.
-            record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
-                    invocationId, attemptId));
-            lifecycle = fold(lifecycle, transitions);
-            return startedEventId;
         }
 
         /** Starts the root attempt whose identities and SCHEDULED state were committed at admission. */
-        private synchronized UUID preparedNodeStarted(String nodeId, UUID invocationId, UUID attemptId,
+        private UUID preparedNodeStarted(String nodeId, UUID invocationId, UUID attemptId,
                                                       NodeCommand command, UUID causedBy) {
-            visitedNodes.add(nodeId);
-            if (terminal) return null;
-            Traversal traversal = lifecycle.traversals().get(traversalId);
-            NodeInvocation invocation = traversal == null ? null : traversal.invocations().get(invocationId);
-            NodeAttempt attempt = invocation == null ? null : invocation.attempts().stream()
-                    .filter(value -> value.attemptId().equals(attemptId)).findFirst().orElse(null);
-            if (invocation == null || attempt == null || !invocation.nodeId().equals(nodeId)
-                    || !invocation.command().equals(command)
-                    || invocation.status() != NodeInvocationStatus.RUNNING
-                    || (attempt.status() != NodeAttemptStatus.SCHEDULED
-                        && attempt.status() != NodeAttemptStatus.RUNNING)) {
-                throw new IllegalStateException("prepared derived attempt no longer matches admitted work");
+            stateLock.lock();
+            try {
+                visitedNodes.add(nodeId);
+                if (terminal) return null;
+                Traversal traversal = lifecycle.traversals().get(traversalId);
+                NodeInvocation invocation = traversal == null ? null : traversal.invocations().get(invocationId);
+                NodeAttempt attempt = invocation == null ? null : invocation.attempts().stream()
+                        .filter(value -> value.attemptId().equals(attemptId)).findFirst().orElse(null);
+                if (invocation == null || attempt == null || !invocation.nodeId().equals(nodeId)
+                        || !invocation.command().equals(command)
+                        || invocation.status() != NodeInvocationStatus.RUNNING
+                        || (attempt.status() != NodeAttemptStatus.SCHEDULED
+                            && attempt.status() != NodeAttemptStatus.RUNNING)) {
+                    throw new IllegalStateException("prepared derived attempt no longer matches admitted work");
+                }
+                var transitions = attempt.status() == NodeAttemptStatus.SCHEDULED
+                        ? List.<ExecutionTransition>of(new ExecutionTransition.AttemptTransitioned(
+                                traversalId, invocationId, attemptId, NodeAttemptStatus.RUNNING))
+                        : List.<ExecutionTransition>of();
+                UUID startedEventId = eventId();
+                record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
+                        invocationId, attemptId));
+                if (!transitions.isEmpty()) lifecycle = fold(lifecycle, transitions);
+                return startedEventId;
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = attempt.status() == NodeAttemptStatus.SCHEDULED
-                    ? List.<ExecutionTransition>of(new ExecutionTransition.AttemptTransitioned(
-                            traversalId, invocationId, attemptId, NodeAttemptStatus.RUNNING))
-                    : List.<ExecutionTransition>of();
-            UUID startedEventId = eventId();
-            record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
-                    invocationId, attemptId));
-            if (!transitions.isEmpty()) lifecycle = fold(lifecycle, transitions);
-            return startedEventId;
         }
 
         /**
@@ -6291,42 +6342,57 @@ public final class GraphRunner implements AutoCloseable {
          *                       {@code bypassed} by construction at the call site.
          * @return the identity of the completion event, for the successors it dispatches to name
          */
-        private synchronized UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
                                                 boolean bypassed, boolean defaulted) {
-            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, null);
+            stateLock.lock();
+            try {
+                return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, null);
+            } finally {
+                stateLock.unlock();
+            }
         }
 
-        private synchronized UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
                                                 boolean bypassed, boolean defaulted, UUID assignedEventId) {
-            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted,
-                    assignedEventId, null, Set.of(), NodeCommand.PROCESS, null, IterationContext.EMPTY);
+            stateLock.lock();
+            try {
+                return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted,
+                        assignedEventId, null, Set.of(), NodeCommand.PROCESS, null, IterationContext.EMPTY);
+            } finally {
+                stateLock.unlock();
+            }
         }
 
-        private synchronized UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
                                                 boolean bypassed, boolean defaulted, UUID assignedEventId,
                                                 String nodeId, Set<UUID> parents, NodeCommand command,
                                                 NodeResult result, IterationContext iteration) {
-            if (terminal) {
-                if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
-                return null;
+            stateLock.lock();
+            try {
+                if (terminal) {
+                    if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
+                    return null;
+                }
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                                NodeAttemptStatus.COMPLETED),
+                        new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                                NodeInvocationStatus.COMPLETED));
+                UUID defaultedEventId = defaulted ? eventId() : null;
+                UUID completedEventId = assignedEventId == null ? eventId() : assignedEventId;
+                ExecutionEventType completionType = bypassed
+                        ? ExecutionEventType.NODE_BYPASSED : ExecutionEventType.NODE_COMPLETED;
+                var published = defaulted
+                        ? List.of(new PublishedEvent(ExecutionEventType.NODE_DEFAULTED, defaultedEventId),
+                                new PublishedEvent(completionType, completedEventId))
+                        : List.of(new PublishedEvent(completionType, completedEventId));
+                var evidence = replayEvidence(invocationId, attemptId, nodeId, parents, command, result, iteration);
+                record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
+                lifecycle = fold(lifecycle, transitions);
+                return completedEventId;
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
-                            NodeAttemptStatus.COMPLETED),
-                    new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
-                            NodeInvocationStatus.COMPLETED));
-            UUID defaultedEventId = defaulted ? eventId() : null;
-            UUID completedEventId = assignedEventId == null ? eventId() : assignedEventId;
-            ExecutionEventType completionType = bypassed
-                    ? ExecutionEventType.NODE_BYPASSED : ExecutionEventType.NODE_COMPLETED;
-            var published = defaulted
-                    ? List.of(new PublishedEvent(ExecutionEventType.NODE_DEFAULTED, defaultedEventId),
-                            new PublishedEvent(completionType, completedEventId))
-                    : List.of(new PublishedEvent(completionType, completedEventId));
-            var evidence = replayEvidence(invocationId, attemptId, nodeId, parents, command, result, iteration);
-            record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
-            lifecycle = fold(lifecycle, transitions);
-            return completedEventId;
         }
 
         private List<ai.ravenroot.api.persistence.ReplayInvocationEvidence> replayEvidence(
@@ -6357,17 +6423,22 @@ public final class GraphRunner implements AutoCloseable {
          * The successor retains the source terminal event as its direct cause, preserving the
          * established causation contract for existing readers; stream order relates both effects.
          */
-        private synchronized void edgeTraversed(GraphEdge edge, UUID sourceInvocationId,
+        private void edgeTraversed(GraphEdge edge, UUID sourceInvocationId,
                                                 UUID sourceAttemptId, UUID causedBy) {
-            if (terminal || !journalling()) {
-                return;
+            stateLock.lock();
+            try {
+                if (terminal || !journalling()) {
+                    return;
+                }
+                UUID traversalEventId = eventId();
+                EventEnvelope event = envelope(ExecutionEventType.EDGE_TRAVERSED, traversalEventId,
+                        java.util.Objects.requireNonNull(causedBy,
+                                "an EDGE_TRAVERSED event must name the source terminal event as its cause"),
+                        sourceInvocationId, sourceAttemptId, EdgeTraversalEventData.payload(edge.id()));
+                record(List.of(), List.of(event));
+            } finally {
+                stateLock.unlock();
             }
-            UUID traversalEventId = eventId();
-            EventEnvelope event = envelope(ExecutionEventType.EDGE_TRAVERSED, traversalEventId,
-                    java.util.Objects.requireNonNull(causedBy,
-                            "an EDGE_TRAVERSED event must name the source terminal event as its cause"),
-                    sourceInvocationId, sourceAttemptId, EdgeTraversalEventData.payload(edge.id()));
-            record(List.of(), List.of(event));
         }
 
         /**
@@ -6375,21 +6446,26 @@ public final class GraphRunner implements AutoCloseable {
          *         to name as its cause — the same role {@link #nodeCompleted}'s return plays for an
          *         ordinary successor — or {@code null} when nothing was journalled
          */
-        private synchronized UUID nodeFailed(UUID invocationId, UUID attemptId, UUID startedEventId) {
-            if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
-            if (terminal) {
-                return null;
+        private UUID nodeFailed(UUID invocationId, UUID attemptId, UUID startedEventId) {
+            stateLock.lock();
+            try {
+                if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
+                if (terminal) {
+                    return null;
+                }
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                                NodeAttemptStatus.FAILED),
+                        new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                                NodeInvocationStatus.FAILED));
+                UUID failedEventId = eventId();
+                record(transitions, events(ExecutionEventType.NODE_FAILED, failedEventId, startedEventId,
+                        invocationId, attemptId));
+                lifecycle = fold(lifecycle, transitions);
+                return failedEventId;
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
-                            NodeAttemptStatus.FAILED),
-                    new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
-                            NodeInvocationStatus.FAILED));
-            UUID failedEventId = eventId();
-            record(transitions, events(ExecutionEventType.NODE_FAILED, failedEventId, startedEventId,
-                    invocationId, attemptId));
-            lifecycle = fold(lifecycle, transitions);
-            return failedEventId;
         }
 
         /**
@@ -6429,26 +6505,31 @@ public final class GraphRunner implements AutoCloseable {
          * @return the identity of the retry event, for the next attempt's start to name as its cause,
          *         or {@code null} when nothing was journalled
          */
-        private synchronized RetryCommit retryScheduled(UUID invocationId, UUID failedAttemptId,
+        private RetryCommit retryScheduled(UUID invocationId, UUID failedAttemptId,
                                                         NodeAttempt nextAttempt, UUID startedEventId,
                                                         boolean amplified, long payloadBytes) {
-            if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
-            if (closing || terminal) {
-                return null;
+            stateLock.lock();
+            try {
+                if (recorder != null) recorder.markReplaySourceOutcomeAmbiguous();
+                if (closing || terminal) {
+                    return null;
+                }
+                // One serialized operation owns the complete retry charge and the lifecycle commit.
+                // A concurrent branch therefore either consumes all three monotonic dimensions or none,
+                // and the limit refusal precedes every retry journal event and dispatch side effect.
+                budget.reserveRetry(amplified, payloadBytes);
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
+                                NodeAttemptStatus.FAILED),
+                        new ExecutionTransition.AttemptAdded(traversalId, invocationId, nextAttempt));
+                UUID retryEventId = eventId();
+                record(transitions, events(ExecutionEventType.NODE_RETRY_SCHEDULED, retryEventId, startedEventId,
+                        invocationId, failedAttemptId));
+                lifecycle = fold(lifecycle, transitions);
+                return new RetryCommit(retryEventId);
+            } finally {
+                stateLock.unlock();
             }
-            // One synchronized operation owns the complete retry charge and the lifecycle commit.
-            // A concurrent branch therefore either consumes all three monotonic dimensions or none,
-            // and the limit refusal precedes every retry journal event and dispatch side effect.
-            budget.reserveRetry(amplified, payloadBytes);
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
-                            NodeAttemptStatus.FAILED),
-                    new ExecutionTransition.AttemptAdded(traversalId, invocationId, nextAttempt));
-            UUID retryEventId = eventId();
-            record(transitions, events(ExecutionEventType.NODE_RETRY_SCHEDULED, retryEventId, startedEventId,
-                    invocationId, failedAttemptId));
-            lifecycle = fold(lifecycle, transitions);
-            return new RetryCommit(retryEventId);
         }
 
         /**
@@ -6493,18 +6574,23 @@ public final class GraphRunner implements AutoCloseable {
          * @return the commit, whose event identity may itself be {@code null} when nothing is
          *         journalling, or {@code null} when the traversal ended and nothing was written
          */
-        private synchronized RetryCommit retryStarted(UUID invocationId, UUID attemptId, UUID causedBy) {
-            if (closing || terminal) {
-                return null;
+        private RetryCommit retryStarted(UUID invocationId, UUID attemptId, UUID causedBy) {
+            stateLock.lock();
+            try {
+                if (closing || terminal) {
+                    return null;
+                }
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                                NodeAttemptStatus.RUNNING));
+                UUID startedEventId = eventId();
+                record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
+                        invocationId, attemptId));
+                lifecycle = fold(lifecycle, transitions);
+                return new RetryCommit(startedEventId);
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
-                            NodeAttemptStatus.RUNNING));
-            UUID startedEventId = eventId();
-            record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
-                    invocationId, attemptId));
-            lifecycle = fold(lifecycle, transitions);
-            return new RetryCommit(startedEventId);
         }
 
         /**
@@ -6516,21 +6602,27 @@ public final class GraphRunner implements AutoCloseable {
          * every failure it finds a <em>handled</em> one: an unhandled failure ends the traversal
          * through {@link #executionFailed()} and produces no result to annotate.</p>
          *
-         * <p>{@code synchronized} for the same reason every writer above is: {@code lifecycle} is a
+         * <p>The execution-state lock is required for the same reason every writer above uses it:
+         * {@code lifecycle} is a
          * plain field, and the last branch to settle may not be the thread that wrote the failure.</p>
          */
-        private synchronized Set<String> handledFailureNodes() {
-            Traversal traversal = lifecycle.traversals().get(traversalId);
-            if (traversal == null) {
-                return Set.of();
-            }
-            var failed = new LinkedHashSet<String>();
-            for (NodeInvocation invocation : traversal.invocations().values()) {
-                if (invocation.status() == NodeInvocationStatus.FAILED) {
-                    failed.add(invocation.nodeId());
+        private Set<String> handledFailureNodes() {
+            stateLock.lock();
+            try {
+                Traversal traversal = lifecycle.traversals().get(traversalId);
+                if (traversal == null) {
+                    return Set.of();
                 }
+                var failed = new LinkedHashSet<String>();
+                for (NodeInvocation invocation : traversal.invocations().values()) {
+                    if (invocation.status() == NodeInvocationStatus.FAILED) {
+                        failed.add(invocation.nodeId());
+                    }
+                }
+                return failed;
+            } finally {
+                stateLock.unlock();
             }
-            return failed;
         }
 
         /**
@@ -6545,16 +6637,21 @@ public final class GraphRunner implements AutoCloseable {
          * until the runtime can distinguish the two cases at the point of emission. The traversal's
          * end remains observable in the aggregate, which commits in this same transaction.</p>
          */
-        private synchronized void executionCompleted() {
-            if (durablyHeld || sagaCompletionPending) {
-                return;
+        private void executionCompleted() {
+            stateLock.lock();
+            try {
+                if (durablyHeld || sagaCompletionPending) {
+                    return;
+                }
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED),
+                        new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED));
+                record(transitions, List.of());
+                lifecycle = fold(lifecycle, transitions);
+                terminal = true;
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED),
-                    new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED));
-            record(transitions, List.of());
-            lifecycle = fold(lifecycle, transitions);
-            terminal = true;
         }
 
         /**
@@ -6563,15 +6660,20 @@ public final class GraphRunner implements AutoCloseable {
          * is durable; an unavailable participant is therefore visible and restart-safe, not a graph
          * failure and not a successful execution.
          */
-        private synchronized void executionWaitingForSaga() {
-            if (sagaCompletionPending) return;
-            var transitions = List.<ExecutionTransition>of(
-                    new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING),
-                    new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING));
-            record(transitions, List.of());
-            lifecycle = fold(lifecycle, transitions);
-            sagaCompletionPending = true;
-            terminal = true;
+        private void executionWaitingForSaga() {
+            stateLock.lock();
+            try {
+                if (sagaCompletionPending) return;
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING),
+                        new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING));
+                record(transitions, List.of());
+                lifecycle = fold(lifecycle, transitions);
+                sagaCompletionPending = true;
+                terminal = true;
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         private boolean sagaCompletionPending() {
@@ -6584,8 +6686,13 @@ public final class GraphRunner implements AutoCloseable {
          * <p>Idempotent and one-way. Called before teardown rather than after it, which is the whole
          * point: see {@link #closing}.</p>
          */
-        private synchronized void beginClosing() {
-            closing = true;
+        private void beginClosing() {
+            stateLock.lock();
+            try {
+                closing = true;
+            } finally {
+                stateLock.unlock();
+            }
         }
 
         /**
@@ -6604,26 +6711,31 @@ public final class GraphRunner implements AutoCloseable {
          *               when the traversal was stopped on request, and {@code null} for an ordinary
          *               failure.
          */
-        private synchronized void executionFailed(
+        private void executionFailed(
                 ai.ravenroot.api.application.ExecutionTerminationReason reason) {
-            // A held traversal has not failed; it is waiting, and its hold says so. See #durablyHeld.
-            if (durablyHeld || sagaCompletionPending) {
-                return;
+            stateLock.lock();
+            try {
+                // A held traversal has not failed; it is waiting, and its hold says so. See #durablyHeld.
+                if (durablyHeld || sagaCompletionPending) {
+                    return;
+                }
+                var transitions = new ArrayList<ExecutionTransition>();
+                Traversal traversal = lifecycle.traversals().get(traversalId);
+                if (!traversal.status().terminal()) {
+                    transitions.add(new ExecutionTransition.TraversalTransitioned(traversalId,
+                            TraversalStatus.FAILED, reason));
+                }
+                if (!lifecycle.status().terminal()) {
+                    transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                            reason));
+                }
+                // No event; see executionCompleted().
+                record(transitions, List.of());
+                lifecycle = fold(lifecycle, transitions);
+                terminal = true;
+            } finally {
+                stateLock.unlock();
             }
-            var transitions = new ArrayList<ExecutionTransition>();
-            Traversal traversal = lifecycle.traversals().get(traversalId);
-            if (!traversal.status().terminal()) {
-                transitions.add(new ExecutionTransition.TraversalTransitioned(traversalId,
-                        TraversalStatus.FAILED, reason));
-            }
-            if (!lifecycle.status().terminal()) {
-                transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
-                        reason));
-            }
-            // No event; see executionCompleted().
-            record(transitions, List.of());
-            lifecycle = fold(lifecycle, transitions);
-            terminal = true;
         }
 
         /**

@@ -101,7 +101,8 @@ class PackagedEmbedProcessTest {
             assertEquals(200, v2Launched.statusCode(), v2Launched.body());
             assertTrue(v2Launched.body().contains("\"viewerSourceVersion\":\"2\""), v2Launched.body());
             assertTrue(v2Launched.body().contains("data-viewer-run"), v2Launched.body());
-            assertTrue(v2Launched.body().contains("data-viewer-start>Start execution</button>"),
+            assertTrue(v2Launched.body().contains(
+                    "data-viewer-start data-i18n=\"embed.controls.startExecution\">Start execution</button>"),
                     v2Launched.body());
 
             // 1. create-session: the workload supplies only the registration id.

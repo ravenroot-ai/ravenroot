@@ -43,26 +43,26 @@ export function conformingPublicReason(value) {
  * has to exist and has to agree, otherwise a peer that predates `publicReason`, or one that sends the
  * classifier without the sentence, silently reverts the panel to the false copy.
  */
-function describeWithReason(type, publicReason) {
+function describeWithReason(type, publicReason, text = uiText) {
   const reason = conformingPublicReason(publicReason);
   if (!reason) return null;
   switch (String(type || '')) {
     case 'NODE_COMPLETED':
       return reason === DEFAULT_ROUTED_OUTCOME
-        ? uiText('executionEvent.nodeCompletedSuccess')
-        : uiText('executionEvent.nodeCompletedOutcome', { reason });
+        ? text('executionEvent.nodeCompletedSuccess')
+        : text('executionEvent.nodeCompletedOutcome', { reason });
     case 'NODE_FAILED':
-      return uiText('executionEvent.nodeFailedReason', { reason });
+      return text('executionEvent.nodeFailedReason', { reason });
     case 'EXECUTION_FAILED':
-      return uiText('executionEvent.executionFailedReason', { reason });
+      return text('executionEvent.executionFailedReason', { reason });
     case 'JOIN_FAILED':
-      return uiText('executionEvent.joinFailedReason', { reason });
+      return text('executionEvent.joinFailedReason', { reason });
     // Kept in step with `PublicExecutionDescription.forType`'s NODE_RETRY_SCHEDULED branch. The
     // classifier here is the failure's retry classification, a fixed four-member vocabulary rather
     // than a Java type name, and it is named rather than characterised for the same reason a routed
     // outcome is.
     case 'NODE_RETRY_SCHEDULED':
-      return uiText('executionEvent.retryReason', { reason });
+      return text('executionEvent.retryReason', { reason });
     // Kept in step with `PublicExecutionDescription.forType`'s NODE_BYPASSED branch -- INCLUDING
     // the thing that branch deliberately does NOT do. The cases above interpolate the classifier into
     // the sentence; this one SELECTS among sentences written here, so an unrecognised token falls
@@ -71,10 +71,10 @@ function describeWithReason(type, publicReason) {
     // a classifier, lands on that same bare sentence.
     case 'NODE_BYPASSED':
       if (reason === BYPASS_REASON_AUTHORED) {
-        return uiText('executionEvent.bypassedAuthored');
+        return text('executionEvent.bypassedAuthored');
       }
       if (reason === BYPASS_REASON_COMMAND) {
-        return uiText('executionEvent.bypassedCommand');
+        return text('executionEvent.bypassedCommand');
       }
       return null;
     default:
@@ -155,15 +155,23 @@ const DESCRIPTION_KEY_BY_TYPE = Object.freeze({
  */
 export function publicExecutionDescription(description, type, publicReason) {
   const fallbackKey = DESCRIPTION_KEY_BY_TYPE[String(type || '')];
-  const candidate = describeWithReason(type, publicReason)
-    || (uiText.locale === 'en' && typeof description === 'string' && description.trim())
+  const supplied = typeof description === 'string' && description.trim()
+    ? normalizePublicDescription(description, '') : '';
+  const englishProductDescription = describeWithReason(type, publicReason, englishText)
+    || (fallbackKey && englishText(fallbackKey)) || '';
+  // Current servers send their English product fallback in `description`, while providers may send
+  // authored public copy in the same bounded field. Translate only the known product sentence;
+  // preserve every distinct authored value literally in every selected locale.
+  const authored = supplied && supplied !== normalizePublicDescription(englishProductDescription, '')
+    ? supplied : '';
+  const candidate = authored
+    || describeWithReason(type, publicReason)
     || (fallbackKey && uiText(fallbackKey))
-    || (typeof description === 'string' && description.trim())
     || uiText('executionEvent.unknown');
-  return normalizePublicDescription(candidate);
+  return normalizePublicDescription(candidate, uiText('executionEvent.unknown'));
 }
 
-export function normalizePublicDescription(value) {
+export function normalizePublicDescription(value, emptyFallback = UNKNOWN_EXECUTION_DESCRIPTION) {
   let normalized = '';
   let previousSpace = true;
   for (const character of String(value || '')) {
@@ -181,7 +189,7 @@ export function normalizePublicDescription(value) {
     }
   }
   normalized = normalized.trim();
-  if (!normalized) return UNKNOWN_EXECUTION_DESCRIPTION;
+  if (!normalized) return emptyFallback;
 
   const encoder = new TextEncoder();
   if (encoder.encode(normalized).byteLength <= MAX_PUBLIC_DESCRIPTION_UTF8_BYTES) return normalized;
@@ -197,4 +205,6 @@ export function normalizePublicDescription(value) {
   }
   return bounded + PUBLIC_DESCRIPTION_TRUNCATION_MARKER;
 }
-import { uiText } from './ui-text.js';
+import { createUiText, uiText } from './ui-text.js';
+
+const englishText = createUiText();

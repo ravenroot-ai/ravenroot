@@ -202,7 +202,7 @@ test('localizes module-load failure early and keeps malformed bootstrap safe', a
     <script id="ravenroot-embed-bootstrap" type="application/json">${JSON.stringify({
       acknowledgementId: 'ack', challenge: 'challenge', channelId: 'channel', exchangeId: 'exchange',
       expiresAt: '2099-01-01T00:00:00.000Z', grantRevision: '1', parentOrigin: UI_ORIGIN,
-      theme: null, viewerOrigin: UI_ORIGIN, locale: 'it', catalog: JSON.stringify(early),
+      theme: null, viewerOrigin: UI_ORIGIN, locale: 'it-IT', catalog: JSON.stringify(early),
     })}</script><script src="/embed-bootstrap.js"></script></body></html>` }));
   await page.route('**/malformed-embed', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
     <main id="ravenroot-embed-viewer"><p data-viewer-status data-i18n-error="Viewer unavailable."></p></main>

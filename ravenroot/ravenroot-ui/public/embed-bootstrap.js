@@ -30,6 +30,16 @@
   const boundedString = (value, maximum = 256) =>
     typeof value === 'string' && value.length > 0 && value.length <= maximum;
 
+  const earlyCatalogMatches = (catalogLocale, selectedLocale) => {
+    try {
+      const [catalog] = Intl.getCanonicalLocales(String(catalogLocale).replaceAll('_', '-'));
+      const [selected] = Intl.getCanonicalLocales(String(selectedLocale).replaceAll('_', '-'));
+      return catalog === selected || catalog === new Intl.Locale(selected).language;
+    } catch {
+      return false;
+    }
+  };
+
   const base64url = (bytes) => {
     let binary = '';
     for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
@@ -291,7 +301,7 @@
     if (bootstrap.catalog) {
       const candidate = JSON.parse(bootstrap.catalog);
       if (candidate?.schema === 'ravenroot.ui-catalog/v1'
-          && candidate.locale === bootstrap.locale
+          && earlyCatalogMatches(candidate.locale, bootstrap.locale)
           && candidate.messages && typeof candidate.messages === 'object'
           && !Array.isArray(candidate.messages)) earlyCatalog = candidate;
     }

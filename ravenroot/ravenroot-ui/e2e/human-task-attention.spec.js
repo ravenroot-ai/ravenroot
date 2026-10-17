@@ -374,7 +374,7 @@ test('two tasks page independently and explicit decisions remove the final non-c
     .toHaveText('<script>alert("review")</script>\nmail body');
   await expect(page.locator('[data-human-task-review-text] script')).toHaveCount(0);
   await page.locator('[data-human-task-action="RESOLVE"]').click();
-  await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
+  await expect(page.locator('.human-task-status')).toContainText('One actionable task');
   await expect(page.locator('[data-human-task-id="task-2"]')).toBeVisible();
   await page.locator('[data-human-task-id="task-2"]').click();
   await page.locator('[data-human-task-action="DENY"]').click();
@@ -606,7 +606,7 @@ test('unauthorized, expiry, cancellation and poll reconnect states stay determin
   await page.locator('[data-human-task-id="task-1"]').click();
   await page.locator('[data-human-task-action="RESOLVE"]').click();
   await expect(page.locator('[data-human-task-error]')).toContainText('HTTP 409 POST');
-  await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
+  await expect(page.locator('.human-task-status')).toContainText('One actionable task');
   await page.locator('[data-human-task-close]').click();
   expect(tasks[0].status).toBe('EXPIRED');
 

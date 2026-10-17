@@ -654,7 +654,22 @@ test('invalid structured-looking output and double-encoded JSON remain literal t
 });
 
 test('public descriptions remain literal and safe across live delivery and cursor replay', async ({ page }) => {
+  await page.route('**/ui-locales.json', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      schema: 'ravenroot.ui-locales/v1',
+      defaultLocale: 'it',
+      catalogs: [{
+        schema: 'ravenroot.ui-catalog/v1',
+        locale: 'it',
+        messages: {
+          'executionEvent.nodeFailed': 'Il nodo non è riuscito. I dettagli protetti possono contenere ulteriori informazioni.',
+        },
+      }],
+    }),
+  }));
   await submitAndAwaitBinding(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'it');
 
   const secret = 'password=hunter2 /home/runner/private stack trace';
   const hostileDescription = '<img src=x onerror=alert(1)> visit https://example.invalid/path';

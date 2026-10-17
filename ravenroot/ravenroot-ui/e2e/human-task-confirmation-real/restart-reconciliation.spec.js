@@ -147,7 +147,7 @@ async function assertPinnedDialog(page, taskId) {
   await expect(page.locator('[data-human-task-identity]')).toContainText(`Task ${taskId}`);
   expect(await page.locator('[data-human-task-prompt]').textContent()).toMatch(/^P{8192}$/);
   await expect(page.locator('[data-human-task-comment]')).toBeFocused();
-  await expect(page.locator('[data-human-task-comment-hint]')).toContainText('/ 8192 UTF-8 bytes');
+  await expect(page.locator('[data-human-task-comment-hint]')).toContainText('/ 8,192 UTF-8 bytes');
   // Responder enforcement is disabled in this fixture, so any admitted same-tenant principal sees
   // every pinned action even though the durable ingress identity requested the tasks.
   await expect(page.locator('[data-human-task-action]')).toHaveText(
@@ -296,7 +296,7 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     expect(replay.status()).toBe(200);
     expect(await replay.json()).toMatchObject({ schemaVersion: 1, outcome: 'ALREADY_APPLIED',
       taskId: storedLocator.taskId });
-    await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
+    await expect(page.locator('.human-task-status')).toContainText('One actionable task');
     await page.locator('[data-human-task-close]').click();
 
     const remaining = page.locator('[data-human-task-id]');
@@ -379,7 +379,8 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
 
       const custom = page.frameLocator('iframe[title="Custom Human Task presentation"]');
       await expect(custom.locator('#custom-ready')).toHaveText('Initialized registered presentation');
-      await expect(page.locator('.human-task-status')).toContainText('1 actionable task',
+      await expect(page.locator('.human-task-status'))
+        .toContainText('One actionable task for this node · one escalated',
         { timeout: 20_000 });
       await expect(page.locator('[data-human-task-id]')).toHaveCount(1);
       await expect(page.locator('#human-task-dialog')).toBeHidden();

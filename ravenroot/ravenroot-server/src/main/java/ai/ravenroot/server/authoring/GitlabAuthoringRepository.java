@@ -36,7 +36,7 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
     private static final Set<Capability> CAPABILITIES = Set.of(Capability.values());
     private static final Pattern DOCUMENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,155}\\.graphml");
     private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{15,127}");
-    
+
     private final GraphAuthoringConfiguration configuration;
     private final PublicationEvidence publications;
     private final HttpClient client;

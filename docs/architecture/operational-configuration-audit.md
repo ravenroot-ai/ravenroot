@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 27048 |
+| Atomic operational candidates discovered | 27047 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 27048 |
+| Reviewed | 27047 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 349 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2389 |
-| Retained protocol or format invariants | 11166 |
+| Retained protocol or format invariants | 11165 |
 | Retained published contract descriptions | 611 |
 | Retained presentation text | 838 |
 | Retained derived values | 1135 |
 | Test fixtures | 9009 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2312.
+Retired source candidates preserved in inventory history: 2313.
 
 Approved normalized-identity reappearances: 23. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 152.
+Checked source reconciliations: 153.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 27048 candidates.
+zero-count or unclassified rows as needed and sums to 27047 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 27048 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 25148 |
+| retained | 25147 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 27048 candidates.
 | derived | 1135 |
 | operator-configurable | 1900 |
 | presentation-text | 838 |
-| protocol-or-format-invariant | 11166 |
+| protocol-or-format-invariant | 11165 |
 | published-contract-description | 611 |
 | security-ceiling-or-default | 2389 |
 | test-fixture | 9009 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 27048 candidates.
 |---|---:|
 | deployment | 3200 |
 | deployment-example | 20 |
-| java | 8136 |
+| java | 8135 |
 | script | 2875 |
 | test-fixture | 9009 |
 | ui | 3808 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1469 |
 | #321 | 8506 |
-| Retained; no remediation required | 16477 |
+| Retained; no remediation required | 16476 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 27025 |
-| Unchanged identities | 27023 |
+| Source inventory candidates | 27048 |
+| Unchanged identities | 27047 |
 | Approved identity migrations | 0 |
-| Approved retirements | 2 |
-| Semantically classified additions | 25 |
-| Current candidates | 27048 |
+| Approved retirements | 1 |
+| Semantically classified additions | 0 |
+| Current candidates | 27047 |
 
 ## Final semantic review
 
@@ -638,7 +638,7 @@ The remaining reviewed atoms are partitioned by their source-proven role:
 | Semantic partition | Classification | Candidates |
 |---|---|---:|
 | graph-authoring.security-limits-and-carriers | security-ceiling-or-default | 252 |
-| graph-authoring.protocol-and-lifecycle | protocol-or-format-invariant | 410 |
+| graph-authoring.protocol-and-lifecycle | protocol-or-format-invariant | 409 |
 | graph-authoring.executable-fixtures | test-fixture | 0 |
 
 ## Source-proven JWKS retrieval policy
@@ -11016,10 +11016,9 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-17082aa9deccfe0df247` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:527` `requestRecord` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
 | `oc-3a886e4307763c5833d8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:527` `requestRecord` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
 | `oc-7125d1052eefa4e5ee28` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:550` `treeEntries` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
-| `oc-b41b2cdadddf3d9ccb71` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:723` `request` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
-| `oc-8fab9096ed0b51004864` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:735` `if` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
-| `oc-34f689544ac697acbad0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:737` `if` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
-| `oc-f5f8a2bd409848b84f70` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:737` `if` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
+| `oc-8fab9096ed0b51004864` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:732` `if` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
+| `oc-34f689544ac697acbad0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:734` `if` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
+| `oc-f5f8a2bd409848b84f70` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java:734` `if` | java | retained | protocol-or-format-invariant | Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary. |
 | `oc-5bc18e0d97f59fd8cbf7` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringConfiguration.java:24` `CredentialMode` | java | retained | security-ceiling-or-default | Closed bounds, strict schemas, credential carriers, and local-safe defaults constrain graph authoring and publication. |
 | `oc-197ee5d7e3cd906e2d47` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringConfiguration.java:25` `CredentialMode` | java | retained | security-ceiling-or-default | Closed bounds, strict schemas, credential carriers, and local-safe defaults constrain graph authoring and publication. |
 | `oc-9c6ef5fa5d58b5ec2f51` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringConfiguration.java:26` `CredentialMode` | java | retained | security-ceiling-or-default | Closed bounds, strict schemas, credential carriers, and local-safe defaults constrain graph authoring and publication. |

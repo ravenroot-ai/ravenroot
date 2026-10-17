@@ -239955,25 +239955,9 @@
       "graphAuthoringAuthority": "graph-authoring-publication-boundary-v1"
     },
     {
-      "id": "oc-b41b2cdadddf3d9ccb71",
-      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java",
-      "line": 723,
-      "symbol": "request",
-      "kind": "operational-declaration",
-      "role": "count",
-      "expression": "1",
-      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
-      "evidenceDigest": "51a0fd7cbe491dd251b398f9fabe95e72042c897e0954180373c536666ac308a",
-      "surface": "java",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary.",
-      "graphAuthoringAuthority": "graph-authoring-publication-boundary-v1"
-    },
-    {
       "id": "oc-8fab9096ed0b51004864",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java",
-      "line": 735,
+      "line": 732,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "attempt",
@@ -239989,7 +239973,7 @@
     {
       "id": "oc-f5f8a2bd409848b84f70",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java",
-      "line": 737,
+      "line": 734,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "sleep",
@@ -240005,7 +239989,7 @@
     {
       "id": "oc-34f689544ac697acbad0",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java",
-      "line": 737,
+      "line": 734,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "sleep",
@@ -472970,7 +472954,7 @@
     {
       "id": "oc-6153abb2effd1f661463",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 55,
+      "line": 56,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "binding-default",
       "role": "binding-value",
@@ -472985,7 +472969,7 @@
     {
       "id": "oc-399dc7c99fd8466c3812",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 55,
+      "line": 56,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473004,7 +472988,7 @@
     {
       "id": "oc-82bc227388d736e8fe5f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 55,
+      "line": 56,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473023,7 +473007,7 @@
     {
       "id": "oc-2c623d51839d85783816",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 55,
+      "line": 56,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_BACKEND_TOKEN",
@@ -473038,7 +473022,7 @@
     {
       "id": "oc-18dc0f370ccaab0ea4c9",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 55,
+      "line": 56,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_BACKEND_URL",
@@ -473057,7 +473041,7 @@
     {
       "id": "oc-637c977923babd650525",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 55,
+      "line": 56,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_PREFIX",
@@ -473076,7 +473060,7 @@
     {
       "id": "oc-53f346a5fa7c3cfc336f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 56,
+      "line": 57,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_PORT",
@@ -473091,7 +473075,7 @@
     {
       "id": "oc-951146453ad626254df0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 56,
+      "line": 57,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_ROOT",
@@ -473106,7 +473090,7 @@
     {
       "id": "oc-e3f6809a1bf79666e4c8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 56,
+      "line": 57,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473121,7 +473105,7 @@
     {
       "id": "oc-07f12d35b8c8e66053e1",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 56,
+      "line": 57,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473136,7 +473120,7 @@
     {
       "id": "oc-8ee955a56a881ae458a2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 64,
+      "line": 65,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473151,7 +473135,7 @@
     {
       "id": "oc-d3a02312fcb3a29718e8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 65,
+      "line": 66,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473166,7 +473150,7 @@
     {
       "id": "oc-018ae1350b1a414b0b60",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 65,
+      "line": 66,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_TYPO",
@@ -473181,7 +473165,7 @@
     {
       "id": "oc-ffefcc76448007c4b531",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 67,
+      "line": 68,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473196,7 +473180,7 @@
     {
       "id": "oc-024adde0ce8f4c62a9d2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 67,
+      "line": 68,
       "symbol": "test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_TYPO",
@@ -473211,7 +473195,7 @@
     {
       "id": "oc-39656ad330247ebe3a3b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 73,
+      "line": 74,
       "symbol": "test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473225,7 +473209,7 @@
     {
       "id": "oc-db783772c3ce3340a147",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 73,
+      "line": 74,
       "symbol": "test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_ACTIVITY_CAPTURE_",
@@ -473239,7 +473223,7 @@
     {
       "id": "oc-67a3b02da14207cf1ab9",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 92,
+      "line": 93,
       "symbol": "test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473253,7 +473237,7 @@
     {
       "id": "oc-163ff9b9cdaaeed758a9",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 92,
+      "line": 93,
       "symbol": "test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_ACTIVITY_CAPTURE_TYPO",
@@ -473267,7 +473251,7 @@
     {
       "id": "oc-f6a2d37f197fde33866c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 93,
+      "line": 94,
       "symbol": "test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473281,7 +473265,7 @@
     {
       "id": "oc-160438633f28ef07b7af",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 93,
+      "line": 94,
       "symbol": "test_activity_capture_bindings_are_exact_and_link_their_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_ACTIVITY_CAPTURE_TYPO",
@@ -473295,7 +473279,7 @@
     {
       "id": "oc-76f1e1f996229a775c2b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 96,
+      "line": 97,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
@@ -473310,7 +473294,7 @@
     {
       "id": "oc-73f55bf6c6fd7252ebc0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 96,
+      "line": 97,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS",
@@ -473325,7 +473309,7 @@
     {
       "id": "oc-fed4125d28d63c705804",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 96,
+      "line": 97,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473340,7 +473324,7 @@
     {
       "id": "oc-2a2339af5802d2757aab",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 96,
+      "line": 97,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473355,7 +473339,7 @@
     {
       "id": "oc-2b739abb6ea04fd4e74d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 97,
+      "line": 98,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473374,7 +473358,7 @@
     {
       "id": "oc-006dbdbce95622a6e460",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 97,
+      "line": 98,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473393,7 +473377,7 @@
     {
       "id": "oc-9397178a2a08f36fb08f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 97,
+      "line": 98,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473412,7 +473396,7 @@
     {
       "id": "oc-f9608bc4621e5182a8ba",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 97,
+      "line": 98,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_LOCAL_RUNNER_CONFIG",
@@ -473431,7 +473415,7 @@
     {
       "id": "oc-85e7d9aa94546b316bbe",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 97,
+      "line": 98,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_INSTANCE",
@@ -473450,7 +473434,7 @@
     {
       "id": "oc-5411387fa724cbc3ddef",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 97,
+      "line": 98,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_SHARED_ARTIFACTS",
@@ -473469,7 +473453,7 @@
     {
       "id": "oc-cc57dadc916dd39ab287",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 98,
+      "line": 99,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473485,7 +473469,7 @@
     {
       "id": "oc-7c842b1cc33a985a7cdd",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 98,
+      "line": 99,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_READINESS_FILE",
@@ -473501,7 +473485,7 @@
     {
       "id": "oc-97c716495adf2b8eebef",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 100,
+      "line": 101,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS",
@@ -473516,7 +473500,7 @@
     {
       "id": "oc-77ecc2b53502faec25cb",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 100,
+      "line": 101,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473531,7 +473515,7 @@
     {
       "id": "oc-8a81ef47bf317f78abd8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 100,
+      "line": 101,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473546,7 +473530,7 @@
     {
       "id": "oc-fcaa814aa4d2f7e77a05",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 101,
+      "line": 102,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
@@ -473561,7 +473545,7 @@
     {
       "id": "oc-3da1ad6acfbb92f10ed0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 101,
+      "line": 102,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473576,7 +473560,7 @@
     {
       "id": "oc-aa7b76069e1a41d9193a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 101,
+      "line": 102,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473591,7 +473575,7 @@
     {
       "id": "oc-3461984d3397c2f8924f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 102,
+      "line": 103,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473606,7 +473590,7 @@
     {
       "id": "oc-5c508e24a0492176c5c5",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 102,
+      "line": 103,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473621,7 +473605,7 @@
     {
       "id": "oc-f813a3f0b19b2c20737c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 102,
+      "line": 103,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_SHARED_ARTIFACTS",
@@ -473636,7 +473620,7 @@
     {
       "id": "oc-250ccbc4312e340f2b42",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 103,
+      "line": 104,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473651,7 +473635,7 @@
     {
       "id": "oc-5e5cab2354c368d7d0a8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 103,
+      "line": 104,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473666,7 +473650,7 @@
     {
       "id": "oc-daa8e012d98757bfa655",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 103,
+      "line": 104,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_INSTANCE",
@@ -473681,7 +473665,7 @@
     {
       "id": "oc-a0d9c3b71586e73f49a2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 104,
+      "line": 105,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473696,7 +473680,7 @@
     {
       "id": "oc-8fcd6ab7b5abf6e47350",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 104,
+      "line": 105,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473711,7 +473695,7 @@
     {
       "id": "oc-8e3d3078b8f3ba133a9b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 104,
+      "line": 105,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_LOCAL_RUNNER_CONFIG",
@@ -473726,7 +473710,7 @@
     {
       "id": "oc-9ae16b168a505280c24b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 105,
+      "line": 106,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473741,7 +473725,7 @@
     {
       "id": "oc-cdf6a74297ee32e09a0f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 105,
+      "line": 106,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473756,7 +473740,7 @@
     {
       "id": "oc-d6cde3c343e01692b015",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 105,
+      "line": 106,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_LOCAL_RUNNER_CONFIG",
@@ -473771,7 +473755,7 @@
     {
       "id": "oc-c5fe9ba1ad245419085c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 106,
+      "line": 107,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473787,7 +473771,7 @@
     {
       "id": "oc-537e198ed406f45785b8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 106,
+      "line": 107,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473803,7 +473787,7 @@
     {
       "id": "oc-6d1175834780cc5a8562",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 106,
+      "line": 107,
       "symbol": "test_runner_coordinator_bindings_are_exact_and_have_independent_semantics",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNNER_READINESS_FILE",
@@ -473819,7 +473803,7 @@
     {
       "id": "oc-3260ab0279a10fcabf20",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 109,
+      "line": 110,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473834,7 +473818,7 @@
     {
       "id": "oc-228d0bb486a808b0661f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 109,
+      "line": 110,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_ASSISTANT_PROVIDER",
@@ -473849,7 +473833,7 @@
     {
       "id": "oc-4a5cad606cdbc82a1e46",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 110,
+      "line": 111,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS",
@@ -473864,7 +473848,7 @@
     {
       "id": "oc-ed655e0b5abdf7e4a544",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 110,
+      "line": 111,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -473879,7 +473863,7 @@
     {
       "id": "oc-a71e9babf05cbd25cf3c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 111,
+      "line": 112,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473894,7 +473878,7 @@
     {
       "id": "oc-df699d122c20098e77c8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 111,
+      "line": 112,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_JDBC_PROFILE_",
@@ -473909,7 +473893,7 @@
     {
       "id": "oc-25d680e3609dcbc402ad",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 112,
+      "line": 113,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473924,7 +473908,7 @@
     {
       "id": "oc-c4741e940d8d62a11df3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 112,
+      "line": 113,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_HUMAN_TASK_",
@@ -473939,7 +473923,7 @@
     {
       "id": "oc-7fa02b010b86ccb2daef",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 114,
+      "line": 115,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473954,7 +473938,7 @@
     {
       "id": "oc-723ce9d724be6b91b4e6",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 114,
+      "line": 115,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_MATRIX_CONFIG",
@@ -473969,7 +473953,7 @@
     {
       "id": "oc-b736d07abd66cfb521c7",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 115,
+      "line": 116,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -473984,7 +473968,7 @@
     {
       "id": "oc-64f8a870fe32113103fd",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 115,
+      "line": 116,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_MATTERMOST_CONFIG",
@@ -473999,7 +473983,7 @@
     {
       "id": "oc-42464dd41e2e24d669f0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 116,
+      "line": 117,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474014,7 +473998,7 @@
     {
       "id": "oc-f6049b3f588e0da1bc08",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 116,
+      "line": 117,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_TEAMS_CONFIG",
@@ -474029,7 +474013,7 @@
     {
       "id": "oc-2eefbc65d390bcf7cbac",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 120,
+      "line": 121,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474044,7 +474028,7 @@
     {
       "id": "oc-ce1556a5561d173dd750",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 120,
+      "line": 121,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474059,7 +474043,7 @@
     {
       "id": "oc-a0aa109c6f1d1bc4f35a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 120,
+      "line": 121,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_ASSISTANT_PROVIDER",
@@ -474074,7 +474058,7 @@
     {
       "id": "oc-276e80f892edcd9df431",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 121,
+      "line": 122,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474089,7 +474073,7 @@
     {
       "id": "oc-117477488551eb07d2f4",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 121,
+      "line": 122,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474104,7 +474088,7 @@
     {
       "id": "oc-7cd6a8eb3a5c83947564",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 121,
+      "line": 122,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_JDBC_PROFILE_",
@@ -474119,7 +474103,7 @@
     {
       "id": "oc-6b83c3cc293e13e25aae",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 122,
+      "line": 123,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474134,7 +474118,7 @@
     {
       "id": "oc-77162e03c70a8014496e",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 122,
+      "line": 123,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474149,7 +474133,7 @@
     {
       "id": "oc-c3f99051c9b35682af28",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 122,
+      "line": 123,
       "symbol": "test_inventory_covers_high_risk_and_dynamic_groups",
       "kind": "environment-binding",
       "role": "RAVENROOT_HUMAN_TASK_",
@@ -474164,7 +474148,7 @@
     {
       "id": "oc-0b52bc1587c434d81197",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 125,
+      "line": 126,
       "symbol": "test_trusted_network_policy_is_scoped_egress_configuration",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474179,7 +474163,7 @@
     {
       "id": "oc-e30d6ab3a30fcae4f6d3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 125,
+      "line": 126,
       "symbol": "test_trusted_network_policy_is_scoped_egress_configuration",
       "kind": "environment-binding",
       "role": "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY",
@@ -474194,7 +474178,7 @@
     {
       "id": "oc-d696b3b80142fe914a09",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 130,
+      "line": 131,
       "symbol": "test_trusted_network_policy_is_scoped_egress_configuration",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474209,7 +474193,7 @@
     {
       "id": "oc-ec16582196cb6bddce72",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 131,
+      "line": 132,
       "symbol": "test_trusted_network_policy_is_scoped_egress_configuration",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474224,7 +474208,7 @@
     {
       "id": "oc-45c52eba2c1f6c39adea",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 134,
+      "line": 135,
       "symbol": "test_trusted_network_policy_is_scoped_egress_configuration",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474239,7 +474223,7 @@
     {
       "id": "oc-fcae1145a4fd100affbc",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 145,
+      "line": 146,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",
@@ -474254,7 +474238,7 @@
     {
       "id": "oc-e356351691dad99005c2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 145,
+      "line": 146,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474269,7 +474253,7 @@
     {
       "id": "oc-eea77511b01c71db2f3d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 146,
+      "line": 147,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474284,7 +474268,7 @@
     {
       "id": "oc-1f0852f409cb0cb73d16",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 146,
+      "line": 147,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS",
@@ -474299,7 +474283,7 @@
     {
       "id": "oc-e446a959fc44e495a1b8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 147,
+      "line": 148,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY",
@@ -474314,7 +474298,7 @@
     {
       "id": "oc-6cc49580c4b4ffd6f0fc",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 147,
+      "line": 148,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474329,7 +474313,7 @@
     {
       "id": "oc-b4d0611fe67e19561092",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 148,
+      "line": 149,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474344,7 +474328,7 @@
     {
       "id": "oc-48e6673d4fb23e593e53",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 148,
+      "line": 149,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS",
@@ -474359,7 +474343,7 @@
     {
       "id": "oc-98f69965ba5201b09dcc",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 154,
+      "line": 155,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "environment-binding",
       "role": "RAVENROOT_GRAPHML_MAX_DEPTH",
@@ -474374,7 +474358,7 @@
     {
       "id": "oc-f8a0aa65c6e2b121ea27",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 154,
+      "line": 155,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474389,7 +474373,7 @@
     {
       "id": "oc-5fca6e8e8d25cc4d2cae",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 154,
+      "line": 155,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474404,7 +474388,7 @@
     {
       "id": "oc-768211aab4196adfabe8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 159,
+      "line": 160,
       "symbol": "test_execution_runtime_group_is_exact_and_links_its_dedicated_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474419,7 +474403,7 @@
     {
       "id": "oc-54474268e4d6a43bcc5d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 167,
+      "line": 168,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474435,7 +474419,7 @@
     {
       "id": "oc-ff0126da7b183eec0cf5",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474451,7 +474435,7 @@
     {
       "id": "oc-8ad90786644dea1e6227",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474467,7 +474451,7 @@
     {
       "id": "oc-e0999fa708f8e4fe41d9",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "environment-binding",
       "role": "RAVENROOT_WEBSOCKET_PROFILE_",
@@ -474483,7 +474467,7 @@
     {
       "id": "oc-0a5ee148a41a3457a1e2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 178,
+      "line": 179,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474499,7 +474483,7 @@
     {
       "id": "oc-54448df6af97b09a2238",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 178,
+      "line": 179,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "environment-binding",
       "role": "RAVENROOT_WEBSOCKET_ENABLED",
@@ -474515,7 +474499,7 @@
     {
       "id": "oc-90a7ea5b4fe026815594",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 179,
+      "line": 180,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474531,7 +474515,7 @@
     {
       "id": "oc-da47c43068594a0b4dc3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 179,
+      "line": 180,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "environment-binding",
       "role": "RAVENROOT_WEBSOCKET_PROFILE_",
@@ -474547,7 +474531,7 @@
     {
       "id": "oc-e68f75fa60142aef3e91",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 180,
+      "line": 181,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474563,7 +474547,7 @@
     {
       "id": "oc-b3fef9fac3f5323c343a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 180,
+      "line": 181,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "environment-binding",
       "role": "RAVENROOT_WEBSOCKET_PROFILE_",
@@ -474579,7 +474563,7 @@
     {
       "id": "oc-38a6fc859d10fc83215a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 181,
+      "line": 182,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474595,7 +474579,7 @@
     {
       "id": "oc-e06facf10c0299f5457f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 181,
+      "line": 182,
       "symbol": "test_interaction_listener_and_outbound_profile_have_distinct_references",
       "kind": "environment-binding",
       "role": "RAVENROOT_WEBSOCKET_ENABLED",
@@ -474611,7 +474595,7 @@
     {
       "id": "oc-93dd31a8f50c7c530a4b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 186,
+      "line": 187,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474626,7 +474610,7 @@
     {
       "id": "oc-a62c64a4bcacdbbc5e6a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 186,
+      "line": 187,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "environment-binding",
       "role": "RAVENROOT_SYSTEM_ONE_",
@@ -474641,7 +474625,7 @@
     {
       "id": "oc-5b0ac627b0028e74233c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 189,
+      "line": 190,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474656,7 +474640,7 @@
     {
       "id": "oc-b0840e20761886b32729",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 189,
+      "line": 190,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "environment-binding",
       "role": "RAVENROOT_SYSTEM_ONE_PROFILE_",
@@ -474671,7 +474655,7 @@
     {
       "id": "oc-f2e39ec2f795c2175c00",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 200,
+      "line": 201,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474686,7 +474670,7 @@
     {
       "id": "oc-1448c5efc1cabba8085a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 208,
+      "line": 209,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474701,7 +474685,7 @@
     {
       "id": "oc-450a695f5710fa76a0e8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 208,
+      "line": 209,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "environment-binding",
       "role": "RAVENROOT_SYSTEM_ONE_PROFILE_TYPO",
@@ -474716,7 +474700,7 @@
     {
       "id": "oc-99bda7228e8802ae2272",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 209,
+      "line": 210,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474731,7 +474715,7 @@
     {
       "id": "oc-1b9ec989f079aeb837c5",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 209,
+      "line": 210,
       "symbol": "test_system_one_profile_is_an_exact_dynamic_bundle_binding",
       "kind": "environment-binding",
       "role": "RAVENROOT_SYSTEM_ONE_PROFILE_TYPO",
@@ -474746,7 +474730,7 @@
     {
       "id": "oc-d3fdec1a4d1679e4216d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 220,
+      "line": 221,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "environment-binding",
       "role": "RAVENROOT_NODE_PACKAGE_SERVICES_",
@@ -474761,7 +474745,7 @@
     {
       "id": "oc-82350fb6d4b27da8285c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 220,
+      "line": 221,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474776,7 +474760,7 @@
     {
       "id": "oc-29d7831fd768c7e715e5",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 220,
+      "line": 221,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474791,7 +474775,7 @@
     {
       "id": "oc-5908b59034375d37df1a",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 221,
+      "line": 222,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "environment-binding",
       "role": "RAVENROOT_NODE_PACKAGE_SERVICES_",
@@ -474806,7 +474790,7 @@
     {
       "id": "oc-1a0c17b5684a95ab42de",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 221,
+      "line": 222,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474821,7 +474805,7 @@
     {
       "id": "oc-19faeba91b17a6917777",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 221,
+      "line": 222,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474836,7 +474820,7 @@
     {
       "id": "oc-70151248509d47512777",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 222,
+      "line": 223,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "environment-binding",
       "role": "RAVENROOT_PLUGINS_INSTALL_DIR",
@@ -474851,7 +474835,7 @@
     {
       "id": "oc-b353434f435fd6b438af",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 222,
+      "line": 223,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474866,7 +474850,7 @@
     {
       "id": "oc-668ba8cabc541608e8b2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 222,
+      "line": 223,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474881,7 +474865,7 @@
     {
       "id": "oc-bd5aaa4bcacf9b0dd09f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 223,
+      "line": 224,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "environment-binding",
       "role": "RAVENROOT_REPLICAS",
@@ -474896,7 +474880,7 @@
     {
       "id": "oc-5aed743094c6b6d926b3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 223,
+      "line": 224,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474911,7 +474895,7 @@
     {
       "id": "oc-070daab4b6020954caf3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 223,
+      "line": 224,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474926,7 +474910,7 @@
     {
       "id": "oc-8631e53ecb9f4b6a91f8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 224,
+      "line": 225,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "environment-binding",
       "role": "RAVENROOT_TRUSTED_PROXY_ADDRESSES",
@@ -474941,7 +474925,7 @@
     {
       "id": "oc-1dc5dd81b5c23a6d5279",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 224,
+      "line": 225,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474956,7 +474940,7 @@
     {
       "id": "oc-2b8d2d7a13b879ef7d7f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 224,
+      "line": 225,
       "symbol": "test_variable_specific_boundaries_do_not_inherit_false_group_defaults",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -474971,7 +474955,7 @@
     {
       "id": "oc-c2b6b4276959ede34397",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 227,
+      "line": 228,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "binding-default",
       "role": "binding-value",
@@ -474986,7 +474970,7 @@
     {
       "id": "oc-e7559dd054db7c81445c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 227,
+      "line": 228,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "environment-binding",
       "role": "RAVENROOT_MATRIX_CONFIG",
@@ -475001,7 +474985,7 @@
     {
       "id": "oc-cb8400a6fbcd4e5328ff",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 234,
+      "line": 235,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475016,7 +475000,7 @@
     {
       "id": "oc-c07246426a243d35f708",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 234,
+      "line": 235,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475031,7 +475015,7 @@
     {
       "id": "oc-f7f8c10dbc61ad6bbf9b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 234,
+      "line": 235,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "environment-binding",
       "role": "RAVENROOT_MATTERMOST_CONFIG",
@@ -475046,7 +475030,7 @@
     {
       "id": "oc-e5697681915d280a4408",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 235,
+      "line": 236,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475061,7 +475045,7 @@
     {
       "id": "oc-7820f56890f3d29721ad",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 235,
+      "line": 236,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475076,7 +475060,7 @@
     {
       "id": "oc-80d56a196eef5405be0f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 235,
+      "line": 236,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "environment-binding",
       "role": "RAVENROOT_TEAMS_CONFIG",
@@ -475091,7 +475075,7 @@
     {
       "id": "oc-5708010ba3a3c4003dc2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 242,
+      "line": 243,
       "symbol": "test_chat_bundle_configuration_boundaries_match_activation_lifecycle",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475106,7 +475090,7 @@
     {
       "id": "oc-d54d14c0ab105b571f7d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 247,
+      "line": 248,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS",
@@ -475121,7 +475105,7 @@
     {
       "id": "oc-9177c32ff2c87ff1c7a3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 247,
+      "line": 248,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475136,7 +475120,7 @@
     {
       "id": "oc-964beb0dff19eda0e44f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 248,
+      "line": 249,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475151,7 +475135,7 @@
     {
       "id": "oc-0123fe44234c1ebde5e7",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS",
@@ -475166,7 +475150,7 @@
     {
       "id": "oc-c0ea18c7b7e09086ee67",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475181,7 +475165,7 @@
     {
       "id": "oc-63c7bbf9a18f8eeba8e0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 251,
+      "line": 252,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475196,7 +475180,7 @@
     {
       "id": "oc-7cf6dd4aa11a5ee5e5f2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 253,
+      "line": 254,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS",
@@ -475211,7 +475195,7 @@
     {
       "id": "oc-993f0f1c8d1b6968e545",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 253,
+      "line": 254,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475226,7 +475210,7 @@
     {
       "id": "oc-1bf660fa550942bd4bbc",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 254,
+      "line": 255,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475241,7 +475225,7 @@
     {
       "id": "oc-6ed8e49d843fc80a6fb7",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS",
@@ -475256,7 +475240,7 @@
     {
       "id": "oc-53ea1e4dc9e044c1de2f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475271,7 +475255,7 @@
     {
       "id": "oc-c5b4c9ef4abead812e92",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 259,
+      "line": 260,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS",
@@ -475286,7 +475270,7 @@
     {
       "id": "oc-90c051b7f0225d90fa34",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 259,
+      "line": 260,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475301,7 +475285,7 @@
     {
       "id": "oc-9d1b5a8b9e016dfe4adf",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 260,
+      "line": 261,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475316,7 +475300,7 @@
     {
       "id": "oc-6c4183bf15e6b11e1630",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 262,
+      "line": 263,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE",
@@ -475331,7 +475315,7 @@
     {
       "id": "oc-21dbfcc21304d612b10e",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 262,
+      "line": 263,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475346,7 +475330,7 @@
     {
       "id": "oc-b8a4f140f1bc62a49c52",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 263,
+      "line": 264,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475361,7 +475345,7 @@
     {
       "id": "oc-ce0a9afb4c56239c3165",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS",
@@ -475376,7 +475360,7 @@
     {
       "id": "oc-ac8cb9f530908dfa72cc",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475391,7 +475375,7 @@
     {
       "id": "oc-de17a30ad11e85443231",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 266,
+      "line": 267,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475406,7 +475390,7 @@
     {
       "id": "oc-5bf703a299362f072714",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 268,
+      "line": 269,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES",
@@ -475421,7 +475405,7 @@
     {
       "id": "oc-d1f5aeb172914d120120",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 268,
+      "line": 269,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475436,7 +475420,7 @@
     {
       "id": "oc-ec52bb3b4853c70f7c53",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 269,
+      "line": 270,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475451,7 +475435,7 @@
     {
       "id": "oc-cdc3a4a70a44cd003f0c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 270,
+      "line": 271,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475466,7 +475450,7 @@
     {
       "id": "oc-ef953fb712370a7302b6",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 272,
+      "line": 273,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475481,7 +475465,7 @@
     {
       "id": "oc-1a88abb783efbabac85b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 272,
+      "line": 273,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_SERIALIZATION_RETRIES",
@@ -475496,7 +475480,7 @@
     {
       "id": "oc-b986e2c69d35ea3b8caf",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 273,
+      "line": 274,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475511,7 +475495,7 @@
     {
       "id": "oc-3f4aadf5060326fd4cc8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 275,
+      "line": 276,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS",
@@ -475526,7 +475510,7 @@
     {
       "id": "oc-b920675e624069df48c4",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 275,
+      "line": 276,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475541,7 +475525,7 @@
     {
       "id": "oc-82ea92b90077788584f2",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 277,
+      "line": 278,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475556,7 +475540,7 @@
     {
       "id": "oc-e12259638218564bde53",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 279,
+      "line": 280,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS",
@@ -475571,7 +475555,7 @@
     {
       "id": "oc-429ae1a2ede9bd9ba56d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 279,
+      "line": 280,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475586,7 +475570,7 @@
     {
       "id": "oc-4906466738c32ae1da56",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 280,
+      "line": 281,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475601,7 +475585,7 @@
     {
       "id": "oc-deb43ab3341a73afba7e",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 284,
+      "line": 285,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475616,7 +475600,7 @@
     {
       "id": "oc-c55734ed1581ba7e5251",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 284,
+      "line": 285,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475631,7 +475615,7 @@
     {
       "id": "oc-0958301854fc4905ac6b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475646,7 +475630,7 @@
     {
       "id": "oc-20727e131a9db55c017c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475661,7 +475645,7 @@
     {
       "id": "oc-a8f93758abca51ad4be6",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475676,7 +475660,7 @@
     {
       "id": "oc-13f263a921e7d1489dfd",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475691,7 +475675,7 @@
     {
       "id": "oc-671077cfaaae4e1837b9",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_TYPO",
@@ -475706,7 +475690,7 @@
     {
       "id": "oc-ef5062718d393deb0dc7",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_postgresql_bindings_have_exact_published_boundaries",
       "kind": "environment-binding",
       "role": "RAVENROOT_UNCLASSIFIED_SETTING",
@@ -475721,7 +475705,7 @@
     {
       "id": "oc-c5bf099955916be24f70",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 296,
+      "line": 297,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475736,7 +475720,7 @@
     {
       "id": "oc-ec9642d28c745a18d66b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 298,
+      "line": 299,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475751,7 +475735,7 @@
     {
       "id": "oc-0ebd1a3b5182da9bc8ec",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 298,
+      "line": 299,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475766,7 +475750,7 @@
     {
       "id": "oc-516312cc7a90cd0d6887",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 298,
+      "line": 299,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475781,7 +475765,7 @@
     {
       "id": "oc-9e261de045f1f69133f5",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 299,
+      "line": 300,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475796,7 +475780,7 @@
     {
       "id": "oc-eef65c6d31b9d1568887",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 299,
+      "line": 300,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475811,7 +475795,7 @@
     {
       "id": "oc-2baf71ecf522d7214d15",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 300,
+      "line": 301,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475826,7 +475810,7 @@
     {
       "id": "oc-9f7d9ace08a9d2d48ac0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 300,
+      "line": 301,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475841,7 +475825,7 @@
     {
       "id": "oc-ddec1db18ce86e1e5b8c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 303,
+      "line": 304,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475856,7 +475840,7 @@
     {
       "id": "oc-bd6f12d13ffb4019cd75",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 303,
+      "line": 304,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475871,7 +475855,7 @@
     {
       "id": "oc-343a8e8810d1416db8bf",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 303,
+      "line": 304,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475886,7 +475870,7 @@
     {
       "id": "oc-a065733e52f82e41e299",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 308,
+      "line": 309,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475901,7 +475885,7 @@
     {
       "id": "oc-738de916b4ac237f3ca0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 308,
+      "line": 309,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475916,7 +475900,7 @@
     {
       "id": "oc-7b742ddab99f2364b5cb",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 309,
+      "line": 310,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475931,7 +475915,7 @@
     {
       "id": "oc-b58980b3acdcd33b25e4",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 309,
+      "line": 310,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -475946,7 +475930,7 @@
     {
       "id": "oc-50d02a3d60b99cb3a35b",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 309,
+      "line": 310,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475961,7 +475945,7 @@
     {
       "id": "oc-846a522eee9ddb3806cc",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 309,
+      "line": 310,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -475976,7 +475960,7 @@
     {
       "id": "oc-c37b0767f8e230ddb529",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 310,
+      "line": 311,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -475991,7 +475975,7 @@
     {
       "id": "oc-dd3a944a0d902b496829",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 313,
+      "line": 314,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -476006,7 +475990,7 @@
     {
       "id": "oc-a5c4bad8257d6e8f3977",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 321,
+      "line": 322,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476021,7 +476005,7 @@
     {
       "id": "oc-5f30aba523ea89edc46f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 321,
+      "line": 322,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -476036,7 +476020,7 @@
     {
       "id": "oc-4d7211e30cdae26aff38",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 322,
+      "line": 323,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476051,7 +476035,7 @@
     {
       "id": "oc-59072986676e013ef7d0",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 322,
+      "line": 323,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -476066,7 +476050,7 @@
     {
       "id": "oc-4b79d8642a756f0b35f3",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 325,
+      "line": 326,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476081,7 +476065,7 @@
     {
       "id": "oc-2c63cf9144ff3b93215f",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 325,
+      "line": 326,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_",
@@ -476096,7 +476080,7 @@
     {
       "id": "oc-1bd6e7ac5380cc5a09c9",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 326,
+      "line": 327,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS",
@@ -476111,7 +476095,7 @@
     {
       "id": "oc-976e7debb24ab6f19149",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 326,
+      "line": 327,
       "symbol": "test_namespace_guard_exclusion_requires_unchanged_reviewed_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -476126,7 +476110,7 @@
     {
       "id": "oc-41458afa716ff995de28",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 333,
+      "line": 334,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476141,7 +476125,7 @@
     {
       "id": "oc-b8ac376c20c0b9197f63",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 333,
+      "line": 334,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476156,7 +476140,7 @@
     {
       "id": "oc-a4590b00dd618fb5ccaa",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 333,
+      "line": 334,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_TYPO",
@@ -476171,7 +476155,7 @@
     {
       "id": "oc-2bba7e4c694edf50da9d",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 335,
+      "line": 336,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476186,7 +476170,7 @@
     {
       "id": "oc-9d14f4b2293d9ae07f27",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 335,
+      "line": 336,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_TYPO",
@@ -476201,7 +476185,7 @@
     {
       "id": "oc-b1e5a519eeb82f1d38a8",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 336,
+      "line": 337,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "binding-default",
       "role": "binding-value",
@@ -476216,7 +476200,7 @@
     {
       "id": "oc-fbf828e95357200ac00c",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 336,
+      "line": 337,
       "symbol": "test_new_unknown_postgresql_binding_is_extracted_and_refused",
       "kind": "environment-binding",
       "role": "RAVENROOT_POSTGRES_TYPO",
@@ -476231,7 +476215,7 @@
     {
       "id": "oc-3fc90e0f6abef6aa7d67",
       "path": "scripts/tests/test_publish_environment_reference.py",
-      "line": 342,
+      "line": 343,
       "symbol": "test_check_requires_exact_generated_bytes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -552522,6 +552506,24 @@
       "rationale": "Prepared-release rejection fixture diagnostic for a missing exact release-preparation revision; it grants no runtime authority.",
       "retirementRationale": "Issue 568 attempt 2 replaces the source expression at scripts/tests/test_audit_operational_configuration.py (inline) with a shared isolated release-fixture setup; its replacement is classified independently.",
       "evidence": "self.fail(\"no exact release-preparation revision is reachable from the prepared tree\")"
+    },
+    {
+      "id": "oc-b41b2cdadddf3d9ccb71",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java",
+      "line": 723,
+      "symbol": "request",
+      "kind": "operational-declaration",
+      "role": "count",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "51a0fd7cbe491dd251b398f9fabe95e72042c897e0954180373c536666ac308a",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Authenticated routes, revision fences, immutable artifact identities, UI transitions, and publisher formats are one reviewed protocol boundary.",
+      "graphAuthoringAuthority": "graph-authoring-publication-boundary-v1",
+      "retirementRationale": "Issue 568 attempt 3 removes request-level count initialization with literal1; the existing4096 ceiling is now checked and incremented immediately before each outbound send, including retries. The per-send increment is source-proven executable behavior rather than a new configurable declaration.",
+      "evidence": "int count = requestCount.get() + 1;"
     }
   ],
   "evidenceRecords": {
@@ -556015,7 +556017,6 @@
     "518f26229b0b7e3ba1a802c02143d3155481b55b0d099bf05fcabe6112a343f5": "const location = [finding.nodeId && `node ${finding.nodeId}`, finding.propertyName && `property ${finding.propertyName}`].filter(Boolean).join(' · ');",
     "5193883b756dc7dd3e8a80b5dbef479e29fa155f5f756ba4781b1f56bdf56fca": "export RAVENROOT_ENABLED_PLUGINS=ai.ravenroot.extensions.mail",
     "519eea71712cb768639c2ba316a3f6d8c5fac6f3c253a4918fe9c2ff74232f70": "RAVENROOT_LOCAL_HOST_BIND_ADDRESS=\"$LOCAL_HOST_BIND_ADDRESS\" \\",
-    "51a0fd7cbe491dd251b398f9fabe95e72042c897e0954180373c536666ac308a": "int count = requestCount.get() + 1;",
     "51a45bb79e0d95c84147ccedbd3c1c41f5a53e4f5e13ede42b9a4b7ba04de2f0": "original_generator, \"OpenApiSpecGenerator\", \"generate\")",
     "51b9f05dc784bea2cd1d3278908fe7bcf3ee932054e84aa092b0aa674b9aad49": "original_edge_test = edge_test_path.read_text(encoding=\"utf-8\")",
     "51c1ca958bee28c00edcd1ac4fa82ba17077490c389080da9f055f68be5ebbe1": "*'\"behavior\":\"test.inert.probe\"'*)",
@@ -849868,6 +849869,24 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-568-attempt-3-http-attempt-budget-reconciliation",
+      "issue": "#568",
+      "sourceRevision": "d87f56ffa606be3c2791e284675c47c3aef78a46",
+      "targetRevision": "0b797e0f6d46efa1609837d817342c0d731d42db",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "c1c332149a673fd5e8f51fa37fe4b4b9228ca699ce703e46e00317c12456d764",
+      "targetCandidateDigest": "09b5ee9c68a25481e894a15fe51b34709b2da00e2db3a93ee1270c27fb8a6b3a",
+      "mappings": [],
+      "retirements": [
+        {
+          "id": "oc-b41b2cdadddf3d9ccb71",
+          "approved": true,
+          "rationale": "Issue 568 attempt 3 removes request-level count initialization with literal1; the existing4096 ceiling is now checked and incremented immediately before each outbound send, including retries. The per-send increment is source-proven executable behavior rather than a new configurable declaration."
+        }
+      ],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -919298,7 +919317,7 @@
         },
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "611ee9866daf9d081369b8d5597ba2039cb774e1217577a939415e7284f6acf9"
+          "digest": "aeef42de111e13a773321a6938cb96d9dcb96dff4c39788b2cacacd3e195b42b"
         },
         {
           "path": "ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java",
@@ -924714,7 +924733,7 @@
         },
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "611ee9866daf9d081369b8d5597ba2039cb774e1217577a939415e7284f6acf9"
+          "digest": "aeef42de111e13a773321a6938cb96d9dcb96dff4c39788b2cacacd3e195b42b"
         },
         {
           "path": "scripts/tests/test_program_authoring_platform_configuration.sh",
@@ -926687,11 +926706,11 @@
         },
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "611ee9866daf9d081369b8d5597ba2039cb774e1217577a939415e7284f6acf9"
+          "digest": "aeef42de111e13a773321a6938cb96d9dcb96dff4c39788b2cacacd3e195b42b"
         },
         {
           "path": "scripts/tests/test_publish_environment_reference.py",
-          "digest": "acee461bd299dfe27d89eecb2944af6438dd6ecc78492afd68ce7542220ada8d"
+          "digest": "966903d91067cdc574ce800578e9c59f91be269e5779ae932c131f51629d9a89"
         }
       ],
       "testEvidence": [
@@ -926755,7 +926774,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "8fded25666473b24e4ba13534463e11ad7ccbfa767dd479ee4c8851f883e6c33"
+    "digest": "6cf7a63635b7e9cf8ef78e5a57abfa4c709746515b7c23258b3af24a62c4ddf6"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {
@@ -930425,7 +930444,6 @@
             "oc-b15cc3cc9947b3f83763",
             "oc-b1bbcd9d2cf3cc2f2f98",
             "oc-b3c594f13b3978e7fcd3",
-            "oc-b41b2cdadddf3d9ccb71",
             "oc-b8035234f4d85d76f765",
             "oc-b848c95d3e889713526c",
             "oc-b9ef75efa5cb54897c86",
@@ -931063,7 +931081,6 @@
         "oc-b1bbcd9d2cf3cc2f2f98",
         "oc-b2e98fcdfe92d7d35d56",
         "oc-b3c594f13b3978e7fcd3",
-        "oc-b41b2cdadddf3d9ccb71",
         "oc-b43a536bcdb295d1c43e",
         "oc-b4e6dd6611051a557309",
         "oc-b586f44b78b4d7519c49",
@@ -931318,7 +931335,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java",
-          "digest": "266d6fd3bbf3c7e06c1d5944dcad45e9b1791586716769216a1282b6978e86a0"
+          "digest": "c059c79e39ad04c4352057d227a8719532493cdf64b3bcbfdefb715fbdfb3cd5"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringConfiguration.java",
@@ -931370,7 +931387,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java",
-          "digest": "e7d4fcd4560f42d64f090cc724c689e3d2741a37d42f30cdc59933f785d7583a"
+          "digest": "0ec29db6cab49b7ad89853e8201b6515b9f8619798fccee11c2c012e56fa95ea"
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphAuthoringConfigurationTest.java",

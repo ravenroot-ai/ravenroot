@@ -244,11 +244,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 )
                 return str(prepared["version"])
 
-            source_version = str(latest_release(ROOT))
-            current_version = product_version(ROOT)
             source_fixture = isolated_tree("source", ROOT, "HEAD")
-            if current_version != source_version:
-                self.assertEqual(source_version, normalize_release_fixture_source(source_fixture))
+            source_version = normalize_release_fixture_source(source_fixture)
+            if fixture_git(source_fixture, "status", "--porcelain"):
                 self.assertEqual(source_version, product_version(source_fixture))
                 self.assertEqual(
                     [],
@@ -8490,12 +8488,10 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 ).stdout.strip()
 
             def normalize_prepared_source(root: Path) -> str:
-                source_version = str(latest_release(root))
-                if product_version(root) == source_version:
-                    return source_version
-                self.assertEqual(source_version, normalize_release_fixture_source(root))
-                fixture_git(root, "add", ".")
-                fixture_git(root, "commit", "-qm", "normalize prepared authoritative source")
+                source_version = normalize_release_fixture_source(root)
+                if fixture_git(root, "status", "--porcelain"):
+                    fixture_git(root, "add", ".")
+                    fixture_git(root, "commit", "-qm", "normalize prepared authoritative source")
                 self.assertEqual(source_version, product_version(root))
                 return source_version
 
@@ -8790,7 +8786,6 @@ class ReleaseFixtureDevelopmentNormalizationTest(unittest.TestCase):
 def normalize_release_fixture_source(root: Path) -> str:
     """Normalize an isolated source fixture; never authorize a production version transition."""
     from scripts.check_product_version import errors as version_surface_errors
-    from scripts.prepare_release import bump_surfaces
 
     if root.resolve() == ROOT.resolve():
         raise AssertionError("version normalization requires an isolated source fixture")
@@ -8863,28 +8858,30 @@ def normalize_release_fixture_source(root: Path) -> str:
             or row[0] == "D" and row[1].startswith(".changes/") for row in changes):
         raise AssertionError("development normalization cannot bypass release-preparation evidence")
 
-    # Only an unreleased forward development version reaches this path. Normalize mirrors in the
-    # clone so the existing release tests can construct their own real preparation commits.
+    # The clone may retain immutable notes for an earlier, still untagged preparation. Moving
+    # mirrors backwards would collide with those notes when testing a minor preparation. Give
+    # this isolated fixture a local released baseline at its coherent development version instead.
+    # No product bytes change, no ref is replaced, and no shared repository is a push destination.
     before = {path: (root / path).read_bytes() for path in git("ls-files").splitlines()
               if (root / path).is_file()}
-    bump_surfaces(root, current_version, source_version)
-    allowed = (RELEASE_PREPARATION_PATHS - {"docs/_data/navigation.yml"}) | {
-        path for path in before if path.endswith("pom.xml")}
-    changed = {path for path, contents in before.items() if (root / path).read_bytes() != contents}
-    if changed - allowed:
-        raise AssertionError("development normalization changed non-version fixture content")
-    for path in changed:
-        original = before[path].decode("utf-8")
-        expected = rewrite_ravenroot_pom_version(original, current_version, source_version, path) \
-                if path.endswith("pom.xml") else original.replace(current_version, source_version)
-        if (root / path).read_text(encoding="utf-8") != expected:
-            raise AssertionError(f"development normalization changed more than version mirrors: {path}")
-    if version_surface_errors(source_version, root):
-        raise AssertionError("development normalization left inconsistent version surfaces")
-    # All runtime bytes, the inventory, release notes, and change fragments are outside allowed.
-    if any((root / path).read_bytes() != contents for path, contents in before.items() if path not in allowed):
-        raise AssertionError("development normalization changed protected source fixture bytes")
-    return source_version
+    before_tree = git("write-tree")
+    source_tags = git("show-ref", "--tags")
+    synthetic_tag = "v" + current_version
+    if git("tag", "--list", synthetic_tag):
+        raise AssertionError("development fixture baseline must not replace an existing tag")
+    # Remove push destinations in the independent clone before adding the synthetic fixture ref.
+    for remote in git("remote").splitlines():
+        git("remote", "remove", remote)
+    git("tag", synthetic_tag, "HEAD")
+    if git("remote") or git("write-tree") != before_tree or git("status", "--porcelain"):
+        raise AssertionError("development fixture baseline changed source or retained a remote")
+    if any((root / path).read_bytes() != contents for path, contents in before.items()):
+        raise AssertionError("development fixture baseline changed protected source bytes")
+    after_tags = git("show-ref", "--tags").splitlines()
+    expected_tags = source_tags.splitlines() + [git("rev-parse", "HEAD") + " refs/tags/" + synthetic_tag]
+    if sorted(after_tags) != sorted(expected_tags) or str(latest_release(root)) != current_version:
+        raise AssertionError("development fixture baseline changed an unrelated tag")
+    return current_version
 
 
 def reverse_release_preparation_delta(

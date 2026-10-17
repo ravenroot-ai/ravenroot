@@ -272,6 +272,69 @@ class GitlabAuthoringRepositoryTest {
         }
     }
 
+    @Test void listingAndHistoryExposeBoundedContinuationPages() {
+        var api = new Gitlab();
+        try (var repository = repository(api)) {
+            var first = save(repository, "one.graphml", "one", EMPTY, "pages-key-00000000001");
+            save(repository, "two.graphml", "two", EMPTY, "pages-key-00000000002");
+            save(repository, "three.graphml", "three", EMPTY, "pages-key-00000000003");
+            var page = repository.list(ALICE, "").toCompletableFuture().join();
+            assertEquals(2, page.items().size()); assertEquals("1", page.nextCursor());
+            var next = repository.list(ALICE, page.nextCursor()).toCompletableFuture().join();
+            assertEquals(1, next.items().size()); assertEquals("", next.nextCursor());
+            first = repository.open(ALICE, "one.graphml", false).toCompletableFuture().join();
+            var second = save(repository, "one.graphml", "edited", first.summary().revision(), "pages-key-00000000004");
+            save(repository, "one.graphml", "third", second.summary().revision(), "pages-key-00000000005");
+            var history = repository.history(ALICE, "one.graphml", "").toCompletableFuture().join();
+            assertEquals(2, history.items().size()); assertEquals("1", history.nextCursor());
+            var older = repository.history(ALICE, "one.graphml", history.nextCursor()).toCompletableFuture().join();
+            assertEquals(1, older.items().size()); assertEquals("", older.nextCursor());
+        }
+    }
+
+    @Test void oversizedMalformedAndUnboundedProviderResponsesFailExplicitly() {
+        var api = new Gitlab();
+        try (var repository = repository(api)) {
+            api.oversizedResponse = true;
+            assertFailure(GraphAuthoringException.Failure.LIMIT_EXCEEDED, () -> repository.list(ALICE, "").toCompletableFuture().join());
+            api.oversizedResponse = false; api.malformedResponse = true;
+            assertFailure(GraphAuthoringException.Failure.UNAVAILABLE, () -> repository.list(ALICE, "").toCompletableFuture().join());
+            api.malformedResponse = false; api.infiniteTree = true;
+            assertFailure(GraphAuthoringException.Failure.LIMIT_EXCEEDED, () -> repository.list(ALICE, "").toCompletableFuture().join());
+            assertEquals(20, api.treeRequests);
+            assertEquals(0, api.writes);
+        }
+    }
+
+    @Test void operationDeadlineBoundsTheTotalRequestChain() {
+        var api = new Gitlab(); api.slowResponse = true;
+        var environment = environment(); environment.put("RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS", "5");
+        environment.put("RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", "0");
+        try (var repository = new GitlabAuthoringRepository(GraphAuthoringConfiguration.fromEnvironment(environment),
+                ignored -> Optional.of(new SecretValue("server-secret".toCharArray())), (t,g,v,s,b) -> "absent",
+                ignored -> { }, api, Clock.systemUTC())) {
+            assertFailure(GraphAuthoringException.Failure.UNAVAILABLE, () -> repository.list(ALICE, "").toCompletableFuture().join());
+            assertTrue(api.totalRequests <= 1);
+            assertEquals(0, api.writes);
+        }
+    }
+
+    @Test void releaseAdvancingAfterWriteIsRejectedEvenWhenTheDocumentWasAbsentFromRelease() {
+        var api = new Gitlab();
+        try (var repository = repository(api)) {
+            var first = save(repository, "orders.graphml", "one", EMPTY, "release-race-key-00001");
+            api.afterCommit = () -> {
+                String parent = api.refs.get("main"); var previous = api.commits.get(parent);
+                String id = Gitlab.sha(++api.sequence);
+                api.commits.put(id, new Gitlab.Commit(parent, "External reviewed release", previous.files, previous.modified));
+                api.refs.put("main", id);
+            };
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> save(repository, "orders.graphml", "bad",
+                    first.summary().revision(), "release-race-key-00002"));
+            assertArrayEquals(first.graphMl(), repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join().graphMl());
+        }
+    }
+
     private static String commit(GraphAuthoringRepository.Document doc) { return doc.summary().revision().draft().split(":")[0]; }
     private static GraphAuthoringRepository.MutationRequest mutation(String id, String source, GraphAuthoringRepository.Revision revision, String key) {
         return new GraphAuthoringRepository.MutationRequest(id, source, revision, key);
@@ -285,14 +348,16 @@ class GitlabAuthoringRepositoryTest {
         return new GitlabAuthoringRepository(configuration(), ignored -> Optional.of(new SecretValue("server-secret".toCharArray())),
                 publications, ignored -> { }, api, Clock.systemUTC());
     }
-    static GraphAuthoringConfiguration configuration() {
-        return GraphAuthoringConfiguration.fromEnvironment(Map.of(
+    static GraphAuthoringConfiguration configuration() { return GraphAuthoringConfiguration.fromEnvironment(environment()); }
+    private static Map<String, String> environment() {
+        return new HashMap<>(Map.of(
                 "RAVENROOT_GRAPH_AUTHORING_MODE", "git", "RAVENROOT_GRAPH_AUTHORING_PROVIDER", "gitlab",
                 "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "platform/nested/graphs",
                 "RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE", "https://gitlab.example.test/api/v4",
                 "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "PAT", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE", "git-authoring",
                 "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "tenant-a=customers/a,tenant-b=customers/b",
-                "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "https://artifacts.example.test/releases/"));
+                "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "https://artifacts.example.test/releases/",
+                "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE", "2"));
     }
     private static byte[] graph(String label) {
         return ("<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\"><key id=\"label\" for=\"graph\" attr.name=\"label\" attr.type=\"string\"/>"
@@ -313,6 +378,8 @@ class GitlabAuthoringRepositoryTest {
         final List<Map<String, Object>> mrs = new ArrayList<>();
         int sequence = 10, writes;
         volatile boolean loseCommit, loseMr, unauthorized, rawProjectObserved, symlink, failTransport;
+        volatile boolean oversizedResponse, malformedResponse, infiniteTree, slowResponse;
+        volatile int treeRequests, totalRequests;
         volatile Runnable beforeCommit, afterCommit, beforeParentCapture;
         volatile int releaseRootReads;
         volatile java.util.concurrent.CyclicBarrier race, mrRace;
@@ -327,7 +394,13 @@ class GitlabAuthoringRepositoryTest {
         @Override @SuppressWarnings("unchecked")
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) throws IOException {
             assertEquals("server-secret", request.headers().firstValue("PRIVATE-TOKEN").orElseThrow());
+            totalRequests++;
             if (failTransport) throw new IOException("server-secret provider failure");
+            if (slowResponse) {
+                try { Thread.sleep(20); } catch (InterruptedException interrupted) { throw new IOException(interrupted); }
+            }
+            if (oversizedResponse) return (HttpResponse<T>) new FakeResponse(request, 200, new byte[16 * 1024 * 1024]);
+            if (malformedResponse) return (HttpResponse<T>) new FakeResponse(request, 200, "not JSON".getBytes(StandardCharsets.UTF_8));
             assertTrue(request.headers().firstValue("Authorization").isEmpty());
             String raw = request.uri().getRawPath();
             assertTrue(raw.startsWith("/api/v4/projects/platform%2Fnested%2Fgraphs/"), raw);
@@ -370,6 +443,13 @@ class GitlabAuthoringRepositoryTest {
                 refs.put(str(body,"branch"), str(body,"ref")); return response(201, Map.of());
             }
             if (method.equals("GET") && endpoint.equals("/repository/tree")) {
+                treeRequests++;
+                if (infiniteTree) {
+                    var page = new ArrayList<Object>();
+                    for (int i = 0; i < 100; i++) page.add(Map.of("id", sha(i + 1), "name", "file" + i,
+                            "path", "file" + i, "type", "blob", "mode", "100644"));
+                    return response(200, page);
+                }
                 Commit commit = commits.get(param(query,"ref"));
                 if (param(query, "ref").equals(refs.get("main")) && param(query, "path").isEmpty()) releaseRootReads++;
                 String dir = param(query,"path"), prefix = dir.isEmpty() ? "" : dir + "/";
@@ -428,7 +508,9 @@ class GitlabAuthoringRepositoryTest {
                         history.add(Map.of("id",head,"message",current.message,"author_name","Ravenroot","authored_date","2026-10-17T10:00:00Z"));
                     head=current.parent;
                 }
-                return response(200,history);
+                int size = Integer.parseInt(param(query,"per_page"));
+                int start = Math.min(history.size(), (Integer.parseInt(param(query,"page")) - 1) * size);
+                return response(200, history.subList(start, Math.min(start + size, history.size())));
             }
             if (method.equals("GET") && endpoint.equals("/merge_requests")) return response(200,mrs);
             if (method.equals("GET") && endpoint.startsWith("/merge_requests/")) return response(200,mrs.get(Integer.parseInt(endpoint.substring("/merge_requests/".length()))-1));

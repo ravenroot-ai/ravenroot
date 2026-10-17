@@ -21,7 +21,13 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import audit_operational_configuration as audit  # noqa: E402
-from scripts.prepare_release import bump_ui_examples, latest_release, prepare, product_version  # noqa: E402
+from scripts.prepare_release import (  # noqa: E402
+    bump_surfaces,
+    bump_ui_examples,
+    latest_release,
+    prepare,
+    product_version,
+)
 from scripts.release_contract import expected_next, parse_tag  # noqa: E402
 
 
@@ -245,52 +251,22 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 return str(prepared["version"])
 
             source_version = str(latest_release(ROOT))
-            current_version = product_version(ROOT)
             source_fixture = isolated_tree("source", ROOT, "HEAD")
-            if current_version != source_version:
-                preparation_revision = None
-                for revision in subprocess.run(
-                        ["git", "rev-list", "--topo-order", "HEAD"], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                ).stdout.splitlines():
-                    ancestry = subprocess.run(
-                        ["git", "rev-list", "--parents", "-n", "1", revision], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                    ).stdout.split()
-                    if len(ancestry) != 2:
-                        continue
-                    parent = ancestry[1]
-                    prepared_pom = subprocess.run(
-                        ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                    ).stdout
-                    source_pom = subprocess.run(
-                        ["git", "show", f"{parent}:ravenroot/pom.xml"], cwd=ROOT,
-                        check=True, capture_output=True, text=True,
-                    ).stdout
-                    if f"<version>{current_version}</version>" in prepared_pom \
-                            and f"<version>{source_version}</version>" in source_pom:
-                        preparation_revision = revision
-                        break
-                if preparation_revision is None:
-                    self.fail("no exact release-preparation revision is reachable from the prepared tree")
-                reverse_release_preparation_delta(source_fixture, preparation_revision, current_version)
-                for path, contents in bump_ui_examples(
-                        source_fixture, current_version, source_version).items():
-                    path.write_bytes(contents.encode())
-                self.assertEqual(source_version, product_version(source_fixture))
-                self.assertEqual(
-                    [],
-                    audit.check(
-                        source_fixture,
-                        source_fixture / "scripts/operational-configuration-inventory.json",
-                        source_fixture / "docs/architecture/operational-configuration-audit.md",
-                    ),
-                )
-                fixture_git(source_fixture, "add", ".")
-                fixture_git(source_fixture, "-c", "user.name=Test", "-c",
-                            "user.email=test@example.invalid", "commit", "-qm",
-                            "ordinary authoritative source snapshot")
+            normalize_authoritative_version_history(source_fixture)
+            self.assertEqual(source_version, product_version(source_fixture))
+            self.assertEqual(
+                ["normalize 0.7.0-alpha.1 to 0.6.1-alpha.1",
+                 "normalize 0.8.0-alpha.1 to 0.7.0-alpha.1"],
+                fixture_git(source_fixture, "log", "-2", "--format=%s").splitlines(),
+            )
+            self.assertEqual(
+                [],
+                audit.check(
+                    source_fixture,
+                    source_fixture / "scripts/operational-configuration-inventory.json",
+                    source_fixture / "docs/architecture/operational-configuration-audit.md",
+                ),
+            )
             source_revision = fixture_git(source_fixture, "rev-parse", "HEAD")
             future_version = str(expected_next(parse_tag(f"v{source_version}"), "minor"))
             future_commit = fixture_git(
@@ -365,6 +341,55 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             )
             self.assertTrue(any("Helm settings require the exact source-derived closed values authority" in error
                                 for error in errors), errors)
+
+    def test_version_only_alignment_inverse_refuses_an_unrelated_source_mutation(self) -> None:
+        target_version = product_version(ROOT)
+        _revision, parent, source_version = reachable_version_transition(
+            ROOT, target_version, "HEAD")
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location) / "alignment"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(root)], check=True)
+            subprocess.run(["git", "checkout", "--quiet", parent], cwd=root, check=True)
+            bump_surfaces(root, source_version, target_version)
+            unexpected = root / "unexpected-runtime-policy.txt"
+            unexpected.write_text("not a version surface\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "invalid version alignment"], cwd=root, check=True)
+            invalid = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            with self.assertRaisesRegex(AssertionError, "unexpected path"):
+                reverse_version_alignment_delta(root, invalid, target_version)
+
+    def test_version_only_alignment_inverse_refuses_same_surface_semantic_mutation(self) -> None:
+        target_version = product_version(ROOT)
+        _revision, parent, source_version = reachable_version_transition(
+            ROOT, target_version, "HEAD")
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location) / "alignment"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--no-local", str(ROOT), str(root)], check=True)
+            subprocess.run(["git", "checkout", "--quiet", parent], cwd=root, check=True)
+            bump_surfaces(root, source_version, target_version)
+            readme = root / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8") + "\nUnexpected semantic change.\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "invalid version alignment"], cwd=root, check=True)
+            invalid = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            with self.assertRaisesRegex(AssertionError, "non-version content"):
+                reverse_version_alignment_delta(root, invalid, target_version)
 
     def test_final_review_authority_applies_one_exact_source_anchored_partition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -8516,35 +8541,8 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                     ["git", *arguments], cwd=root, check=True, capture_output=True, text=True,
                 ).stdout.strip()
 
-            def normalize_prepared_source(root: Path) -> str:
-                source_version = str(latest_release(root))
-                current_version = product_version(root)
-                if current_version == source_version:
-                    return source_version
-                preparation_revision = None
-                for revision in fixture_git(root, "rev-list", "--topo-order", "HEAD").splitlines():
-                    ancestry = fixture_git(
-                        root, "rev-list", "--parents", "-n", "1", revision).split()
-                    if len(ancestry) != 2:
-                        continue
-                    parent = ancestry[1]
-                    prepared_pom = fixture_git(root, "show", f"{revision}:ravenroot/pom.xml")
-                    source_pom = fixture_git(root, "show", f"{parent}:ravenroot/pom.xml")
-                    if f"<version>{current_version}</version>" in prepared_pom \
-                            and f"<version>{source_version}</version>" in source_pom:
-                        preparation_revision = revision
-                        break
-                if preparation_revision is None:
-                    self.fail("no exact release-preparation revision is reachable from the prepared tree")
-                reverse_release_preparation_delta(
-                    root, preparation_revision, current_version)
-                fixture_git(root, "add", ".")
-                fixture_git(root, "commit", "-qm", "normalize prepared authoritative source")
-                self.assertEqual(source_version, product_version(root))
-                return source_version
-
             def exercise_later_security_note(root: Path) -> None:
-                source_version = normalize_prepared_source(root)
+                source_version = normalize_authoritative_version_history(root)
                 fragments = sorted(
                     path for path in (root / ".changes").glob("*.md")
                     if path.name != "README.md")
@@ -8642,7 +8640,7 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 "## Security\n\n- Update the UI build dependency `source-map-js` to 1.2.2",
                 historical_notes.read_text(encoding="utf-8"),
             )
-            source_version = normalize_prepared_source(authoritative)
+            source_version = normalize_authoritative_version_history(authoritative)
             if not any(path.name != "README.md"
                        for path in (authoritative / ".changes").glob("*.md")):
                 fragment = authoritative / ".changes/history-safe-release.fix.md"
@@ -8888,6 +8886,170 @@ def reverse_release_preparation_delta(
             ["git", "add", "--", *later_pom_updates], cwd=root,
             check=True, capture_output=True,
         )
+
+
+def revision_product_version(root: Path, revision: str) -> str:
+    source = subprocess.run(
+        ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    project = re.sub(r"(?s)<parent>.*?</parent>", "", source)
+    match = re.search(r"<version>([^<]+)</version>", project)
+    if match is None:
+        raise AssertionError(f"{revision}: release source has no product version")
+    return match.group(1)
+
+
+def reachable_version_transition(
+        root: Path, target_version: str, source_ref: str) -> tuple[str, str, str]:
+    """Find the real one-parent commit that introduced one reachable product version."""
+    for revision in subprocess.run(
+            ["git", "rev-list", "--topo-order", source_ref, "--", "ravenroot/pom.xml"], cwd=root,
+            check=True, capture_output=True, text=True,
+    ).stdout.splitlines():
+        ancestry = subprocess.run(
+            ["git", "rev-list", "--parents", "-n", "1", revision], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout.split()
+        if len(ancestry) != 2:
+            continue
+        parent = ancestry[1]
+        if revision_product_version(root, revision) != target_version:
+            continue
+        source_version = revision_product_version(root, parent)
+        if source_version != target_version:
+            return revision, parent, source_version
+    raise AssertionError(
+        f"no single-parent version transition to {target_version} is reachable from the prepared tree")
+
+
+def reverse_version_alignment_delta(
+        root: Path, revision: str, target_version: str) -> str:
+    """Reverse a validated bump_surfaces-only integration alignment without touching other bytes."""
+    ancestry = subprocess.run(
+        ["git", "rev-list", "--parents", "-n", "1", revision], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    if len(ancestry) != 2:
+        raise AssertionError("version alignment must be one non-merge commit")
+    parent = ancestry[1]
+    source_version = revision_product_version(root, parent)
+    if revision_product_version(root, revision) != target_version \
+            or source_version == target_version:
+        raise AssertionError("version alignment versions do not match the requested inverse")
+    if subprocess.run(
+            ["git", "status", "--porcelain"], cwd=root, check=True,
+            capture_output=True, text=True,
+    ).stdout:
+        raise AssertionError("authoritative version fixture must start clean")
+
+    with tempfile.TemporaryDirectory() as location:
+        expected = Path(location) / "expected"
+        subprocess.run(
+            ["git", "worktree", "add", "--quiet", "--detach", str(expected), parent],
+            cwd=root, check=True)
+        try:
+            bump_surfaces(expected, source_version, target_version)
+            expected_changes = subprocess.run(
+                ["git", "diff", "--name-status"], cwd=expected,
+                check=True, capture_output=True, text=True,
+            ).stdout.splitlines()
+            actual_changes = subprocess.run(
+                ["git", "diff", "--name-status", parent, revision], cwd=root,
+                check=True, capture_output=True, text=True,
+            ).stdout.splitlines()
+            if actual_changes != expected_changes:
+                expected_paths = {line.split("\t", 1)[-1] for line in expected_changes}
+                actual_paths = {line.split("\t", 1)[-1] for line in actual_changes}
+                unexpected = sorted(actual_paths - expected_paths)
+                missing = sorted(expected_paths - actual_paths)
+                raise AssertionError(
+                    f"version alignment changed an unexpected path: {unexpected}; missing: {missing}")
+            for line in expected_changes:
+                status, path = line.split("\t", 1)
+                if status != "M":
+                    raise AssertionError(f"version alignment has a non-modification change: {line}")
+                committed = subprocess.run(
+                    ["git", "show", f"{revision}:{path}"], cwd=root,
+                    check=True, capture_output=True,
+                ).stdout
+                if committed != (expected / path).read_bytes():
+                    raise AssertionError(f"version alignment changed non-version content: {path}")
+        finally:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(expected)], cwd=root,
+                check=True, capture_output=True)
+
+    expected_paths = [line.split("\t", 1)[-1] for line in expected_changes]
+    historical_poms = {path for path in expected_paths if path.endswith("pom.xml")}
+    current_poms = set(subprocess.run(
+        ["git", "ls-files", "*pom.xml"], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout.splitlines())
+    later_pom_updates: dict[str, str] = {}
+    for path in sorted(current_poms - historical_poms):
+        contents = (root / path).read_text(encoding="utf-8")
+        updated = rewrite_ravenroot_pom_version(
+            contents, target_version, source_version, path)
+        if updated != contents:
+            later_pom_updates[path] = updated
+    patch = subprocess.run(
+        ["git", "diff", "--binary", parent, revision, "--", *expected_paths], cwd=root,
+        check=True, capture_output=True,
+    ).stdout
+    subprocess.run(
+        ["git", "apply", "--reverse", "--3way", "--index"], cwd=root,
+        input=patch, check=True, capture_output=True,
+    )
+    for path, contents in later_pom_updates.items():
+        (root / path).write_text(contents, encoding="utf-8")
+    if later_pom_updates:
+        subprocess.run(
+            ["git", "add", "--", *later_pom_updates], cwd=root,
+            check=True, capture_output=True)
+    return source_version
+
+
+def normalize_authoritative_version_history(root: Path) -> str:
+    """Reconstruct the latest released source through bounded reachable version transitions."""
+    released_version = str(latest_release(root))
+    current_version = product_version(root)
+    source_ref = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    visited_versions: set[str] = set()
+    while current_version != released_version:
+        if current_version in visited_versions:
+            raise AssertionError(f"version normalization cycle at {current_version}")
+        visited_versions.add(current_version)
+        if len(visited_versions) > 16:
+            raise AssertionError("version normalization exceeded its bounded transition count")
+        revision, parent, source_version = reachable_version_transition(
+            root, current_version, source_ref)
+        changes = subprocess.run(
+            ["git", "diff", "--name-status", parent, revision], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        notes = f"docs/releases/v{current_version}.md"
+        if f"A\t{notes}" in changes:
+            reverse_release_preparation_delta(root, revision, current_version)
+            for path, contents in bump_ui_examples(
+                    root, current_version, source_version).items():
+                path.write_text(contents, encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
+        else:
+            source_version = reverse_version_alignment_delta(root, revision, current_version)
+        if product_version(root) != source_version:
+            raise AssertionError("bounded version inverse did not restore its source version")
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+             "commit", "-qm", f"normalize {current_version} to {source_version}"],
+            cwd=root, check=True, capture_output=True,
+        )
+        current_version = source_version
+        source_ref = parent
+    return released_version
 
 
 if __name__ == "__main__":

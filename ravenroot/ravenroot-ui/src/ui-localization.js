@@ -9,7 +9,8 @@ import {
 
 const CATALOG_DATABASE = 'ravenroot-ui-catalogs-v1';
 const CATALOG_STORE = 'catalogs';
-const MAX_CONFIG_BYTES = 512 * 1024;
+export const MAX_UI_CATALOG_BYTES = 512 * 1024;
+const CONFIGURATION_TIMEOUT_MS = 3_000;
 
 function plainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -111,40 +112,63 @@ export function validateUiLocalesConfiguration(value) {
     catalogs: Object.freeze(catalogs) });
 }
 
-async function readConfiguration(fetch_, document_, onDiagnostic) {
+function configurationDeadline(timeoutMs, controller) {
+  let timer;
+  const promise = new Promise((_resolve, reject) => {
+    timer = globalThis.setTimeout(() => {
+      reject(new Error('UI locale configuration request timed out.'));
+      controller.abort();
+    }, timeoutMs);
+  });
+  return Object.freeze({ promise, clear: () => globalThis.clearTimeout(timer) });
+}
+
+async function readConfiguration(fetch_, document_, onDiagnostic, timeoutMs) {
   if (!fetch_ || !document_) return { defaultLocale: null, catalogs: [] };
   const url = new URL('./ui-locales.json', document_.baseURI);
   if (url.origin !== document_.location.origin) {
     report(onDiagnostic, 'CONFIG_ORIGIN_REFUSED');
     return { defaultLocale: null, catalogs: [] };
   }
+  const controller = new AbortController();
+  const deadline = configurationDeadline(timeoutMs, controller);
   let response;
+  let text;
   try {
-    response = await fetch_(url, {
-      credentials: 'same-origin', cache: 'no-store', redirect: 'error',
-    });
-  }
-  catch (failure) {
-    report(onDiagnostic, 'CONFIG_UNAVAILABLE', { reason: failure.message });
-    return { defaultLocale: null, catalogs: [] };
-  }
-  if (response.status === 404) return { defaultLocale: null, catalogs: [] };
-  if (response.url && new URL(response.url).origin !== document_.location.origin) {
-    report(onDiagnostic, 'CONFIG_ORIGIN_REFUSED');
-    return { defaultLocale: null, catalogs: [] };
-  }
-  if (!response.ok) {
-    report(onDiagnostic, 'CONFIG_UNAVAILABLE', { status: response.status });
-    return { defaultLocale: null, catalogs: [] };
-  }
-  const length = Number(response.headers.get('content-length'));
-  if (Number.isFinite(length) && length > MAX_CONFIG_BYTES) {
-    report(onDiagnostic, 'CONFIG_TOO_LARGE');
-    return { defaultLocale: null, catalogs: [] };
+    try {
+      response = await Promise.race([fetch_(url, {
+        credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+        signal: controller.signal,
+      }), deadline.promise]);
+    } catch (failure) {
+      report(onDiagnostic, 'CONFIG_UNAVAILABLE', { reason: failure.message });
+      return { defaultLocale: null, catalogs: [] };
+    }
+    if (response.status === 404) return { defaultLocale: null, catalogs: [] };
+    if (response.url && new URL(response.url).origin !== document_.location.origin) {
+      report(onDiagnostic, 'CONFIG_ORIGIN_REFUSED');
+      return { defaultLocale: null, catalogs: [] };
+    }
+    if (!response.ok) {
+      report(onDiagnostic, 'CONFIG_UNAVAILABLE', { status: response.status });
+      return { defaultLocale: null, catalogs: [] };
+    }
+    const length = Number(response.headers.get('content-length'));
+    if (Number.isFinite(length) && length > MAX_UI_CATALOG_BYTES) {
+      report(onDiagnostic, 'CONFIG_TOO_LARGE');
+      return { defaultLocale: null, catalogs: [] };
+    }
+    try {
+      text = await Promise.race([response.text(), deadline.promise]);
+    } catch (failure) {
+      report(onDiagnostic, 'CONFIG_UNAVAILABLE', { reason: failure.message });
+      return { defaultLocale: null, catalogs: [] };
+    }
+  } finally {
+    deadline.clear();
   }
   try {
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_CONFIG_BYTES) throw new RangeError('Configuration is too large.');
+    if (new TextEncoder().encode(text).byteLength > MAX_UI_CATALOG_BYTES) throw new RangeError('Configuration is too large.');
     return validateUiLocalesConfiguration(JSON.parse(text));
   } catch (failure) {
     report(onDiagnostic, 'CONFIG_INVALID', { reason: failure.message });
@@ -216,9 +240,12 @@ export async function initializeUiLocalization({
   indexedDB = globalThis.indexedDB,
   navigator: navigator_ = globalThis.navigator,
   onDiagnostic = detail => globalThis.console?.warn?.('Ravenroot UI localization:', detail),
+  configurationTimeoutMs = CONFIGURATION_TIMEOUT_MS,
 } = {}) {
+  const timeoutMs = Number.isFinite(configurationTimeoutMs) && configurationTimeoutMs > 0
+    ? configurationTimeoutMs : CONFIGURATION_TIMEOUT_MS;
   const [configuration, imported] = await Promise.all([
-    readConfiguration(fetch_, document_, onDiagnostic),
+    readConfiguration(fetch_, document_, onDiagnostic, timeoutMs),
     storedCatalogs(indexedDB, onDiagnostic),
   ]);
   const catalogs = new Map();

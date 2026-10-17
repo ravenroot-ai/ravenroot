@@ -53,6 +53,8 @@ locale. Applying a locale updates the document `lang` and `dir` attributes.
 
 The browser optionally loads `/ui-locales.json` from the same origin and UI deployment root as
 `index.html`. Redirects and cross-origin final responses are refused. The file is limited to 512 KiB.
+If either the response headers or body stalls for three seconds, startup continues with stored
+catalogs and the built-in English fallback.
 For example, deploy this file as `<ui-root>/ui-locales.json`:
 
 ```json
@@ -88,7 +90,8 @@ parameter renders the bounded `Unavailable` diagnostic; it never renders a raw k
 The explicit choice is stored in local storage under `ravenroot.ui.locale.v1`. Choosing **Automatic**
 removes that preference and reevaluates the deployment and browser languages. Imported catalogs are
 validated and stored in IndexedDB database `ravenroot-ui-catalogs-v1`; the dialog can remove an
-imported catalog, but it cannot remove a configured catalog or replace built-in English. Import,
+imported catalog, but it cannot remove a configured catalog or replace built-in English. Import
+files are checked against the same 512 KiB limit before their contents are read. Import,
 removal, storage, and validation failures show localized generic product text while technical detail
 is sent only to the diagnostic callback.
 

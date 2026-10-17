@@ -397,6 +397,7 @@ import { createCommandRegistry } from './command-registry.js';
 import { requestExecutionLifecycle, UNAVAILABLE_LIFECYCLE_REASONS } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { initializeUiLocalization } from './ui-localization.js';
+import { scheduleApplicationBoot } from './application-boot.js';
 import { uiDateTime, uiErrorReason, useUiLocalization } from './ui-text.js';
 import { createLanguageDialog } from './language-dialog.js';
 import {
@@ -17040,5 +17041,4 @@ function bootApplication() {
 // Localization configuration is intentionally loaded before the application is constructed. A
 // slow or missing optional catalog can settle after the window load event, so initialize directly
 // when that event has already passed instead of leaving the workspace empty.
-if (document.readyState === 'complete') bootApplication();
-else window.addEventListener('load', bootApplication, { once: true });
+scheduleApplicationBoot({ document, window, boot: bootApplication });

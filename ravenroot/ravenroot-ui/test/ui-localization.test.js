@@ -80,4 +80,36 @@ describe('UI localization controller', () => {
     }));
     controller.destroy();
   });
+
+  it.each([
+    ['response headers', () => new Promise(() => {})],
+    ['response body', () => Promise.resolve({
+      status: 200,
+      ok: true,
+      url: 'https://example.test/ui-locales.json',
+      headers: new Headers(),
+      text: () => new Promise(() => {}),
+    })],
+  ])('falls back to English when configuration %s never arrives', async (_name, fetchResult) => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/' });
+    const diagnostics = vi.fn();
+    let requestSignal;
+    const fetch = vi.fn((_url, options) => {
+      requestSignal = options.signal;
+      return fetchResult();
+    });
+
+    const controller = await initializeUiLocalization({
+      document: dom.window.document, fetch, storage: null, indexedDB: null,
+      navigator: { languages: ['en'] }, onDiagnostic: diagnostics,
+      configurationTimeoutMs: 5,
+    });
+
+    expect(controller.localization.locale).toBe('en');
+    expect(requestSignal.aborted).toBe(true);
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'CONFIG_UNAVAILABLE', reason: expect.stringMatching(/timed out/i),
+    }));
+    controller.destroy();
+  });
 });

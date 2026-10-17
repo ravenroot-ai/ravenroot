@@ -1,3 +1,5 @@
+import { MAX_UI_CATALOG_BYTES } from './ui-localization.js';
+
 function element(document_, tag, attributes = {}) {
   const node = document_.createElement(tag);
   for (const [name, value] of Object.entries(attributes)) {
@@ -12,6 +14,11 @@ function localeName(locale, displayLocale) {
   try {
     return new Intl.DisplayNames([displayLocale], { type: 'language' }).of(locale) || locale;
   } catch { return locale; }
+}
+
+export async function readUiCatalogFile(file) {
+  if (file.size > MAX_UI_CATALOG_BYTES) throw new RangeError('UI catalog file is too large.');
+  return JSON.parse(await file.text());
 }
 
 export function createLanguageDialog({ document: document_, controller }) {
@@ -74,7 +81,7 @@ export function createLanguageDialog({ document: document_, controller }) {
     const selectedFile = file.files?.[0];
     file.value = '';
     if (!selectedFile) return;
-    void selectedFile.text().then(JSON.parse).then(value => controller.importCatalog(value)).then(locale => {
+    void readUiCatalogFile(selectedFile).then(value => controller.importCatalog(value)).then(locale => {
       controller.chooseLocale(locale);
       status.textContent = localization.text('language.import.success', { locale });
       render();

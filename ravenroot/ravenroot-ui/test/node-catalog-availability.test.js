@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 
 import { catalogEmptyState } from '../src/catalog-empty-state.js';
+import { scheduleApplicationBoot } from '../src/application-boot.js';
 import {
   RavenrootRuntimeClient,
   RuntimeAuthorizationError,
@@ -227,13 +228,41 @@ describe('the empty palette distinguishes an unauthorised service from an unreac
 });
 
 describe('the page attempts the connection at load rather than assuming it may not', () => {
-  it('calls connectRuntime from the load handler, with no flag and no environment variable gating it', async () => {
+  it('keeps the automatic connection inside the shared boot path without environment gating', async () => {
     const app = await readFile('src/app.js', 'utf8');
-    const boot = app.slice(app.indexOf("window.addEventListener('load'"));
+    const start = app.indexOf('function bootApplication()');
+    const end = app.indexOf('scheduleApplicationBoot(', start);
+    const boot = app.slice(start, end);
 
     expect(boot).toContain('connectRuntime(true)');
+    expect(app.slice(end)).toContain('scheduleApplicationBoot({ document, window, boot: bootApplication })');
     // The attempt must not be conditional on anything the build or the environment decides.
-    expect(boot).not.toMatch(/import\.meta\.env|process\.env/);
+    expect(app).not.toMatch(/import\.meta\.env|process\.env/);
+  });
+
+  it('boots once from load when configuration settles early', () => {
+    const listeners = [];
+    const boot = vi.fn();
+    const start = scheduleApplicationBoot({ document: { readyState: 'loading' },
+      window: { addEventListener: (type, listener, options) => listeners.push({ type, listener, options }) },
+      boot });
+
+    expect(boot).not.toHaveBeenCalled();
+    expect(listeners).toEqual([{ type: 'load', listener: start, options: { once: true } }]);
+    expect(start()).toBe(true);
+    expect(start()).toBe(false);
+    expect(boot).toHaveBeenCalledTimes(1);
+  });
+
+  it('boots once immediately when optional configuration settles after window load', () => {
+    const window = { addEventListener: vi.fn() };
+    const boot = vi.fn();
+    const start = scheduleApplicationBoot({ document: { readyState: 'complete' }, window, boot });
+
+    expect(boot).toHaveBeenCalledTimes(1);
+    expect(window.addEventListener).not.toHaveBeenCalled();
+    expect(start()).toBe(false);
+    expect(boot).toHaveBeenCalledTimes(1);
   });
 
   it('does not hand the change listener an Event where connectRuntime expects its boot flag', async () => {

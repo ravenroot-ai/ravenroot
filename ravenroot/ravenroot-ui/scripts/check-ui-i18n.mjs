@@ -211,6 +211,40 @@ function presentationFlow(ast) {
       && item.scope.end >= callee.end).sort((a, b) =>
       (a.scope.end - a.scope.start) - (b.scope.end - b.scope.start))[0]?.node;
   };
+  // Resolve callable parameters from invocation sites and aliases. A monotone
+  // fixed point handles forwarding chains without recursively rescanning every call.
+  const callbackBindings = new Map(functions.map(({ node }) => [node, new Map()]));
+  const resolveCallables = (callee, owner, seen = new Set()) => {
+    if (!callee || seen.has(callee)) return [];
+    const next = new Set(seen).add(callee);
+    const direct = resolveFunction(callee);
+    if (direct) return [direct];
+    if (callee.type !== 'Identifier') return [];
+    const alias = bindingValue(bindings, callee);
+    if (alias && alias !== callee) {
+      const targets = resolveCallables(alias, owner, next);
+      if (targets.length) return targets;
+    }
+    return [...(callbackBindings.get(owner)?.get(callee.name) || [])];
+  };
+  let callbacksChanged = true;
+  while (callbacksChanged) {
+    callbacksChanged = false;
+    for (const call of calls) {
+      for (const target of resolveCallables(call.callee, owners.get(call))) {
+        target.params.forEach((raw, index) => {
+          const param = raw.type === 'AssignmentPattern' ? raw.left : raw;
+          if (param.type !== 'Identifier') return;
+          const parameters = callbackBindings.get(target);
+          if (!parameters.has(param.name)) parameters.set(param.name, new Set());
+          const values = parameters.get(param.name);
+          for (const callback of resolveCallables(call.arguments[index], owners.get(call))) {
+            if (!values.has(callback)) { values.add(callback); callbacksChanged = true; }
+          }
+        });
+      }
+    }
+  }
   const returns = fn => {
     if (fn.body.type !== 'BlockStatement') return [fn.body];
     const result = [];
@@ -324,7 +358,10 @@ function presentationFlow(ast) {
     for (const call of calls) {
       const name = nameOf(call.callee);
       if (name === 'insertAdjacentHTML') traceHtml(call.arguments[1], owners.get(call), onLiteral);
-      const arguments_ = primitiveArguments.get(name) || signatures.get(resolveFunction(call.callee)) || [];
+      const arguments_ = new Set(primitiveArguments.get(name) || []);
+      for (const target of resolveCallables(call.callee, owners.get(call))) {
+        for (const path of signatures.get(target) || []) arguments_.add(path);
+      }
       for (const path of arguments_) {
         const [index, property] = String(path).split('.');
         let value = call.arguments[index];

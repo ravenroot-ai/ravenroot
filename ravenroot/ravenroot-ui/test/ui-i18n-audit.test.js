@@ -72,6 +72,9 @@ describe('UI localization source audit fixtures', () => {
   });
   it.each([
     `const say = text => { status.textContent = text; }; say('Inline status');`,
+    `function invoke(paint) { paint('Connect service'); } invoke(text => { status.textContent = text; });`,
+    `function invoke(paint) { const alias = paint; alias('Connect service'); } invoke(text => { status.textContent = text; });`,
+    `function invoke(paint) { paint('Connect service'); } function forward(callback) { invoke(callback); } forward(text => { status.textContent = text; });`,
     `function first(value) { second(value); } function second(copy) { target.innerText = copy; } first('Indirect copy');`,
     `function status() { return 'Returned copy'; } const value = status(); node.textContent = value;`,
     `function paint(node, render) { node.textContent = render(); } paint(node, () => 'Deferred copy');`,
@@ -91,6 +94,8 @@ describe('UI localization source audit fixtures', () => {
 
   it('accepts deferred localized text and authored values through opaque wrappers', () => {
     expect(findPresentationSinkViolations(`
+      function invoke(paint) { paint(uiText('fixture.message')); }
+      invoke(text => { status.textContent = text; });
       function paint(node, render) { node.textContent = render(); }
       paint(node, () => uiText('fixture.message', { author: model.name }));
       function markup() { return '<b>' + escapeHtml(uiText('fixture.message')) + '</b>'; }

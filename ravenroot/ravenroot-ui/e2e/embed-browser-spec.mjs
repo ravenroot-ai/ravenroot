@@ -347,7 +347,9 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
 
     const messagesBeforeRevocation = await page.evaluate(() => structuredClone(window.embedMessages));
     expect(messagesBeforeRevocation.every(message => Object.keys(message).sort().join(',')
-      === 'channelId,correlationId,direction,protocolVersion,type')).toBe(true);
+      === (message.type === 'LOCALE_CHANGED'
+        ? 'channelId,correlationId,direction,locale,protocolVersion,type'
+        : 'channelId,correlationId,direction,protocolVersion,type'))).toBe(true);
     expect(JSON.stringify(messagesBeforeRevocation)).not.toContain('browser-secret-topology');
     expect(JSON.stringify(messagesBeforeRevocation)).not.toContain('browser-secret-runtime-payload');
     expect(await page.locator('body').innerText()).not.toContain('browser-secret-topology');

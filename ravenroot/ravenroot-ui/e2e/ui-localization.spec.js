@@ -20,7 +20,12 @@ const pseudo = (locale, direction, marker) => ({
 const italian = pseudo('it', 'ltr', '⟦IT⟧');
 italian.messages['workspace.template.app.name'] = '<img src=x onerror="globalThis.__catalogExecuted=true">Nome';
 italian.messages['workspace.template.app.registered.name.or.future.behavior'] = '" autofocus onfocus="globalThis.__catalogExecuted=true';
-const arabic = pseudo('ar', 'rtl', '⟦نص واجهة طويل للاختبار⟧');
+// Two complete synthetic catalogs share the production 512 KiB configuration ceiling.
+// Keep long RTL labels while omitting redundant English prose from long messages.
+const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
+  messages: mapMessages(value => '⟦نص واجهة طويل للاختبار⟧'
+    + (value.length > 80 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
+};
 
 const configuration = {
   schema: 'ravenroot.ui-locales/v1',

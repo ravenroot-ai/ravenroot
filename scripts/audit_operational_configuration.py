@@ -15082,7 +15082,7 @@ def graph_authoring_authority_from_source(
         (ui, "fetchInputTextWithinByteLimit(target.url, maxBytes"),
         (ui, "await fetch(input, { signal, redirect: 'manual' })"),
         (ui, "if (response.type === 'opaqueredirect') {\n"
-             "        throw new StartupImportError('redirect-not-allowed',"),
+             '        throw productError("workspace.startup.failure.redirect-not-allowed", new StartupImportError(\'redirect-not-allowed\','),
         (ui, "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })"),
         (ui, "workspaceAuthority.state === 'ready'"),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "authoring-capability.js")],

@@ -252,12 +252,45 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
             source_version = str(latest_release(ROOT))
             source_fixture = isolated_tree("source", ROOT, "HEAD")
+            expected_normalizations = []
+            history_cursor = fixture_git(source_fixture, "rev-parse", "HEAD")
+            history_version = product_version(source_fixture)
+            while history_version != source_version:
+                transition = None
+                for revision in fixture_git(
+                        source_fixture, "rev-list", "--topo-order", history_cursor,
+                        "--", "ravenroot/pom.xml").splitlines():
+                    ancestry = fixture_git(
+                        source_fixture, "rev-list", "--parents", "-n", "1", revision).split()
+                    if len(ancestry) != 2:
+                        continue
+                    parent = ancestry[1]
+                    prepared = revision_product_version(source_fixture, revision)
+                    previous = revision_product_version(source_fixture, parent)
+                    if prepared == history_version and previous != prepared:
+                        transition = (parent, previous)
+                        break
+                self.assertIsNotNone(
+                    transition,
+                    f"immutable root-POM history has no transition from {history_version}",
+                )
+                assert transition is not None
+                parent, previous = transition
+                expected_normalizations.append(
+                    f"normalize {history_version} to {previous}")
+                history_cursor = parent
+                history_version = previous
+            self.assertGreaterEqual(
+                len(expected_normalizations), 2,
+                "fixture must exercise real release preparation plus later integration alignment",
+            )
             normalize_authoritative_version_history(source_fixture)
             self.assertEqual(source_version, product_version(source_fixture))
             self.assertEqual(
-                ["normalize 0.7.0-alpha.1 to 0.6.1-alpha.1",
-                 "normalize 0.8.0-alpha.1 to 0.7.0-alpha.1"],
-                fixture_git(source_fixture, "log", "-2", "--format=%s").splitlines(),
+                list(reversed(expected_normalizations)),
+                fixture_git(
+                    source_fixture, "log", f"-{len(expected_normalizations)}",
+                    "--format=%s").splitlines(),
             )
             self.assertEqual(
                 [],

@@ -7334,6 +7334,21 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
   // because a condition can name any other property in this same list, not only ones earlier in it.
   const resolvedValues = Object.fromEntries(
     descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
+  // A hidden field is inactive authoring state, so its retained draft value must not hide or
+  // require another field. Blank only this condition-time copy to a fixed point; controls still
+  // render from resolvedValues, preserving drafts when a mode is toggled back.
+  const conditionValues = { ...resolvedValues };
+  for (let pass = 0; pass < descriptor.properties.length; pass += 1) {
+    let changed = false;
+    for (const conditionalProperty of descriptor.properties) {
+      if (!isPropertyVisible(conditionalProperty, conditionValues)
+          && conditionValues[conditionalProperty.name] !== '') {
+        conditionValues[conditionalProperty.name] = '';
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
     const title = property.displayName || property.name;
@@ -7356,7 +7371,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // Visibility and conditional required-ness, read from `visibleWhen`/`requiredWhen` via the
     // same generic evaluator the HTTP layer's own contract is built from — nothing here names a
     // property or a behavior, so this is identical for any node package that declares a condition.
-    const visible = isPropertyVisible(property, resolvedValues);
+    const visible = isPropertyVisible(property, conditionValues);
     // `requiredNow` is the SCHEMA-level answer from the contract alone — used for the `*`
     // marker, which has always reflected "the author should fill this in" independently of whether
     // the browser enforces it natively (adapterBinding already establishes that split; see
@@ -7367,7 +7382,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // should never actually receive, the same fail-closed instinct `conditionHolds` applies to an
     // unrecognised contract), and never native-`required` for an adapter binding, unchanged from
     // existing behavior.
-    const requiredNow = isPropertyRequiredNow(property, resolvedValues);
+    const requiredNow = isPropertyRequiredNow(property, conditionValues);
     const nativeRequired = requiredNow && visible && !adapterBound;
     const unconfigured = adapterBound && adapterIdOf(value) === '';
     // A closed-choice property whose descriptor declares NO default has three states, not two
@@ -7661,11 +7676,23 @@ function readCurrentCatalogPropertyValues(container) {
  * reason.
  */
 function conditionalPropertyStates(descriptor, valuesByName) {
-  return (descriptor?.properties || []).map(property => ({
+  const properties = descriptor?.properties || [];
+  const conditionValues = { ...valuesByName };
+  for (let pass = 0; pass < properties.length; pass += 1) {
+    let changed = false;
+    for (const property of properties) {
+      if (!isPropertyVisible(property, conditionValues) && conditionValues[property.name] !== '') {
+        conditionValues[property.name] = '';
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return properties.map(property => ({
     name: property.name,
     displayName: property.displayName,
-    visible: isPropertyVisible(property, valuesByName),
-    requiredNow: isPropertyRequiredNow(property, valuesByName) && isPropertyVisible(property, valuesByName)
+    visible: isPropertyVisible(property, conditionValues),
+    requiredNow: isPropertyRequiredNow(property, conditionValues) && isPropertyVisible(property, conditionValues)
       && !property.adapterBinding,
   }));
 }
@@ -7741,6 +7768,10 @@ function readCatalogPropertyEditor(form) {
   const properties = {};
   const propertyTypes = {};
   form.querySelectorAll('[data-catalog-property]').forEach(field => {
+    // Conditional fields stay mounted so changing their driver can restore the draft value during
+    // this edit session. They are nevertheless inactive authoring inputs while their wrapper is
+    // hidden and must not survive the whole-property-map replacement performed on Save.
+    if (field.closest('.catalog-property')?.hidden) return;
     const name = field.dataset.catalogProperty;
     const value = field.value;
     if (value === '') return;

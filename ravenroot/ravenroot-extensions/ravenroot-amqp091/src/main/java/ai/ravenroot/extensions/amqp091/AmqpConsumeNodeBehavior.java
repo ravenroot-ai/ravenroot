@@ -25,7 +25,8 @@ import java.util.concurrent.Executor;
 /** Deployment-scoped manual-ack AMQP 0-9-1 source. */
 public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourceCapable {
     public static final String BEHAVIOR = "amqp.consume";
-    private static final Set<String> CONFIGURATION = Set.of("brokerProfile", "queue", "prefetch", "maxInFlight",
+    private static final Set<String> CONFIGURATION = Set.of("brokerProfile", "mode", "queue", "exchange",
+            "bindingPattern", "prefetch", "maxInFlight",
             "retryBackoffMs", "maxRetryBackoffMs", "drainTimeoutMs", "poisonAttempts", "poisonPolicy",
             "deadLetterMode", "checkpointPolicy", "resourceMode");
     private final CredentialResolver credentials;
@@ -53,8 +54,16 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
         List<NodePropertyDescriptor> properties = new ArrayList<>();
         properties.add(NodePropertyDescriptor.required("brokerProfile", "Broker profile", NodePropertyType.STRING,
                 "Opaque tenant-scoped profile; endpoint, credentials, queue authority and DLX stay operator-owned."));
-        properties.add(optional("queue", "Queue", NodePropertyType.STRING,
-                "Optional confirmation of the exact operator-authorized queue."));
+        properties.add(allowed("mode", "Mode", List.of("Consumer", "Subscriber"), "Consumer",
+                "Consumer shares an existing queue; Subscriber owns an online-only ephemeral topic subscription."));
+        PropertyCondition consumer = PropertyCondition.equalTo("mode", "Consumer");
+        PropertyCondition subscriber = PropertyCondition.equalTo("mode", "Subscriber");
+        properties.add(conditional("queue", "Queue", "Optional confirmation of the exact operator-authorized queue.",
+                consumer, false));
+        properties.add(conditional("exchange", "Topic exchange",
+                "Existing operator-authorized topic exchange.", subscriber, true));
+        properties.add(conditional("bindingPattern", "Binding pattern",
+                "Operator-authorized topic binding pattern; wildcards apply only to subscriptions.", subscriber, true));
         properties.add(optional("prefetch", "Prefetch", NodePropertyType.INTEGER,
                 "Positive tightening of the operator QoS ceiling."));
         properties.add(optional("maxInFlight", "Maximum in-flight", NodePropertyType.INTEGER,
@@ -74,9 +83,10 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
                 false, dlx, dlx));
         properties.add(allowed("checkpointPolicy", "Checkpoint policy", List.of("require-durable"),
                 "require-durable"));
-        properties.add(allowed("resourceMode", "Resource mode", List.of("shared", "exclusive"), "shared",
-                "Shared allows independent sources to consume the authorized queue. Exclusive permits only one "
-                        + "process-local source for the tenant, profile and queue."));
+        properties.add(new NodePropertyDescriptor("resourceMode", "Resource mode", NodePropertyType.STRING,
+                false, "Shared allows independent sources to consume the authorized queue. Exclusive permits only "
+                        + "one process-local source for the tenant, profile and queue.", "shared",
+                List.of("shared", "exclusive"), false, consumer, null, "", "", 0, 0, 0));
         // PERS-04 (ADR 0022). An inbound source declares no recovery repeatability, and the
         // reason is that it has no attempt of its own for the contract to describe. The node is armed
         // once (InboundSourceCapable) and thereafter the broker drives it; the unit that can be lost
@@ -85,7 +95,7 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
         // Declaring the property here would offer an author a decision about an event that does not
         // occur on this node.
         return new NodeTypeDescriptor(BEHAVIOR, "Consume AMQP deliveries", "AMQP 0-9-1",
-                "Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.",
+                "Consumes an authorized queue or ephemeral topic subscription with bounded QoS and durable acknowledgements.",
                 "actor", false, List.copyOf(properties),
                 Set.of("network", "credential-reference", "inbound-source"));
     }
@@ -98,6 +108,12 @@ public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourc
     private static NodePropertyDescriptor allowed(String name, String label, List<String> allowed,
                                                    String defaultValue) {
         return allowed(name, label, allowed, defaultValue, "");
+    }
+
+    private static NodePropertyDescriptor conditional(String name, String label, String description,
+                                                      PropertyCondition condition, boolean required) {
+        return new NodePropertyDescriptor(name, label, NodePropertyType.STRING, false, description, "", List.of(),
+                false, condition, required ? condition : null, "", "", 0, 0, 0);
     }
 
     private static NodePropertyDescriptor allowed(String name, String label, List<String> allowed,

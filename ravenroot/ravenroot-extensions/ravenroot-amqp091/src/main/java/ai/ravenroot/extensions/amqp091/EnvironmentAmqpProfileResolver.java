@@ -33,7 +33,7 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
         String raw = environment.get(key);
         if (raw == null) return Optional.empty();
         String[] p = raw.split(";", -1);
-        if (p.length != 20) return Optional.empty();
+        if (p.length != 20 && p.length != 21) return Optional.empty();
         try {
             int port = integer(p[1]);
             boolean tls = strictBoolean(p[2]);
@@ -49,6 +49,7 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
             int timeoutMs = integer(p[17]);
             int maxBodyBytes = integer(p[18]);
             int retries = integer(p[19]);
+            Set<String> topicExchanges = p.length == 21 ? csv(p[20]) : Set.of();
             AmqpProfile.requireValidShape(tenant, profile, p[0], port, p[3], p[4], p[5], p[6],
                     exchanges, p[8], routingKeys, headers, replyTo, maxPriority, maxExpirationMs,
                     maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries);
@@ -60,7 +61,7 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
             return Optional.of(new AmqpProfile(tenant, profile, p[0], port, tls, p[3],
                     p[4], p[5], p[6], exchanges, p[8], routingKeys, headers, replyTo,
                     allowPersistent, maxPriority, maxExpirationMs, maxConcurrency, maxPerSecond,
-                    timeoutMs, maxBodyBytes, retries, plaintextAuthorization));
+                    timeoutMs, maxBodyBytes, retries, topicExchanges, plaintextAuthorization));
         } catch (SecurityException refused) {
             throw refused;
         } catch (RuntimeException invalid) {

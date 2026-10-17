@@ -29,7 +29,8 @@
         "maxPerSecond": 20,
         "timeoutMs": 10000,
         "maxBodyBytes": 262144,
-        "retries": 1
+        "retries": 1,
+        "topicExchanges": ["orders"]
       }
     },
     {
@@ -46,7 +47,10 @@
         "maxRetryBackoffMs": 5000,
         "poisonAttempts": 5,
         "poisonPolicy": "reject",
-        "drainTimeoutMs": 10000
+        "drainTimeoutMs": 10000,
+        "topicExchanges": ["orders"],
+        "bindingPatterns": ["orders.*"],
+        "maxEphemeralSubscriptions": 4
       }
     }
   ],

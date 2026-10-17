@@ -13,12 +13,14 @@ enum AmqpSourceStartFailure implements SourceStartFailureCode {
     AMQP_CONSUMER_POLICY_UNAVAILABLE("amqp-consumer-policy-unavailable"),
     AMQP_CONSUMER_UNAVAILABLE("amqp-consumer-unavailable"),
     AMQP_PROFILE_UNAVAILABLE("amqp-profile-unavailable"),
+    AMQP_SUBSCRIPTION_CAPACITY_EXHAUSTED("amqp-subscription-capacity-exhausted"),
     CREDENTIAL_UNAVAILABLE("credential-unavailable"),
     DURABLE_INGRESS_LOST("durable-ingress-lost"),
     DURABLE_INGRESS_REQUIRED("durable-ingress-required"),
     INVALID_CHECKPOINT_POLICY("invalid-checkpoint-policy"),
     INVALID_DEAD_LETTER_MODE("invalid-dead-letter-mode"),
     INVALID_DRAIN_TIMEOUT("invalid-drain-timeout"),
+    INVALID_DESTINATION_MODE("invalid-destination-mode"),
     INVALID_MAX_IN_FLIGHT("invalid-max-in-flight"),
     INVALID_MAX_RETRY_BACKOFF("invalid-max-retry-backoff"),
     INVALID_POISON_ATTEMPTS("invalid-poison-attempts"),
@@ -30,6 +32,7 @@ enum AmqpSourceStartFailure implements SourceStartFailureCode {
     OUTBOUND_TRANSPORT_ENCRYPTION_REQUIRED("outbound-transport-encryption-required"),
     POISON_POLICY_FORBIDDEN("poison-policy-forbidden"),
     QUEUE_NOT_AUTHORIZED("queue-not-authorized"),
+    SUBSCRIPTION_NOT_AUTHORIZED("subscription-not-authorized"),
     STARTUP_CANCELLED("startup-cancelled"),
     UNKNOWN_GRAPH_PROPERTY("unknown-graph-property");
 

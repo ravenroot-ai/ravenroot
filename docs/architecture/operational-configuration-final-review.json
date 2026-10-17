@@ -11503,7 +11503,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "fe42801b298e9b4e5d4c4e9fab572fe6bb6836bff55d416005b11a5d0792eafd",
+          "digest": "cceeec5eed96fe3bb5a27ae4343103021535c9939608b3f2c408cc02c327b2e5",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
         }
       ],
@@ -11577,7 +11577,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "fe42801b298e9b4e5d4c4e9fab572fe6bb6836bff55d416005b11a5d0792eafd",
+          "digest": "cceeec5eed96fe3bb5a27ae4343103021535c9939608b3f2c408cc02c327b2e5",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
         }
       ],
@@ -11648,7 +11648,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "fe42801b298e9b4e5d4c4e9fab572fe6bb6836bff55d416005b11a5d0792eafd",
+          "digest": "cceeec5eed96fe3bb5a27ae4343103021535c9939608b3f2c408cc02c327b2e5",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
         }
       ],

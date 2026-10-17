@@ -91,9 +91,14 @@ The explicit choice is stored in local storage under `ravenroot.ui.locale.v1`. C
 removes that preference and reevaluates the deployment and browser languages. The selector remains
 on **Automatic** while a deployment or browser fallback supplies the resolved locale; the dialog
 reports that resolved locale and its source separately. Selecting the same locale explicitly is a
-distinct stored preference and is unaffected by later browser-language changes. Imported catalogs are
-validated and stored in IndexedDB database `ravenroot-ui-catalogs-v1`; the dialog can remove an
-imported catalog, but it cannot remove a configured catalog or replace built-in English. Import
+distinct stored preference and is unaffected by later browser-language changes. A regional
+preference remains visible in the selector when a base-language catalog supplies it. Removing that
+imported base catalog also clears the dependent regional preference and reevaluates the normal
+fallback chain. If the imported catalog overrode a configured catalog for the same locale, removal
+restores the configured catalog and keeps the preference. Imported catalogs are validated and
+stored in IndexedDB database
+`ravenroot-ui-catalogs-v1`; the dialog can remove an imported catalog, but it cannot remove a
+configured catalog or replace built-in English. Import
 files are checked against the same 512 KiB limit before their contents are read. Import,
 removal, storage, and validation failures show localized generic product text while technical detail
 is sent only to the diagnostic callback.

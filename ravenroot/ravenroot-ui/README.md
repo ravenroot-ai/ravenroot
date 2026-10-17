@@ -147,11 +147,13 @@ to publish `dist` as static assets.
   GraphML round trip is unchanged after any undo/redo sequence;
 - `src/graph-editing.js` builds those commands from user gestures and owns Modify-mode guards;
 - `src/ui-text.js` owns the dependency-free UI message catalog and locale fallback used by the
-  application command model. The mechanism, accessibility contract and deliberately limited
-  coverage are documented in `../../docs/architecture/ui-internationalization.md`. The language
+  application command model. The mechanism, accessibility contract and product-owned presentation
+  boundary are documented in
+  `../../docs/architecture/ui-internationalization.md`. The language
   selector keeps **Automatic** selected when the configured or browser fallback supplies the
   resolved locale; the dialog reports that resolved locale and its source separately. Choosing a
-  locale creates an explicit preference, and returning to Automatic clears that preference;
+  locale creates an explicit preference, including a regional preference backed by a base-language
+  catalog. Returning to Automatic or removing that imported base catalog clears the preference;
 - `src/contextual-help.js` owns the one shared, non-modal long-help surface used by authoring forms;
   persistent state and validation remain at their render sites, while stable explanatory content is
   selected by the activating button and rendered as text;

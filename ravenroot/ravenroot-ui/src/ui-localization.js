@@ -249,6 +249,7 @@ export async function initializeUiLocalization({
     readConfiguration(fetch_, document_, onDiagnostic, timeoutMs),
     storedCatalogs(indexedDB, onDiagnostic),
   ]);
+  const configuredCatalogs = new Map(configuration.catalogs.map(catalog => [catalog.locale, catalog]));
   const catalogs = new Map();
   for (const catalog of [...configuration.catalogs, ...imported]) catalogs.set(catalog.locale, catalog);
   const available = new Set(['en', ...catalogs.keys()]);
@@ -273,6 +274,12 @@ export async function initializeUiLocalization({
   const languageChange = () => {
     localization.setLocale(resolveLocale());
   };
+  const catalogLocaleFor = locale_ => {
+    const normalized = normalizeUiLocale(locale_);
+    if (available.has(normalized)) return normalized;
+    const base = new Intl.Locale(normalized).language;
+    return available.has(base) ? base : null;
+  };
   globalThis.addEventListener?.('languagechange', languageChange);
 
   return Object.freeze({
@@ -282,8 +289,8 @@ export async function initializeUiLocalization({
       report(onDiagnostic, code, { reason: failure?.message || String(failure || '') });
     },
     sourceFor(locale_) {
-      const normalized = normalizeUiLocale(locale_);
-      return sources.get(normalized) || sources.get(new Intl.Locale(normalized).language) || 'fallback';
+      const catalogLocale = catalogLocaleFor(locale_);
+      return (catalogLocale && sources.get(catalogLocale)) || 'fallback';
     },
     chooseLocale(locale_) {
       const normalized = normalizeUiLocale(locale_);
@@ -306,14 +313,21 @@ export async function initializeUiLocalization({
       return catalog.locale;
     },
     async removeImportedCatalog(locale_) {
-      const normalized = normalizeUiLocale(locale_);
-      if (sources.get(normalized) !== 'imported') throw productError("workspace.error.ui.localization.only.imported.ui.catalogs.can.be.removed", new TypeError('Only imported UI catalogs can be removed.'));
-      await deleteStoredCatalog(indexedDB, normalized);
-      sources.delete(normalized);
-      available.delete(normalized);
-      const wasActive = localization.locale === normalized;
-      localization.removeCatalog(normalized);
-      if (wasActive) {
+      const catalogLocale = catalogLocaleFor(locale_);
+      if (!catalogLocale || sources.get(catalogLocale) !== 'imported') throw productError("workspace.error.ui.localization.only.imported.ui.catalogs.can.be.removed", new TypeError('Only imported UI catalogs can be removed.'));
+      const wasActive = catalogLocaleFor(localization.locale) === catalogLocale;
+      const wasPreferred = explicit !== null && catalogLocaleFor(explicit) === catalogLocale;
+      await deleteStoredCatalog(indexedDB, catalogLocale);
+      const configuredCatalog = configuredCatalogs.get(catalogLocale);
+      if (configuredCatalog) {
+        sources.set(catalogLocale, 'configured');
+        localization.registerCatalog(configuredCatalog);
+      } else {
+        sources.delete(catalogLocale);
+        available.delete(catalogLocale);
+        localization.removeCatalog(catalogLocale);
+      }
+      if (!configuredCatalog && (wasActive || wasPreferred)) {
         explicit = null;
         setStorageValue(storage, UI_LOCALE_STORAGE_KEY, null);
         languageChange();

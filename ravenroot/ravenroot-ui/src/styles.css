@@ -2697,7 +2697,7 @@
   .visual-group-actions .btn, .visual-group-members .btn, .visual-group-dialog button { min-height: 44px; }
 }
 
-.node-palettes { display: grid; gap: 9px; width: 100%; min-width: 0; max-width: 100%; }
+.node-palettes { container-type: inline-size; display: grid; gap: 9px; width: 100%; min-width: 0; max-width: 100%; }
 [data-panel-id="node-palettes"] .panel-content { box-sizing: border-box; width: 100%; min-width: 0; }
 .panel--content-collapsed > .panel-body { display: none; }
 .palette-create { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); gap: 6px; min-width: 0; max-width: 100%; align-items: end; }
@@ -2722,6 +2722,10 @@
 .panel--short .palette-create button,
 .panel--short .node-template button { min-height: 28px; }
 .panel--short .node-template { grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px 4px; }
+@container (max-width: 13rem) {
+  .node-template { grid-template-columns: minmax(0, 1fr); }
+  .node-template button { white-space: normal; overflow-wrap: anywhere; }
+}
 @media (max-width: 720px) {
   .palette-create, .node-template { grid-template-columns: minmax(0, 1fr); }
   .palette-create button, .node-template button { white-space: normal; overflow-wrap: anywhere; }

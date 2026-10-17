@@ -24,6 +24,25 @@ describe('language dialog catalog import', () => {
 });
 
 describe('language dialog preference', () => {
+  it('represents an explicit regional preference backed by a base-language catalog', async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/' });
+    dom.window.localStorage.setItem('ravenroot.ui.locale.v1', 'fr-CA');
+    const controller = await initializeUiLocalization({ document: dom.window.document,
+      storage: dom.window.localStorage, indexedDB: null, navigator: { languages: ['en'] },
+      onDiagnostic: vi.fn(), fetch: async () => new Response(JSON.stringify({
+        schema: UI_LOCALES_SCHEMA, defaultLocale: 'en',
+        catalogs: [{ schema: UI_CATALOG_SCHEMA, locale: 'fr', messages: {} }],
+      })) });
+    const dialog = createLanguageDialog({ document: dom.window.document, controller });
+    const select = dom.window.document.querySelector('#language-selection');
+    try {
+      expect(controller.localization.locale).toBe('fr-CA');
+      expect(select.value).toBe('fr-CA');
+      expect(select.selectedIndex).toBeGreaterThan(-1);
+      expect([...select.options].map(option => option.value)).toEqual(['', 'en', 'fr', 'fr-CA']);
+    } finally { dialog.destroy(); controller.destroy(); }
+  });
+
   it('keeps Automatic selected while reporting the separately resolved configured locale', async () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/' });
     const catalog = { schema: UI_CATALOG_SCHEMA, locale: 'fr', messages: {} };

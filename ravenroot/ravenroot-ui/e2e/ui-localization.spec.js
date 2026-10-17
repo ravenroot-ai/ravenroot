@@ -180,6 +180,51 @@ test('keeps every localized palette action usable inside a 360px panel in LTR an
   await testInfo.attach('narrow Arabic palette', { path: arabicScreenshot, contentType: 'image/png' });
 });
 
+test('contains a long localized palette at the desktop minimum panel width', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'de', catalogs: [german] });
+  await page.goto('/');
+  await page.locator('[data-layout-splitter="left"]').focus();
+  await page.keyboard.press('Home');
+  await page.evaluate(() => {
+    localStorage.setItem('ravenroot.ui.node-palettes.open.v1', JSON.stringify(['palette-machine-id']));
+    window.ravenroot._renderPersonalPalettesForTest({ pending: false, error: '',
+      palettes: [{ id: 'palette-machine-id', name: 'Palette Ω', version: 7 }],
+      templates: [{ id: 'template-machine-id', paletteId: 'palette-machine-id',
+        name: 'Auteur Vorlage MitEinemSehrLangenZusammengesetztenNamen اسم مؤلف طويل للغاية',
+        version: 11, node: { id: 'authored-node' } }],
+    });
+  });
+  const palette = page.locator('.node-palette[data-palette-id="palette-machine-id"]');
+  const geometry = await palette.evaluate(element => {
+    const bounds = node => { const box = node.getBoundingClientRect(); return { left: box.left,
+      right: box.right, width: box.width }; };
+    const panel = element.closest('.panel');
+    const template = element.querySelector('.node-template');
+    const panelBounds = bounds(panel);
+    return { viewportWidth: innerWidth, panel: panelBounds, palette: bounds(element),
+      template: { ...bounds(template), clientWidth: template.clientWidth,
+        scrollWidth: template.scrollWidth }, documentScrollWidth: document.documentElement.scrollWidth,
+      controls: [...element.querySelectorAll('.palette-actions button, .node-template button')]
+        .map(node => ({ text: node.textContent, ...bounds(node) })),
+    };
+  });
+  expect(geometry.panel.width).toBeLessThan(200);
+  expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+  expect(geometry.template.scrollWidth).toBeLessThanOrEqual(geometry.template.clientWidth);
+  for (const control of geometry.controls) {
+    expect(control.width).toBeGreaterThan(0);
+    expect(control.left).toBeGreaterThanOrEqual(geometry.palette.left - 0.5);
+    expect(control.right).toBeLessThanOrEqual(geometry.palette.right + 0.5);
+    expect(control.left).toBeGreaterThanOrEqual(geometry.panel.left - 0.5);
+    expect(control.right).toBeLessThanOrEqual(geometry.panel.right + 0.5);
+  }
+  const screenshot = testInfo.outputPath('desktop-minimum-palette-de.png');
+  await palette.screenshot({ path: screenshot });
+  await testInfo.attach('desktop minimum German palette', { path: screenshot,
+    contentType: 'image/png' });
+});
+
 test('switches a complete catalog live while preserving a dirty selected document and open form', async ({ page }, testInfo) => {
   await configure(page);
   await page.goto('/');
@@ -574,4 +619,59 @@ test('imports and persists the actual complete CLI catalog through the language 
   await page.getByRole('menuitem', { name: 'Language…' }).click();
   await expect(page.locator('.language-current-source')).toContainText('Imported');
   await expect(page.locator('#language-selection')).toHaveValue('it');
+});
+
+test('represents and removes a regional preference backed by an imported base catalog', async ({ page }) => {
+  const output = execFileSync(process.execPath,
+    [new URL('../scripts/export-ui-catalog.mjs', import.meta.url).pathname, 'fr']);
+  await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'en', catalogs: [] });
+  await page.goto('/');
+  await openLanguageDialog(page);
+  await page.locator('.language-dialog input[type="file"]').setInputFiles({
+    name: 'fr.json', mimeType: 'application/json', buffer: output,
+  });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+  await page.evaluate(() => localStorage.setItem('ravenroot.ui.locale.v1', 'fr-CA'));
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fr-CA');
+  await openLanguageDialog(page);
+  await expect(page.locator('#language-selection')).toHaveValue('fr-CA');
+  await expect(page.locator('.language-current-source')).toContainText('Imported');
+  const remove = page.locator('.language-dialog .danger');
+  await expect(remove).toBeEnabled();
+  await remove.click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('#language-selection')).toHaveValue('');
+  await expect(page.locator('.language-current-source')).toContainText('Built in');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('ravenroot.ui.locale.v1')))
+    .toBeNull();
+});
+
+test('restores a configured base catalog after removing its imported override', async ({ page }) => {
+  const output = execFileSync(process.execPath,
+    [new URL('../scripts/export-ui-catalog.mjs', import.meta.url).pathname, 'fr']);
+  await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'en', catalogs: [{
+    schema: 'ravenroot.ui-catalog/v1', locale: 'fr',
+    messages: { 'commands.file.open.label': 'Ouvrir configuré…' },
+  }] });
+  await page.goto('/');
+  await openLanguageDialog(page);
+  await page.locator('.language-dialog input[type="file"]').setInputFiles({
+    name: 'fr.json', mimeType: 'application/json', buffer: output,
+  });
+  await page.evaluate(() => localStorage.setItem('ravenroot.ui.locale.v1', 'fr-CA'));
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fr-CA');
+  await openLanguageDialog(page);
+  await expect(page.locator('#language-selection')).toHaveValue('fr-CA');
+  await expect(page.locator('.language-current-source')).toContainText('Imported');
+  await page.locator('.language-dialog .danger').click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fr-CA');
+  await expect(page.locator('#language-selection')).toHaveValue('fr-CA');
+  await expect(page.locator('.language-current-source')).toContainText('Configured');
+  await page.locator('.language-dialog button[type="submit"]').click();
+  await page.locator('#menu-file').click();
+  await expect(page.getByRole('menuitem', { name: 'Ouvrir configuré…' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('ravenroot.ui.locale.v1')))
+    .toBe('fr-CA');
 });

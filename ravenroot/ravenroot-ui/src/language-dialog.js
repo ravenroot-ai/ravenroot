@@ -60,7 +60,9 @@ export function createLanguageDialog({ document: document_, controller }) {
     select.replaceChildren();
     const automatic = element(document_, 'option', { value: '', textContent: t('language.automatic') });
     select.append(automatic);
-    for (const locale of localization.availableLocales()) {
+    const selectableLocales = [...localization.availableLocales()];
+    if (preference && !selectableLocales.includes(preference)) selectableLocales.push(preference);
+    for (const locale of selectableLocales) {
       const option = element(document_, 'option', { value: locale,
         textContent: `${localeName(locale, localization.locale)} — ${locale}` });
       select.append(option);

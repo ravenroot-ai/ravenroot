@@ -52,6 +52,7 @@ describe('UI localization controller', () => {
     expect(controller.preferenceLocale).toBe('fr-CA');
     expect(controller.sourceFor(controller.localization.locale)).toBe('configured');
     expect(controller.localization.text('commands.file.open.label')).toBe('Ouvrir…');
+    await expect(controller.removeImportedCatalog('fr-CA')).rejects.toThrow(/Only imported/);
     controller.chooseLocale('fr');
     expect(controller.preferenceLocale).toBe('fr');
     expect(storage.setItem).toHaveBeenCalled();

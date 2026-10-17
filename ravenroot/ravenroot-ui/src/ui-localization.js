@@ -277,10 +277,14 @@ export async function initializeUiLocalization({
 
   return Object.freeze({
     localization,
+    get preferenceLocale() { return explicit; },
     reportDiagnostic(code, failure) {
       report(onDiagnostic, code, { reason: failure?.message || String(failure || '') });
     },
-    sourceFor: locale_ => sources.get(normalizeUiLocale(locale_)) || 'fallback',
+    sourceFor(locale_) {
+      const normalized = normalizeUiLocale(locale_);
+      return sources.get(normalized) || sources.get(new Intl.Locale(normalized).language) || 'fallback';
+    },
     chooseLocale(locale_) {
       const normalized = normalizeUiLocale(locale_);
       explicit = normalized;

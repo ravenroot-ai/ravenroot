@@ -38,6 +38,10 @@ describe('embedded viewer localization', () => {
       .toThrow(/must match/);
     expect(validateEmbedLocaleChange('it', catalog('it', 'Caricamento')))
       .toMatchObject({ locale: 'it', catalog: { locale: 'it' } });
+    expect(validateEmbedLocaleChange('it-IT', catalog('it', 'Caricamento')))
+      .toMatchObject({ locale: 'it-IT', catalog: { locale: 'it' } });
+    expect(() => validateEmbedLocaleChange('it-IT', catalog('en', 'Loading')))
+      .toThrow(/must match/);
   });
 });
 

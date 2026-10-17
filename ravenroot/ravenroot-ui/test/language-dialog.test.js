@@ -1,6 +1,9 @@
+import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
-import { readUiCatalogFile } from '../src/language-dialog.js';
+import { createLanguageDialog, readUiCatalogFile } from '../src/language-dialog.js';
 import { MAX_UI_CATALOG_BYTES } from '../src/ui-localization.js';
+import { initializeUiLocalization } from '../src/ui-localization.js';
+import { UI_CATALOG_SCHEMA, UI_LOCALES_SCHEMA } from '../src/ui-text.js';
 
 describe('language dialog catalog import', () => {
   it('rejects an oversized catalog before reading the file body', async () => {
@@ -17,5 +20,38 @@ describe('language dialog catalog import', () => {
 
     await expect(readUiCatalogFile({ size: 128, text })).resolves.toEqual(catalog);
     expect(text).toHaveBeenCalledOnce();
+  });
+});
+
+describe('language dialog preference', () => {
+  it('keeps Automatic selected while reporting the separately resolved configured locale', async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/' });
+    const catalog = { schema: UI_CATALOG_SCHEMA, locale: 'fr', messages: {} };
+    const controller = await initializeUiLocalization({ document: dom.window.document,
+      storage: dom.window.localStorage, indexedDB: null, navigator: { languages: ['en'] },
+      onDiagnostic: vi.fn(), fetch: async () => new Response(JSON.stringify({
+        schema: UI_LOCALES_SCHEMA, defaultLocale: 'fr-CA', catalogs: [catalog],
+      })) });
+    const dialog = createLanguageDialog({ document: dom.window.document, controller });
+    const select = dom.window.document.querySelector('#language-selection');
+    const source = dom.window.document.querySelector('.language-current-source');
+    try {
+      expect(select.value).toBe('');
+      expect(source.textContent).toContain('Resolved language: fr-CA');
+      expect(source.textContent).toContain('Configured by this deployment');
+
+      select.value = 'fr';
+      select.dispatchEvent(new dom.window.Event('change'));
+      expect(controller.preferenceLocale).toBe('fr');
+      expect(select.value).toBe('fr');
+      expect(dom.window.localStorage.getItem('ravenroot.ui.locale.v1')).toBe('fr');
+
+      select.value = '';
+      select.dispatchEvent(new dom.window.Event('change'));
+      expect(controller.preferenceLocale).toBeNull();
+      expect(select.value).toBe('');
+      expect(controller.localization.locale).toBe('fr-CA');
+      expect(dom.window.localStorage.getItem('ravenroot.ui.locale.v1')).toBeNull();
+    } finally { dialog.destroy(); controller.destroy(); }
   });
 });

@@ -55,7 +55,8 @@ export function createLanguageDialog({ document: document_, controller }) {
     removeButton.textContent = t('language.remove');
     closeButton.textContent = t('language.close');
     file.setAttribute('aria-label', t('language.catalogFile.label'));
-    const selected = localization.locale;
+    const resolved = localization.locale;
+    const preference = controller.preferenceLocale;
     select.replaceChildren();
     const automatic = element(document_, 'option', { value: '', textContent: t('language.automatic') });
     select.append(automatic);
@@ -64,10 +65,13 @@ export function createLanguageDialog({ document: document_, controller }) {
         textContent: `${localeName(locale, localization.locale)} — ${locale}` });
       select.append(option);
     }
-    select.value = selected;
-    const sourceName = controller.sourceFor(selected);
-    source.textContent = t('language.currentSource', {
-      source: t(`language.source.${sourceName}`),
+    select.value = preference ?? '';
+    const sourceName = controller.sourceFor(resolved);
+    source.textContent = t('language.currentResolution', {
+      locale: resolved,
+      source: t('language.currentSource', {
+        source: t(`language.source.${sourceName}`),
+      }),
     });
     removeButton.disabled = sourceName !== 'imported';
   };

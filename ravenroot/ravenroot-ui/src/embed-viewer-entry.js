@@ -64,7 +64,8 @@ export function createEmbedLocalization({ locale = 'en', catalog = null, documen
 export function validateEmbedLocaleChange(locale, catalog) {
   const normalized = normalizeUiLocale(locale);
   const validated = catalog === null ? null : validateUiCatalog(catalog);
-  if (validated !== null && validated.locale !== normalized) {
+  const base = new Intl.Locale(normalized).language;
+  if (validated !== null && validated.locale !== normalized && validated.locale !== base) {
     throw productError("workspace.error.embed.viewer.entry.embedded.catalog.locale.must.match.the.requested.locale", new TypeError('Embedded catalog locale must match the requested locale.'));
   }
   return Object.freeze({ locale: normalized, catalog: validated });

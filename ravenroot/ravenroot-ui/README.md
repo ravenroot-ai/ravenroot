@@ -148,7 +148,10 @@ to publish `dist` as static assets.
 - `src/graph-editing.js` builds those commands from user gestures and owns Modify-mode guards;
 - `src/ui-text.js` owns the dependency-free UI message catalog and locale fallback used by the
   application command model. The mechanism, accessibility contract and deliberately limited
-  coverage are documented in `../../docs/architecture/ui-internationalization.md`;
+  coverage are documented in `../../docs/architecture/ui-internationalization.md`. The language
+  selector keeps **Automatic** selected when the configured or browser fallback supplies the
+  resolved locale; the dialog reports that resolved locale and its source separately. Choosing a
+  locale creates an explicit preference, and returning to Automatic clears that preference;
 - `src/contextual-help.js` owns the one shared, non-modal long-help surface used by authoring forms;
   persistent state and validation remain at their render sites, while stable explanatory content is
   selected by the activating button and rendered as text;

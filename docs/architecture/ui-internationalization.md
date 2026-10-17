@@ -88,7 +88,10 @@ English. For example, `fr-CA` checks `fr-CA`, `fr`, and `en`. A missing source k
 parameter renders the bounded `Unavailable` diagnostic; it never renders a raw key or `undefined`.
 
 The explicit choice is stored in local storage under `ravenroot.ui.locale.v1`. Choosing **Automatic**
-removes that preference and reevaluates the deployment and browser languages. Imported catalogs are
+removes that preference and reevaluates the deployment and browser languages. The selector remains
+on **Automatic** while a deployment or browser fallback supplies the resolved locale; the dialog
+reports that resolved locale and its source separately. Selecting the same locale explicitly is a
+distinct stored preference and is unaffected by later browser-language changes. Imported catalogs are
 validated and stored in IndexedDB database `ravenroot-ui-catalogs-v1`; the dialog can remove an
 imported catalog, but it cannot remove a configured catalog or replace built-in English. Import
 files are checked against the same 512 KiB limit before their contents are read. Import,
@@ -187,7 +190,10 @@ A successful change returns to the parent origin:
 }
 ```
 
-The viewer validates the locale and the entire catalog before registering either value. Invalid
+The viewer validates the locale and the entire catalog before registering either value. A live
+request for a regional locale may carry the validated base-language catalog (for example, `it-IT`
+with an `it` catalog); the viewer keeps `it-IT` as the active locale, uses the `it` messages, and
+falls back to English per missing key. A catalog for an unrelated locale is refused. Invalid
 messages are ignored atomically. Origin, source window, channel, direction, correlation, protocol,
 and post-handshake checks remain mandatory. An iframe that fails before loading the viewer module
 uses a valid selected catalog for its failure state when possible and otherwise uses the keyed

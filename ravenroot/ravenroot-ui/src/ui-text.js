@@ -442,6 +442,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   'language.remove.failure': 'The catalog could not be removed. Try again.',
   'language.catalogFile.label': 'UI catalog JSON file',
   'language.currentSource': 'Source: {source}',
+  'language.currentResolution': 'Resolved language: {locale} · {source}',
   'embed.document.title': 'Ravenroot embedded graph',
   'embed.state.idle': '',
   'embed.state.loading': 'Loading graph…',

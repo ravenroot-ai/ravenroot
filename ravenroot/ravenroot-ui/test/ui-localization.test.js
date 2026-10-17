@@ -49,10 +49,15 @@ describe('UI localization controller', () => {
       indexedDB: null, navigator: { languages: ['de-DE'] }, onDiagnostic: vi.fn() });
 
     expect(controller.localization.locale).toBe('fr-CA');
+    expect(controller.preferenceLocale).toBe('fr-CA');
+    expect(controller.sourceFor(controller.localization.locale)).toBe('configured');
     expect(controller.localization.text('commands.file.open.label')).toBe('Ouvrir…');
     controller.chooseLocale('fr');
+    expect(controller.preferenceLocale).toBe('fr');
     expect(storage.setItem).toHaveBeenCalled();
     controller.useAutomaticLocale();
+    expect(controller.preferenceLocale).toBeNull();
+    expect(storage.removeItem).toHaveBeenCalled();
     expect(controller.localization.locale).toBe('fr');
     controller.destroy();
   });
@@ -71,10 +76,13 @@ describe('UI localization controller', () => {
     });
     try {
       expect(controller.localization.locale).toBe(defaultLocale || 'fr');
+      expect(controller.preferenceLocale).toBeNull();
       controller.chooseLocale('en');
+      expect(controller.preferenceLocale).toBe('en');
       events.dispatchEvent(new Event('languagechange'));
       expect(controller.localization.locale).toBe('en');
       controller.useAutomaticLocale();
+      expect(controller.preferenceLocale).toBeNull();
       expect(controller.localization.locale).toBe(defaultLocale || 'fr');
       navigator.languages = ['en'];
       events.dispatchEvent(new Event('languagechange'));

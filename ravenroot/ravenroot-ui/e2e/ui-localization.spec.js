@@ -41,6 +41,17 @@ const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rt
   messages: mapMessages(value => '⟦نص واجهة طويل للاختبار⟧'
     + (value.length > 80 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
 };
+const german = pseudo('de', 'ltr', '⟦DE⟧');
+Object.assign(german.messages, {
+  'workspace.node.palette.action.saveSelected': 'AusgewähltenKonfigurationsknotenInDerPersönlichenWiederverwendungspaletteSpeichern',
+  'workspace.node.palette.view.rename': 'PersönlicheWiederverwendungspaletteUmbenennen',
+  'workspace.node.palette.view.delete': 'PersönlicheWiederverwendungspaletteDauerhaftLöschen',
+});
+Object.assign(arabic.messages, {
+  'workspace.node.palette.action.saveSelected': 'حفظ العقدة المحددة في لوحة إعادة الاستخدام الشخصية الطويلة للغاية',
+  'workspace.node.palette.view.rename': 'إعادة تسمية لوحة إعادة الاستخدام الشخصية باسم عربي طويل للغاية',
+  'workspace.node.palette.view.delete': 'حذف لوحة إعادة الاستخدام الشخصية نهائياً بعد التأكيد',
+});
 
 const configuration = {
   schema: 'ravenroot.ui-locales/v1',
@@ -55,7 +66,7 @@ async function configure(page, body = configuration) {
 }
 
 async function openLanguageDialog(page, locale = 'en') {
-  const marker = locale === 'en' ? '' : locale === 'it' ? '⟦IT⟧' : '⟦نص واجهة طويل للاختبار⟧';
+  const marker = { en: '', it: '⟦IT⟧', de: '⟦DE⟧', ar: '⟦نص واجهة طويل للاختبار⟧' }[locale];
   await page.locator('#menu-view').click();
   await page.getByRole('menuitem', { name: `${marker}Language…${marker}` }).click();
 }
@@ -77,6 +88,97 @@ async function createDirtyDraft(page) {
     selected: window.cy.nodes(':selected').map(node => node.id()),
   }));
 }
+
+test('keeps every localized palette action usable inside a 360px panel in LTR and RTL', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 360, height: 1400 });
+  await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'de',
+    catalogs: [german, arabic] });
+  await page.goto('/');
+  await page.locator('#btn-new').evaluate(button => button.click());
+  await page.locator('#btn-modify').evaluate(button => button.click());
+  await page.evaluate(() => {
+    window.cy.nodes().first().select();
+    localStorage.setItem('ravenroot.ui.node-palettes.open.v1', JSON.stringify(['palette-machine-id']));
+    window.ravenroot._renderPersonalPalettesForTest({ pending: false, error: '',
+      palettes: [{ id: 'palette-machine-id', name: 'Palette Ω', version: 7 }],
+      templates: [{ id: 'template-machine-id', paletteId: 'palette-machine-id',
+        name: 'Auteur Vorlage اسم مؤلف', version: 11, node: { id: 'authored-node' } }],
+    });
+  });
+  const palette = page.locator('.node-palette[data-palette-id="palette-machine-id"]');
+  const authored = async () => palette.evaluate(element => ({
+    paletteId: element.dataset.paletteId,
+    paletteName: element.querySelector('summary').textContent,
+    templateName: element.querySelector('.node-template-insert').textContent,
+    templateId: element.querySelector('.node-template-insert')?.closest('.node-template')
+      ?.querySelector('.node-template-insert')?.textContent,
+  }));
+  const identity = await authored();
+  expect(identity).toMatchObject({ paletteId: 'palette-machine-id', paletteName: 'Palette Ω',
+    templateName: 'Auteur Vorlage اسم مؤلف' });
+
+  const assertActions = async (locale, names) => {
+    await expect(page.locator('html')).toHaveAttribute('lang', locale);
+    const buttons = palette.locator('.palette-actions button');
+    await expect(buttons).toHaveCount(3);
+    await expect(buttons).toHaveText(names);
+    const geometry = await palette.evaluate(element => {
+      const panel = element.closest('.panel');
+      const paletteBounds = element.getBoundingClientRect();
+      const panelBounds = panel.getBoundingClientRect();
+      const actions = element.querySelector('.palette-actions');
+      return {
+        viewportWidth: innerWidth,
+        rootFits: document.documentElement.scrollWidth <= innerWidth,
+        actionsFits: actions.scrollWidth <= actions.clientWidth,
+        buttons: [...actions.querySelectorAll('button')].map(button => {
+          const bounds = button.getBoundingClientRect();
+          return { left: bounds.left, right: bounds.right, width: bounds.width,
+            paletteLeft: paletteBounds.left, paletteRight: paletteBounds.right,
+            panelLeft: panelBounds.left, panelRight: panelBounds.right };
+        }),
+      };
+    });
+    expect(geometry.rootFits).toBe(true);
+    expect(geometry.actionsFits).toBe(true);
+    for (const bounds of geometry.buttons) {
+      expect(bounds.width).toBeGreaterThan(0);
+      expect(bounds.left).toBeGreaterThanOrEqual(bounds.paletteLeft - 0.5);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.paletteRight + 0.5);
+      expect(bounds.left).toBeGreaterThanOrEqual(bounds.panelLeft - 0.5);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.panelRight + 0.5);
+      expect(bounds.left).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(geometry.viewportWidth);
+    }
+    for (let index = 0; index < names.length; index += 1) {
+      const button = buttons.nth(index);
+      await button.focus();
+      await expect(button).toBeFocused();
+      const dialogs = [];
+      page.once('dialog', async dialog => { dialogs.push(dialog.type()); await dialog.dismiss(); });
+      await button.click();
+      await expect.poll(() => dialogs.length).toBe(1);
+    }
+  };
+
+  const germanNames = [german.messages['workspace.node.palette.action.saveSelected'],
+    german.messages['workspace.node.palette.view.rename'], german.messages['workspace.node.palette.view.delete']];
+  await assertActions('de', germanNames);
+  const germanScreenshot = testInfo.outputPath('narrow-palette-de.png');
+  await palette.screenshot({ path: germanScreenshot });
+  await testInfo.attach('narrow German palette', { path: germanScreenshot, contentType: 'image/png' });
+
+  await openLanguageDialog(page, 'de');
+  await page.locator('#language-selection').selectOption('ar');
+  await page.locator('.language-dialog button[type="submit"]').click();
+  const arabicNames = [arabic.messages['workspace.node.palette.action.saveSelected'],
+    arabic.messages['workspace.node.palette.view.rename'], arabic.messages['workspace.node.palette.view.delete']];
+  await assertActions('ar', arabicNames);
+  expect(await authored()).toEqual(identity);
+  const arabicScreenshot = testInfo.outputPath('narrow-palette-ar.png');
+  await palette.screenshot({ path: arabicScreenshot });
+  await testInfo.attach('narrow Arabic palette', { path: arabicScreenshot, contentType: 'image/png' });
+});
 
 test('switches a complete catalog live while preserving a dirty selected document and open form', async ({ page }, testInfo) => {
   await configure(page);

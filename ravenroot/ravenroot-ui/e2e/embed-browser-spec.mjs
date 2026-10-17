@@ -66,11 +66,27 @@ test('localizes a real server session and accepts only the authenticated locale 
   const before = await page.evaluate(() => window.embedMessages.length);
 
   await page.evaluate(() => window.postViewerLocale('en', null, { channelId: 'wrong-channel' }));
+  await page.evaluate(() => window.postViewerLocale('en', null, { protocolVersion: 999 }));
+  await page.evaluate(() => window.postViewerLocale('en', null, { unexpected: true }));
+  await page.evaluate(catalog => window.postViewerLocale('it-IT', catalog), {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'fr',
+    messages: { 'embed.controls.fit': 'Adapter' },
+  });
   await page.evaluate(() => window.relayViewerLocale('sibling', 'en', null));
   await page.evaluate(() => window.relayViewerLocale('foreign', 'en', null));
   await page.waitForTimeout(150);
   expect(await page.evaluate(() => window.embedMessages.length)).toBe(before);
   await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+
+  await page.evaluate(catalog => window.postViewerLocale('it-IT', catalog), {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'it',
+    messages: { 'embed.controls.fit': 'Adatta' },
+  });
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('it-IT');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'it-IT');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Adatta');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
 
   await page.evaluate(() => window.postViewerLocale('en', null));
   await expect.poll(() => page.evaluate(() => window.embedMessages.filter(

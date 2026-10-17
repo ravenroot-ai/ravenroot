@@ -3,6 +3,8 @@ package ai.ravenroot.core.runtime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 /** Monotonic traversal budget shared by every asynchronous branch and cycle re-entry. */
 final class ExecutionBudget {
@@ -13,6 +15,7 @@ final class ExecutionBudget {
     private long payloadBytes;
     private int inFlightHops;
     private int liveActors;
+    private final CompletableFuture<Void> quiescent = new CompletableFuture<>();
 
     ExecutionBudget(GraphExecutionLimits limits) {
         this(limits, new RunnerActorCapacity());
@@ -141,11 +144,22 @@ final class ExecutionBudget {
 
     private synchronized void releaseHop() {
         inFlightHops = Math.max(0, inFlightHops - 1);
+        completeQuiescenceIfReached();
     }
 
     private synchronized void releaseActor(RunnerActorCapacity.Permit runnerPermit) {
         liveActors = Math.max(0, liveActors - 1);
         runnerPermit.close();
+        completeQuiescenceIfReached();
+    }
+
+    synchronized CompletionStage<Void> quiescence() {
+        completeQuiescenceIfReached();
+        return quiescent;
+    }
+
+    private void completeQuiescenceIfReached() {
+        if (inFlightHops == 0 && liveActors == 0) quiescent.complete(null);
     }
 
     static final class Hop implements AutoCloseable {

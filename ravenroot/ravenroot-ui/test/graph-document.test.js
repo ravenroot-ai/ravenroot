@@ -4,6 +4,7 @@ import { parseGraphML } from '../src/graph-parsers.js';
 import {
   JOIN_SEMANTICS_DECLARED,
   JOIN_SEMANTICS_PROPERTY,
+  createEmptyWorkflowDocument,
   createEdge,
   createNode,
   createWorkflowDocument,
@@ -11,6 +12,7 @@ import {
   distinctPredecessorIds,
   effectiveJoinArrival,
   hasDeclaredJoinSemantics,
+  isEmptyWorkflowDocument,
   isEachJoinPolicy,
   joinKindProperties,
   kindToNodeType,
@@ -24,6 +26,24 @@ import {
 } from '../src/graph-document.js';
 
 describe('editable GraphML documents', () => {
+  it('constructs one canonical empty editable document and distinguishes populated graphs', () => {
+    const empty = createEmptyWorkflowDocument();
+
+    expect(isEmptyWorkflowDocument(empty)).toBe(true);
+    expect(empty).toMatchObject({ format: 'graphml', sourceXml: '',
+      nodes: [], edges: [], nodeMap: {} });
+    expect(empty.graphProperties).toMatchObject({
+      [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED,
+      'ravenroot.renderMode': 'design',
+      'ravenroot.layoutMode': 'cyto',
+    });
+    expect(isEmptyWorkflowDocument(parseGraphML(serializeGraphML(empty)))).toBe(true);
+    expect(isEmptyWorkflowDocument(createWorkflowDocument())).toBe(false);
+    expect(isEmptyWorkflowDocument({ ...empty, nodeMap: { stale: {} } })).toBe(false);
+    expect(isEmptyWorkflowDocument({ ...empty,
+      graphProperties: { ...empty.graphProperties, 'workflow.owner': 'local' } })).toBe(false);
+  });
+
   it('replaces the editor-owned presentation properties on save and round-trips them', () => {
     const graph = parseGraphML(serializeGraphML(createWorkflowDocument()));
     setGraphPresentation(graph, {

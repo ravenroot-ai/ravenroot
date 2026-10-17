@@ -25,6 +25,23 @@ function nullableString(value, label) {
   return value;
 }
 
+function persistedAuthoring(value) {
+  if (!value?.providerDocumentId) return null;
+  const revision = value.revision;
+  if (!revision || ['draft', 'release', 'publication'].some(key => typeof revision[key] !== 'string' || !revision[key])) {
+    throw new TypeError('Repository authoring revision is invalid');
+  }
+  return Object.freeze({ providerDocumentId: nullableString(value.providerDocumentId, 'providerDocumentId'),
+    revision: Object.freeze({ draft: revision.draft, release: revision.release, publication: revision.publication }),
+    graphId: nullableString(value.graphId, 'graphId'),
+    releaseVersion: Number.isSafeInteger(value.releaseVersion) && value.releaseVersion > 0 ? value.releaseVersion : null,
+    releasedGraphId: nullableString(value.releasedGraphId, 'releasedGraphId'),
+    releasedVersion: Number.isSafeInteger(value.releasedVersion) && value.releasedVersion > 0
+      ? value.releasedVersion : null,
+    released: Boolean(value.released), published: Boolean(value.published),
+    draftDeleted: Boolean(value.draftDeleted) });
+}
+
 export function canonicalGraphSnapshot(graph) {
   const { nodeMap: _derivedNodeIndex, ...semanticGraph } = graph;
   const canonical = JSON.parse(JSON.stringify(semanticGraph));
@@ -70,6 +87,7 @@ export function persistedDocument(document_) {
       sourceGraphVersion: nullableString(document_.provenance?.sourceGraphVersion, 'sourceGraphVersion'),
       deploymentId: nullableString(document_.provenance?.deploymentId, 'deploymentId'),
     }),
+    authoring: persistedAuthoring(document_.authoring),
     graph,
     presentation: Object.freeze({
       ...visualGroupPresentation(document_),

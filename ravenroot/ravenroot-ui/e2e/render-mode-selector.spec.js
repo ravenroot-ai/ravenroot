@@ -22,23 +22,6 @@ const nodePoint = (page, id) => page.evaluate(nodeId => {
   return { x: rect.left + position.x, y: rect.top + position.y };
 }, id);
 
-const blankCanvasPoint = page => page.evaluate(() => {
-  const rect = window.cy.container().getBoundingClientRect();
-  const boxes = window.cy.nodes().map(node => node.renderedBoundingBox({ includeLabels: true }));
-  for (let y = 30; y < rect.height - 30; y += 24) {
-    for (let x = 30; x < rect.width - 30; x += 24) {
-      const pageX = rect.left + x;
-      const pageY = rect.top + y;
-      if (document.elementFromPoint(pageX, pageY)?.tagName === 'CANVAS'
-          && boxes.every(box => x < box.x1 - 16 || x > box.x2 + 16
-            || y < box.y1 - 16 || y > box.y2 + 16)) {
-        return { x: pageX, y: pageY };
-      }
-    }
-  }
-  throw new Error('No blank canvas point available');
-});
-
 async function beginRepeatedDesign(page) {
   await page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();
@@ -342,14 +325,11 @@ test('repeated Design requests keep one latest owner through final routing and r
   await expect(pane).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#btn-add-node')).toBeDisabled();
   await expect(page.locator('#btn-undo')).toBeDisabled();
-
-  const movingNode = await nodePoint(page, 'start');
-  await page.mouse.move(movingNode.x, movingNode.y);
-  await page.mouse.down();
-  await page.mouse.move(movingNode.x + 70, movingNode.y + 35, { steps: 4 });
-  await page.mouse.up();
-  const blankWhileBusy = await blankCanvasPoint(page);
-  await page.mouse.click(blankWhileBusy.x, blankWhileBusy.y);
+  // Observe the no-edit state while the latest routing owner is still busy. A physical drag and
+  // click here used to race the asynchronous release: on a slower runner the legitimate final
+  // `Render graph` history command could land between separate Playwright mouse calls, making that
+  // command look like an authoring edit. The preceding test owns the in-flight gesture refusal;
+  // this one proves repeated-request ownership and then proves authoring after the single release.
   expect(await page.evaluate(() => ({
     nodes: window.cy.nodes().length,
     history: window.ravenroot.activeDocument().history.depth(),
@@ -366,6 +346,18 @@ test('repeated Design requests keep one latest owner through final routing and r
   expect(events.filter(event => event.phase === 'start').every(
     event => event.busy && event.addDisabled && event.historyDepth === before.history)).toBe(true);
   await expect(page.locator('#graph-live')).toContainText('layout complete');
+  const afterRouting = await page.evaluate(() => ({
+    nodes: window.cy.nodes().length,
+    history: window.ravenroot.activeDocument().history.depth(),
+  }));
+  expect(afterRouting.nodes).toBe(before.nodes);
+  const routingHistoryDelta = afterRouting.history - before.history;
+  expect(routingHistoryDelta).toBeGreaterThanOrEqual(0);
+  expect(routingHistoryDelta).toBeLessThanOrEqual(1);
+  expect(events.at(-1).historyDepth).toBe(afterRouting.history);
+  if (afterRouting.history > before.history) {
+    await expect(page.locator('#btn-undo')).toHaveAttribute('title', 'Undo Render graph');
+  }
 
   const beforeMove = await page.evaluate(() => ({
     renderer: window.cy.getElementById('start').position(),

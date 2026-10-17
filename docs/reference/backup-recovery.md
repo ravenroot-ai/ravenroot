@@ -27,7 +27,7 @@ Backup and restore acquire the same persistent maintenance lock as the server an
 | Entry | Contract |
 |---|---|
 | `MANIFEST.txt` | Canonical UTF-8 inventory with byte length and SHA-256 digest |
-| `execution-store.db` | SQLite-native `VACUUM INTO` snapshot, including the canonical graph definitions accepted executions are pinned to and the dependency-set records those executions were accepted against |
+| `execution-store.db` | SQLite-native `VACUUM INTO` snapshot, including personal node palettes, the canonical graph definitions accepted executions are pinned to, and the dependency-set records those executions were accepted against |
 | `audit/` | Every selected `.audit.jsonl` and `.audit.head` pair |
 
 The destination must not already exist. Publication uses a sibling staging directory and atomic rename.

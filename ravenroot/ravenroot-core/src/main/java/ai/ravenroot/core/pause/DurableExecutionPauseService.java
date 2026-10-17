@@ -330,7 +330,7 @@ public final class DurableExecutionPauseService {
                     pause.key().processInstanceId(), traversalId, request.nodeId(),
                     request.graphVersionPin().reference(), recorder, request.afterInvocationId(),
                     continuation.payloadValue(), continuation.attributeValues(), commandOf(request),
-                    checkpoint.budget());
+                    checkpoint.budget(), checkpoint.calledExecution(), checkpoint.calledEndOutputs());
         } catch (RuntimeException setupFailure) {
             setupFailure = cleanup(setupFailure, runner::close);
             setupFailure = cleanup(setupFailure, () -> close(budgetBinding));

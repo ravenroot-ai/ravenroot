@@ -14,6 +14,7 @@ The catalog returned by `GET /v1/node-types` is authoritative for the running de
 | `http-request` | Perform an outbound HTTP call | Egress and credentials |
 | `delay` | Resume after a bounded asynchronous delay | Scheduler |
 | `human-task` | Park for a durable authorized human decision | Durable execution store |
+| `call-flow`, `start-flow`, `await-flow` | Invoke an exact registered graph version and optionally wait | Durable flow store, deployment registry, and recovery runtime |
 | `json-parse` | Parse JSON text into a structured value | None |
 | `json-path` | Select ordered values with RFC 9535 JSONPath | JSONPath evaluator |
 | `program` | Execute an approved artifact | Sandbox supervisor |

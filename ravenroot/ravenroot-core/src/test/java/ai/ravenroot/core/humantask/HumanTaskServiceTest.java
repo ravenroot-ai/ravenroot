@@ -95,6 +95,39 @@ class HumanTaskServiceTest {
     Path directory;
 
     @Test
+    void runtimeFlowContinuationIsInvisibleAndRefusesEveryUserSettlementPath() throws Exception {
+        try (var store = sqlite("internal-flow-task", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            UUID handle = UUID.randomUUID();
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> service.suspend(fixture.message(), internalFlowDefinition()));
+                task = service.suspendInternal(fixture.message(), internalFlowDefinition(), handle).task();
+            }
+
+            assertTrue(service.inbox(requester(), HumanTaskQuery.everything(10)).items().isEmpty());
+            var query = new HumanTaskService.AdminQuery(Optional.of(handle), Set.of(), Optional.empty(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Set.of(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), 10);
+            assertTrue(service.adminInventory(TENANT, query).items().isEmpty());
+            assertEquals(HumanTaskResult.Code.NOT_FOUND,
+                    service.cancel(requester(), handle, task.generation()).code());
+            assertEquals(HumanTaskResult.Code.NOT_FOUND,
+                    service.resolve(requester(), handle, task.generation(), internalFlowResponse()).code());
+            assertEquals(HumanTaskResult.Code.NOT_FOUND,
+                    service.resolveInternal(TENANT, UUID.randomUUID(), internalFlowResponse()).code());
+
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolveInternal(TENANT, handle, internalFlowResponse()).code());
+            assertEquals(HumanTaskStatus.RESOLVED, store.loadHumanTask(TENANT, handle)
+                    .toCompletableFuture().join().orElseThrow().status());
+        }
+    }
+
+    @Test
     void administrativeInventoryIsPayloadFreeAndForcedAbandonmentIsAtomicWithoutReentry() throws Exception {
         try (var store = sqlite("admin-human-tasks", Clock.fixed(NOW, ZoneOffset.UTC))) {
             Fixture fixture = running(store);
@@ -1125,6 +1158,21 @@ class HumanTaskServiceTest {
                         PayloadKind.MAP, 4096), HandlerAuthorization.ofRoles(Role.APPROVER.name()),
                 Optional.of(Duration.ofMinutes(5)), Duration.ofHours(1),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+    }
+
+    private static HumanTaskDefinition internalFlowDefinition() {
+        return new HumanTaskDefinition(new HumanTaskMetadata("Flow continuation", "Runtime owned."),
+                new HumanTaskResponseSchema("application/json", HumanTaskService.INTERNAL_FLOW_SCHEMA, "1",
+                        PayloadKind.MAP, 4096), HandlerAuthorization.none(), Optional.empty(),
+                Duration.ofHours(1),
+                new HumanTaskReentryMapping("completed", "failed", "deadline_exceeded", "cancelled"));
+    }
+
+    private static OpaquePayload internalFlowResponse() {
+        String json = PayloadEnvelope.of(HumanTaskService.INTERNAL_FLOW_SCHEMA, "1",
+                PayloadValue.map(Map.of("status", PayloadValue.of("COMPLETED"),
+                        "output", PayloadValue.of("ok")))).toJson();
+        return OpaquePayload.of(json.getBytes(StandardCharsets.UTF_8), "application/json");
     }
 
     private static HumanTaskPolicy enforced(HumanTaskPolicy policy) {

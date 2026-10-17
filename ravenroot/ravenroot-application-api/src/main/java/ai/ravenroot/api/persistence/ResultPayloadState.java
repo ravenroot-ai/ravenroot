@@ -4,7 +4,7 @@ package ai.ravenroot.api.persistence;
  * What became of a terminal execution's payload on its way into the durable record, and what a
  * reader is therefore being offered.
  *
- * <p>Four different facts are collapsed into "no payload came back" by every design that models this
+ * <p>Distinct facts are collapsed into "no payload came back" by every design that models this
  * as a nullable field, and a caller cannot act on any of them: <em>the run produced nothing</em> is a
  * normal completion, <em>it was too large</em> is a limit an operator can raise, <em>it could not be
  * converted</em> is a defect in the producing node, and <em>it aged out</em> is a retention policy
@@ -72,6 +72,19 @@ public enum ResultPayloadState {
      * would make it silently look like a run that produced nothing.</p>
      */
     UNCONVERTIBLE,
+
+    /**
+     * The execution reached a durable terminal boundary, but its original runtime ended before it
+     * could record the output projection.
+     *
+     * <p>This is recovery evidence, not a statement about the output: the replacement worker can
+     * prove the lifecycle from the durable aggregate and participant receipts, but it cannot
+     * reconstruct arbitrary graph output or node-result sets. Reporting {@link #NONE} would claim
+     * that no output existed, while {@link #WITHHELD} and {@link #UNCONVERTIBLE} would invent a
+     * payload-limit or type failure. Readers therefore receive the terminal status and this explicit
+     * absence reason without fabricated payload bytes.</p>
+     */
+    UNAVAILABLE,
 
     /**
      * A payload was stored and is no longer offered, because the record's retention deadline has

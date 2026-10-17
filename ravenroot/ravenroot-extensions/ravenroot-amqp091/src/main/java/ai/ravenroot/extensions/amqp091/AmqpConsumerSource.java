@@ -19,6 +19,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntConsumer;
 
@@ -37,7 +39,9 @@ final class AmqpConsumerSource implements InboundSource {
     private final DoubleSupplier reconnectJitter;
     private final ReservedNetworkPolicy destinationPolicy;
     @SuppressWarnings("unused") private final Clock clock;
-    private final Object lifecycle = new Object();
+    /** Serializes owner generation and channel calls without pinning a Java 21 consumer carrier. */
+    private final ReentrantLock lifecycle = new ReentrantLock();
+    private final Condition lifecycleChanged = lifecycle.newCondition();
     private volatile State state = State.STOPPED;
     private volatile AmqpConsumerProtocol.Owner owner;
     private boolean stopRequested;
@@ -77,7 +81,8 @@ final class AmqpConsumerSource implements InboundSource {
 
     @Override public CompletionStage<Void> start(InboundSourceContext context) {
         Objects.requireNonNull(context);
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (owner != null || !stopFlight.isDone()) {
                 if (state == State.STARTING) return startFlight;
                 if (state == State.READY || state == State.BACKING_OFF || state == State.RECONNECTING)
@@ -91,12 +96,15 @@ final class AmqpConsumerSource implements InboundSource {
             startFlight = new CompletableFuture<>(); stopFlight = new CompletableFuture<>();
             executor.execute(() -> run(context, startFlight, stopFlight));
             return startFlight;
+        } finally {
+            lifecycle.unlock();
         }
     }
 
     @Override public CompletionStage<Void> stop() {
         AmqpConsumerProtocol.Owner current;
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (state == State.STOPPED) return CompletableFuture.completedFuture(null);
             if (state == State.STOPPING) return stopFlight;
             if (owner == null && stopFlight.isDone()) {
@@ -104,7 +112,9 @@ final class AmqpConsumerSource implements InboundSource {
                 return CompletableFuture.completedFuture(null);
             }
             stopRequested = true; state = State.STOPPING; generation++; current = owner;
-            lifecycle.notifyAll();
+            lifecycleChanged.signalAll();
+        } finally {
+            lifecycle.unlock();
         }
         if (current != null) try { current.wakeup(); } catch (RuntimeException ignored) { }
         return stopFlight;
@@ -113,7 +123,14 @@ final class AmqpConsumerSource implements InboundSource {
     @Override public CompletionStage<Void> rollback() { return stop(); }
     @Override public CompletionStage<Void> shutdown() { return stop(); }
     State state() { return state; }
-    long generation() { synchronized (lifecycle) { return generation; } }
+    long generation() {
+        lifecycle.lock();
+        try {
+            return generation;
+        } finally {
+            lifecycle.unlock();
+        }
+    }
 
     private void run(InboundSourceContext context, CompletableFuture<Void> ready,
                      CompletableFuture<Void> stopped) {
@@ -162,15 +179,24 @@ final class AmqpConsumerSource implements InboundSource {
         } catch (RuntimeException failure) {
             fail(context, ready, failure);
         } finally {
-            synchronized (lifecycle) { generation++; owner = null; }
+            lifecycle.lock();
+            try {
+                generation++;
+                owner = null;
+            } finally {
+                lifecycle.unlock();
+            }
             if (password != null) java.util.Arrays.fill(password, '\0');
             if (secret != null) secret.close();
             if (resourceLease != null) resourceLease.close();
-            synchronized (lifecycle) {
+            lifecycle.lock();
+            try {
                 if (!ready.isDone()) ready.completeExceptionally(
                         new IllegalStateException("AMQP source stopped before readiness"));
                 state = stopRequested ? State.STOPPED : State.FAILED;
-                stopped.complete(null); lifecycle.notifyAll();
+                stopped.complete(null); lifecycleChanged.signalAll();
+            } finally {
+                lifecycle.unlock();
             }
         }
     }
@@ -230,32 +256,44 @@ final class AmqpConsumerSource implements InboundSource {
     }
 
     private void claimReady(InboundSourceContext context, CompletableFuture<Void> ready) {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (stopRequested || state == State.STOPPING) throw sourceFailure(AmqpSourceStartFailure.STARTUP_CANCELLED);
             state = State.READY; context.reportHealthy(); ready.complete(null);
+        } finally {
+            lifecycle.unlock();
         }
     }
 
     private void healthy(InboundSourceContext context) {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (!stopRequested && state != State.READY) { state = State.READY; context.reportHealthy(); }
+        } finally {
+            lifecycle.unlock();
         }
     }
 
     private void degrade(InboundSourceContext context, String reason, State target) {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (stopRequested) return;
             state = target; context.reportDegraded(reason);
+        } finally {
+            lifecycle.unlock();
         }
     }
 
     private void fail(InboundSourceContext context, CompletableFuture<Void> ready, RuntimeException failure) {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (stopRequested || state == State.STOPPING) return;
             state = State.FAILED;
             if (failure instanceof SourceStartException classified) context.reportDegraded(classified.code());
             else if (ready.isDone()) context.reportDegraded("amqp-consumer-failed");
             ready.completeExceptionally(failure);
+        } finally {
+            lifecycle.unlock();
         }
     }
 
@@ -266,31 +304,55 @@ final class AmqpConsumerSource implements InboundSource {
         catch (RuntimeException ignored) { }
     }
 
-    private long nextGeneration() { synchronized (lifecycle) { return ++generation; } }
-    private boolean current(long expected) { synchronized (lifecycle) { return !stopRequested && generation == expected; } }
+    private long nextGeneration() {
+        lifecycle.lock();
+        try {
+            return ++generation;
+        } finally {
+            lifecycle.unlock();
+        }
+    }
+
+    private boolean current(long expected) {
+        lifecycle.lock();
+        try {
+            return !stopRequested && generation == expected;
+        } finally {
+            lifecycle.unlock();
+        }
+    }
 
     private boolean ackIfCurrent(long expected, long deliveryTag) throws AmqpConsumerProtocol.Failure {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (stopRequested || generation != expected || owner == null) return false;
             owner.ack(deliveryTag);
             return true;
+        } finally {
+            lifecycle.unlock();
         }
     }
 
     private boolean nackIfCurrent(long expected, long deliveryTag, boolean requeue)
             throws AmqpConsumerProtocol.Failure {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (stopRequested || generation != expected || owner == null) return false;
             owner.nack(deliveryTag, requeue);
             return true;
+        } finally {
+            lifecycle.unlock();
         }
     }
 
     private void awaitBackoff(int millis) {
-        synchronized (lifecycle) {
+        lifecycle.lock();
+        try {
             if (stopRequested) return;
-            try { lifecycle.wait(millis); }
+            try { lifecycleChanged.await(millis, java.util.concurrent.TimeUnit.MILLISECONDS); }
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); stopRequested = true; }
+        } finally {
+            lifecycle.unlock();
         }
     }
 
@@ -410,6 +472,64 @@ final class AmqpConsumerSource implements InboundSource {
                 return value;
             } catch (RuntimeException invalid) { throw sourceFailure(reason); }
         }
+    }
+
+    /** Validates graph-authored syntax and absolute bounds before consulting operator authority. */
+    static void validateTemplateAuthoredSettings(NodeConfiguration configuration) {
+        if (!AmqpConsumeNodeBehavior.knownConfiguration().containsAll(configuration.properties().keySet())) {
+            throw sourceFailure(AmqpSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
+        }
+        String queue = configuration.property("queue", "");
+        if (!queue.isEmpty() && (queue.length() > 255 || !AmqpWireLimits.isShortstr(queue)
+                || queue.codePoints().anyMatch(Character::isISOControl))) {
+            throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
+        }
+        authoredInteger(configuration, "prefetch", 1, 1_024,
+                AmqpSourceStartFailure.INVALID_PREFETCH);
+        authoredInteger(configuration, "maxInFlight", 1, 1_024,
+                AmqpSourceStartFailure.INVALID_MAX_IN_FLIGHT);
+        int retry = authoredInteger(configuration, "retryBackoffMs",
+                AmqpConsumerPolicy.MIN_RETRY_BACKOFF_MS, 60_000,
+                AmqpSourceStartFailure.INVALID_RETRY_BACKOFF);
+        int maximum = authoredInteger(configuration, "maxRetryBackoffMs",
+                AmqpConsumerPolicy.MIN_MAX_RETRY_BACKOFF_MS, 60_000,
+                AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);
+        if (retry >= 0 && maximum >= 0 && maximum < retry) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);
+        }
+        authoredInteger(configuration, "drainTimeoutMs", 0, 30_000,
+                AmqpSourceStartFailure.INVALID_DRAIN_TIMEOUT);
+        authoredInteger(configuration, "poisonAttempts", 1, 100,
+                AmqpSourceStartFailure.INVALID_POISON_ATTEMPTS);
+        String poisonPolicy = configuration.property("poisonPolicy", "profile");
+        if (!poisonPolicy.equals("profile") && !poisonPolicy.equals("dead-letter")) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_POISON_POLICY);
+        }
+        if (poisonPolicy.equals("dead-letter")
+                && !configuration.property("deadLetterMode", "").equals("broker-dlx")) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_DEAD_LETTER_MODE);
+        }
+        if (!configuration.property("checkpointPolicy", "require-durable").equals("require-durable")) {
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_CHECKPOINT_POLICY);
+        }
+    }
+
+    private static int authoredInteger(NodeConfiguration configuration, String name, int minimum, int maximum,
+                                       AmqpSourceStartFailure reason) {
+        String raw = configuration.property(name, "");
+        if (raw.isEmpty()) return -1;
+        try {
+            int value = Integer.parseInt(raw);
+            if (value < minimum || value > maximum) throw new NumberFormatException();
+            return value;
+        } catch (RuntimeException invalid) {
+            throw sourceFailure(reason);
+        }
+    }
+
+    /** Reuses source-start authority checks without opening a connection or resolving a credential. */
+    static void validateTemplateSettings(NodeConfiguration configuration, AmqpConsumerPolicy policy) {
+        Settings.resolve(configuration, policy);
     }
 
     private static final class FailureStreak {

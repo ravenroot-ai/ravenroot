@@ -73,8 +73,8 @@ public enum AuthorizationAction {
     AGENT_AUTHORITY_CONTROL("ravenroot.agent.authority.control", true),
 
     /** Reserved categories whose use cases are not exposed by the current application API. */
-    /** Reserved graph-mutation permission, not exposed by this API version. */
-    GRAPH_WRITE("ravenroot.graph.write", false),
+    /** Create and mutate tenant-confined graph drafts in the configured source archive. */
+    GRAPH_WRITE("ravenroot.graph.write", true),
     /** Reserved tool-invocation permission, not exposed by this API version. */
     TOOL_INVOKE("ravenroot.tool.invoke", false),
     /** Reserved administrative permission, not exposed by this API version. */
@@ -93,7 +93,17 @@ public enum AuthorizationAction {
     HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true),
 
     /** Discover the caller tenant's process-local deployments that are currently ready to embed. */
-    EMBED_DEPLOYMENT_DISCOVER("ravenroot.embed.deployment.discover", true);
+    EMBED_DEPLOYMENT_DISCOVER("ravenroot.embed.deployment.discover", true),
+
+    /** Read the authenticated author's personal node palettes. */
+    PALETTE_READ("ravenroot.palette.read", true),
+    /** Create, rename, move, or delete the authenticated author's personal node palettes. */
+    PALETTE_MANAGE("ravenroot.palette.manage", true),
+
+    /** Propose a reviewed release in the configured graph repository. */
+    GRAPH_RELEASE("ravenroot.graph.release", true),
+    /** Register a deployment only from a verified immutable published graph artifact. */
+    GRAPH_ARTIFACT_DEPLOY("ravenroot.graph.deploy.published", true);
 
     private final String requiredScope;
     private final boolean available;

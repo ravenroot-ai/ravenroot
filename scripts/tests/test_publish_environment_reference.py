@@ -10,7 +10,9 @@ from scripts import publish_environment_reference as publisher
 
 from scripts.publish_environment_reference import (
     ACTIVITY_CAPTURE_VARIABLES,
+    GRAPH_AUTHORING_VARIABLES,
     INTERACTION_WEBSOCKET_VARIABLES,
+    SYSTEM_ONE_PROFILE_VARIABLES,
     boundary,
     group,
     render,
@@ -20,9 +22,37 @@ from scripts.publish_environment_reference import (
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
+    def test_graph_authoring_bindings_are_exact_and_link_their_operator_contract(self):
+        names = variables()
+        actual = {
+            name for name in names
+            if name.startswith("RAVENROOT_GRAPH_AUTHORING_")
+            or name.startswith("RAVENROOT_GRAPH_ARTIFACT_")
+        }
+        self.assertEqual(GRAPH_AUTHORING_VARIABLES, actual)
+        for name in GRAPH_AUTHORING_VARIABLES:
+            with self.subTest(name=name):
+                self.assertEqual("graph-authoring", group(name))
+                self.assertNotEqual(
+                    "See the linked contract for exact type, default, and applicability.",
+                    boundary(name),
+                )
+
+        section = render().split(
+            "## Graph source control and published artifacts", 1
+        )[1].split("## ", 1)[0]
+        self.assertIn(
+            "../operator-guide/graph-source-control.md#configure-the-source-archive",
+            section,
+        )
+        self.assertIn("defaults to `LOCAL`", section)
+        self.assertIn("defaults to `10485760`", section)
+        self.assertIn("maximum `120000` milliseconds", section)
+        self.assertIn("mutations are never retried blindly", section)
+
     def test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory(self):
         names = publisher.ui_settings()
-        self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_PREFIX",
+        self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_BACKEND_TOKEN", "RAVENROOT_UI_PREFIX",
                           "RAVENROOT_UI_PORT", "RAVENROOT_UI_ROOT"}, set(names))
         self.assertFalse(set(names).intersection(variables()))
         section = render().split("## Independent UI web server", 1)[1]
@@ -149,6 +179,34 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertNotIn("`RAVENROOT_WEBSOCKET_PROFILE_`", listener_section)
         self.assertIn("`RAVENROOT_WEBSOCKET_PROFILE_`", bundle_section)
         self.assertNotIn("`RAVENROOT_WEBSOCKET_ENABLED`", bundle_section)
+
+    def test_system_one_profile_is_an_exact_dynamic_bundle_binding(self):
+        names = variables()
+        actual = {
+            name for name in names if name.startswith("RAVENROOT_SYSTEM_ONE_")
+        }
+        self.assertEqual(SYSTEM_ONE_PROFILE_VARIABLES, actual)
+        name = "RAVENROOT_SYSTEM_ONE_PROFILE_"
+        self.assertEqual("bundle", group(name))
+        self.assertEqual(
+            {"EnvironmentSystemOneProfileResolver.java"},
+            {path.name for path in names[name]},
+        )
+
+        description = boundary(name)
+        self.assertIn("upper-case hexadecimal UTF-8", description)
+        self.assertIn("canonical padded Base64 of strict JSON", description)
+        self.assertIn(
+            "endpoint, model, credential binding, deadlines, limits, and capabilities",
+            description,
+        )
+        self.assertIn("`PROFILE_UNKNOWN` before network I/O", description)
+
+        section = render().split("## Bundle profile", 1)[1].split("## ", 1)[0]
+        self.assertIn("Detailed contract: [Bundle profile](bundles/)", section)
+        self.assertIn(f"| `{name}` | {description} |", section)
+        with self.assertRaisesRegex(ValueError, "RAVENROOT_SYSTEM_ONE_PROFILE_TYPO"):
+            group("RAVENROOT_SYSTEM_ONE_PROFILE_TYPO")
 
     def test_render_names_every_production_literal(self):
         published = render()

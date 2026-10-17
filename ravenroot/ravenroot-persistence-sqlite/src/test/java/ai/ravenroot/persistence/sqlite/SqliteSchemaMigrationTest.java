@@ -10,6 +10,7 @@ import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -75,6 +77,50 @@ class SqliteSchemaMigrationTest {
             assertEquals(SqliteSchema.currentVersion(), SqliteSchema.migrate(connection, CLOCK));
             assertEquals(after, tableNames(connection));
             assertEquals(SqliteSchema.currentVersion(), historyVersions(connection).size());
+        }
+    }
+
+    @Test
+    void intergraphMigrationAcceptsAnExistingTableAndPreservesItsRows() throws Exception {
+        Path file = databaseDirectory.resolve("flow-marker-recovery.db");
+        int flowVersion = SqliteSchema.migrations().stream()
+                .filter(migration -> migration.statements().stream()
+                        .anyMatch(statement -> statement.contains("CREATE TABLE IF NOT EXISTS flow_invocation")))
+                .mapToInt(SchemaMigration::version)
+                .findFirst().orElseThrow(() -> new AssertionError("no intergraph invocation migration"));
+        var handle = new ai.ravenroot.api.flow.FlowHandle(UUID.randomUUID());
+        var callerProcess = UUID.randomUUID();
+        var callerTraversal = UUID.randomUUID();
+        var callerInvocation = UUID.randomUUID();
+        Instant now = CLOCK.instant();
+        var intent = new ai.ravenroot.api.flow.FlowInvocationRecord("acme", handle, callerProcess,
+                callerTraversal, callerInvocation, "alice",
+                ai.ravenroot.api.security.PrincipalType.USER, "issuer",
+                ai.ravenroot.api.deployment.DeploymentId.of("target"), 3, "a".repeat(64),
+                UUID.randomUUID(), UUID.randomUUID(),
+                ai.ravenroot.api.flow.FlowInvocationStatus.INTENT,
+                "preserved-input".getBytes(java.nio.charset.StandardCharsets.UTF_8), null,
+                "", "", null, 1, now, now, now.plusSeconds(60), now.plusSeconds(120));
+
+        try (var store = new SqliteExecutionStore(file, CLOCK)) {
+            store.createFlowInvocation(intent).toCompletableFuture().join();
+        }
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + file);
+             PreparedStatement removeMarker = connection.prepareStatement(
+                     "DELETE FROM store_schema_history WHERE version = ?");
+             Statement statement = connection.createStatement()) {
+            removeMarker.setInt(1, flowVersion);
+            assertEquals(1, removeMarker.executeUpdate());
+            statement.execute("PRAGMA user_version = " + (flowVersion - 1));
+        }
+
+        try (var store = new SqliteExecutionStore(file, CLOCK)) {
+            var restored = store.loadFlowInvocation("acme", handle).toCompletableFuture().join()
+                    .orElseThrow();
+            assertEquals(callerProcess, restored.callerProcessInstanceId());
+            assertEquals(callerTraversal, restored.callerTraversalId());
+            assertEquals(callerInvocation, restored.callerInvocationId());
+            assertArrayEquals(intent.input(), restored.input());
         }
     }
 

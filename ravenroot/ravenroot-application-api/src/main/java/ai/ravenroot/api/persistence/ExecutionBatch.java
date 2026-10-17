@@ -36,6 +36,12 @@ public final class ExecutionBatch {
     private final List<HumanTaskTransition> humanTaskTransitions;
     private final List<ExecutionPauseRegistration> executionPausesToRegister;
     private final List<ExecutionPauseTransition> executionPauseTransitions;
+    private final List<SagaWrite> sagaWrites;
+    private final List<SagaCommandIntent> sagaCommands;
+    private final List<UUID> sagaCommandsToRearm;
+    private final List<ReplayInvocationEvidence> replayEvidence;
+    private final DerivedExecutionAncestry derivedAncestry;
+    private final ReplaySourceSettlement replaySourceExpectation;
 
     private ExecutionBatch(Builder builder) {
         this.runnerOperations = List.copyOf(builder.runnerOperations);
@@ -57,6 +63,12 @@ public final class ExecutionBatch {
         this.humanTaskTransitions = List.copyOf(builder.humanTaskTransitions);
         this.executionPausesToRegister = List.copyOf(builder.executionPausesToRegister);
         this.executionPauseTransitions = List.copyOf(builder.executionPauseTransitions);
+        this.sagaWrites = List.copyOf(builder.sagaWrites);
+        this.sagaCommands = List.copyOf(builder.sagaCommands);
+        this.sagaCommandsToRearm = List.copyOf(builder.sagaCommandsToRearm);
+        this.replayEvidence = List.copyOf(builder.replayEvidence);
+        this.derivedAncestry = builder.derivedAncestry;
+        this.replaySourceExpectation = builder.replaySourceExpectation;
         // Every operation category is named here, and the guard has to grow with each one. An origin
         // counts as an operation: recording a deployment, workload or correlation identity changes
         // stored state and is a legitimate write on its own, which is what lets a caller that learns
@@ -70,7 +82,9 @@ public final class ExecutionBatch {
                 && toolApprovalTransitions.isEmpty()
                 && humanTasksToRegister.isEmpty() && humanTaskTransitions.isEmpty()
                 && executionPausesToRegister.isEmpty() && executionPauseTransitions.isEmpty()
-                && agentBudgetOperations.isEmpty() && runnerOperations.isEmpty()) {
+                && sagaWrites.isEmpty() && sagaCommands.isEmpty() && sagaCommandsToRearm.isEmpty()
+                && agentBudgetOperations.isEmpty() && runnerOperations.isEmpty()
+                && replayEvidence.isEmpty() && derivedAncestry == null) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -326,6 +340,47 @@ public final class ExecutionBatch {
         return executionPauseTransitions;
     }
 
+    /**
+     * Saga aggregate replacements committed under this batch's revision and fencing checks.
+     * @return immutable writes
+     */
+    public List<SagaWrite> sagaWrites() { return sagaWrites; }
+
+    /**
+     * Application commands committed with the saga transitions that created them.
+     * @return immutable commands
+     */
+    public List<SagaCommandIntent> sagaCommands() { return sagaCommands; }
+
+    /**
+     * Exhausted application commands explicitly rearmed by a concurrency-checked operator action.
+     * Message and operation identities remain unchanged; the store grants one fresh bounded attempt
+     * window and retains any broker-acceptance receipt so a lookup-only retry never republishes.
+     * @return immutable message identities to rearm
+     */
+    public List<UUID> sagaCommandsToRearm() { return sagaCommandsToRearm; }
+
+    /** Completed invocation values committed in the same transaction as their terminal transition.
+     * @return immutable evidence in insertion order
+     */
+    public List<ReplayInvocationEvidence> replayEvidence() {
+        return replayEvidence;
+    }
+
+    /** Ancestry admitted atomically with creation of a derived execution.
+     * @return optional derived ancestry
+     */
+    public Optional<DerivedExecutionAncestry> derivedAncestry() {
+        return Optional.ofNullable(derivedAncestry);
+    }
+
+    /** Source proof that must still be current when a derived admission commits.
+     * @return optional source settlement expectation
+     */
+    public Optional<ReplaySourceSettlement> replaySourceExpectation() {
+        return Optional.ofNullable(replaySourceExpectation);
+    }
+
 /**
  * Defines the builder contract exposed to Ravenroot integrators.
  */
@@ -359,6 +414,12 @@ public final class ExecutionBatch {
         private final List<ExecutionPauseTransition> executionPauseTransitions = new ArrayList<>();
         private final List<HumanTaskRegistration> humanTasksToRegister = new ArrayList<>();
         private final List<HumanTaskTransition> humanTaskTransitions = new ArrayList<>();
+        private final List<SagaWrite> sagaWrites = new ArrayList<>();
+        private final List<SagaCommandIntent> sagaCommands = new ArrayList<>();
+        private final List<UUID> sagaCommandsToRearm = new ArrayList<>();
+        private final List<ReplayInvocationEvidence> replayEvidence = new ArrayList<>();
+        private DerivedExecutionAncestry derivedAncestry;
+        private ReplaySourceSettlement replaySourceExpectation;
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -571,6 +632,68 @@ public final class ExecutionBatch {
         public Builder applyExecutionPause(ExecutionPauseTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             executionPauseTransitions.add(transition);
+            return this;
+        }
+
+        /**
+         * Adds one compare-and-set saga aggregate replacement.
+         * @param write replacement
+         * @return this builder
+         */
+        public Builder writeSaga(SagaWrite write) {
+            sagaWrites.add(java.util.Objects.requireNonNull(write, "write"));
+            return this;
+        }
+
+        /**
+         * Adds one durable application command.
+         * @param command command intent
+         * @return this builder
+         */
+        public Builder enqueueSagaCommand(SagaCommandIntent command) {
+            sagaCommands.add(java.util.Objects.requireNonNull(command, "command"));
+            return this;
+        }
+
+        /**
+         * Rearms one exhausted saga command in the same transaction as its operator saga mutation.
+         * @param messageId stable outbox message identity
+         * @return this builder
+         */
+        public Builder rearmSagaCommand(UUID messageId) {
+            sagaCommandsToRearm.add(java.util.Objects.requireNonNull(messageId, "messageId"));
+            return this;
+        }
+
+        /** Adds bounded replay evidence to this atomic write set.
+         * @param evidence completed invocation evidence
+         * @return this builder
+         */
+        public Builder captureReplayEvidence(ReplayInvocationEvidence evidence) {
+            if (evidence == null) throw new IllegalArgumentException("evidence cannot be null");
+            replayEvidence.add(evidence);
+            return this;
+        }
+
+        /** Records immutable derived ancestry in the same transaction as execution admission.
+         * @param ancestry ancestry and self-contained pending work
+         * @return this builder
+         */
+        public Builder recordDerivedAncestry(DerivedExecutionAncestry ancestry) {
+            if (ancestry == null) throw new IllegalArgumentException("ancestry cannot be null");
+            if (derivedAncestry != null) throw new IllegalStateException("derived ancestry is already set");
+            derivedAncestry = ancestry;
+            return this;
+        }
+
+        /** Requires the retained source settlement to remain current through this transaction.
+         * @param settlement exact source proof seen during planning
+         * @return this builder
+         */
+        public Builder requiringReplaySourceSettlement(ReplaySourceSettlement settlement) {
+            if (settlement == null) throw new IllegalArgumentException("settlement cannot be null");
+            if (replaySourceExpectation != null) throw new IllegalStateException("source settlement is already set");
+            replaySourceExpectation = settlement;
             return this;
         }
 

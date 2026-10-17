@@ -162,6 +162,26 @@ class RouteTableSpecServerAgreementTest {
         String deployment = pathEntry(generatedNow, "/v1/deployments/{id}");
         assertTrue(deployment.contains("X-Ravenroot-Undeploy-Disposition"), deployment);
         assertTrue(generatedNow.contains("\"deploymentGeneration\""), generatedNow);
+        String authoredDocument = pathEntry(generatedNow, "/v1/graph-authoring/{id}");
+        assertTrue(authoredDocument.contains("\"get\""), authoredDocument);
+        assertTrue(authoredDocument.contains("\"put\""), authoredDocument);
+        assertTrue(authoredDocument.contains("\"delete\""), authoredDocument);
+        int delete = authoredDocument.indexOf("\"delete\"");
+        int get = authoredDocument.indexOf("\"get\"", delete);
+        String deleteOperation = authoredDocument.substring(delete, get);
+        assertTrue(deleteOperation.contains("\"204\": {\"description\": \"success\"}"), deleteOperation);
+        assertFalse(deleteOperation.contains("\"200\": {\"description\": \"success\"}"), deleteOperation);
+        for (String artifactPath : List.of("/v1/graph-artifacts/{graphId}/{version}/import",
+                "/v1/graph-artifacts/{graphId}/{version}/deploy")) {
+            String artifactOperation = pathEntry(generatedNow, artifactPath);
+            assertTrue(artifactOperation.contains("\"name\": \"expectedSha256\""), artifactOperation);
+            assertTrue(artifactOperation.contains("\"name\": \"expectedArtifactRef\""), artifactOperation);
+            assertTrue(artifactOperation.contains("\"maximum\": 9007199254740991"), artifactOperation);
+            assertTrue(artifactOperation.contains("\"412\""), artifactOperation);
+            assertTrue(artifactOperation.contains("\"422\""), artifactOperation);
+            assertTrue(artifactOperation.contains("\"500\""), artifactOperation);
+            assertTrue(artifactOperation.contains("\"501\""), artifactOperation);
+        }
         for (String outcome : List.of("ACCEPTED", "CONVERGED", "REPLAYED", "IDEMPOTENCY_CONFLICT",
                 "STALE_GENERATION", "SUPERSEDED", "REFUSED", "FAILED", "TERMINAL")) {
             assertTrue(generatedNow.contains("\"" + outcome + "\""), "missing outcome " + outcome);

@@ -29,18 +29,30 @@ import {
 } from './additional-property-groups.js';
 import {
   detectAndParse,
+  fetchInputTextWithinByteLimit,
   GFY_MAX_WARN,
   GFY_SAMPLE,
+  GRAPH_INPUT_REJECTION_REASONS,
+  GraphInputRejection,
   loadLocalGraphInput,
-  loadUrlGraphInput,
   sampleLargeGraph,
 } from './graph-parsers.js';
+import {
+  createStartupImportController,
+  StartupImportError,
+} from './startup-import.js';
+import {
+  captureWorkspaceRestoreBaseline,
+  stableUserPresentationFingerprint,
+  workspaceMatchesRestoreBaseline,
+} from './workspace-restore-guard.js';
 import {
   DEFAULT_EDGE_OUTCOME,
   NODE_KINDS,
   additionalProperties,
   classifyFailureRoutes,
   createEdge,
+  createEmptyWorkflowDocument,
   createNode,
   createWorkflowDocument,
   declaredJoinKind,
@@ -48,6 +60,7 @@ import {
   edgeFailureRouteKind,
   effectiveJoinArrival,
   hasDeclaredJoinSemantics,
+  isEmptyWorkflowDocument,
   JOIN_KIND_OPTIONS,
   JOIN_KIND_UNRECOGNIZED,
   JOIN_POLICY_PROPERTY,
@@ -76,6 +89,7 @@ import {
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
+import { renderNodePalettes } from './node-palette-view.js';
 import { namedAgentPresets } from './named-agent-presets.js';
 import {
   availableRegisterMachinePresets,
@@ -177,7 +191,16 @@ import {
   natureRiskText,
 } from './node-nature.js';
 import { resolveOutcomes, unreachableOutcome } from './node-outcomes.js';
-import { RavenrootRuntimeClient, memoryTokenProvider } from './runtime-client.js';
+import { RavenrootRuntimeClient } from './runtime-client.js';
+import { createRememberedConnection, connectionService } from './remembered-connection.js';
+import {
+  AUTHORING_CAPABILITY_STATE,
+  loadAuthoringCapability,
+  pendingAuthoringCapability,
+  primaryPersistenceTarget,
+  runPrimaryPersistence,
+  unavailableAuthoringCapability,
+} from './authoring-capability.js';
 import {
   captureSourceSessionToken,
   effectiveSourceCount,
@@ -208,6 +231,13 @@ import {
 } from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
+import {
+  applyAcceptedGraphMl,
+  GraphAuthoringClient,
+  decodeGraphMl,
+  parseAuthoredReleaseVersion,
+  repositorySourceStatus,
+} from './graph-authoring-client.js';
 import {
   applyAssistantGraphProposal,
   catalogProposalDigest,
@@ -309,6 +339,7 @@ import {
 import {
   addConnectedNodeAt,
   addNodeAt,
+  addTemplateNodeAt,
   canDuplicateNode,
   canModifyGraph as graphCanModify,
   connectNodes,
@@ -348,7 +379,10 @@ import {
   createCommandHistory,
   discardChangesMessage,
   shouldWarnBeforeUnload,
+  updateGraphPropertiesCommand,
 } from './graph-commands.js';
+import { createDrawingModelController } from './drawing-model-controller.js';
+import { createFrontendPluginSandbox } from './frontend-plugin-sandbox.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
@@ -784,6 +818,7 @@ let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scop
 const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
+  startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
   workspaceRestoreInProgress = false;
@@ -794,6 +829,7 @@ function beginWorkspaceAuthority(client, state = 'pending') {
   void credentialsWindow?.setClient(null);
   runnerWindow?.setClient(null);
   void deploymentsWindow?.setClient(null);
+  clearPersonalPalettes();
   refreshCommands();
   return workspaceAuthority.generation;
 }
@@ -899,6 +935,10 @@ function removeAllWorkspaceDocuments() {
   projectWorkspaceAfterDocumentClose();
 }
 
+function workspaceSwitchFailure(code) {
+  return Object.freeze({ failed: true, code });
+}
+
 async function switchWorkspacePersistence(configuration, client) {
   const nextScope = configuration?.workspace
     ? workspaceScope(normalizedWorkspaceServiceUrl(client), configuration.workspace.tenantId) : null;
@@ -916,16 +956,19 @@ async function switchWorkspacePersistence(configuration, client) {
         && !editHistory.isDirty())) {
     workspacePersistenceReason = 'Session-only documents remain open and exportable. Close or export them before reconnecting to restore the authenticated workspace.';
     syncPaneHeaders();
-    return false;
+    return workspaceSwitchFailure('current-session-conflict');
   }
   if (activeWorkspaceScope) {
     if (!workspacePersistenceWritable) {
       workspacePersistenceReason = 'This workspace could not be saved, so it remains open to prevent data loss.';
       syncPaneHeaders();
-      return false;
+      return workspaceSwitchFailure('persistence-unavailable');
     }
     await flushWorkspacePersistence({ allowSuspended: true });
-    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
+    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) {
+      return workspaceSwitchFailure(transition !== workspacePersistenceGeneration
+        ? 'stale-transition' : 'persistence-unavailable');
+    }
   }
   if (!nextScope) {
     removeAllWorkspaceDocuments();
@@ -936,12 +979,23 @@ async function switchWorkspacePersistence(configuration, client) {
     return null;
   }
   workspaceRestoreInProgress = true;
+  captureActiveDocument();
+  const restoreBaseline = captureWorkspaceRestoreBaseline(workspace);
   try {
     const restored = await workspaceSnapshotReader(nextScope);
-    if (transition !== workspacePersistenceGeneration) return false;
+    if (transition !== workspacePersistenceGeneration) return workspaceSwitchFailure('stale-transition');
+    captureActiveDocument();
+    if (!workspaceMatchesRestoreBaseline(workspace, restoreBaseline)) {
+      workspacePersistenceReason = 'Stored documents are ready, but the current session changed while they were loading. Your current documents remain open; reconnect when you are ready to restore the stored workspace.';
+      syncActiveDocumentChrome();
+      return workspaceSwitchFailure('current-session-changed');
+    }
     if (activeWorkspaceScope) {
       await flushWorkspacePersistence({ allowSuspended: true });
-      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
+      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) {
+        return workspaceSwitchFailure(transition !== workspacePersistenceGeneration
+          ? 'stale-transition' : 'persistence-unavailable');
+      }
     }
     removeAllWorkspaceDocuments();
     activeWorkspaceScope = nextScope;
@@ -952,6 +1006,7 @@ async function switchWorkspacePersistence(configuration, client) {
           name: stored.name, displayName: stored.displayName, graph: stored.graph,
           documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
           provenance: stored.provenance, presentation: stored.presentation,
+          authoring: stored.authoring,
         });
       }
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
@@ -963,12 +1018,12 @@ async function switchWorkspacePersistence(configuration, client) {
     }
     workspacePersistenceWritable = true;
     return nextScope;
-  } catch (error) {
-    if (transition !== workspacePersistenceGeneration) return;
+  } catch {
+    if (transition !== workspacePersistenceGeneration) return workspaceSwitchFailure('stale-transition');
     // Keep both the unreadable snapshot and current visible workspace untouched. Writes never open
     // for the failed scope, so a recovery view cannot overwrite recoverable stored documents.
-    workspacePersistenceReason = `Stored documents could not be restored: ${error.message}`;
-    return false;
+    workspacePersistenceReason = 'Stored documents could not be restored. Current documents and stored data were left unchanged; reconnect to retry.';
+    return workspaceSwitchFailure('restore-failed');
   } finally {
     if (transition === workspacePersistenceGeneration) {
       workspaceRestoreInProgress = false;
@@ -1001,11 +1056,34 @@ let fontSize = DEFAULT_FONT_SIZE;
 let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
+let graphAuthoringClient = null;
+let activeAuthoring = null;
+let graphAuthoringUnavailable = false;
 let runtimeDisconnect = null;
 let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
+let graphAuthoringCapability = pendingAuthoringCapability();
 let runtimeConnectionGeneration = 0;
-const runtimeTokenProvider = memoryTokenProvider();
+let startupImportController = null;
+let startupImportPlaceholder = null;
+let invalidStartupImportVisible = false;
+const startupService = connectionService(document.getElementById('service-url').defaultValue, location.origin);
+const startupServerAuth = document.getElementById('service-url').dataset.serverAuth === 'true';
+const rememberedConnection = createRememberedConnection({
+  origin: location.origin,
+  onRejection: () => { void revokeRuntimeAccess(true); },
+  onChange: state => {
+    hasRuntimeToken = state.hasToken;
+    const input = document.getElementById('access-token');
+    input.placeholder = state.remembered ? 'saved in this browser' : state.hasToken ? 'token in memory' : 'paste token';
+    if (state.notice) {
+      const status = document.getElementById('runtime-connection');
+      status.title = state.notice;
+      status.setAttribute('aria-label', `Runtime status: ${status.textContent}. ${state.notice}`);
+    }
+    refreshCommands();
+  },
+});
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;
 const PROGRAM_OUTPUT_DISPLAY_LIMIT = 8 * 1024;
@@ -1020,6 +1098,7 @@ let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
 let nodeTypeCatalog = [];
 let namedAgentCatalog = [];
+let nodePaletteState = { pending: false, error: '', palettes: [], templates: [] };
 // Why the palette is empty, kept apart from the catalog itself: a failed request and a service
 // that legitimately has nothing to offer are different states and are shown differently.
 let nodeCatalogFailure = null;
@@ -1075,18 +1154,6 @@ function readHumanTaskSelection() {
 function sameHumanTaskSelection(left, right) {
   return Boolean(left && right && left.serviceOrigin === right.serviceOrigin
     && left.taskId === right.taskId && left.generation === right.generation);
-}
-
-function restoreHumanTaskServiceOrigin() {
-  const locator = readHumanTaskSelection();
-  if (!locator || typeof locator.serviceOrigin !== 'string' || !locator.serviceOrigin) return;
-  try {
-    const target = new URL(locator.serviceOrigin);
-    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
-    document.getElementById('service-url').value = locator.serviceOrigin;
-  } catch {
-    clearHumanTaskSelection();
-  }
 }
 
 function focusHumanTaskInspector() {
@@ -1221,7 +1288,7 @@ function receiveHumanTaskProjection(state) {
       + `${escalated ? `; ${escalated} escalated` : ''}.` : 'No Human Tasks need attention.');
   }
   if (state.kind === 'ready' && !humanTaskDecisionDialog?.selected()) {
-    void recoverHumanTaskSelection(owner);
+    if (!document.getElementById('remember-connection-dialog').open) void recoverHumanTaskSelection(owner);
   }
 }
 
@@ -1230,7 +1297,7 @@ function configureHumanTasks(owner = workspace.active) {
   const authorized = tenantAuthorityAllows(owner);
   const configured = humanTaskController?.configure(authorized ? runtimeClient : null,
     authorized ? currentHumanTaskCapability() : null, owner);
-  void recoverHumanTaskSelection(owner);
+  if (!document.getElementById('remember-connection-dialog').open) void recoverHumanTaskSelection(owner);
   return configured;
 }
 
@@ -2501,6 +2568,7 @@ function captureActiveDocument() {
   document_.graph = graphData;
   document_.incarnation = activeDocumentIncarnation;
   document_.history = editHistory;
+  document_.authoring = activeAuthoring;
   document_.name = graphName;
   document_.displayName = graphDisplayName;
   document_.renderMode = renderMode;
@@ -2586,6 +2654,7 @@ function applyActiveDocument() {
   graphData = document_?.graph ?? null;
   activeDocumentIncarnation = document_?.incarnation ?? null;
   editHistory = document_?.history ?? createCommandHistory();
+  activeAuthoring = document_?.authoring ?? null;
   graphName = document_?.name ?? 'untitled.graphml';
   graphDisplayName = document_?.displayName ?? graphName;
   const presentation = documentPresentationState(document_);
@@ -2678,6 +2747,7 @@ window.ravenroot = {
   // editor would actually write rather than against a separately loaded copy of the module.
   serializeGraphML: graph => serializeGraphML(graph),
   graphDocumentByteLimit: currentGraphDocumentByteLimit,
+  startupImport: () => startupImportController?.snapshot() ?? null,
   flushWorkspacePersistence,
   workspacePersistence: () => ({
     scope: activeWorkspaceScope ? { serviceUrl: activeWorkspaceScope.serviceUrl,
@@ -2699,6 +2769,7 @@ window.ravenroot = {
   _setWorkspaceSnapshotReaderForTest: reader => {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
+  _createFrontendPluginSandboxForTest: (source, options) => createFrontendPluginSandbox(source, options),
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -2782,9 +2853,41 @@ function paneIsDirty(document_) {
 
 function documentModeLabel(document_) {
   if (!document_) return 'No document';
+  const authoring = document_.authoring;
+  if (authoring?.providerDocumentId) {
+    const { sourceState, version, releaseState, publicationState } = repositorySourceStatus(authoring);
+    const revision = authoring.draftDeleted ? authoring.revision?.release
+      : authoring.revision?.draft !== 'absent' ? authoring.revision?.draft : authoring.revision?.release;
+    const sourceRevision = typeof revision === 'string' && revision !== 'absent'
+      ? revision.split(':', 1)[0].slice(0, 12) : 'revision pending';
+    const editState = authoring.saveFlight ? 'Saving…' : authoring.saveError ? 'Save failed'
+      : graphAuthoringUnavailable ? 'Repository unavailable'
+        : paneIsDirty(document_) ? 'Unsaved edits' : null;
+    return [sourceState, version, sourceRevision, releaseState, publicationState, editState]
+      .filter(Boolean).join(' · ');
+  }
   const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
     : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
-  return document_.tenantId === null ? `${label} · session only` : label;
+  const local = document_.tenantId === null ? `${label} · session only` : label;
+  if (graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.PENDING) {
+    return `${local} · Authoring capability pending`;
+  }
+  if (graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.UNAVAILABLE) {
+    return `${local} · Authoring unavailable`;
+  }
+  return graphAuthoringUnavailable ? `${local} · Repository unavailable` : local;
+}
+
+function syncGraphModeLabel() {
+  const mode = window.document.getElementById('graph-mode-label');
+  if (!mode) return;
+  const active = workspace.active;
+  mode.textContent = active
+    ? `${documentModeLabel(active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  if (active?.authoring?.providerDocumentId) {
+    const revision = active.authoring.revision || {};
+    mode.title = `Draft revision: ${revision.draft || 'absent'}; release revision: ${revision.release || 'absent'}; publication revision: ${revision.publication || 'absent'}`;
+  } else mode.removeAttribute('title');
 }
 
 let maximizedDocumentId = null;
@@ -3503,12 +3606,13 @@ function initLoadedGraph(graph, currentStyle) {
 }
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
-  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null } = {}) {
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null } = {}) {
   const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
     documentId, tenantId, mode, provenance,
     presentation: presentation || graphPresentation,
   });
+  if (authoring) Object.assign(document_.authoring, structuredClone(authoring));
   if (graph) {
     graphName = name;
     graphDisplayName = document_.displayName;
@@ -3850,6 +3954,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
     if (humanTaskController) void configureHumanTasks(document_);
+    drawingModelController?.scheduleRefresh(document_.id);
   }
   refreshCommands();
 }
@@ -3878,9 +3983,7 @@ function syncActiveDocumentChrome() {
   const hasDocument = Boolean(workspace.active);
   window.document.getElementById('graph-title').textContent = hasDocument ? graphDisplayName : 'No graph loaded';
   window.document.title = hasDocument ? `${graphDisplayName} — Ravenroot UI` : 'Ravenroot UI';
-  const modeLabel = window.document.getElementById('graph-mode-label');
-  if (modeLabel) modeLabel.textContent = hasDocument
-    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  syncGraphModeLabel();
   // Play is shared chrome and has to describe the document in front of the user: with one button and
   // several documents, a run still in flight in one of them must not lock the others out.
   //
@@ -3904,6 +4007,7 @@ function syncActiveDocumentChrome() {
   syncSourceSessionChrome(workspace.active);
   syncProgramReadinessChrome(workspace.active);
   refreshCommands();
+  void drawingModelController?.reload();
 }
 
 function syncExecutionReconciliationChrome(hasDocument) {
@@ -4938,7 +5042,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
       bypassed: Boolean(n.data('bypassed')),
       labelSide: layeredLabelSide(owner?.layoutMode),
     }));
-    applyRuntimeVisual(n);
+    applyRuntimeVisual(n, owner);
   });
   // Restated after the per-node style above, which writes this family's placement inline: a
   // restyle must not drag the names back under the cards of a top-down drawing.
@@ -6679,7 +6783,7 @@ function syncGraphRendererInPlace({
       element.data(next.data);
       if (restoreModelPositionIds?.has(id)) element.position(next.position);
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(element, owner);
-      else applyRuntimeVisual(element);
+      else applyRuntimeVisual(element, owner);
       const after = {
         x: element.position('x'), y: element.position('y'),
         width: element.width(), height: element.height(),
@@ -8242,7 +8346,7 @@ function programPhase(owner, nodeId, result) {
     const runtimeState = phase === 'READY' ? 'completed'
       : phase === 'FAILED' || phase === 'RETIRED' || result.transportError ? 'failed' : 'idle';
     node.data('runtimeState', runtimeState);
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, nodeId, 0, runtimeState);
   }
   if (owner === workspace.active) {
@@ -8438,7 +8542,7 @@ function resetProgramGeneration(owner, state, plan) {
     if (!node?.length) return;
     node.removeData('programPhase');
     node.data('runtimeState', 'idle');
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, model.id, 0, 'idle');
   });
 }
@@ -9542,6 +9646,141 @@ function renderNodeCatalog() {
   });
 }
 
+function renderPersonalPalettes() {
+  const container = document.getElementById('node-palettes');
+  if (!container) return;
+  renderNodePalettes(container, nodePaletteState, {
+    onCreatePalette: async name => paletteMutation(() => runtimeClient.createNodePalette(name)),
+    onSave: palette => saveSelectedNodeTemplate(palette),
+    onRename: palette => {
+      const name = globalThis.prompt('Palette name', palette.name)?.trim();
+      if (name && name !== palette.name) void paletteMutation(
+        () => runtimeClient.renameNodePalette(palette.id, palette.version, name));
+    },
+    onDelete: palette => {
+      if (globalThis.confirm(`Delete “${palette.name}” and its saved nodes?`)) void paletteMutation(
+        () => runtimeClient.deleteNodePalette(palette.id, palette.version));
+    },
+    onInsert: template => insertSavedTemplate(template),
+    onDragStart: (event, template) => {
+      event.dataTransfer?.setData('application/x-ravenroot-node-template', template.id);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+    },
+    onRenameTemplate: template => {
+      const name = globalThis.prompt('Saved node name', template.name)?.trim();
+      if (name && name !== template.name) void paletteMutation(() => runtimeClient.updateNodeTemplate(
+        template.id, template.version, template.paletteId, name));
+    },
+    onMoveTemplate: (template, paletteId) => {
+      if (paletteId !== template.paletteId) void paletteMutation(() => runtimeClient.updateNodeTemplate(
+        template.id, template.version, paletteId, template.name));
+    },
+    onDeleteTemplate: template => {
+      if (globalThis.confirm(`Delete saved node “${template.name}”?`)) void paletteMutation(
+        () => runtimeClient.deleteNodeTemplate(template.id, template.version));
+    },
+  });
+}
+
+function clearPersonalPalettes() {
+  nodePaletteState = { pending: false, error: '', palettes: [], templates: [] };
+  renderPersonalPalettes();
+}
+
+async function loadPersonalPalettes(client = runtimeClient) {
+  if (!client) return;
+  nodePaletteState = { ...nodePaletteState, pending: true, error: '' };
+  renderPersonalPalettes();
+  try {
+    const result = await client.nodePalettes();
+    if (client !== runtimeClient || result?.schemaVersion !== 1
+        || !Array.isArray(result.palettes) || !Array.isArray(result.templates)) return;
+    nodePaletteState = { pending: false, error: '', palettes: result.palettes, templates: result.templates };
+  } catch (error) {
+    if (client !== runtimeClient) return;
+    nodePaletteState = { pending: false, error: error.message || 'Personal palettes are unavailable',
+      palettes: [], templates: [] };
+  }
+  renderPersonalPalettes();
+}
+
+async function paletteMutation(operation) {
+  if (!runtimeClient) return;
+  try {
+    await operation();
+    await loadPersonalPalettes(runtimeClient);
+  } catch (error) {
+    showInspectorMessage(error.message || 'Personal palette update failed.');
+    addActivityMessage('palette', error.message || 'Personal palette update failed', 'failed');
+  }
+}
+
+function saveSelectedNodeTemplate(palette) {
+  const selected = cy?.nodes(':selected');
+  if (!modifyEnabled || !selected || selected.length !== 1) {
+    showInspectorMessage('Select exactly one node in Editing before saving it.');
+    return;
+  }
+  const node = graphData.nodeMap[selected.first().id()];
+  if (!node) return;
+  const name = globalThis.prompt('Saved node name', node.name || node.id)?.trim();
+  if (!name) return;
+  void paletteMutation(() => runtimeClient.createNodeTemplate(palette.id, name, {
+    name: node.name, kind: node.kind, behavior: node.behavior || '',
+    nodeType: node.nodeType || '', classname: node.classname || '',
+    description: node.description || '', width: node.ow, height: node.oh,
+    properties: { ...(node.properties || {}) },
+  }));
+}
+
+async function insertSavedTemplate(template, position = null, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard) return runAfterInspectorDraft(() =>
+    insertSavedTemplate(template, position, { skipDraftGuard: true }));
+  if (!modifyEnabled || !canModifyGraph(graphData, layoutMode) || layoutBusy) {
+    showInspectorMessage('Switch to Editing before inserting a saved node.');
+    return null;
+  }
+  const owner = workspace.active;
+  const graph = graphData;
+  const history = editHistory;
+  const revision = history.revision();
+  const client = runtimeClient;
+  if (!client) {
+    showInspectorMessage('Connect to the service before inserting a saved node.');
+    return null;
+  }
+  try {
+    await client.validateNodeTemplate(template.id);
+  } catch (error) {
+    showInspectorMessage(error.message || 'The saved node is no longer valid for this tenant.');
+    addActivityMessage('palette', error.message || 'Saved node validation failed', 'failed');
+    return null;
+  }
+  if (runtimeClient !== client || workspace.active !== owner || graphData !== graph
+      || editHistory !== history || history.revision() !== revision) {
+    showInspectorMessage('The workflow changed while the saved node was being validated. Try again.');
+    return null;
+  }
+  if (!position) {
+    const rect = cy.container()?.getBoundingClientRect();
+    if (!rect) return null;
+    position = modelPositionFromClient({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      rect, cy.pan(), cy.zoom());
+  }
+  const result = addTemplateNodeAt(graph, position, template, history);
+  if (!result.node) {
+    showInspectorMessage(`Cannot insert saved node: ${result.reason}.`);
+    announceGraph(result.reason);
+    return null;
+  }
+  cy.add(buildElements({ nodes: [result.node], edges: [] }));
+  cy.batch(() => applyVisualStyle(visualStyle, cy, workspace.active));
+  updateStats(); scheduleMinimap(); updateHistoryUi();
+  showNodeInfo(cy.getElementById(result.node.id));
+  addActivityMessage('editor', `Inserted saved node ${template.name}`, 'completed');
+  return result.node;
+}
+
 function selectCatalogNodeType(behavior) {
   if (!catalogDescriptor(behavior)) return;
   selectedCatalogBehavior = behavior;
@@ -9903,6 +10142,19 @@ function newWorkflow() {
   addActivityMessage('editor', 'Minimal Start → Do something → {End, Error} workflow created', 'completed');
 }
 
+function createStartupImportPlaceholder() {
+  setModifyMode(false);
+  activeDocumentIncarnation = createDocumentIncarnation();
+  graphData = createEmptyWorkflowDocument();
+  editHistory.reset();
+  updateHistoryUi();
+  graphName = 'untitled.graphml';
+  document.getElementById('graph-title').textContent = graphName;
+  document.title = graphName + ' — Ravenroot UI';
+  initCy(buildElements(graphData), graphData);
+  clearActivity();
+}
+
 function showAddNodeForm({ skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => showAddNodeForm({ skipDraftGuard: true }));
@@ -10194,6 +10446,7 @@ function updateHistoryUi() {
   if (exportButton) {
     exportButton.classList.toggle('primary', dirty && graphData?.format !== 'graphify');
   }
+  syncGraphModeLabel();
   // The pane strip carries the same `*` this indicator carries, for the document it names. Hooked
   // here because this already runs on every edit, undo, redo and save: a modified marker that
   // updated on document switch alone would be wrong for as long as the user kept editing.
@@ -10240,9 +10493,7 @@ function setModifyMode(enabled) {
     button.classList.toggle('active', modifyEnabled);
     button.setAttribute('aria-label', modifyEnabled ? 'Editing mode active' : 'Switch to Editing mode');
   }
-  const mode = document.getElementById('graph-mode-label');
-  if (mode) mode.textContent = workspace.active
-    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
+  syncGraphModeLabel();
   document.getElementById('cy-wrap')?.classList.toggle('modify-on', modifyEnabled);
   applyCanvasInteraction();
   updateConnectButton();
@@ -11499,30 +11750,49 @@ function syncGraphPositions() {
 async function connectRuntime(atBoot = false) {
   const connectionGeneration = ++runtimeConnectionGeneration;
   const authorityGeneration = beginWorkspaceAuthority(null);
+  graphAuthoringCapability = pendingAuthoringCapability();
+  refreshCommands();
+  syncGraphModeLabel();
   const input = document.getElementById('service-url');
   const baseUrl = input.value.trim().replace(/\/$/, '');
+  try { rememberedConnection.select(baseUrl); } catch (error) {
+    setRuntimeConnectionState('error', error.message);
+    const outcome = { kind: 'error', code: 'invalid-service-url',
+      message: 'Enter a valid Ravenroot service URL, then retry the import.' };
+    startupImportController?.updateRuntime(outcome);
+    return outcome;
+  }
   input.value = baseUrl;
+  const runtimeTokenProvider = rememberedConnection.provider(baseUrl);
   if (baseUrl) {
     let target;
     try {
       target = new URL(baseUrl, location.origin);
       if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
     } catch {
-      return setRuntimeConnectionState('error', 'Enter a valid HTTP(S) service URL');
+      setRuntimeConnectionState('error', 'Enter a valid HTTP(S) service URL');
+      const outcome = { kind: 'error', code: 'invalid-service-url',
+        message: 'Enter a valid Ravenroot service URL, then retry the import.' };
+      startupImportController?.updateRuntime(outcome);
+      return outcome;
     }
     if (target.origin !== location.origin && confirmedServiceOrigin !== target.origin) {
       // A page load must never raise a confirmation the user did not ask for. The field ships
       // empty, so this only happens when a browser restores a cross-origin value across a reload:
       // the token stays put and the decision waits for the user's next deliberate action.
       if (atBoot) {
-        return setRuntimeConnectionState('authentication-required',
+        setRuntimeConnectionState('authentication-required',
           'Confirm the external service origin to connect');
+        const outcome = { kind: 'service-confirmation-required' };
+        startupImportController?.updateRuntime(outcome);
+        return outcome;
       }
       const accepted = globalThis.confirm(
         `Connect Ravenroot UI to the external service origin exactly as shown?\n\n${target.origin}\n\n` +
-        'The in-memory bearer token will be sent to this origin.');
+        'The bearer token for this connection will be sent to this origin. Remembering a connection does not bypass this confirmation.');
       if (!accepted) {
         input.value = '';
+        rememberedConnection.select('');
         // Declining ends the previous connection as well. Every other path through this function
         // replaces the client; leaving it running here kept a connection alive that no longer
         // matched the now-empty field, and its transport retries overwrote the very message that
@@ -11533,19 +11803,29 @@ async function connectRuntime(atBoot = false) {
         runtimeClient = null;
         runtimeConfigurationRequest = null;
         runtimeConfiguration = null;
+        graphAuthoringCapability = unavailableAuthoringCapability(
+          new Error('External service connection was cancelled'));
+        refreshCommands();
+        syncGraphModeLabel();
         void configureHumanTasks();
-        return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
+        setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
+        const outcome = { kind: 'service-confirmation-required' };
+        startupImportController?.updateRuntime(outcome);
+        return outcome;
       }
       confirmedServiceOrigin = target.origin;
     }
   }
   await flushWorkspacePersistence({ allowSuspended: true });
-  if (connectionGeneration !== runtimeConnectionGeneration) return;
+  if (connectionGeneration !== runtimeConnectionGeneration) return { kind: 'superseded' };
   if (runtimeDisconnect) runtimeDisconnect();
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
   });
+  graphAuthoringClient = new GraphAuthoringClient(baseUrl, { tokenProvider: runtimeTokenProvider });
   namedAgentCatalog = [];
+  nodePaletteState = { pending: true, error: '', palettes: [], templates: [] };
+  renderPersonalPalettes();
   // The assistant reaches THE SAME Ravenroot service with THE SAME user authentication, and
   // nothing else — it has no base URL of its own to be pointed elsewhere. That is what makes "a
   // denial to the user is a denial to the panel" true here rather than merely intended, and it is
@@ -11564,12 +11844,22 @@ async function connectRuntime(atBoot = false) {
   assistantClient = null;
   void refreshAssistantAvailability();
   runtimeConfiguration = null;
-  runtimeConfigurationRequest = connectedClient.configuration().then(async configuration => {
-    const result = { client: connectedClient, configuration, error: null };
+  graphAuthoringCapability = pendingAuthoringCapability();
+  refreshCommands();
+  runtimeConfigurationRequest = loadAuthoringCapability(connectedClient).then(async result => {
+    const { configuration } = result;
     if (runtimeClient === connectedClient) {
+      graphAuthoringCapability = result.capability;
+      refreshCommands();
+      syncGraphModeLabel();
+      if (result.error || !configuration) {
+        failWorkspaceAuthority(connectedClient, authorityGeneration,
+          `Workspace authority could not be verified: ${result.error?.message || 'configuration unavailable'}`);
+        return result;
+      }
       runtimeConfiguration = result;
       const scope = await switchWorkspacePersistence(configuration, connectedClient);
-      if (scope !== false && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
+      if (!scope?.failed && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
         assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
         void refreshAssistantAvailability();
         void credentialsWindow?.setClient(
@@ -11578,36 +11868,35 @@ async function connectRuntime(atBoot = false) {
         runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
-      } else if (scope === false) {
+        void loadPersonalPalettes(connectedClient);
+      } else if (scope?.failed) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
       }
+      if (scope?.failed) return Object.freeze({ ...result, workspaceFailure: scope.code });
     }
     return result;
-  }).catch(error => {
-    if (runtimeClient === connectedClient) {
-      runtimeConfiguration = null;
-      failWorkspaceAuthority(connectedClient, authorityGeneration,
-        `Workspace authority could not be verified: ${error.message}`);
-    }
-    return { client: connectedClient, configuration: null, error };
   });
   const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
-    atBoot ? 'Connecting to the service — the access token is kept in memory only'
-      : 'Connecting with an in-memory bearer token');
+    atBoot ? 'Connecting to the service' : 'Connecting to the selected service');
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
     runtimeDisconnect = runtimeClient.connect(
       event => deliverRuntimeEventAfterAuthority(event, connectedClient, connectedConfigurationRequest),
       (status, message) => {
+        if (runtimeClient !== connectedClient) return;
         setRuntimeConnectionState(status, message);
-        if (status === 'connected') void configureHumanTasks();
+        if (status === 'connected') {
+          void rememberedConnection.authenticated(confirmRememberConnection);
+          void configureHumanTasks();
+        }
       });
     connectedClient.nodeTypes().then(async catalog => {
       await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
+      void rememberedConnection.authenticated(confirmRememberConnection);
       nodeTypeCatalog = catalog;
       namedAgentCatalog = [];
       if (catalog.some(type => type.behavior === 'workspace')) {
@@ -11635,24 +11924,86 @@ async function connectRuntime(atBoot = false) {
       addActivityMessage('catalog', catalogEmptyState(error, []).message, 'failed');
     });
   } catch (error) {
+    graphAuthoringCapability = unavailableAuthoringCapability(error);
+    refreshCommands();
+    syncGraphModeLabel();
     nodeCatalogPending = false;
     renderNodeCatalog();
     setRuntimeConnectionState('error', error.message);
     addActivityMessage('connection', error.message, 'failed');
+    const outcome = { kind: 'error', code: 'connection-failed',
+      message: 'The Ravenroot service connection failed. Retry when the service is available.' };
+    startupImportController?.updateRuntime(outcome);
+    return outcome;
   }
+  const configurationResult = await connectedConfigurationRequest;
+  if (connectionGeneration !== runtimeConnectionGeneration || runtimeClient !== connectedClient) {
+    return { kind: 'superseded' };
+  }
+  let outcome;
+  if (configurationResult.error || !configurationResult.configuration) {
+    outcome = [401, 403].includes(configurationResult.error?.status)
+      ? { kind: 'authentication-required' }
+      : { kind: 'error', code: 'configuration-unavailable',
+        message: 'The service did not provide valid graph-loading configuration. Fix the connection and retry.' };
+  } else if (workspaceAuthority.state === 'ready' && workspaceAuthority.client === connectedClient
+      && workspaceAuthority.generation === authorityGeneration && !workspaceRestoreInProgress) {
+    outcome = { kind: 'ready', binding: startupImportBinding() };
+  } else {
+    const workspaceFailure = configurationResult.workspaceFailure;
+    const failures = {
+      'current-session-conflict': 'Current session documents must remain open. Close or export them, reconnect, and retry the import.',
+      'current-session-changed': 'The stored workspace was not replaced because the current documents changed. Reconnect when you are ready, then retry the import.',
+      'persistence-unavailable': 'The current workspace could not be saved safely. Keep or export the open documents, then retry the connection.',
+      'restore-failed': 'The stored workspace could not be restored. Current documents and stored data were left unchanged; retry the connection.',
+      'stale-transition': 'The service or workspace changed before restoration completed. Retry in the current workspace.',
+    };
+    outcome = { kind: 'error', code: workspaceFailure || 'workspace-not-ready',
+      message: failures[workspaceFailure]
+        || 'The workspace is not ready for an import. Reconnect when ready, then retry.' };
+  }
+  startupImportController?.updateRuntime(outcome);
+  return outcome;
+}
+
+function confirmRememberConnection(service) {
+  // Consent and restored task confirmation must not compete in the native modal stack.
+  suspendHumanTaskRecovery();
+  const dialog = document.getElementById('remember-connection-dialog');
+  document.getElementById('remember-connection-service').textContent = service;
+  const origin = document.activeElement;
+  return new Promise(resolve => {
+    const finish = accepted => {
+      dialog.removeEventListener('close', close);
+      dialog.close();
+      if (origin?.isConnected) origin.focus({ preventScroll: true });
+      resolve(accepted);
+      void configureHumanTasks();
+    };
+    const close = () => finish(dialog.returnValue === 'remember');
+    dialog.returnValue = 'decline';
+    dialog.addEventListener('close', close, { once: true });
+    dialog.showModal();
+    dialog.querySelector('[value="decline"]').focus();
+  });
 }
 
 function authenticateRuntime() {
   const input = document.getElementById('access-token');
   const token = input.value.trim();
   input.value = '';
+  if (!token && hasRuntimeToken) {
+    // Authenticate also confirms a restored external connection whose password field stays blank.
+    void connectRuntime();
+    return;
+  }
   if (!token) {
     setRuntimeConnectionState('authentication-required', 'Paste an access token to authenticate');
     input.focus();
     return;
   }
-  runtimeTokenProvider.setAccessToken(token);
-  hasRuntimeToken = true;
+  try { rememberedConnection.authenticate(document.getElementById('service-url').value, token); }
+  catch (error) { setRuntimeConnectionState('error', error.message); return; }
   // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
   // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
   suspendHumanTaskRecovery();
@@ -11660,18 +12011,23 @@ function authenticateRuntime() {
   connectRuntime();
 }
 
-async function revokeRuntimeAccess() {
+async function revokeRuntimeAccess(rejected = false) {
   const connectionGeneration = ++runtimeConnectionGeneration;
   beginWorkspaceAuthority(null, 'revoked');
-  await flushWorkspacePersistence({ allowSuspended: true });
+  if (rejected) startupImportController?.updateRuntime({ kind: 'authentication-required' });
+  if (!rejected) await flushWorkspacePersistence({ allowSuspended: true });
   if (connectionGeneration !== runtimeConnectionGeneration) return;
-  runtimeTokenProvider.clearAccessToken();
+  if (!rejected) rememberedConnection.forget();
   hasRuntimeToken = false;
   runtimeDisconnect?.();
   runtimeDisconnect = null;
   runtimeClient = null;
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
+  graphAuthoringCapability = unavailableAuthoringCapability(
+    new Error('Runtime access was revoked'));
+  refreshCommands();
+  syncGraphModeLabel();
   workspacePersistenceReason = 'Workspace authority was revoked. Documents remain open for export.';
   syncActiveDocumentChrome();
   suspendHumanTaskRecovery();
@@ -11695,14 +12051,23 @@ async function revokeRuntimeAccess() {
   nodeCatalogLoaded = false;
   nodeCatalogPending = false;
   renderNodeCatalog();
-  setRuntimeConnectionState('revoked', 'Access token removed from memory');
+  setRuntimeConnectionState(rejected ? 'authentication-required' : 'revoked', rejected
+    ? 'The service rejected its token; authenticate with a replacement token'
+    : 'Browser token forgotten; service retained. A configured server token may still apply.');
   refreshCommands();
+  if (!rejected && startupServerAuth && connectionService(document.getElementById('service-url').value, location.origin) === startupService) {
+    void connectRuntime();
+  }
 }
 
 function setRuntimeConnectionState(status, message) {
   const state = document.getElementById('runtime-connection');
   state.className = `connection-state ${status}`;
   state.textContent = status.replaceAll('-', ' ');
+  if (status === 'authentication-required' && !hasRuntimeToken) {
+    message += ' — Paste a service token. If the proxy uses an operator token, its operator must rotate it and restart the UI server.';
+  }
+  if (rememberedConnection.notice) message += ` — ${rememberedConnection.notice}`;
   state.title = message;
   state.setAttribute('aria-label', `Runtime status: ${status.replaceAll('-', ' ')}. ${message}`);
 }
@@ -12217,6 +12582,7 @@ async function playGraph(mode = 'test') {
   if (!tenantAuthorityAllows(owner)) {
     return showInspectorMessage('Wait for this document workspace authority to be verified before execution.');
   }
+  owner.execution.intentGeneration += 1;
   if (programNodes(ownerGraph).length) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
@@ -12449,7 +12815,20 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     target.execution.monitoringFlow ||= createMonitoringRuntimeState();
     const knownEdgeIds = new Set((targetGraph?.edges || []).map(edge => edge.id));
     const observation = observeEdgeTraversal(target.execution.monitoringFlow, event, { knownEdgeIds });
-    if (observation.changed) updateD3RuntimeEdge(target, observation.edgeId);
+    if (observation.changed) {
+      updateD3RuntimeEdge(target, observation.edgeId);
+      if (isActive) {
+        drawingModelController?.scheduleRefresh(target.id);
+        const generation = target.execution.generation;
+        const delay = Math.max(0, observation.expiresAt - Date.now()) + 1;
+        setTimeout(() => {
+          if (workspace.find(target.id) === target && target === workspace.active
+              && target.execution.generation === generation) {
+            drawingModelController?.scheduleRefresh(target.id);
+          }
+        }, delay);
+      }
+    }
     return;
   }
   if (!event.nodeId || !targetCy) return;
@@ -12527,7 +12906,7 @@ function flushRuntimeNodePaint(owner, queue) {
     node.data('lastOccurredAt', view.lastOccurredAt);
     node.data('processingDuration', view.processingDuration);
     node.data('fallback', view.fallback);
-    applyRuntimeVisual(node);
+    applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, nodeId, view.instances, view.state, view.arrivals, {
       type: view.lastEventType,
       occurredAt: view.lastOccurredAt,
@@ -12538,6 +12917,10 @@ function flushRuntimeNodePaint(owner, queue) {
     if (groupId) affectedGroups.add(groupId);
   }
   affectedGroups.forEach(groupId => paintVisibleGroupRuntime(owner, groupId));
+  // Schedule from the owner-scoped flush rather than only from non-idle styling. Reset/rebind can
+  // legitimately paint an observed node back to idle, and that removal is evidence the plugin must
+  // receive just as promptly as an active highlight.
+  if (isActive) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function paintVisibleGroupRuntime(owner, groupId) {
@@ -12592,7 +12975,10 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
   runtimeNodePaintQueues.get(owner)?.nodes.clear();
-  if (!targetCy) return;
+  if (!targetCy) {
+    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
+    return;
+  }
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
     node.data('instances', 0);
@@ -12614,6 +13000,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
   } else if (isN8nFamilyLayout(targetVisualStyle)) {
     applyN8nNodeStyle(targetCy, owner);
   }
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function runtimeColor(state) {
@@ -12670,7 +13057,7 @@ function runtimeNodeLabel(node) {
   return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }
 
-function applyRuntimeVisual(node) {
+function applyRuntimeVisual(node, owner = workspace.active) {
   const state = node.data('runtimeState') || 'idle';
   const active = Number(node.data('instances')) || 0;
   node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
@@ -12684,6 +13071,7 @@ function applyRuntimeVisual(node) {
     'underlay-opacity': state === 'active' ? 0.28 : 0.12,
     'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
   });
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArrivals = 0, event = {}) {
@@ -12750,6 +13138,7 @@ function updateD3RuntimeEdge(owner, edgeId) {
       visible?.data('runtimeCount', flow.count);
     }
     scheduleMinimap(owner);
+    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
   };
   paint();
 }
@@ -13734,31 +14123,154 @@ async function loadReplacementFile(file) {
   });
 }
 
-async function autoLoadUrl(url) {
-  const name = url.split('/').pop();
-  let maxBytes;
-  try {
-    maxBytes = await graphDocumentByteLimitForLoad();
-  } catch (error) {
-    console.warn('Auto-load failed:', error.message);
-    return false;
-  }
-  return loadUrlGraphInput(url, maxBytes, {
-    fetchImpl: fetch,
-    onStart: showLoading,
-    parseAndRender: text => {
-      const gd = parsePreparedGraph(text, name, { automatic: true, maxBytes });
-      const active = workspace.active;
-      active.name = name;
-      active.displayName = allocateDocumentDisplayName(name);
-      graphName = name;
-      graphDisplayName = active.displayName;
-      initLoadedGraph(gd, visualStyle);
-      syncActiveDocumentChrome();
-    },
-    onError: err => console.warn('Auto-load failed:', err.message),
-    onComplete: hideLoading,
+function startupImportBinding() {
+  return Object.freeze({
+    connectionGeneration: runtimeConnectionGeneration,
+    authorityGeneration: workspaceAuthority.generation,
+    persistenceGeneration: workspacePersistenceGeneration,
+    client: runtimeClient,
   });
+}
+
+function startupImportBindingIsCurrent(binding) {
+  return Boolean(binding && runtimeClient === binding.client
+    && runtimeConnectionGeneration === binding.connectionGeneration
+    && workspaceAuthority.state === 'ready'
+    && workspaceAuthority.client === binding.client
+    && workspaceAuthority.generation === binding.authorityGeneration
+    && workspacePersistenceGeneration === binding.persistenceGeneration
+    && runtimeConfiguration?.client === binding.client);
+}
+
+function startupImportPlaceholderIsUntouched() {
+  captureActiveDocument();
+  const initial = startupImportPlaceholder;
+  const target = initial && workspace.find(initial.id);
+  if (!target || target !== initial.document || workspace.documents.length !== 1) return false;
+  const execution = target.execution;
+  const sourceSession = target.sourceSession;
+  const hasRuntimeActivity = Boolean(execution?.intentGeneration !== initial.runtimeIntentGeneration
+    || execution?.executionId || execution?.commandFlight
+    || execution?.reconciliationController || sourceSession?.sessionId
+    || sourceSession?.startPromise || sourceSession?.stopPromise || target.deploymentView);
+  return isEmptyWorkflowDocument(target.graph) && !hasRuntimeActivity
+    && target.incarnation === initial.incarnation && target.graph === initial.graph
+    && target.history === initial.history && target.history.revision() === initial.revision
+    && stableUserPresentationFingerprint(target) === initial.presentation
+    && !target.history.isDirty() && target.mode === DOCUMENT_MODES.DRAFT
+    && target.authoring.providerDocumentId === null && target.authoring.revision === null
+    && target.authoring.graphId === null && target.authoring.releaseVersion === null;
+}
+
+function startupImportFailure(error, stage) {
+  if (error?.name === 'AbortError' || error instanceof StartupImportError) return error;
+  if (error instanceof GraphInputRejection
+      && error.reason === GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE) {
+    return new StartupImportError('document-too-large',
+      'The graph is larger than the connected service allows. Choose a smaller file and retry.');
+  }
+  if (stage === 'download') {
+    const status = /^HTTP ([0-9]{3})$/.exec(error?.message || '')?.[1];
+    if (status === '404') {
+      return new StartupImportError('not-found', 'The graph file was not found. Check the source and retry.');
+    }
+    return new StartupImportError('download-failed',
+      'The graph could not be downloaded. Check browser access and retry.');
+  }
+  return new StartupImportError('invalid-graph',
+    'The downloaded file is not valid supported GraphML or Graphify JSON.');
+}
+
+async function runStartupImport({ target, binding, signal }) {
+  if (!startupImportBindingIsCurrent(binding)) {
+    throw new StartupImportError('stale-authority',
+      'The service or workspace changed before the import began. Retry in the current workspace.');
+  }
+  const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes;
+  showLoading();
+  let text;
+  try {
+    text = await fetchInputTextWithinByteLimit(target.url, maxBytes, async input => {
+      // Consent covers only the supplied origin. A followed redirect has already contacted its
+      // target before a final-response check can run. Manual browser redirects hide Location, so
+      // reject every redirect and let a new direct URL pass through the normal origin consent.
+      const response = await fetch(input, { signal, redirect: 'manual' });
+      if (response.type === 'opaqueredirect') {
+        throw new StartupImportError('redirect-not-allowed',
+          'The graph URL redirects to another location. Use the final file URL directly and confirm its origin if prompted.');
+      }
+      return response;
+    });
+  } catch (error) {
+    throw startupImportFailure(error, 'download');
+  } finally {
+    hideLoading();
+  }
+  if (signal.aborted || !startupImportBindingIsCurrent(binding)) {
+    throw new StartupImportError('stale-authority',
+      'The service or workspace changed during the import. Retry in the current workspace.');
+  }
+  let graph;
+  try {
+    graph = parsePreparedGraph(text, target.filename, { automatic: true, maxBytes });
+  } catch (error) {
+    throw startupImportFailure(error, 'parse');
+  }
+  if (signal.aborted || !startupImportBindingIsCurrent(binding)) {
+    throw new StartupImportError('stale-authority',
+      'The service or workspace changed during the import. Retry in the current workspace.');
+  }
+  if (startupImportPlaceholderIsUntouched()) {
+    completeReplaceActiveDocument(startupImportPlaceholder.document, graph, target.filename);
+  } else {
+    openDocument({ name: target.filename, graph,
+      tenantId: activeWorkspaceScope?.tenantId ?? null });
+    clearActivity();
+    addActivityMessage('editor', `Imported ${target.filename}`, 'completed');
+  }
+  scheduleWorkspacePersistence();
+}
+
+function renderStartupImport(state) {
+  const surface = document.getElementById('startup-import');
+  surface.hidden = false;
+  surface.dataset.phase = state.phase;
+  document.getElementById('startup-import-file').textContent = state.target.filename;
+  document.getElementById('startup-import-status').textContent = state.message;
+  document.getElementById('startup-import-confirm').hidden = !state.canConfirmOrigin;
+  document.getElementById('startup-import-retry').hidden = !state.canRetry;
+  document.getElementById('startup-import-cancel').hidden = !state.canCancel;
+}
+
+function initializeStartupImport(rawUrl) {
+  captureActiveDocument();
+  const document_ = workspace.active;
+  startupImportPlaceholder = Object.freeze({
+    id: document_.id, document: document_, incarnation: document_.incarnation,
+    graph: document_.graph, history: document_.history, revision: document_.history.revision(),
+    runtimeIntentGeneration: document_.execution.intentGeneration,
+    presentation: stableUserPresentationFingerprint(document_),
+  });
+  try {
+    startupImportController = createStartupImportController({
+      rawUrl,
+      pageUrl: location.href,
+      run: runStartupImport,
+      onChange: renderStartupImport,
+    });
+  } catch (error) {
+    startupImportController = null;
+    invalidStartupImportVisible = true;
+    const surface = document.getElementById('startup-import');
+    surface.hidden = false;
+    surface.dataset.phase = 'failed';
+    document.getElementById('startup-import-file').textContent = 'graph URL';
+    document.getElementById('startup-import-status').textContent = error instanceof StartupImportError
+      ? error.publicMessage : 'The graph URL is invalid.';
+    document.getElementById('startup-import-confirm').hidden = true;
+    document.getElementById('startup-import-retry').hidden = true;
+    document.getElementById('startup-import-cancel').hidden = false;
+  }
 }
 
 function showLoading() { document.getElementById('loading').classList.remove('off'); }
@@ -13770,7 +14282,9 @@ function hideLoading() { document.getElementById('loading').classList.add('off')
 
 const wrap = document.getElementById('cy-wrap');
 function isCatalogDrag(event) {
-  return [...(event.dataTransfer?.types || [])].includes('application/x-ravenroot-node');
+  const types = [...(event.dataTransfer?.types || [])];
+  return types.includes('application/x-ravenroot-node')
+    || types.includes('application/x-ravenroot-node-template');
 }
 wrap.addEventListener('dragover', e => {
   e.preventDefault();
@@ -13784,6 +14298,16 @@ wrap.addEventListener('dragleave', e => { if (!wrap.contains(e.relatedTarget)) d
 wrap.addEventListener('drop', e => {
   e.preventDefault();
   document.getElementById('dropzone').classList.remove('on');
+  const templateId = e.dataTransfer?.getData('application/x-ravenroot-node-template');
+  if (templateId) {
+    const template = nodePaletteState.templates.find(candidate => candidate.id === templateId);
+    if (!template) return;
+    const rect = cy.container()?.getBoundingClientRect();
+    if (!rect) return;
+    const position = modelPositionFromClient({ x: e.clientX, y: e.clientY }, rect, cy.pan(), cy.zoom());
+    insertSavedTemplate(template, position);
+    return;
+  }
   const behavior = e.dataTransfer?.getData('application/x-ravenroot-node');
   if (behavior) {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) {
@@ -13869,8 +14393,36 @@ function renderShortcutHelp() {
 
 const ZONE_HOSTS = { left: 'sidebar-scroll', right: 'info-body-zone', bottom: 'dock' };
 const COLUMN_ELEMENTS = { left: 'sidebar', right: 'info' };
+const PALETTE_DISCLOSURE_KEY = 'ravenroot.ui.palette-disclosures.v1';
 
 let panelLayout = readStoredLayout();
+
+function storedPaletteDisclosures() {
+  try {
+    const value = JSON.parse(globalThis.localStorage?.getItem(PALETTE_DISCLOSURE_KEY) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+function applyPaletteDisclosures() {
+  const stored = storedPaletteDisclosures();
+  document.querySelectorAll('[data-action="panel-disclosure"]').forEach(control => {
+    const expanded = stored[control.dataset.panel] !== false;
+    const label = `${expanded ? 'Collapse' : 'Expand'} ${panelDescriptor(control.dataset.panel)?.title || 'section'}`;
+    control.setAttribute('aria-expanded', String(expanded));
+    control.setAttribute('aria-label', label);
+    control.dataset.tooltip = label;
+    control.textContent = expanded ? '▾' : '▸';
+    panelElement(control.dataset.panel)?.classList.toggle('panel--content-collapsed', !expanded);
+  });
+}
+
+function togglePaletteDisclosure(control) {
+  const stored = storedPaletteDisclosures();
+  stored[control.dataset.panel] = control.getAttribute('aria-expanded') !== 'true';
+  try { globalThis.localStorage?.setItem(PALETTE_DISCLOSURE_KEY, JSON.stringify(stored)); } catch { /* optional */ }
+  applyPaletteDisclosures();
+}
 
 function readStoredLayout() {
   // Degrades without exception, in every direction: no storage API at all (private mode, a
@@ -14959,6 +15511,193 @@ function proceedToCloseDocument(id, origin) {
 
 let pendingActiveDeploymentClose = null;
 
+function gitAuthoringEnabled() {
+  return graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT && graphAuthoringClient;
+}
+
+function primaryPersistenceUnavailable() {
+  const detail = graphAuthoringCapability.error?.message;
+  showInspectorMessage(`Open and Save are unavailable until authoring capabilities are verified. `
+    + `Reconnect or authenticate and retry${detail ? `: ${detail}` : '.'}`);
+  return false;
+}
+
+function setGraphAuthoringAvailability(available) {
+  graphAuthoringUnavailable = !available;
+  syncGraphModeLabel();
+  refreshCommands();
+}
+
+function applyAuthoringDocument(target, result, providerDocumentId = result.documentId) {
+  target.authoring.providerDocumentId = providerDocumentId;
+  target.authoring.revision = structuredClone(result.revision);
+  target.authoring.graphId = result.graphId;
+  target.authoring.releaseVersion = result.releaseVersion;
+  target.authoring.releasedGraphId = result.releasedGraphId || null;
+  target.authoring.releasedVersion = Number.isSafeInteger(result.releasedVersion) && result.releasedVersion > 0
+    ? result.releasedVersion : null;
+  target.authoring.released = Boolean(result.released);
+  target.authoring.published = Boolean(result.published);
+  target.authoring.draftDeleted = Boolean(result.draftDeleted);
+  target.authoring.saveError = null;
+  graphAuthoringUnavailable = false;
+  if (target === workspace.active) {
+    updateModifyAvailability();
+    syncGraphModeLabel();
+  }
+}
+
+async function openRepositoryGraph(requested = null) {
+  if (!gitAuthoringEnabled()) return false;
+  try {
+    let documentId = requested?.documentId;
+    let source = requested?.source;
+    if (!documentId || !['draft', 'release'].includes(source)) {
+      const page = await graphAuthoringClient.list();
+      setGraphAuthoringAvailability(true);
+      if (!page.items.length) return showInspectorMessage('This repository has no graphs in your workspace.') || false;
+      const choices = page.items.flatMap(item => [
+        ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
+          source: 'draft', label: `${item.documentId} [draft] · v${item.releaseVersion}`
+            + (item.released ? ` · released v${item.releasedVersion}${item.published ? ' · published' : ' · publication pending or failed'}` : '') }] : []),
+        ...(item.released ? [{ key: `${item.documentId} [released]`, documentId: item.documentId,
+          source: 'release', label: `${item.documentId} [released] · v${item.releasedVersion}`
+            + (item.published ? ' · published' : ' · publication pending or failed') }] : []),
+      ]);
+      const selected = globalThis.prompt(`Open a repository graph:\n\n${choices.map(item => item.label).join('\n')}`,
+        choices[0].key)?.trim();
+      const choice = choices.find(item => item.key === selected);
+      if (!choice) return false;
+      ({ documentId, source } = choice);
+    }
+    const result = await graphAuthoringClient.open(documentId, source);
+    const graph = parsePreparedGraph(decodeGraphMl(result), result.documentId,
+      { maxBytes: currentGraphDocumentByteLimit() });
+    const id = openDocument({ name: result.documentId, graph,
+      documentId: `repository:${result.documentId}:${source}` });
+    const target = workspace.find(id);
+    applyAuthoringDocument(target, result, result.documentId);
+    target.history.markSaved();
+    updateHistoryUi();
+    addActivityMessage('editor', `Opened ${result.documentId} from ${runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay}.`, 'completed');
+    return true;
+  } catch (error) {
+    setGraphAuthoringAvailability(false);
+    showInspectorMessage(error.message || 'The repository graph could not be opened.'); return false;
+  }
+}
+
+async function saveRepositoryGraph() {
+  const target = workspace.active;
+  if (!gitAuthoringEnabled() || !target || target.authoring.saveFlight) return false;
+  const providerDocumentId = target.authoring.providerDocumentId
+    || globalThis.prompt('Repository filename', target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
+  if (!providerDocumentId) return false;
+  const prepared = prepareDocumentDownload(target.id);
+  if (!prepared) return false;
+  const history = target.history;
+  const submittedRevision = history.revision();
+  const expected = target.authoring.revision || { draft: 'absent', release: 'absent', publication: 'absent' };
+  const flight = crypto.randomUUID();
+  target.authoring.saveError = null;
+  target.authoring.saveFlight = flight;
+  updateHistoryUi();
+  try {
+    const result = await graphAuthoringClient.save(providerDocumentId, prepared.xml, expected, flight);
+    if (target.authoring.saveFlight !== flight) return false;
+    applyAcceptedGraphMl(target.graph, result, xml => parsePreparedGraph(xml, providerDocumentId,
+      { maxBytes: currentGraphDocumentByteLimit() }));
+    applyAuthoringDocument(target, result, providerDocumentId);
+    // Edits made while the request was in flight remain dirty. Only the exact submitted history
+    // position becomes the save point.
+    if (target.history === history && history.revision() === submittedRevision) {
+      history.markSaved(); target.visualGroupPresentationDirty = false;
+    }
+    addActivityMessage('editor', `Saved ${providerDocumentId} as authored version ${result.releaseVersion}.`, 'completed');
+    updateHistoryUi(); return true;
+  } catch (error) {
+    target.authoring.saveError = error.message || 'The repository save failed.';
+    setGraphAuthoringAvailability(false);
+    showInspectorMessage(error.message || 'The repository save failed. Refresh and retry.'); return false;
+  } finally {
+    if (target.authoring.saveFlight === flight) target.authoring.saveFlight = null;
+    updateHistoryUi();
+  }
+}
+
+async function repositoryHistory() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id) return false;
+  try {
+    const page = await graphAuthoringClient.history(id);
+    const lines = page.items.map(item => `${item.revision.slice(0, 12)} · ${item.summary} · ${item.author}`);
+    const revision = globalThis.prompt(`History for ${id}:\n\n${lines.join('\n')}\n\nEnter a full revision to restore, or leave blank to close:`, '')?.trim();
+    if (!revision) return true;
+    if (!globalThis.confirm('Restore this revision as a new draft commit?')) return false;
+    const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
+    const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
+    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    target.history.markSaved(); updateHistoryUi(); return true;
+  } catch (error) { showInspectorMessage(error.message || 'Repository history is unavailable.'); return false; }
+}
+
+async function repositoryDiscard() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id || !globalThis.confirm('Discard draft changes and restore the reviewed release?')) return false;
+  try {
+    const result = await graphAuthoringClient.discard(id, target.authoring.revision);
+    const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
+    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    target.history.markSaved(); updateHistoryUi(); return true;
+  } catch (error) { showInspectorMessage(error.message || 'Draft changes could not be discarded.'); return false; }
+}
+
+async function repositoryDelete() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(`Delete the draft ${id}? Git history is retained.`)) return false;
+  try { await graphAuthoringClient.delete(id, target.authoring.revision);
+    if (target.authoring.released) {
+      const result = await graphAuthoringClient.open(id, 'release');
+      const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
+      completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+      target.history.markSaved();
+    } else target.authoring.providerDocumentId = null;
+    addActivityMessage('editor', `Deleted the ${id} draft; Git history remains available.`, 'completed');
+    updateHistoryUi(); refreshCommands(); return true;
+  } catch (error) { showInspectorMessage(error.message || 'The draft could not be deleted.'); return false; }
+}
+
+async function repositoryRelease() {
+  const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (!gitAuthoringEnabled() || !id) return false;
+  try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
+    addActivityMessage('editor', `${result.reused ? 'Existing' : 'New'} graph review: ${result.url}`, 'completed'); return true;
+  } catch (error) { showInspectorMessage(error.message || 'A release review could not be proposed.'); return false; }
+}
+
+async function publishedArtifacts() {
+  if (!gitAuthoringEnabled()) return false;
+  try {
+    const page = await graphAuthoringClient.artifacts();
+    if (!page.items.length) return showInspectorMessage('No verified published graph versions are available.') || false;
+    const choices = page.items.map(item => `${item.graphId}@${item.releaseVersion} · ${item.sha256.slice(0, 12)}`);
+    const selection = globalThis.prompt(`Published versions (selecting an older version performs rollback):\n\n${choices.join('\n')}\n\nEnter graphId@version to pin and register:`, '')?.trim();
+    if (!selection) return false;
+    const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})@([1-9][0-9]*)$/.exec(selection);
+    if (!match) throw new Error('Use graphId@version.');
+    const releaseVersion = parseAuthoredReleaseVersion(match[2]);
+    const selected = page.items.find(item => item.graphId === match[1]
+      && item.releaseVersion === releaseVersion);
+    if (!selected) throw new Error('Select an exact version from the verified catalog shown above.');
+    const deploymentId = globalThis.prompt('Deployment name', `${match[1]}-${match[2]}`)?.trim();
+    if (!deploymentId) return false;
+    await graphAuthoringClient.importArtifact(match[1], releaseVersion, selected.sha256, selected.artifactRef);
+    const result = await graphAuthoringClient.deploy(match[1], releaseVersion, deploymentId,
+      selected.sha256, selected.artifactRef);
+    addActivityMessage('deployment', `Pinned ${result.graphId} v${result.releaseVersion} and registered it as ${result.deploymentId}. It is not running.`, 'completed'); return true;
+  } catch (error) { showInspectorMessage(error.message || 'The published version could not be deployed.'); return false; }
+}
+
 function openActiveDeploymentCloseDialog({ documentId, origin }) {
   const target = workspace.find(documentId);
   if (!target) return false;
@@ -15004,10 +15743,29 @@ function closeActiveDeploymentDialog(outcome) {
 
 const commandRegistry = createCommandRegistry(createAppCommands({
   newDocument: () => runAfterInspectorDraft(() => openDocument()),
-  openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
+  openFile: () => runAfterInspectorDraft(() => runPrimaryPersistence(graphAuthoringCapability, {
+    git: () => openRepositoryGraph(),
+    local: () => document.getElementById('file-inp').click(),
+    blocked: () => primaryPersistenceUnavailable(),
+  })),
+  localOpen: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
   replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
-  forkDocument: () => runAfterInspectorDraft(() => forkActiveDocument()),
-  save: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
+  forkDocument: context => runAfterInspectorDraft(() => context.repositoryReleasedSource
+    ? openRepositoryGraph({ documentId: activeAuthoring.providerDocumentId, source: 'draft' })
+    : forkActiveDocument()),
+  save: () => runAfterInspectorDraft(() => runPrimaryPersistence(graphAuthoringCapability, {
+    git: () => saveRepositoryGraph(),
+    local: () => exportGraphML(),
+    blocked: () => primaryPersistenceUnavailable(),
+  }), { preserveDraft: true }),
+  localSave: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
+  repositoryOpen: () => runAfterInspectorDraft(() => openRepositoryGraph()),
+  repositorySave: () => runAfterInspectorDraft(() => saveRepositoryGraph(), { preserveDraft: true }),
+  repositoryHistory: () => runAfterInspectorDraft(() => repositoryHistory()),
+  repositoryDiscard: () => runAfterInspectorDraft(() => repositoryDiscard()),
+  repositoryDelete: () => runAfterInspectorDraft(() => repositoryDelete()),
+  repositoryRelease: () => runAfterInspectorDraft(() => repositoryRelease()),
+  publishedArtifacts: () => runAfterInspectorDraft(() => publishedArtifacts()),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),
@@ -15079,6 +15837,13 @@ function commandContext() {
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
+    authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
+    gitAuthoring: graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT,
+    repositoryDocument: Boolean(activeAuthoring?.providerDocumentId),
+    repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
+    repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
+      && activeAuthoring?.revision?.draft !== 'absent'),
+    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight),
     hasOpenDocuments: workspace.size > 0,
     // Preserve every existing public format's command behavior. Only the new safe deployment
     // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
@@ -15130,6 +15895,23 @@ function executeCommand(id, invocation = {}) {
   return commandRegistry.execute(id, commandContext(), invocation);
 }
 
+function commandDisplayLabel(command, context) {
+  if (context.gitAuthoring && command.id === 'file.open') return 'Open from repository…';
+  if (context.gitAuthoring && command.id === 'file.save') return 'Save draft to repository';
+  if (context.repositoryReleasedSource && command.id === 'file.fork') return 'Open repository draft';
+  return command.label;
+}
+
+function commandDisplayDescription(command, state, context) {
+  if (context.gitAuthoring && command.id === 'file.open') {
+    return 'Open a tenant graph from the configured Git repository';
+  }
+  if (context.gitAuthoring && command.id === 'file.save') {
+    return 'Save this GraphML draft to the configured Git repository with conflict protection';
+  }
+  return state.description;
+}
+
 function refreshCommands({ menu = true } = {}) {
   const context = commandContext();
   const focusedMenuCommand = document.activeElement?.closest('#application-menu [data-command-id]')?.dataset.commandId;
@@ -15143,14 +15925,18 @@ function refreshCommands({ menu = true } = {}) {
     control.classList.toggle('active', state.checked === true);
     if (command.kind === 'checkbox') control.setAttribute('aria-pressed', String(state.checked === true));
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
-    if (control.hasAttribute('data-command-label')) control.textContent = command.label;
+    const displayLabel = commandDisplayLabel(command, context);
+    if (control.hasAttribute('data-command-label')) control.textContent = displayLabel;
+    if (control.id === 'btn-open') control.textContent = `📂 ${displayLabel.replace(/…$/, '')}`;
+    if (control.id === 'btn-export') control.textContent = `${context.gitAuthoring ? '↑' : '⇩'} ${displayLabel}`;
     // This runs after every edit, undo, redo and save, so whatever it writes here is the last
     // word: a title applied elsewhere before the refresh does not survive it. Writing the state's
     // description rather than the static help is what lets the history controls keep naming the
     // step they would reverse, while every other control still shows its help -- including the
     // lifecycle controls, which need it here because they carry no `data-command-label`.
-    if (state.description) {
-      control.title = state.description;
+    const description = commandDisplayDescription(command, state, context);
+    if (description) {
+      control.title = description;
       if (command.group === 'unavailable-lifecycle') {
         control.setAttribute('aria-label', `${command.label}. ${command.help}`);
       }
@@ -15194,6 +15980,8 @@ function renderApplicationMenu(name) {
   let lastGroup = null;
   popup.innerHTML = commands.map(command => {
     const state = commandRegistry.state(command.id, context);
+    const displayLabel = commandDisplayLabel(command, context);
+    const description = commandDisplayDescription(command, state, context);
     const separator = lastGroup !== null && lastGroup !== command.group
       ? '<div class="application-menu-separator" role="separator"></div>' : '';
     lastGroup = command.group;
@@ -15203,12 +15991,12 @@ function renderApplicationMenu(name) {
     const shortcut = shortcuts.length ? shortcuts.map(item => commandRegistry.shortcutLabel(item)).join(' / ') : '';
     const ariaShortcut = shortcuts[0] ? ` aria-keyshortcuts="${escapeAttribute(commandRegistry.ariaShortcut(shortcuts[0]))}"` : '';
     const checked = command.kind ? ` aria-checked="${state.checked === true}"` : '';
-    const help = state.description ? ` title="${escapeAttribute(state.description)}"` : '';
+    const help = description ? ` title="${escapeAttribute(description)}"` : '';
     const unavailableLabel = command.group === 'unavailable-lifecycle' && command.help
       ? ` aria-label="${escapeAttribute(`${command.label}. ${command.help}`)}"` : '';
     return `${separator}<button type="button" class="application-menu-item" role="${role}"
       data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}${help}${unavailableLabel}>
-      <span>${escapeHtml(command.label)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
+      <span>${escapeHtml(displayLabel)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
     </button>`;
   }).join('');
   popup.setAttribute('aria-labelledby', menuTrigger(name)?.id || '');
@@ -15572,7 +16360,9 @@ document.addEventListener('click', event => {
     abandonAssistantConnection();
     renderAssistantState();
   }
-  else if (action === 'panel-close') {
+  else if (action === 'panel-disclosure') {
+    togglePaletteDisclosure(control);
+  } else if (action === 'panel-close') {
     updatePanelLayout(setPanelClosed(panelLayout, control.dataset.panel, true));
   } else if (action === 'panel-menu') {
     if (control.getAttribute('aria-expanded') === 'true') closePopovers();
@@ -15970,6 +16760,7 @@ document.getElementById('deployments-dialog').addEventListener('keydown', event 
 });
 // Wrapped, not passed by reference: `connectRuntime` now takes a flag, and a listener would hand it
 // the Event object, which is truthy.
+document.getElementById('remember-connection-dialog').addEventListener('keydown', event => event.stopPropagation());
 document.getElementById('service-url').addEventListener('change', () => connectRuntime());
 document.getElementById('access-token').addEventListener('keydown', event => {
   if (event.key === 'Enter') authenticateRuntime();
@@ -16003,6 +16794,59 @@ document.getElementById('help-box').addEventListener('click', event => {
   event.stopPropagation();
 });
 
+const drawingModelController = createDrawingModelController({
+  document: window.document,
+  getContext: () => {
+    const owner = workspace.find(workspace.activeId);
+    return owner && graphData ? {
+      documentId: owner.id,
+      graph: graphData,
+      container: owner.container,
+      operational: {
+        activeNodeIds: owner.cy?.nodes()
+          .filter(node => node.data('runtimeObserved') && node.data('runtimeState') !== 'idle')
+          .map(node => node.id()) || [],
+        activeEdgeIds: graphData.edges
+          .filter(edge => edgeFlowSnapshot(owner.execution.monitoringFlow, edge.id).recent > 0)
+          .map(edge => edge.id),
+      },
+    } : null;
+  },
+  editGraphProperties: (patch, unset, label) => {
+    if (!graphData || graphData.format !== 'graphml' || !documentIsEditable(workspace.active)) return false;
+    editHistory.execute(graphData, updateGraphPropertiesCommand(patch, label, unset));
+    updateHistoryUi();
+    return true;
+  },
+  selectEvidence: ({ role, id, nodeIds, edgeIds, documentId }) => {
+    const owner = workspace.find(documentId);
+    if (!owner || owner !== workspace.active || owner.cy !== cy) return;
+    invalidateStableSelection();
+    owner.cy.elements().unselect();
+    [...nodeIds, ...edgeIds].forEach(elementId => owner.cy.getElementById(elementId).select());
+    revealInspector();
+    if (nodeIds.length === 1) showNodeInfo(owner.cy.getElementById(nodeIds[0]));
+    else showInspectorMessage(`${role === 'transition' ? 'Transition' : 'State'} ${id} maps to `
+      + `${nodeIds.length} workflow node(s) and ${edgeIds.length} ordered workflow edge(s).`);
+    addActivityMessage('drawing-model', `Inspected mapped ${role} ${id}`, 'completed');
+  },
+  notify: (message, state) => addActivityMessage('drawing-model', message, state),
+});
+window.ravenroot.drawingModels = drawingModelController;
+
+document.getElementById('startup-import-confirm').addEventListener('click', () => {
+  startupImportController?.confirmOrigin();
+});
+document.getElementById('startup-import-retry').addEventListener('click', () => {
+  if (startupImportController?.retry()) void connectRuntime();
+});
+document.getElementById('startup-import-cancel').addEventListener('click', () => {
+  if (invalidStartupImportVisible) {
+    invalidStartupImportVisible = false;
+    document.getElementById('startup-import').hidden = true;
+  } else startupImportController?.cancel();
+});
+
 // ═══════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════
@@ -16026,30 +16870,48 @@ window.addEventListener('load', () => {
   renderShortcutHelp();
   updateHistoryUi();
   syncCommandBarDensity();
+  applyPaletteDisclosures();
   const params = new URLSearchParams(location.search);
   // The page asks the service what it offers instead of deciding on its own that it may not ask.
   // Whether authentication is required is the service's answer — a 401 still produces exactly the
   // state and message it produced before, because the gate lives on the server and is untouched.
   // The attempt is unconditional: a build flag or an environment variable here would be the same
-  // assumption behind a switch. It runs before the graph loads so the request departs immediately,
-  // and a failure only fills the palette with a reason — the editor stays usable offline.
-  // A durable-task locator is the only browser state retained for recovery. Restore its service
-  // origin before boot connection; the existing cross-origin gate still refuses to send a token
-  // until the user explicitly confirms that origin again.
-  restoreHumanTaskServiceOrigin();
-  connectRuntime(true);
-  // Composed once at boot so the chips are truthful from the first paint rather than blank
-  // until something happens. `connectRuntime` above has already asked the service what it offers.
-  refreshAssistantContext();
+  // assumption behind a switch. A failure only fills the palette with a reason — the editor stays usable offline.
+  // Resolve a remembered public connection ahead of the operator prefix. Task recovery locators
+  // never override connection authority; an external service still needs fresh origin confirmation.
+  const serviceInput = document.getElementById('service-url');
+  const defaultService = serviceInput.defaultValue;
+  // Preserve the existing service-only task recovery preference below an opted-in connection.
+  // It carries no credential or trust decision, and must pass the same public binding validation.
+  let legacyService = '';
+  const locator = readHumanTaskSelection();
+  if (locator?.serviceOrigin) {
+    try { legacyService = connectionService(locator.serviceOrigin, location.origin); }
+    catch { clearHumanTaskSelection(); }
+  }
+  const selectedService = rememberedConnection.startup(defaultService, legacyService);
+  serviceInput.value = selectedService === connectionService(defaultService, location.origin)
+    && !rememberedConnection.hasSavedService ? defaultService : selectedService;
+  const fileParam = params.get('file');
   // The workspace always holds at least one document; the editor has simply never had a way to open
   // a second one. Creating it here means `initCy` always has a document to draw into.
   addDocumentRecord();
-  // Auto-load from ?file= query parameter. Supports .graphml, .xml, .json (graphify).
+  // A startup import gets a canonical empty GraphML draft so successful replacement is provably
+  // content-free. Ordinary startup keeps the established four-node workflow. Any content, history,
+  // presentation, repository identity or runtime activity added while waiting makes the import open
+  // as a separate document instead.
+  if (fileParam) createStartupImportPlaceholder();
+  else newWorkflow();
+  // Import from ?file= after validated configuration and workspace restoration. Supports .graphml,
+  // .xml and Graphify .json without acquiring repository authoring identity.
   // Examples:
   // ?file=my-flow.graphml
   // ?file=/graphs/project/graph.json
   // ?file=examples/graph.json
-  const fileParam = params.get('file');
-  if (fileParam) autoLoadUrl(fileParam);
-  else newWorkflow();
+  if (fileParam) initializeStartupImport(fileParam);
+  void connectRuntime(true);
+  // Composed once at boot so the chips are truthful from the first paint rather than blank
+  // until something happens. The connection attempt above is already in flight.
+  refreshAssistantContext();
+  void drawingModelController.reload();
 });

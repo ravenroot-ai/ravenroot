@@ -6,14 +6,17 @@ Ravenroot is a graph-governed platform for designing, executing, and operating b
 
 - [Get started](get-started/index.md) — Install Ravenroot, validate one GraphML document, and complete a first Test and Run.
 - [User guide](user-guide/index.md) — Author graph documents in the workspace, control execution deliberately, and understand every visible result.
+- [Illustrated workspace guide](user-guide/illustrated-workspace.md) — Build, connect, test, observe, and save a graph with authentic Workbench images.
 - [Operator guide](operator-guide/index.md) — Run Ravenroot as a controlled service with explicit identity, storage, deployment, and embed authority.
 - [Integrator guide](integrator-guide/index.md) — Embed Ravenroot, call its APIs, and add adapters without crossing application and operator boundaries.
 - [Architecture and concepts](architecture/index.md) — Understand the invariants connecting graph semantics, actor execution, durability, AI, and deployment control.
 - [Security guide](security/index.md) — Apply trust boundaries and controls for identity, untrusted graphs, secrets, code, AI, and embeds.
 - [Developer guide](developer-guide/index.md) — Build, test, extend, and document Ravenroot while preserving its public contracts.
 - [Reference](reference/index.md) — Look up exact GraphML, node, execution, API, configuration, embed, extension, and limit contracts.
+- [Platform comparison](reference/platform-comparison.md) — Compare authoring, durability, human work, AI, extensions, observability, governance, licensing, and education using current primary sources.
 - [Operational coverage inventory](reference/coverage-inventory.md) — Check the documented baseline and reach every core node, optional bundle, command, configuration group, API, procedure, and validation source.
 - [Troubleshooting and runbooks](troubleshooting/index.md) — Move from observable symptoms through bounded diagnosis and action to an explicit verification.
+- [Education](education/index.md) — Teach explicit state, transitions, loops, evidence, and the boundary between execution and presentation.
 - [Governance and releases](governance/index.md) — Understand compatibility, support, disclosure, licensing, and documentation commitments.
 
 ## Contract model

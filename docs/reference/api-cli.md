@@ -11,6 +11,11 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/status` | Service status |
 | `GET /v1/runtime` | Selected engine and runtime capabilities |
 | `GET /v1/node-types` | Effective node catalog |
+| `GET, POST /v1/node-palettes` | List the exact authenticated author's durable palettes and templates, or create a named palette. Responses are private and non-cacheable. |
+| `PATCH, DELETE /v1/node-palettes/{paletteId}` | Rename or delete one caller-owned palette using its returned `version` in `If-Match`. |
+| `POST /v1/node-palettes/templates` | Save one descriptor-filtered configured node in a caller-owned palette. |
+| `PATCH, DELETE /v1/node-palettes/templates/{templateId}` | Rename, move, or delete one caller-owned template using its returned `version` in `If-Match`. |
+| `POST /v1/node-palettes/templates/{templateId}/validate` | Revalidate current behavior and tenant-scoped operator references immediately before insertion. |
 | `POST /v1/graphs/inspect?purpose=EXECUTION\|LOCAL_DEPLOYMENT\|SOURCE_SESSION` | Validate the exact GraphML bytes without executing them. A parsed but inadmissible graph remains HTTP 200 with `valid:false` and one `ravenroot.graph-admission/1` finding; malformed GraphML remains an error response carrying the same safe finding shape. |
 | `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget and the authenticated principal's exact opaque `workspace.tenantId` |
 | `GET /v1/activity` | Read the optional tenant-scoped durable node-content archive after an incremental cursor; requires `EXECUTION_READ` and reports retention gaps explicitly |

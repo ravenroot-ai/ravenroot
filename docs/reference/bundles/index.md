@@ -31,6 +31,7 @@ and expected Run result for every node listed below.
 | [OpenAPI server](openapi-server.md) | `openapi.receive`, `openapi.request-reply` |
 | [Slack](slack.md) | `slack.events`, `slack.commands`, `slack.post-message` |
 | [Restricted SpEL](spel.md) | `spel.transform`, `spel.decision` |
+| [System One](system-one.md) | `system-one-evaluate` |
 | [Microsoft Teams](teams.md) | `teams.send`, `teams.outgoing-webhook` |
 | [Telegram](telegram.md) | `telegram.send`, `telegram.answer.callback`, `telegram.edit.message`, `telegram.delete.message` |
 | [WebSocket](websocket.md) | `websocket.send`, `websocket.receive` |

@@ -28,8 +28,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Protects every server-managed execution mutation with the immutable persistence capacity pinned
  * in that execution's manifest.
  *
- * <p>The returned store delegates static descriptions, reads, acknowledgements, lease renewal and
- * lease release unchanged. New process writes and claims first load a verified format-3 manifest,
+ * <p>The returned store delegates static descriptions, reads, acknowledgements, lease renewal,
+ * lease release, and the lease-fenced replay settlement write unchanged. New process writes and claims
+ * first load a verified format-3 manifest,
  * require its generic payload capacity to equal the immutable delegate's capacity, and pass the
  * manifest digest and capacity into an adapter method that revalidates them atomically with the
  * mutation. An adapter without that atomic seam refuses through the port's default methods; this
@@ -67,7 +68,11 @@ public final class ManagedExecutionStore implements InvocationHandler {
             "findProcessInstance", "listTraversals", "inventoryRetainedFrom",
             "purgeExpiredProcessInstances", "executionResultRetention", "maxExecutionResultPayloadBytes",
             "recordExecutionResult", "loadExecutionResult", "executionResultsRetainedFrom",
-            "purgeExpiredExecutionResults", "close");
+            "purgeExpiredExecutionResults", "replayEvidence", "recordReplaySettlement",
+            "replaySettlement", "derivedAncestry", "loadSaga", "listSagas", "listSagaCommands",
+            "createFlowInvocation", "admitFlowInvocation", "loadFlowInvocation",
+            "findFlowInvocationByCaller", "mutateFlowInvocation", "unfinishedFlowInvocations",
+            "retainedFlowInvocations", "retainedFlowInvocationsAfter", "purgeExpiredFlowInvocations", "close");
 
     private final ExecutionStore delegate;
     private final ExecutionManifestStore manifests;
@@ -118,7 +123,9 @@ public final class ManagedExecutionStore implements InvocationHandler {
         }
         if (name.equals("applyManaged") || name.equals("claimManaged")
                 || name.equals("claimPendingWorkAmong") || name.equals("claimDueTimersAmong")
-                || name.equals("managedClaimCandidates")) {
+                || name.equals("managedClaimCandidates") || name.equals("claimSagaCommands")
+                || name.equals("listSagaCompletionCandidates") || name.equals("listSagaRecoveryCandidates")
+                || name.equals("settleSagaCommand")) {
             return failed("managed persistence internals are not public entry points");
         }
         if (!SAFE_DELEGATE_METHODS.contains(name)) {

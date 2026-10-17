@@ -43,6 +43,18 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     List<NodeTypeDescriptor> nodeTypes();
 
+    /**
+     * Validates operator-owned references for one sanitized template in its destination tenant.
+     * @param tenantId authenticated destination tenant
+     * @param behavior installed behavior identifier
+     * @param properties descriptor-filtered authored properties
+     * @throws IllegalArgumentException when the authored properties are malformed
+     * @throws NodeTemplateReferenceUnavailableException when the behavior or a destination authority
+     *         reference is unavailable to the authenticated tenant
+     */
+    default void validateNodeTemplateReferences(String tenantId, String behavior,
+                                                Map<String, String> properties) { }
+
 /**
  * Runtime-owned provenance keyed by behavior; absent entries are treated as installed bundles.
  * @return provenance by behavior for entries whose source is known to the runtime
@@ -192,6 +204,20 @@ public interface RavenrootApplication extends AutoCloseable {
             throw new UnsupportedOperationException("purpose-aware graph inspection is unavailable");
         }
         return inspectGraphMl(graphMl);
+    }
+
+    /**
+     * Resolves exact package and tenant-owned ACTIVE program dependencies without executing or
+     * creating artifacts. Older embedders fail closed because they cannot prove publication
+     * compatibility.
+     *
+     * @param security ingress-established tenant used for program artifact confinement
+     * @param graphMl exact admitted GraphML bytes; ownership remains with the caller
+     * @return immutable runtime-resolved dependency evidence
+     */
+    default GraphArtifactDependencies resolveGraphArtifactDependencies(SecurityContext security,
+                                                                        InputStream graphMl) {
+        throw new UnsupportedOperationException("graph artifact dependency resolution is unavailable");
     }
 
     /**
@@ -362,6 +388,67 @@ public interface RavenrootApplication extends AutoCloseable {
     default LocalDeploymentStatus registerLocalDeployment(SecurityContext security, String deploymentId,
                                                           InputStream graphMl) {
         throw new UnsupportedOperationException("process-local deployments are not supported");
+    }
+
+    /**
+     * Imports CI-verified bytes into the tenant's immutable definition store without deploying or
+     * running them. An existing identity may be reused only when it resolves to the same digest.
+     *
+     * @param security ingress-established tenant and principal owning the immutable definition
+     * @param identity stable graph and authored-version identity verified against the GraphML
+     * @param graphMl exact CI-published GraphML bytes; ownership remains with the adapter
+     * @return immutable stored definition including the verified content digest
+     */
+    default ai.ravenroot.api.persistence.StoredGraphDefinition importPublishedGraphDefinition(
+            SecurityContext security, ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            InputStream graphMl) {
+        throw new UnsupportedOperationException("published graph imports are not supported");
+    }
+
+    /**
+     * Registers a stopped deployment from an already imported authored identity. Registration
+     * resolves the immutable bytes again and never starts an execution.
+     *
+     * @param security ingress-established tenant and principal owning the registration
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity previously imported graph and authored-version identity
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity) {
+        throw new UnsupportedOperationException("pinned graph deployments are not supported");
+    }
+
+    /**
+     * Registers an already imported definition only when its immutable content identity still
+     * matches the publication selected by the caller.
+     *
+     * @param security ingress-established tenant and principal owning the registration
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity previously imported graph and authored-version identity
+     * @param expectedContentId content identity of the selected verified publication
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPinnedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity,
+            ai.ravenroot.api.persistence.GraphContentId expectedContentId) {
+        throw new UnsupportedOperationException("digest-bound pinned graph deployments are not supported");
+    }
+
+    /**
+     * Imports and registers a CI-verified publication for trusted embedders. This convenience seam
+     * preserves the distinct immutable import and stopped deployment steps and does not run it.
+     *
+     * @param security ingress-established tenant and principal owning both operations
+     * @param deploymentId caller-supplied id unique within the tenant
+     * @param identity stable graph and authored-version identity verified against the GraphML
+     * @param graphMl exact CI-published GraphML bytes; ownership remains with the adapter
+     * @return current process-local status of the stopped registration
+     */
+    default LocalDeploymentStatus registerPublishedLocalDeployment(SecurityContext security, String deploymentId,
+            ai.ravenroot.api.persistence.GraphDefinitionIdentity identity, InputStream graphMl) {
+        importPublishedGraphDefinition(security, identity, graphMl);
+        return registerPinnedLocalDeployment(security, deploymentId, identity);
     }
 
     /**
@@ -924,6 +1011,59 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Whether this application can expose durable saga diagnostics.
+     * @return true only when a durable saga-capable execution store is composed
+     */
+    default boolean sagaStatusAvailable() {
+        return false;
+    }
+
+    /**
+     * Lists bounded durable saga state for one tenant-scoped process instance.
+     *
+     * @param tenantId tenant that owns the process instance
+     * @param processInstanceId process instance whose saga state is requested
+     * @return immutable saga snapshots; sensitive participant payloads remain opaque
+     * @throws IllegalStateException when {@link #sagaStatusAvailable()} is false
+     */
+    default List<ai.ravenroot.api.persistence.SagaSnapshot> processInstanceSagas(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable saga status unavailable");
+    }
+
+    /**
+     * Lists payload-free command-outbox diagnostics for the same process scope.
+     * @param tenantId tenant that owns the process instance
+     * @param processInstanceId process instance whose commands are requested
+     * @return immutable durable records; callers must not expose {@code intent.payload}
+     */
+    default List<ai.ravenroot.api.persistence.SagaOutboxRecord> processInstanceSagaCommands(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable saga status unavailable");
+    }
+
+    /**
+     * Applies a fenced recovery request without allowing the caller to assert participant success.
+     *
+     * @param tenantId tenant that owns the process and saga
+     * @param processInstanceId process containing the saga
+     * @param sagaId saga selected for recovery
+     * @param expectedSagaRevision exact revision observed by the operator
+     * @param action recovery transition to request
+     * @param mutationId stable audit/idempotency identity of this request
+     * @return the persisted saga snapshot after the conditional transition
+     */
+    default ai.ravenroot.api.persistence.SagaSnapshot requestSagaAction(
+            String tenantId, UUID processInstanceId, UUID sagaId, long expectedSagaRevision,
+            ai.ravenroot.api.persistence.SagaOperatorAction action, UUID mutationId) {
+        throw new UnsupportedOperationException("governed saga recovery is unavailable");
+    }
+
+    /**
      * The per-tenant inventory retention floor, delegating to
      * {@link ai.ravenroot.api.persistence.ExecutionStore#inventoryRetainedFrom}. {@link java.time.Instant#MIN}
      * for an implementation with no durable inventory at all, which is the honest answer: nothing has
@@ -1093,6 +1233,50 @@ public interface RavenrootApplication extends AutoCloseable {
     default ExecutionLookup executionResult(String tenantId, UUID executionId) {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         return new ExecutionLookup.Unknown(java.util.Objects.requireNonNull(executionId, "executionId"));
+    }
+
+    /**
+     * Lists payload-free retained downstream boundary choices for one settled source.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence is inspected
+     * @return bounded boundary choices; empty when no retained edge can seed downstream work
+     */
+    default java.util.List<DerivedBoundaryOption> derivedExecutionBoundaries(
+            SecurityContext security, UUID sourceProcessInstanceId) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
+    /** Previews an exact retained boundary without admitting new work.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence is inspected
+     * @param request bounded proposed derived request
+     * @return proof-oriented preview and typed refusal codes
+     */
+    default DerivedExecutionPreview previewDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                            DerivedExecutionRequest request) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
+    }
+
+    /** Finds an already admitted request without launching or recovering its work.
+     * @param security authenticated tenant identity
+     * @param sourceProcessInstanceId immutable source process
+     * @param request exact idempotent request
+     * @return existing derived identities, or empty when the request has not been admitted
+     */
+    default java.util.Optional<DerivedExecutionStart> existingDerivedExecution(
+            SecurityContext security, UUID sourceProcessInstanceId, DerivedExecutionRequest request) {
+        return java.util.Optional.empty();
+    }
+
+    /** Admits fresh derived work after repeating every preview proof under the same pins.
+     * @param security authenticated tenant and requester identity
+     * @param sourceProcessInstanceId source process whose retained evidence seeds the derivation
+     * @param request bounded derived request and idempotency identity
+     * @return fresh derived process and traversal identities
+     */
+    default DerivedExecutionStart startDerivedExecution(SecurityContext security, UUID sourceProcessInstanceId,
+                                                        DerivedExecutionRequest request) {
+        throw new UnsupportedOperationException("selective derived execution is unavailable");
     }
 
     @Override

@@ -286,6 +286,39 @@ export function setEdgeFailureRoute(edge, declared) {
   return edge;
 }
 
+// A structurally complete, editable GraphML model with no authored graph content. Startup URL
+// imports use this while configuration and restoration are pending: an empty placeholder can be
+// replaced after every other identity/intent guard passes, while the ordinary New command remains
+// the useful four-node starter below. Keeping construction here prevents a caller from producing a
+// different "empty" shape by clearing only the arrays of a populated graph.
+export function createEmptyWorkflowDocument() {
+  return {
+    format: 'graphml', sourceXml: '', nodes: [], edges: [], nodeMap: {},
+    graphProperties: {
+      [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED,
+      [GRAPH_RENDER_MODE_PROPERTY]: 'design',
+      [GRAPH_LAYOUT_MODE_PROPERTY]: 'cyto',
+    },
+  };
+}
+
+export function isEmptyWorkflowDocument(graph) {
+  const expectedProperties = {
+    [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED,
+    [GRAPH_RENDER_MODE_PROPERTY]: 'design',
+    [GRAPH_LAYOUT_MODE_PROPERTY]: 'cyto',
+  };
+  const graphProperties = graph?.graphProperties;
+  return Boolean(graph?.format === 'graphml'
+    && Array.isArray(graph.nodes) && graph.nodes.length === 0
+    && Array.isArray(graph.edges) && graph.edges.length === 0
+    && graph.nodeMap && typeof graph.nodeMap === 'object'
+    && Object.keys(graph.nodeMap).length === 0
+    && graphProperties && typeof graphProperties === 'object'
+    && Object.keys(graphProperties).length === Object.keys(expectedProperties).length
+    && Object.entries(expectedProperties).every(([key, value]) => graphProperties[key] === value));
+}
+
 // The document created by "New" demonstrates the recommended error-routing shape: exactly one
 // START, one END and one ERROR, reached from a PASSTHROUGH node (`dosomething`) that fans out on two
 // outcomes. `dosomething` is a passthrough so the fresh graph validates without the user choosing
@@ -302,20 +335,11 @@ export function createWorkflowDocument() {
   // that instead of introducing new render styling.
   const edgeToError = createEdge('edge-dosomething-error', 'dosomething', 'error', 'failed');
   const nodeMap = { start, dosomething: doSomething, end, error };
-  return {
-    format: 'graphml', sourceXml: '',
-    nodes: [start, doSomething, error, end],
-    edges: [edgeToDoSomething, edgeToEnd, edgeToError],
-    nodeMap,
-    // A drawing made from scratch has no join unless its author selects one. The marker is
-    // what makes that true, and it is set here -- at creation -- rather than at save time, so that
-    // every document this editor originates carries it and no document it opens acquires it.
-    graphProperties: {
-      [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED,
-      [GRAPH_RENDER_MODE_PROPERTY]: 'design',
-      [GRAPH_LAYOUT_MODE_PROPERTY]: 'cyto',
-    },
-  };
+  const graph = createEmptyWorkflowDocument();
+  graph.nodes.push(start, doSomething, error, end);
+  graph.edges.push(edgeToDoSomething, edgeToEnd, edgeToError);
+  Object.assign(graph.nodeMap, nodeMap);
+  return graph;
 }
 
 export function setGraphPresentation(graph, { renderMode, layoutMode, designArrangement } = {}) {

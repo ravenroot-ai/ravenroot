@@ -45,6 +45,19 @@ public final class BehaviorRegistry {
     }
 
     public ai.ravenroot.core.runner.RunnerJobService runnerJobs() { return runnerJobs; }
+    private ai.ravenroot.api.flow.FlowInvocationCapability flowInvocations;
+
+    /** Installs the internal intergraph capability and its three built-in authoring nodes. */
+    public BehaviorRegistry withFlowInvocations(ai.ravenroot.api.flow.FlowInvocationCapability capability) {
+        if (flowInvocations != null) throw new IllegalStateException("flow invocations already configured");
+        ai.ravenroot.core.runtime.builtin.FlowNodeBehaviorFactories.all(
+                        java.util.Objects.requireNonNull(capability, "capability"))
+                .forEach(factory -> registerFactory(factory, NodeCatalogSource.core()));
+        flowInvocations = capability;
+        return this;
+    }
+
+    public ai.ravenroot.api.flow.FlowInvocationCapability flowInvocations() { return flowInvocations; }
     private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
             "log", "delay", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
             "cel-decision", "json-path", "boundary-guard");
@@ -593,6 +606,20 @@ public final class BehaviorRegistry {
         if (factory != null) factory.validate(node);
     }
 
+    /** Validates references through the exact registered behavior without constructing an action. */
+    public void validateTemplateReferences(GraphNode node, String tenantId) {
+        if (node == null || node.behavior() == null) return;
+        var factory = factories.get(node.behavior());
+        if (factory == null) {
+            throw new ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException();
+        }
+        // Schema and cross-property validation remain invalid authored payloads. The behavior hook
+        // owns the classification boundary because only the behavior knows whether a refusal came
+        // from authored settings or from an operator-owned destination reference.
+        factory.validate(node);
+        factory.validateTemplateReferences(node, tenantId);
+    }
+
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */
     public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
         if (node == null || node.behavior() == null) return Optional.empty();
@@ -610,11 +637,14 @@ public final class BehaviorRegistry {
      */
     public Optional<NodeTypeDescriptor> descriptor(String behavior) {
         if ("agent".equals(behavior) && runnerJobs != null) {
-            return Optional.of(ai.ravenroot.core.runner.GovernedAgent.descriptor(resolvedDescriptors.get(behavior)));
+            return Optional.of(SagaCatalogProperties.decorate(
+                    ai.ravenroot.core.runner.GovernedAgent.descriptor(resolvedDescriptors.get(behavior))));
         }
         // The resolved entry, not the factory's raw one, so every consumer -- schema validation,
         // the nature validator, the catalog API -- sees the same nature the registry decided at load.
-        return behavior == null ? Optional.empty() : Optional.ofNullable(resolvedDescriptors.get(behavior));
+        if (behavior == null) return Optional.empty();
+        NodeTypeDescriptor descriptor = resolvedDescriptors.get(behavior);
+        return descriptor == null ? Optional.empty() : Optional.of(sagaDescriptor(descriptor));
     }
 
     /** Runtime command/property authority remains the ordinary descriptor unless access is explicit. */
@@ -627,9 +657,12 @@ public final class BehaviorRegistry {
             runnerJobs.definitions(node).forEach(definition -> definition.commands().values().forEach(command ->
                     command.outcomes().forEach(name -> outcomes.putIfAbsent(name,
                             ai.ravenroot.api.catalog.NodeOutcomeDescriptor.literal(name, "Approved definition outcome.")))));
-            return Optional.of(descriptor.withOutcomes(outcomes.values().toArray(ai.ravenroot.api.catalog.NodeOutcomeDescriptor[]::new)));
+            return Optional.of(SagaCatalogProperties.decorate(descriptor.withOutcomes(
+                    outcomes.values().toArray(ai.ravenroot.api.catalog.NodeOutcomeDescriptor[]::new))));
         }
-        return node == null ? Optional.empty() : Optional.ofNullable(resolvedDescriptors.get(node.behavior()));
+        if (node == null) return Optional.empty();
+        NodeTypeDescriptor descriptor = resolvedDescriptors.get(node.behavior());
+        return descriptor == null ? Optional.empty() : Optional.of(sagaDescriptor(descriptor));
     }
 
     /**
@@ -708,10 +741,15 @@ public final class BehaviorRegistry {
         if (runnerJobs != null) {
             values.removeIf(value -> value.behavior().equals("agent")); values.add(descriptor("agent").orElseThrow());
         }
-        return values.stream()
+        return values.stream().map(this::sagaDescriptor)
                 .sorted(java.util.Comparator.comparing(NodeTypeDescriptor::category)
                         .thenComparing(NodeTypeDescriptor::displayName))
                 .toList();
+    }
+
+    private NodeTypeDescriptor sagaDescriptor(NodeTypeDescriptor descriptor) {
+        return factories.get(descriptor.behavior()) instanceof LegacyNodeBehaviorFactory
+                ? descriptor : SagaCatalogProperties.decorate(descriptor);
     }
 
     public Map<String, NodeCatalogSource> catalogSources() { return Map.copyOf(catalogSources); }

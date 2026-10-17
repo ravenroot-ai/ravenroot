@@ -283,7 +283,7 @@ class RepositoryConfigurationTest(unittest.TestCase):
     def test_publishable_module_boundary_excludes_non_shipping_projects(self):
         artifacts = set(publishable_artifacts())
         self.assertEqual(artifacts, set(PUBLISHABLE_ARTIFACTS))
-        self.assertEqual(len(PUBLISHABLE_ARTIFACTS), 37)
+        self.assertEqual(len(PUBLISHABLE_ARTIFACTS), 38)
         self.assertIn("ravenroot-extensions-all", artifacts)
         self.assertIn("ravenroot-discord", artifacts)
         self.assertIn("ravenroot-git-workspace", artifacts)
@@ -291,6 +291,7 @@ class RepositoryConfigurationTest(unittest.TestCase):
         self.assertIn("ravenroot-slack", artifacts)
         self.assertIn("ravenroot-matrix", artifacts)
         self.assertIn("ravenroot-mattermost", artifacts)
+        self.assertIn("ravenroot-system-one", artifacts)
         self.assertIn("ravenroot-teams", artifacts)
         self.assertIn("ravenroot-persistence-postgresql", artifacts)
         self.assertTrue(EXCLUDED_ARTIFACTS.isdisjoint(artifacts))

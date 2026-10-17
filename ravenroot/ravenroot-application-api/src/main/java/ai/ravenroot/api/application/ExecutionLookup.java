@@ -167,7 +167,10 @@ public sealed interface ExecutionLookup {
      * {@link #payloadState()} is derived from the rejection's reason — a budget an operator
      * configures is {@link ai.ravenroot.api.persistence.ResultPayloadState#WITHHELD}, and anything no
      * configuration change would have admitted is
-     * {@link ai.ravenroot.api.persistence.ResultPayloadState#UNCONVERTIBLE}. The instance that ran
+     * {@link ai.ravenroot.api.persistence.ResultPayloadState#UNCONVERTIBLE}. A terminal boundary
+     * reconstructed after the producing runtime ended is
+     * {@link ai.ravenroot.api.persistence.ResultPayloadState#UNAVAILABLE}, because recovery can
+     * prove the lifecycle but cannot recreate an arbitrary output projection. The instance that ran
      * such a traversal used to rethrow the typed rejection instead, so the same execution answered a
      * payload-rejection status while that instance held it and this answer everywhere else.</p>
      *

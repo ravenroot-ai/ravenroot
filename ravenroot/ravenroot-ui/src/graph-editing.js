@@ -114,7 +114,7 @@ export function duplicateNode(graph, sourceId, history = null, options = {}) {
   return node;
 }
 
-function createNodeForInsertion(graph, position, options = {}) {
+export function createNodeForInsertion(graph, position, options = {}) {
   const descriptor = options.descriptor || null;
   const prefix = descriptor?.behavior?.replace(/[^a-zA-Z0-9_-]/g, '-') || 'node';
   const id = uniqueElementId(prefix, graph.nodes);
@@ -137,6 +137,46 @@ function createNodeForInsertion(graph, position, options = {}) {
       .map(property => [property.name, graphMlType(property.type)]));
   }
   return node;
+}
+
+/** Inserts an immutable saved template as one fresh, disconnected node and one undo step. */
+export function addTemplateNodeAt(graph, position, template, history = null) {
+  if (!canModifyGraph(graph)) return { node: null, reason: 'This graph cannot be edited' };
+  const saved = template?.node;
+  const kind = String(saved?.kind || '').toUpperCase();
+  if (!['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR'].includes(kind)) {
+    return { node: null, reason: 'The saved template has an unsupported node kind' };
+  }
+  if (['START', 'END', 'ERROR'].includes(kind) && graph.nodes.some(node => node.kind === kind)) {
+    return { node: null, reason: `This workflow already has a ${kind} terminal` };
+  }
+  for (const property of saved.workspaceReferences || []) {
+    const referenced = String(saved.properties?.[property] || '').trim();
+    const destination = referenced ? graph.nodeMap?.[referenced] : null;
+    if (referenced && !destination) {
+      return { node: null, reason: `Saved reference ${property} names a node outside this workflow` };
+    }
+    if (destination && (destination.kind !== 'BEHAVIOR' || destination.behavior !== 'workspace')) {
+      return { node: null, reason: `Saved reference ${property} must name a Workspace node in this workflow` };
+    }
+  }
+  const prefix = String(saved.behavior || kind.toLowerCase()).replace(/[^a-zA-Z0-9_-]/g, '-') || 'node';
+  const id = uniqueElementId(prefix, graph.nodes);
+  const node = createNode(id, String(saved.name || template.name || 'Saved node'), kind, position);
+  Object.assign(node, {
+    behavior: kind === 'BEHAVIOR' ? String(saved.behavior || '') : '',
+    nodeType: String(saved.nodeType || node.nodeType),
+    classname: String(saved.classname || ''),
+    description: String(saved.description || ''),
+    ow: Math.max(24, Math.min(1000, Number(saved.width) || node.ow)),
+    oh: Math.max(24, Math.min(1000, Number(saved.height) || node.oh)),
+    properties: { ...(saved.properties || {}) },
+    propertyTypes: { ...(saved.propertyTypes || {}) },
+    _positionIsCenter: true,
+  });
+  run(graph, insertNodesCommand([{ node, index: graph.nodes.length }],
+    `Insert saved node ${template.name || node.name}`), history);
+  return { node, reason: '' };
 }
 
 // A toolbox drop on a source is one authoring gesture, so the node and its edge are planned and

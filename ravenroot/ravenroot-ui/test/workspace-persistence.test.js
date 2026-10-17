@@ -43,6 +43,26 @@ describe('tenant workspace snapshot', () => {
     expect(snapshot.documents[0].graph).not.toHaveProperty('nodeMap');
   });
 
+  it('persists browser-safe repository identity and the complete stale-state revision', () => {
+    const source = document_('repository');
+    source.authoring = {
+      providerDocumentId: 'orders.graphml',
+      revision: { draft: 'd', release: 'r', publication: 'p' },
+      graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
+      released: true, published: true,
+      draftDeleted: true, saveFlight: 'never-persist-request-state', saveError: 'never-persist-error-state',
+    };
+    const stored = persistedDocument(source);
+    expect(stored.authoring).toEqual({
+      providerDocumentId: 'orders.graphml',
+      revision: { draft: 'd', release: 'r', publication: 'p' },
+      graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
+      released: true, published: true, draftDeleted: true,
+    });
+    expect(JSON.stringify(stored)).not.toContain('never-persist-request-state');
+    expect(JSON.stringify(stored)).not.toContain('never-persist-error-state');
+  });
+
   it('keeps live deployment attachments session-only without changing existing document persistence', () => {
     const scope = workspaceScope('https://runtime.example', 'tenant-a');
     const draft = document_('draft');

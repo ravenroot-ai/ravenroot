@@ -89,6 +89,22 @@ class RedactedExecutionResultHttpTest {
         }
     }
 
+    @Test
+    void aRecoveredExecutionReportsUnavailableOutputWithoutInventingAnEmptyResult() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        var stub = new StubApplication(new ExecutionLookup.Redacted(executionId,
+                ProcessInstanceStatus.COMPLETED, null, ResultPayloadState.UNAVAILABLE));
+        try (var server = testServer(stub)) {
+            server.start();
+
+            var response = get(server, "/v1/executions/" + executionId);
+            assertEquals(410, response.statusCode(), response.body());
+            assertTrue(response.body().contains("\"code\":\"EXECUTION_RESULT_REDACTED\""), response.body());
+            assertEquals("COMPLETED", jsonString(response.body(), "status"), response.body());
+            assertEquals("UNAVAILABLE", jsonString(response.body(), "payloadState"), response.body());
+        }
+    }
+
     /**
      * The regression this whole class exists to guard: before this fix, {@code readExecution}
      * rendered both arms with the identical code and status, so a caller had no field on the wire to

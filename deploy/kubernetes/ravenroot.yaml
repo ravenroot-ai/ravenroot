@@ -60,6 +60,11 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: pekko
+            # Local-file authoring remains the default. An operator overlay may switch this to GIT
+            # and must provide the repository, tenant namespace, artifact catalog, and a Secret-backed
+            # RAVENROOT_CREDENTIAL_<hex-reference> value documented in graph-source-control.md.
+            - name: RAVENROOT_GRAPH_AUTHORING_MODE
+              value: LOCAL
             # Blank execution-runtime carriers select the Java typed defaults.
             - name: RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE
               value: ""

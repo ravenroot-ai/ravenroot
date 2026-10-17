@@ -31,7 +31,8 @@ final class JdbcNodeBehavior implements NodeBehavior {
                                 "Operator-owned tenant JDBC profile."),
                         NodePropertyDescriptor.required("statement", "Statement", NodePropertyType.STRING,
                                 "Operator-approved statement id.")),
-                kind == JdbcStatementProfile.Kind.QUERY ? Set.of("network") : Set.of("network", "side-effect"))
+                kind == JdbcStatementProfile.Kind.QUERY ? Set.of("network") : Set.of("network", "side-effect",
+                        "saga-adapter:ravenroot.jdbc-receipt.v1"))
                 .withOutcomes(NodeOutcomeDescriptor.literal("continue", "The bounded JDBC result."));
     }
 
@@ -45,7 +46,19 @@ final class JdbcNodeBehavior implements NodeBehavior {
     @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services) {
         String profile = identifier(configuration.requiredProperty("profile"));
         String statement = identifier(configuration.requiredProperty("statement"));
-        return message -> executor.execute(message, services, profile, statement, kind)
+        String participant = configuration.property("saga.participant", "");
+        String receipt = null;
+        if ("jdbc-receipt-v1".equals(participant)) {
+            if (!"ravenroot.jdbc-receipt.v1".equals(configuration.property("saga.adapter", ""))) {
+                throw new JdbcFailure(JdbcFailure.Code.PROFILE_UNAVAILABLE);
+            }
+            receipt = identifier(configuration.requiredProperty("saga.receiptStatement"));
+        }
+        String receiptStatement = receipt;
+        return message -> (receiptStatement == null
+                ? executor.execute(message, services, profile, statement, kind)
+                : executor.verifySagaBinding(message, profile, statement, receiptStatement)
+                .thenCompose(ignored -> executor.execute(message, services, profile, statement, kind)))
                 .thenApply(value -> new NodeResult("continue", value, message.attributes()));
     }
     private static String identifier(String value) {

@@ -1,3 +1,4 @@
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
 const CONFIGURATION = { schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 };
@@ -155,24 +156,24 @@ async function pendingCatalogFailure(page, routes, restore, failureTurn, token) 
   await expect(empty).not.toContainText('unreachable');
 }
 
-test('publishes a catalog 401 only after its workspace authority becomes ready', async ({ page }) => {
-  const token = 'delayed-401';
+test('publishes a catalog 403 only after its workspace authority becomes ready', async ({ page }) => {
+  const token = 'delayed-403';
   const routes = await installRuntimeRoutes(page, {
     configuration: () => ({ status: 200, body: { ...CONFIGURATION,
-      workspace: { tenantId: 'tenant-delayed-401' } } }),
-    catalog: () => ({ status: 401, body: { error: 'unauthorized' } }),
+      workspace: { tenantId: 'tenant-delayed-403' } } }),
+    catalog: () => ({ status: 403, body: { error: 'unauthorized' } }),
   });
   await openReadyWorkspace(page);
   const failureTurn = await observeCatalogFailureTurn(page, token);
-  const restore = await holdWorkspaceRestore(page, 'tenant-delayed-401');
+  const restore = await holdWorkspaceRestore(page, 'tenant-delayed-403');
   try {
     await pendingCatalogFailure(page, routes, restore, failureTurn, token);
     await restore.release();
     await expect.poll(() => page.evaluate(() =>
       window.ravenroot.workspacePersistence().authority.state)).toBe('ready');
     const empty = page.locator('#node-catalog .catalog-empty');
-    await expect(empty).toHaveAttribute('data-catalog-state', 'authentication-required');
-    await expect(empty).toContainText('HTTP 401');
+    await expect(empty).toHaveAttribute('data-catalog-state', 'access-revoked');
+    await expect(empty).toContainText('HTTP 403');
     await expect(empty).not.toContainText('unreachable');
   } finally {
     await restore.release();
@@ -206,7 +207,7 @@ test('does not publish a catalog error when configuration fails', async ({ page 
   const token = 'failed-configuration';
   const routes = await installRuntimeRoutes(page, {
     configuration: () => ({ status: 503, body: { error: 'configuration unavailable' } }),
-    catalog: () => ({ status: 401, body: { error: 'unauthorized' } }),
+    catalog: () => ({ status: 403, body: { error: 'insufficient scope' } }),
   });
   await openReadyWorkspace(page);
   const failureTurn = await observeCatalogFailureTurn(page, token);
@@ -230,7 +231,7 @@ test('a replacement client cannot receive a delayed catalog error from its prede
       ? { ...CONFIGURATION, workspace: { tenantId: 'tenant-superseded' } }
       : CONFIGURATION }),
     catalog: token => token === firstToken
-      ? { status: 401, body: { error: 'unauthorized' } }
+      ? { status: 403, body: { error: 'unauthorized' } }
       : { status: 200, body: REPLACEMENT_CATALOG },
   });
   await openReadyWorkspace(page);
@@ -259,7 +260,7 @@ test('revocation cannot be overwritten by a delayed catalog error', async ({ pag
   const routes = await installRuntimeRoutes(page, {
     configuration: () => ({ status: 200, body: { ...CONFIGURATION,
       workspace: { tenantId: 'tenant-revoked' } } }),
-    catalog: () => ({ status: 401, body: { error: 'unauthorized' } }),
+    catalog: () => ({ status: 403, body: { error: 'insufficient scope' } }),
   });
   await openReadyWorkspace(page);
   const failureTurn = await observeCatalogFailureTurn(page, token);
@@ -276,8 +277,11 @@ test('revocation cannot be overwritten by a delayed catalog error', async ({ pag
       window.ravenroot.workspacePersistence().authority.state)).toBe('revoked');
     const empty = page.locator('#node-catalog .catalog-empty');
     await expect(empty).toHaveAttribute('data-catalog-state', 'disconnected');
-    await expect(empty).not.toContainText('401');
+    await expect(empty).not.toContainText('403');
   } finally {
     await restore.release();
   }
 });
+
+// Exercise the established feature with deliberately memory-only browser authentication.
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));

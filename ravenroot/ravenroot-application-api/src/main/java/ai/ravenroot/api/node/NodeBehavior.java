@@ -80,6 +80,24 @@ public interface NodeBehavior {
     NodeAction create(NodeConfiguration configuration);
 
     /**
+     * Validates tenant-scoped, operator-owned references before an editor stores or inserts a template.
+     * Implementations must not resolve credentials or return authority details. The default is suitable
+     * for behaviors whose complete authoring contract is already expressed by their descriptor.
+     *
+     * <p>Malformed authored settings are rejected with an ordinary {@link IllegalArgumentException}.
+     * An unavailable or unauthorized plugin, profile, policy, or destination reference is rejected
+     * with {@link ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException}. Keeping
+     * these classifications explicit prevents adapters from describing a typo as missing operator
+     * authority, while the reference exception keeps authority details private.</p>
+     * @param configuration descriptor-filtered authored properties
+     * @param tenantId authenticated destination tenant
+     * @throws IllegalArgumentException when authored settings are malformed
+     * @throws ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException when a required
+     *         destination reference is unavailable or unauthorized
+     */
+    default void validateTemplateReferences(NodeConfiguration configuration, String tenantId) { }
+
+    /**
      * SDK /2 construction path for service-aware behaviors.
      *
      * <p>The default bridge deliberately calls the published SDK /1 method, preserving already

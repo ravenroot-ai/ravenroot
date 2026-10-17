@@ -8,7 +8,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.EnumSet;
+import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -45,5 +48,21 @@ class SqliteExecutionStoreContractTest extends ExecutionStoreContract {
                         + "assertion back into a skip that looks identical to a pass");
         assertTrue(store().supports(StoreCapability.TRANSACTIONAL_BATCH));
         assertTrue(store().supports(StoreCapability.IDEMPOTENCY_PURGE));
+        assertTrue(store().supports(StoreCapability.DURABLE_SAGAS));
+        assertTrue(store().supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE));
+        assertTrue(store().supports(StoreCapability.FLOW_INVOCATIONS));
+
+        assertEquals(EnumSet.of(StoreCapability.DURABLE, StoreCapability.TRANSACTIONAL_BATCH,
+                        StoreCapability.CROSS_PROCESS_LEASE, StoreCapability.IDEMPOTENCY_PURGE,
+                        StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
+                        StoreCapability.DURABLE_HANDLERS, StoreCapability.PROCESS_INVENTORY,
+                        StoreCapability.INVENTORY_RETENTION, StoreCapability.TOOL_APPROVALS,
+                        StoreCapability.HUMAN_TASKS, StoreCapability.HUMAN_TASK_CONFIRMATIONS,
+                        StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
+                        StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
+                        StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
+                        StoreCapability.FLOW_INVOCATIONS),
+                Set.copyOf(store().capabilities()),
+                "the exact capability set keeps every conformance assertion active");
     }
 }

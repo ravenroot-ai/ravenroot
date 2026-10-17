@@ -178,6 +178,23 @@ public enum StoreCapability {
      */
     EXECUTION_RESULTS,
 
+    /**
+     * Bounded invocation outputs, post-quiescence source fences and derived ancestry are retained
+     * outside the event journal for selective derived execution. Add {@link #DURABLE} when that
+     * evidence must survive process death.
+     */
+    SELECTIVE_REPLAY_EVIDENCE,
+
+    /**
+     * Intergraph invocation intent, child correlation, settlement and single continuation claims
+     * are stored with compare-and-set revision semantics. Add {@link #DURABLE} when the relation
+     * survives process death.
+     */
+    FLOW_INVOCATIONS,
+
     /** Atomic process workspace and fenced runner jobs; add DURABLE for restart survival. */
-    RUNNER_JOBS
+    RUNNER_JOBS,
+
+    /** Versioned saga aggregates and application-command outbox rows share the execution batch. */
+    DURABLE_SAGAS
 }

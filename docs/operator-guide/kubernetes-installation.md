@@ -2,7 +2,7 @@
 
 This procedure installs the complete backend plus UI with PostgreSQL execution persistence, OIDC
 through Keycloak, and a PVC for the remaining local stores. It describes the current `dev`
-implementation and the planned `0.6.1-alpha.1` deliverables. Wait for that release to be published
+implementation and the planned `0.7.0-alpha.1` deliverables. Wait for that release to be published
 before resolving its image; these examples do not assert that the new version is already available.
 The [UI-only procedure](kubernetes-ui-only.md) instead connects to a backend you already run.
 
@@ -26,7 +26,7 @@ and configure a long stream timeout. Provision database and PVC backups and veri
 kubectl create namespace ravenroot
 kubectl config set-context --current --namespace=ravenroot
 # Once published, inspect the version and select its immutable index digest.
-docker buildx imagetools inspect ghcr.io/ravenroot-ai/ravenroot:0.6.1-alpha.1
+docker buildx imagetools inspect ghcr.io/ravenroot-ai/ravenroot:0.7.0-alpha.1
 ```
 
 Download or copy [full.yaml](../examples/kubernetes/full.yaml),

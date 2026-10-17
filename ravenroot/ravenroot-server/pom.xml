@@ -6,7 +6,7 @@
     <parent>
         <groupId>ai.ravenroot</groupId>
         <artifactId>ravenroot-parent</artifactId>
-        <version>0.6.1-alpha.1</version>
+        <version>0.7.0-alpha.1</version>
     </parent>
     <artifactId>ravenroot-server</artifactId>
     <name>Ravenroot Server</name>
@@ -100,6 +100,14 @@
         <dependency>
             <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-api-testkit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Live palette classification coverage registers the real first-party AMQP behaviors
+             through DefaultRavenrootApplication; the extension remains optional at runtime. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-amqp091</artifactId>
+            <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
         <!-- The engine-adapter kill cell reuses KillMatrixArtifact rather than growing a

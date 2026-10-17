@@ -1,0 +1,48 @@
+name: Publish reviewed Ravenroot graph
+
+on:
+  push:
+    branches: [main]
+    paths: ['graphs/**/*.graphml']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out matching Ravenroot publication tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ravenroot-ai/ravenroot
+          ref: dev
+          path: .ravenroot-tooling
+          persist-credentials: false
+      - name: Configure short-lived object-store credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.GRAPH_ARTIFACT_PUBLISH_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Publish immutable GraphML, manifest, and catalog snapshot
+        env:
+          RAVENROOT_ADMISSION_TOKEN: ${{ secrets.RAVENROOT_ADMISSION_TOKEN }}
+        run: |
+          python3 .ravenroot-tooling/scripts/publish-graph-artifacts.py "${{ vars.GRAPH_DOCUMENT }}" \
+            --tenant "${{ vars.RAVENROOT_TENANT }}" \
+            --source-commit "${GITHUB_SHA}" \
+            --admission-url "${{ vars.RAVENROOT_ADMISSION_URL }}" \
+            --s3-bucket "${{ vars.GRAPH_ARTIFACT_BUCKET }}" \
+            --previous-catalog-url "${{ vars.PREVIOUS_GRAPH_CATALOG_URL }}" \
+            --catalog-path "catalogs/${GITHUB_SHA}.json"
+
+# Configure Ravenroot's RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH to the reviewed immutable
+# catalogs/<release-commit>.json snapshot. The publisher uses If-None-Match:* for every object;
+# rerunning verifies identical existing bytes, and each catalog retains all earlier versions.
+# Omit --previous-catalog-url only for the first release in a new artifact store.
+# Pin the tooling checkout to the reviewed Ravenroot commit used by the operator before adopting
+# this example in a graph repository; `dev` here follows this repository's documented target branch.

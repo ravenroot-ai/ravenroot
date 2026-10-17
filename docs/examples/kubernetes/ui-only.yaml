@@ -1,4 +1,4 @@
-# Release target 0.6.1-alpha.1: resolve its published digest before applying.
+# Release target 0.7.0-alpha.1: resolve its published digest before applying.
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: ravenroot-ui}
@@ -19,7 +19,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: ui
-          image: ghcr.io/ravenroot-ai/ravenroot-ui:0.6.1-alpha.1
+          image: ghcr.io/ravenroot-ai/ravenroot-ui:0.7.0-alpha.1
           env:
             - {name: RAVENROOT_UI_PREFIX, value: /ravenroot}
             - {name: RAVENROOT_UI_BACKEND_URL, value: "http://existing-backend.application.svc.cluster.local:8080/automation"}

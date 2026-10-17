@@ -14,6 +14,54 @@ class PostgresProcessControlMigrationTest {
     static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC);
 
     @Test
+    void intergraphMigrationAcceptsAnExistingTableAndPreservesItsRows() throws Exception {
+        var source = PostgresTestDatabase.dataSourceFor("flow-marker-recovery-" + UUID.randomUUID());
+        var handle = new ai.ravenroot.api.flow.FlowHandle(UUID.randomUUID());
+        var callerProcess = UUID.randomUUID();
+        var callerTraversal = UUID.randomUUID();
+        var callerInvocation = UUID.randomUUID();
+        Instant now = CLOCK.instant();
+        var intent = new ai.ravenroot.api.flow.FlowInvocationRecord("acme", handle, callerProcess,
+                callerTraversal, callerInvocation, "alice",
+                ai.ravenroot.api.security.PrincipalType.USER, "issuer",
+                ai.ravenroot.api.deployment.DeploymentId.of("target"), 3, "a".repeat(64),
+                UUID.randomUUID(), UUID.randomUUID(),
+                ai.ravenroot.api.flow.FlowInvocationStatus.INTENT,
+                "preserved-input".getBytes(java.nio.charset.StandardCharsets.UTF_8), null,
+                "", "", null, 1, now, now, now.plusSeconds(60), now.plusSeconds(120));
+
+        try (var store = new PostgresExecutionStore(source, CLOCK)) {
+            store.createFlowInvocation(intent).toCompletableFuture().join();
+        }
+        try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+            // Restore the exact version-15 shape while deliberately retaining flow_invocation.
+            // Migrations 16-19 created saga, palette, and selective-replay structures; leaving any
+            // of them behind would synthesize a database no released build could have produced and
+            // would make the migration-20 IF NOT EXISTS compatibility check fail for the wrong reason.
+            statement.execute("DROP TABLE saga_command_outbox");
+            statement.execute("DROP TABLE saga_instance");
+            statement.execute("DROP TABLE node_template");
+            statement.execute("DROP TABLE node_palette");
+            statement.execute("DROP TABLE derived_execution_ancestry");
+            statement.execute("DROP TABLE replay_source_settlement");
+            statement.execute("DROP TABLE replay_invocation_evidence");
+            assertEquals(5, statement.executeUpdate(
+                    "DELETE FROM store_schema_history WHERE version >= 16"));
+            assertEquals(1, statement.executeUpdate(
+                    "UPDATE store_schema_version SET version = 15"));
+        }
+
+        try (var store = new PostgresExecutionStore(source, CLOCK)) {
+            var restored = store.loadFlowInvocation("acme", handle).toCompletableFuture().join()
+                    .orElseThrow();
+            assertEquals(callerProcess, restored.callerProcessInstanceId());
+            assertEquals(callerTraversal, restored.callerTraversalId());
+            assertEquals(callerInvocation, restored.callerInvocationId());
+            assertArrayEquals(intent.input(), restored.input());
+        }
+    }
+
+    @Test
     void legacyControlIsRecoveredOrExplicitlyHeldAndNewWritesNeverDependOnTheJournal() throws Exception {
         var source = PostgresTestDatabase.dataSourceFor("control-upgrade-" + UUID.randomUUID());
         java.util.function.Supplier<PostgresExecutionStore> open = () -> new PostgresExecutionStore(source, CLOCK);
@@ -42,9 +90,19 @@ class PostgresProcessControlMigrationTest {
         }
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+            // These tables arrived in migration 16. A synthetic downgrade must remove later
+            // structures as well as lowering store_schema_version; leaving them behind creates a
+            // shape no released database could have and correctly makes migration 16 fail.
+            statement.execute("DROP TABLE replay_invocation_evidence");
+            statement.execute("DROP TABLE replay_source_settlement");
+            statement.execute("DROP TABLE derived_execution_ancestry");
             statement.execute("DROP INDEX managed_recovery_attempt_candidate");
             statement.execute("DROP INDEX managed_recovery_timer_candidate");
             statement.execute("DROP INDEX managed_recovery_handler_candidate");
+            statement.execute("DROP TABLE saga_command_outbox");
+            statement.execute("DROP TABLE saga_instance");
+            statement.execute("DROP TABLE node_template");
+            statement.execute("DROP TABLE node_palette");
             statement.execute("DROP INDEX idx_process_instance_deployment_incarnation");
             statement.execute("ALTER TABLE process_instance DROP COLUMN deployment_incarnation_id");
             statement.execute("ALTER TABLE process_instance DROP COLUMN control_state");

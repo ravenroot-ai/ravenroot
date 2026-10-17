@@ -115,7 +115,7 @@ describe('node catalog availability is discovered from the service, not assumed 
 
     expect(error).toBeInstanceOf(RuntimeAuthorizationError);
     expect(error.status).toBe(403);
-    expect(error.message).toBe('Access revoked');
+    expect(error.message).toBe('Insufficient permissions');
   });
 });
 
@@ -179,7 +179,7 @@ describe('the empty palette distinguishes an unauthorised service from an unreac
   it('gives the two failures different text, so one is never mistaken for the other', () => {
     const unauthorised = catalogEmptyState(new RuntimeAuthorizationError('Authentication expired', 401), []);
     const unreachable = catalogEmptyState(new TypeError('Failed to fetch'), []);
-    const revoked = catalogEmptyState(new RuntimeAuthorizationError('Access revoked', 403), []);
+    const revoked = catalogEmptyState(new RuntimeAuthorizationError('Insufficient permissions', 403), []);
 
     expect(new Set([unauthorised.message, unreachable.message, revoked.message]).size).toBe(3);
     expect(new Set([unauthorised.kind, unreachable.kind, revoked.kind]).size).toBe(3);
@@ -218,7 +218,7 @@ describe('the empty palette distinguishes an unauthorised service from an unreac
       catalogEmptyState(null, null).kind,
       catalogEmptyState(null, []).kind,
       catalogEmptyState(new RuntimeAuthorizationError('Authentication expired', 401), []).kind,
-      catalogEmptyState(new RuntimeAuthorizationError('Access revoked', 403), []).kind,
+      catalogEmptyState(new RuntimeAuthorizationError('Insufficient permissions', 403), []).kind,
       catalogEmptyState(new TypeError('Failed to fetch'), []).kind,
     ];
 
@@ -256,6 +256,6 @@ describe('the client no longer compiles an authentication assumption into the bu
     expect(runtime).not.toContain("RuntimeAuthorizationError('Authentication required'");
     // The server's gate is untouched: the client still surfaces what the service answered.
     expect(runtime).toContain("'Authentication expired'");
-    expect(runtime).toContain("'Access revoked'");
+    expect(runtime).toContain("'Insufficient permissions'");
   });
 });

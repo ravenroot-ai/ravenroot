@@ -55,14 +55,16 @@ public enum ErrorCode {
     /**
      * The counterpart that keeps {@link #EXECUTION_RESULT_EXPIRED} honest in the other direction: the
      * execution provably ran and its terminal status is still known, but its payload was never
-     * retained in the first place -- refused because it exceeded a configured payload budget, or
-     * because the value does not project onto the closed payload model at all. Distinct from
+     * retained in the first place -- refused because it exceeded a configured payload budget,
+     * because the value does not project onto the closed payload model at all, or unavailable because
+     * recovery proved the terminal boundary after the producing runtime ended. Distinct from
      * {@link #EXECUTION_RESULT_EXPIRED} on purpose: one names a record that aged out under a
      * retention policy working as configured, the other names a record whose payload was refused at
      * write time and that no amount of reading it sooner would have recovered. A caller told "expired"
      * learns nothing actionable; a caller told "redacted" can distinguish a size limit an operator may
-     * raise from a node returning a value no remote adapter could ever persist -- the two published
-     * {@code payloadState} values ({@code WITHHELD}, {@code UNCONVERTIBLE}) this response body carries
+     * raise from a node returning a value no remote adapter could ever persist or an output whose
+     * original writer ended -- the three published {@code payloadState} values ({@code WITHHELD},
+     * {@code UNCONVERTIBLE}, {@code UNAVAILABLE}) this response body carries
      * beside {@code status} and {@code terminationReason}, for the identical reason those two travel
      * beside {@link #EXECUTION_RESULT_EXPIRED}'s own body. 410, the same status
      * {@link #EXECUTION_RESULT_EXPIRED} uses, because both describe the identical shape of absence to
@@ -72,6 +74,9 @@ public enum ErrorCode {
     EXECUTION_RESULT_REDACTED(410, "the execution result was never retained"),
     /** The request violates an input contract without disclosing rejected content. */
     INVALID_REQUEST(400, "the request was rejected as invalid"),
+    /** A saved node names operator authority unavailable in the authenticated destination tenant. */
+    NODE_TEMPLATE_REFERENCE_UNAVAILABLE(409, "a saved node reference is unavailable in this tenant; "
+            + "choose an available plugin, profile, policy, or destination reference"),
     /**
      * A bounded read was asked for more items than the server will return in one answer.
      *

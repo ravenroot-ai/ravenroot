@@ -6,7 +6,7 @@ released `0.1.0-alpha.1` notes remain the authority for that release; a developm
 not be read as a claim that an older release contains it.
 
 The default server composition registers the 12 core node types below. Optional first-party source
-contains 20 buildable bundle modules and 48 node descriptors. The snapshot's CI publication
+contains 21 buildable bundle modules and 49 node descriptors. The snapshot's CI publication
 selection is empty, so its official image assembly path stages no optional bundles. That is evidence
 about this snapshot's configured path, not a retrospective inventory of already-published artifacts.
 An operator can build optional bundles explicitly and include them in an operator-built image.
@@ -76,11 +76,12 @@ allowed value, condition, descriptor limit, and declared outcome from compiled c
 | `openapi-server` | `ai.ravenroot.extensions.openapi.server` | `openapi.receive`, `openapi.request-reply` | [OpenAPI server](bundles/openapi-server.md) |
 | `slack` | `ai.ravenroot.extensions.slack` | `slack.events`, `slack.commands`, `slack.post-message` | [Slack](bundles/slack.md) |
 | `spel` | `ai.ravenroot.extensions.spel` | `spel.transform`, `spel.decision` | [Restricted SpEL](bundles/spel.md) |
+| `system-one` | `ai.ravenroot.extensions.systemone` | `system-one-evaluate` | [System One](bundles/system-one.md) |
 | `teams` | `ai.ravenroot.extensions.teams` | `teams.send`, `teams.outgoing-webhook` | [Microsoft Teams](bundles/teams.md) |
 | `telegram` | `ai.ravenroot.extensions.telegram` | `telegram.send`, `telegram.answer.callback`, `telegram.edit.message`, `telegram.delete.message` | [Telegram](bundles/telegram.md) |
 | `websocket` | `ai.ravenroot.extensions.websocket` | `websocket.send`, `websocket.receive` | [WebSocket](bundles/websocket.md) |
 
-All 20 are source-supported packages, optional at runtime, and absent from the default core catalog.
+All 21 are source-supported packages, optional at runtime, and absent from the default core catalog.
 The deployable-bundle path requires explicit installation plus manifest-ID activation; an embedding
 application can instead include extension jars and explicitly name their package classes through the
 separate classpath mechanism. The [bundle lifecycle](../operator-guide/plugin-bundles.md) is the

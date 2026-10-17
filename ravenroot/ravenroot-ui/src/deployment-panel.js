@@ -162,6 +162,18 @@ export function createDeploymentsWindow({
   const processList = element('lifecycle-process-list');
   const processStatus = element('lifecycle-process-status');
   const processScope = element('lifecycle-process-scope');
+  const derivedForm = element('derived-execution-form');
+  const derivedSource = element('derived-source-id');
+  const derivedBoundaryChoice = element('derived-boundary-choice');
+  const derivedDiscoverButton = element('derived-discover');
+  const derivedKey = element('derived-idempotency-key');
+  const derivedReason = element('derived-reason');
+  const derivedDecision = element('derived-repeatability');
+  const derivedEffects = element('derived-authorize-effects');
+  const derivedPreviewButton = element('derived-preview');
+  const derivedStartButton = element('derived-start');
+  const derivedStatus = element('derived-execution-status');
+  const derivedOutput = element('derived-execution-preview');
 
   let listing = { loaded: false, deployments: [] };
   let registering = false;
@@ -172,6 +184,164 @@ export function createDeploymentsWindow({
   let selectedProcessId = null;
   let processes = [];
   const processBusy = new Set();
+  let derivedPreviewFingerprint = null;
+  let derivedGeneration = 0;
+  let derivedBusy = false;
+  let derivedBoundaryOptions = [];
+
+  function freshDerivedKey() {
+    if (!derivedKey || derivedKey.value.trim()) return;
+    derivedKey.value = globalThis.crypto?.randomUUID?.()
+      || `derived-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function derivedRequest() {
+    const selectedBoundary = derivedBoundaryChoice?.value ?? '';
+    const choice = selectedBoundary === '' ? null : derivedBoundaryOptions[Number(selectedBoundary)];
+    const request = {
+      boundaries: [{ nodeId: choice?.nodeId || '',
+        predecessorInvocationIds: choice ? [choice.predecessorInvocationId] : [] }],
+      idempotencyKey: derivedKey?.value.trim(), reason: derivedReason?.value.trim(),
+      repeatabilityDecision: derivedDecision?.value.trim() || '',
+      authorizeExternalEffects: Boolean(derivedEffects?.checked),
+    };
+    if (!derivedSource?.value.trim() || !request.boundaries[0].nodeId
+        || !request.boundaries[0].predecessorInvocationIds[0]
+        || !request.idempotencyKey || !request.reason) {
+      throw new Error('Source, boundary, predecessor, idempotency key, and reason are required.');
+    }
+    return request;
+  }
+
+  function invalidateDerivedPreview(event) {
+    derivedGeneration += 1;
+    derivedPreviewFingerprint = null;
+    if (derivedStartButton) derivedStartButton.disabled = true;
+    if (event?.target === derivedSource) {
+      derivedBoundaryOptions = [];
+      derivedBoundaryChoice.replaceChildren();
+      const option = doc.createElement('option');
+      option.value = '';
+      option.textContent = 'Discover retained boundaries for this source';
+      derivedBoundaryChoice.append(option);
+    }
+  }
+
+  async function discoverDerivedBoundaries() {
+    if (derivedBusy) return;
+    const source = derivedSource?.value.trim();
+    if (!source) {
+      derivedStatus.textContent = 'Select or enter a source process before discovering boundaries.';
+      return;
+    }
+    const generation = ++derivedGeneration;
+    derivedBusy = true;
+    derivedDiscoverButton.disabled = true;
+    derivedPreviewButton.disabled = true;
+    derivedStartButton.disabled = true;
+    derivedStatus.textContent = 'Reading retained, positively settled boundary evidence…';
+    try {
+      const boundaries = await client.derivedExecutionBoundaries(source);
+      if (disposed || generation !== derivedGeneration) return;
+      derivedBoundaryOptions = boundaries;
+      derivedBoundaryChoice.replaceChildren();
+      const placeholder = doc.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = boundaries.length
+        ? 'Choose a retained boundary' : 'No retained downstream boundaries are available';
+      derivedBoundaryChoice.append(placeholder);
+      boundaries.forEach((boundary, index) => {
+        const option = doc.createElement('option');
+        option.value = String(index);
+        option.textContent = `${boundary.predecessorNodeId} → ${boundary.nodeId} (${boundary.outcome})`;
+        derivedBoundaryChoice.append(option);
+      });
+      derivedStatus.textContent = boundaries.length
+        ? `${boundaries.length} retained boundary choice${boundaries.length === 1 ? '' : 's'} available.`
+        : 'No retained downstream boundary can be selected for this source.';
+    } catch (error) {
+      if (generation !== derivedGeneration) return;
+      derivedBoundaryOptions = [];
+      derivedStatus.textContent = `Boundary discovery failed: ${error?.message || error}`;
+    } finally {
+      derivedBusy = false;
+      if (generation === derivedGeneration) {
+        derivedDiscoverButton.disabled = false;
+        derivedPreviewButton.disabled = false;
+      } else {
+        derivedDiscoverButton.disabled = false;
+        derivedPreviewButton.disabled = false;
+      }
+    }
+  }
+
+  async function previewDerived() {
+    if (derivedBusy) return;
+    try {
+      freshDerivedKey();
+      const request = derivedRequest();
+      const source = derivedSource.value.trim();
+      const fingerprint = JSON.stringify([source, request]);
+      const generation = derivedGeneration;
+      derivedBusy = true;
+      derivedPreviewButton.disabled = true;
+      derivedDiscoverButton.disabled = true;
+      derivedStatus.textContent = 'Checking retained evidence, pins, causal closure, and effects…';
+      const preview = await client.previewDerivedExecution(source, request);
+      if (generation !== derivedGeneration || fingerprint !== JSON.stringify([source, derivedRequest()])) return;
+      const lines = [preview.admissible ? 'Ready to submit.' : 'Submission is refused.',
+        `Refusals: ${preview.refusalCodes.join(', ') || 'none'}`,
+        `Inherited invocation evidence: ${preview.inheritedInvocationIds.join(', ') || 'none'}`,
+        `Possible downstream scope: ${preview.possibleScopeNodeIds.join(', ') || 'none'}`,
+        `Missing inputs: ${preview.missingInputs.join(', ') || 'none'}`,
+        `External effect nodes: ${preview.externalEffectNodes.join(', ') || 'none'}`,
+        `Source outcome ambiguous: ${preview.sourceOutcomeAmbiguous ? 'yes' : 'no'}`,
+        `Graph pin: ${preview.graphContentId || 'unavailable'}`,
+        `Manifest pin: ${preview.manifestDigest || 'unavailable'}`];
+      derivedOutput.textContent = lines.join('\n');
+      derivedOutput.hidden = false;
+      derivedStatus.textContent = preview.admissible
+        ? 'Preview is admissible. Review the possible scope and effect boundaries before starting.'
+        : 'Preview refused. Correct the named evidence or boundary issue before starting.';
+      derivedPreviewFingerprint = preview.admissible ? fingerprint : null;
+      derivedStartButton.disabled = !preview.admissible;
+    } catch (error) {
+      invalidateDerivedPreview();
+      derivedStatus.textContent = `Preview failed: ${error?.message || error}`;
+    } finally {
+      derivedBusy = false;
+      if (derivedPreviewButton) derivedPreviewButton.disabled = false;
+      if (derivedDiscoverButton) derivedDiscoverButton.disabled = false;
+    }
+  }
+
+  async function startDerived(event) {
+    event.preventDefault();
+    if (derivedBusy) return;
+    try {
+      const request = derivedRequest();
+      const source = derivedSource.value.trim();
+      if (derivedPreviewFingerprint !== JSON.stringify([source, request])) {
+        throw new Error('Preview this exact request again before starting.');
+      }
+      derivedStartButton.disabled = true;
+      derivedBusy = true;
+      derivedPreviewButton.disabled = true;
+      derivedDiscoverButton.disabled = true;
+      derivedStatus.textContent = 'Admitting the fresh derived execution…';
+      const started = await client.startDerivedExecution(source, request);
+      derivedStatus.textContent = `Derived process ${started.processInstanceId} started at traversal ${started.traversalId}.`;
+      invalidateDerivedPreview();
+      await refreshProcesses();
+    } catch (error) {
+      derivedStatus.textContent = `Derived execution was not started: ${error?.message || error}`;
+      invalidateDerivedPreview();
+    } finally {
+      derivedBusy = false;
+      derivedPreviewButton.disabled = false;
+      derivedDiscoverButton.disabled = false;
+    }
+  }
 
   if (scope) scope.textContent = DEPLOYMENT_SCOPE_TEXT;
 
@@ -367,6 +537,46 @@ export function createDeploymentsWindow({
           actions.append(drain);
         }
         item.append(actions);
+        if (entry.sagaError) {
+          const diagnostic = doc.createElement('small');
+          diagnostic.className = 'deployment-diagnostic';
+          diagnostic.textContent = `Saga status unavailable: ${entry.sagaError}`;
+          item.append(diagnostic);
+        } else if (Array.isArray(entry.sagas)) {
+          const sagas = doc.createElement('ul');
+          sagas.className = 'lifecycle-saga-list';
+          if (entry.sagas.length === 0) {
+            const none = doc.createElement('li');
+            none.textContent = 'No saga scope has entered this process.';
+            sagas.append(none);
+          }
+          for (const saga of entry.sagas) {
+            const row = doc.createElement('li');
+            const headline = doc.createElement('b');
+            headline.textContent = `${saga.scope} · ${saga.disposition}`;
+            const detail = doc.createElement('small');
+            const steps = Array.isArray(saga.steps)
+              ? saga.steps.map(step => `${step.stepId}: ${step.status}`).join(' · ') : '';
+            detail.textContent = `revision ${saga.revision}`
+              + `${saga.actionableReason ? ` · ${saga.actionableReason}` : ''}`
+              + `${steps ? ` · ${steps}` : ''}`;
+            row.append(headline, detail);
+            sagas.append(row);
+          }
+          item.append(sagas);
+          if (Array.isArray(entry.sagaOutbox) && entry.sagaOutbox.length > 0) {
+            const outbox = doc.createElement('ul');
+            outbox.className = 'lifecycle-saga-outbox';
+            for (const command of entry.sagaOutbox) {
+              const row = doc.createElement('li');
+              row.textContent = `${command.commandType} · ${command.status}`
+                + ` · attempts ${command.attempts}/${command.maxAttempts}`
+                + `${command.lastFailure ? ` · ${command.lastFailure}` : ''}`;
+              outbox.append(row);
+            }
+            item.append(outbox);
+          }
+        }
       }
       return item;
     }));
@@ -422,7 +632,11 @@ export function createDeploymentsWindow({
         rows.push(...page.items);
         cursor = page.nextCursor;
       } while (cursor);
-      processes = rows;
+      const previous = new Map(processes.map(entry => [entry.processInstanceId, entry]));
+      processes = rows.map(entry => ({ ...entry,
+        ...(previous.get(entry.processInstanceId)?.sagas
+          ? { sagas: previous.get(entry.processInstanceId).sagas,
+            sagaOutbox: previous.get(entry.processInstanceId).sagaOutbox } : {}) }));
       if (selectedProcessId && !rows.some(item => item.processInstanceId === selectedProcessId)) {
         selectedProcessId = null;
       }
@@ -430,11 +644,27 @@ export function createDeploymentsWindow({
       processStatus.textContent = rows.length
         ? `${rows.length} authoritative process instance${rows.length === 1 ? '' : 's'} for “${selectedDeploymentId}”.`
         : `No durable process instances are recorded for “${selectedDeploymentId}”.`;
+      if (selectedProcessId) void refreshSagas(selectedProcessId);
     } catch (error) {
       processes = [];
       renderProcesses();
       processStatus.textContent = `Process inventory could not be reconciled: ${error?.message || error}`;
     }
+  }
+
+  async function refreshSagas(processInstanceId) {
+    if (!client || typeof client.processInstanceSagas !== 'function') return;
+    try {
+      const result = await client.processInstanceSagas(processInstanceId);
+      if (disposed || selectedProcessId !== processInstanceId) return;
+      processes = processes.map(entry => entry.processInstanceId === processInstanceId
+        ? { ...entry, sagas: result.sagas, sagaOutbox: result.outbox, sagaError: null } : entry);
+    } catch (error) {
+      if (disposed || selectedProcessId !== processInstanceId) return;
+      processes = processes.map(entry => entry.processInstanceId === processInstanceId
+        ? { ...entry, sagaError: error?.message || String(error) } : entry);
+    }
+    renderProcesses();
   }
 
   async function register() {
@@ -686,7 +916,13 @@ export function createDeploymentsWindow({
     const selectProcess = event.target.closest?.('[data-process-select]');
     if (selectProcess) {
       selectedProcessId = selectProcess.dataset.processSelect;
+      if (derivedSource) derivedSource.value = selectedProcessId;
+      if (derivedKey) derivedKey.value = '';
+      freshDerivedKey();
+      invalidateDerivedPreview({ target: derivedSource });
       renderProcesses();
+      void refreshSagas(selectedProcessId);
+      void discoverDerivedBoundaries();
       return;
     }
     const processAction = event.target.closest?.('[data-process-action]');
@@ -704,12 +940,17 @@ export function createDeploymentsWindow({
   const onDialogClose = () => stopPolling();
 
   form.addEventListener('submit', onSubmit);
+  derivedForm?.addEventListener('submit', startDerived);
+  derivedPreviewButton?.addEventListener('click', previewDerived);
+  derivedDiscoverButton?.addEventListener('click', discoverDerivedBoundaries);
+  derivedForm?.addEventListener('input', invalidateDerivedPreview);
   dialog.addEventListener('click', onDialogClick);
   dialog.addEventListener('cancel', onCancel);
   dialog.addEventListener('close', onDialogClose);
 
   renderList();
   renderProcesses();
+  freshDerivedKey();
 
   return {
     open,
@@ -737,6 +978,10 @@ export function createDeploymentsWindow({
       disposed = true;
       stopPolling();
       form.removeEventListener('submit', onSubmit);
+      derivedForm?.removeEventListener('submit', startDerived);
+      derivedPreviewButton?.removeEventListener('click', previewDerived);
+      derivedDiscoverButton?.removeEventListener('click', discoverDerivedBoundaries);
+      derivedForm?.removeEventListener('input', invalidateDerivedPreview);
       dialog.removeEventListener('click', onDialogClick);
       dialog.removeEventListener('cancel', onCancel);
       dialog.removeEventListener('close', onDialogClose);

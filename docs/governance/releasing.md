@@ -268,11 +268,12 @@ events fail before release credentials are available.
 
 ### Publication boundary
 
-Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains 32
+Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains 38
 coordinates:
 
 - `ravenroot-parent`, `ravenroot-application-api`, `ravenroot-core`,
-  `ravenroot-programming-graalvm`, `ravenroot-plugin-bundle`, `ravenroot-persistence-sqlite`,
+  `ravenroot-programming-graalvm`, `ravenroot-plugin-bundle`, `ravenroot-persistence-postgresql`,
+  `ravenroot-persistence-sqlite`, `ravenroot-system-one`,
   `ravenroot-pekko`, `ravenroot-observability-otel`, `ravenroot-server`, `ravenroot-cli`, and
   `ravenroot-distribution`;
 - the reusable `ravenroot-api-testkit`, `ravenroot-engine-testkit`, and
@@ -280,9 +281,10 @@ coordinates:
 - the `ravenroot-extensions` parent, the dependency-bearing `ravenroot-extensions-all` pack, and the
   `ravenroot-ai`, `ravenroot-amqp091`, `ravenroot-discord`,
   `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-github`, `ravenroot-jdbc`,
-  `ravenroot-kafka`, `ravenroot-mail`,
+  `ravenroot-kafka`, `ravenroot-mail`, `ravenroot-matrix`, `ravenroot-mattermost`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
-  `ravenroot-openapi-server`, `ravenroot-slack`, `ravenroot-spel`, `ravenroot-telegram`, and
+  `ravenroot-openapi-server`, `ravenroot-slack`, `ravenroot-spel`, `ravenroot-teams`,
+  `ravenroot-telegram`, and
   `ravenroot-websocket` extensions.
 
 The example node project, sandbox-supervisor conformance fixture, optional Akka build, development

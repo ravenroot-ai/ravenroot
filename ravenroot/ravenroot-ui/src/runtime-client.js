@@ -3,6 +3,7 @@ import {
   validateHumanTaskCapability,
   validateHumanTaskRow,
 } from './human-task-attention.js';
+import { validateGraphAuthoringCapability } from './graph-authoring-client.js';
 
 const DEFAULT_MAX_FRAME_BYTES = 64 * 1024;
 const DEFAULT_MAX_RETRIES = 5;
@@ -54,6 +55,8 @@ export function validateRuntimeConfiguration(value) {
     workspace = Object.freeze({ tenantId: value.workspace.tenantId });
   }
   const humanTasks = value.humanTasks == null ? null : validateHumanTaskCapability(value.humanTasks);
+  const graphAuthoring = value.graphAuthoring == null ? null
+    : validateGraphAuthoringCapability(value.graphAuthoring);
   return {
     schemaVersion: value.schemaVersion,
     graphDocumentMaxBytes: value.graphDocumentMaxBytes,
@@ -63,6 +66,7 @@ export function validateRuntimeConfiguration(value) {
       maxProgramsPerBuild: authoring.maxProgramsPerBuild,
     }),
     workspace,
+    ...(graphAuthoring ? { graphAuthoring } : {}),
     ...(humanTasks ? { humanTasks } : {}),
   };
 }
@@ -438,7 +442,7 @@ export function validateProcessInventoryPage(value) {
 
 // Whether the service requires authentication is the SERVICE'S answer, never a constant compiled
 // into this bundle. The client sends the request and reacts to the status it gets back: a 401 or a
-// 403 is surfaced as a RuntimeAuthorizationError exactly as before, and a rejected credential is
+// 403 is surfaced as a RuntimeAuthorizationError exactly as before, and only a definitively rejected (401) credential is
 // cleared when its provider can atomically prove that the rejected snapshot is still current. What
 // was removed is only the client's refusal to ASK — which made a loopback service
 // that authorises everyone look like a service that had rejected us, and emptied the node palette
@@ -495,10 +499,10 @@ export class RavenrootRuntimeClient {
           }
         }
         if (response.status === 401 || response.status === 403) {
-          await this.#clearAccessTokenIfCurrent(credential);
+          if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
           if (signal.aborted) return;
           throw new RuntimeAuthorizationError(
-            response.status === 401 ? 'Authentication expired' : 'Access revoked', response.status);
+            response.status === 401 ? 'Authentication expired' : 'Insufficient permissions', response.status);
         }
         if (!response.ok || !response.body?.getReader) {
           throw new Error(`Live events failed with HTTP ${response.status}`);
@@ -730,7 +734,7 @@ export class RavenrootRuntimeClient {
           cache: 'no-store', signal,
         });
         if (response.status === 401 || response.status === 403) {
-          await this.#clearAccessTokenIfCurrent(credential);
+          if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
           throw new RuntimeAuthorizationError(response.status === 401
             ? 'Authentication expired' : 'Deployment observation was revoked', response.status);
         }
@@ -1050,6 +1054,60 @@ export class RavenrootRuntimeClient {
     });
   }
 
+  /** Reads the bounded, payload-free saga and participant status for one process instance. */
+  async processInstanceSagas(processInstanceId, { signal } = {}) {
+    const id = String(processInstanceId || '');
+    if (!id) throw new Error('Process instance sagas require an id');
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/sagas`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    if (!result || !Array.isArray(result.sagas) || !Array.isArray(result.outbox)) {
+      throw new Error('Process saga response is invalid');
+    }
+    return result;
+  }
+
+  async previewDerivedExecution(sourceProcessInstanceId, request, { signal } = {}) {
+    return this.#derivedExecution(sourceProcessInstanceId, request, true, signal);
+  }
+
+  async derivedExecutionBoundaries(sourceProcessInstanceId, { signal } = {}) {
+    const id = String(sourceProcessInstanceId || '');
+    if (!id) throw new Error('Derived boundary discovery requires a source process');
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived/boundaries`, {
+      method: 'GET', signal, headers: { Accept: 'application/json' },
+    });
+    if (!Array.isArray(result?.boundaries)) throw new Error('Derived boundary response is invalid');
+    return result.boundaries;
+  }
+
+  async startDerivedExecution(sourceProcessInstanceId, request, { signal } = {}) {
+    return this.#derivedExecution(sourceProcessInstanceId, request, false, signal);
+  }
+
+  async #derivedExecution(sourceProcessInstanceId, request, preview, signal) {
+    const id = String(sourceProcessInstanceId || '');
+    if (!id || !request || !Array.isArray(request.boundaries) || request.boundaries.length === 0) {
+      throw new Error('Selective derived execution requires a source and boundary');
+    }
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/derived${preview ? '/preview' : ''}`, {
+      method: 'POST', signal, headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schemaVersion: 1, ...request }),
+    });
+    if (preview && (typeof result?.admissible !== 'boolean' || !Array.isArray(result.refusalCodes)
+        || !Array.isArray(result.inheritedInvocationIds) || !Array.isArray(result.possibleScopeNodeIds)
+        || !Array.isArray(result.missingInputs) || !Array.isArray(result.externalEffectNodes)
+        || typeof result.sourceOutcomeAmbiguous !== 'boolean')) {
+      throw new Error('Selective replay preview response is invalid');
+    }
+    if (!preview && (!result?.processInstanceId || !result?.traversalId || !result?.graphVersion)) {
+      throw new Error('Derived execution response is invalid');
+    }
+    return result;
+  }
+
   /** Reads the bounded, tenant-authorized actionable Human Task projection for one exact graph
    * context. The runtime configuration supplies page and polling limits; this method supplies no
    * browser-owned defaults. */
@@ -1227,6 +1285,49 @@ export class RavenrootRuntimeClient {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
     if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');
     return result;
+  }
+
+  nodePalettes() {
+    return this.#json('/v1/node-palettes', { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+
+  createNodePalette(name) {
+    return this.#json('/v1/node-palettes', { method: 'POST', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  }
+
+  renameNodePalette(id, version, name) {
+    return this.#json('/v1/node-palettes/' + encodeURIComponent(id), { method: 'PATCH', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ name }) });
+  }
+
+  deleteNodePalette(id, version) {
+    return this.#json('/v1/node-palettes/' + encodeURIComponent(id), { method: 'DELETE', headers: {
+      Accept: 'application/json', 'If-Match': String(version) } });
+  }
+
+  createNodeTemplate(paletteId, name, node) {
+    return this.#json('/v1/node-palettes/templates', { method: 'POST', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paletteId, name, node }) });
+  }
+
+  updateNodeTemplate(id, version, paletteId, name) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id), { method: 'PATCH', headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ paletteId, name }) });
+  }
+
+  deleteNodeTemplate(id, version) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id), { method: 'DELETE', headers: {
+      Accept: 'application/json', 'If-Match': String(version) } });
+  }
+
+  validateNodeTemplate(id) {
+    return this.#json('/v1/node-palettes/templates/' + encodeURIComponent(id) + '/validate', {
+      method: 'POST', headers: { Accept: 'application/json' },
+    });
   }
 
   /** The connected runtime's effective, operator-owned browser ingestion configuration. */
@@ -1463,8 +1564,8 @@ export class RavenrootRuntimeClient {
       throw new RuntimeRequestError('Service request failed', { method, path });
     }
     if (response.status === 401 || response.status === 403) {
-      await this.#clearAccessTokenIfCurrent(credential);
-      throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Access revoked',
+      if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
+      throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Insufficient permissions',
         response.status);
     }
     // The body is read as text, never with `.json()` directly. A base URL that lands on a proxy,
@@ -1714,7 +1815,7 @@ function executionEventCursor(value) {
  * commit atomically. A conditional refresh must also reject a stale snapshot before starting its
  * external work and check it again when committing the new credential. Legacy providers that only
  * expose `getAccessToken` remain usable for requests; the runtime deliberately does not call their
- * unconditional clear or refresh methods on 401/403.
+ * unconditional clear or refresh methods on 401.
  */
 export function memoryTokenProvider(initialToken = '') {
   let current = Object.freeze({ accessToken: String(initialToken || '') });

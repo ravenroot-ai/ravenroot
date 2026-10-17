@@ -6,7 +6,7 @@
     <parent>
         <groupId>ai.ravenroot</groupId>
         <artifactId>ravenroot-parent</artifactId>
-        <version>0.6.1-alpha.1</version>
+        <version>0.7.0-alpha.1</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -98,6 +98,11 @@
         <dependency>
             <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-spel</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-system-one</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

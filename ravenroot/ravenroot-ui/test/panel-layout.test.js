@@ -30,7 +30,7 @@ describe('the default layout', () => {
     const layout = defaultLayout();
     expect(layout.panels).toHaveLength(PANELS.length);
     expect(new Set(layout.panels.map(panel => panel.id)).size).toBe(PANELS.length);
-    expect(idsIn(layout, 'left')).toEqual(['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats']);
+    expect(idsIn(layout, 'left')).toEqual(['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats']);
     expect(idsIn(layout, 'right')).toEqual(['inspector', 'assistant']);
     expect(idsIn(layout, 'bottom')).toEqual(['activity']);
     // A `defaultClosed` panel means "everything ships open" is no longer the
@@ -252,7 +252,7 @@ describe('moving panels', () => {
   it('appends a moved panel to its new zone so it lands where the user can see it', () => {
     const layout = movePanelToZone(defaultLayout(), 'search', 'right');
     expect(idsIn(layout, 'right')).toEqual(['inspector', 'assistant', 'search']);
-    expect(idsIn(layout, 'left')).toEqual(['node-types', 'node-catalog', 'edge-types', 'graph-stats']);
+    expect(idsIn(layout, 'left')).toEqual(['node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats']);
   });
 
   it('preserves size on same-zone reorder and resets it on a cross-zone move', () => {
@@ -273,7 +273,7 @@ describe('moving panels', () => {
   it('reorders within a zone and leaves every other zone untouched', () => {
     const before = defaultLayout();
     const layout = movePanelWithinZone(before, 'node-catalog', 'up');
-    expect(idsIn(layout, 'left')).toEqual(['search', 'node-catalog', 'node-types', 'edge-types', 'graph-stats']);
+    expect(idsIn(layout, 'left')).toEqual(['search', 'node-catalog', 'node-types', 'node-palettes', 'edge-types', 'graph-stats']);
     expect(idsIn(layout, 'right')).toEqual(idsIn(before, 'right'));
     expect(idsIn(layout, 'bottom')).toEqual(idsIn(before, 'bottom'));
   });
@@ -367,7 +367,7 @@ describe('dropping a panel at a chosen position', () => {
   it('lands where it was released rather than at the end', () => {
     const layout = movePanelToZoneAt(defaultLayout(), 'inspector', 'left', 2);
     expect(idsIn(layout, 'left')).toEqual(
-      ['search', 'node-types', 'inspector', 'node-catalog', 'edge-types', 'graph-stats']);
+      ['search', 'node-types', 'inspector', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats']);
     expect(idsIn(layout, 'right')).toEqual(['assistant']);
   });
 
@@ -375,7 +375,7 @@ describe('dropping a panel at a chosen position', () => {
     const before = defaultLayout();
     const layout = movePanelToZoneAt(before, 'graph-stats', 'left', 0);
     expect(idsIn(layout, 'left')).toEqual(
-      ['graph-stats', 'search', 'node-types', 'node-catalog', 'edge-types']);
+      ['graph-stats', 'search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types']);
     expect(idsIn(layout, 'right')).toEqual(idsIn(before, 'right'));
     expect(idsIn(layout, 'bottom')).toEqual(idsIn(before, 'bottom'));
   });
@@ -506,7 +506,7 @@ describe('the short form', () => {
     // kinds, silently proving nothing. Written as a literal, adding that panel makes this test fail
     // until a person edits it, which is the decision this test exists to force.
     const shortenableIds = PANELS.filter(panel => canShorten(panel.id)).map(panel => panel.id);
-    expect(shortenableIds).toEqual(['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats']);
+    expect(shortenableIds).toEqual(['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats']);
   });
 
   describe('derived compact panel-stack mode', () => {

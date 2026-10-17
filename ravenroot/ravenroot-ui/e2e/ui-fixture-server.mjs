@@ -19,7 +19,10 @@ const MIME_TYPES = new Map([
 // as a literal while the port moved is what made the CSP and the service disagree by construction.
 const CSP = "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; "
   + "form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-  + `connect-src 'self' ${SERVICE_ORIGIN}`;
+  + `connect-src 'self' ${SERVICE_ORIGIN}; frame-src 'self'`;
+const PLUGIN_SANDBOX_CSP = "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; "
+  + "form-action 'none'; script-src 'self' blob:; style-src 'none'; img-src 'none'; connect-src 'none'; "
+  + "frame-src 'none'; worker-src 'none'";
 
 createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
@@ -49,7 +52,8 @@ createServer(async (request, response) => {
   }
   response.writeHead(200, {
     'Content-Type': MIME_TYPES.get(extname(file)) || 'application/octet-stream',
-    'Content-Security-Policy': CSP,
+    'Content-Security-Policy': relative === 'frontend-plugin-sandbox.html' ? PLUGIN_SANDBOX_CSP : CSP,
+    ...(relative === 'frontend-plugin-sandbox.html' ? {} : { 'X-Frame-Options': 'DENY' }),
     'Cache-Control': 'no-store',
   });
   createReadStream(file).pipe(response);

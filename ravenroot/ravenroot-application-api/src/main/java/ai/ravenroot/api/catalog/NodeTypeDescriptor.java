@@ -260,6 +260,25 @@ public record NodeTypeDescriptor(
     }
 
     /**
+     * Returns a copy with additional trusted editor and admission properties.
+     *
+     * @param declared properties appended to the existing schema
+     * @return descriptor copy carrying the combined property schema
+     */
+    public NodeTypeDescriptor withProperties(NodePropertyDescriptor... declared) {
+        var combined = new java.util.ArrayList<>(properties);
+        for (NodePropertyDescriptor property : declared) {
+            if (combined.stream().anyMatch(existing -> existing.name().equals(property.name()))) {
+                throw new IllegalArgumentException("duplicate descriptor property: " + property.name());
+            }
+            combined.add(property);
+        }
+        return new NodeTypeDescriptor(behavior, displayName, category, description, visualType, agentic,
+                combined, capabilities, defaultNature, allowedNatures, commands, outcomes,
+                runtimeConcurrency, additionalProperties);
+    }
+
+    /**
      * Copy with a trusted runtime-admission default and ceiling.
      *
      * @param constraint trusted runtime-admission default and ceiling

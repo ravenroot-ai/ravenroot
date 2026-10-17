@@ -50,6 +50,26 @@ auth:
 
 engine: pekko
 
+# Optional Git-backed graph source archive. Credentials remain in a Kubernetes Secret and are
+# resolved server-side under the fixed opaque reference "git-authoring".
+graphAuthoring:
+  enabled: false
+  provider: github
+  repositoryOwner: ""
+  repositoryName: ""
+  graphDirectory: graphs
+  draftBranch: draft
+  releaseBranch: main
+  githubApiBase: https://api.github.com
+  credentialMode: APP
+  credentialSecretName: ""
+  credentialSecretKey: credential
+  githubAppId: ""
+  githubInstallationId: ""
+  tenantNamespaces: ""
+  artifactBaseUrl: ""
+  artifactCatalogPath: catalog.json
+
 # Engine and graph-runner bounds. Blank values select ExecutionRuntimeConfiguration's Java-owned
 # defaults; explicit Helm integers may tighten the deployed limits.
 executionRuntime:

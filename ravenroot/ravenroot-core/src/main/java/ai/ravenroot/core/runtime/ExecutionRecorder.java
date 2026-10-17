@@ -14,11 +14,17 @@ import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.ReplayInvocationEvidence;
+import ai.ravenroot.api.persistence.ReplaySourceSettlement;
+import ai.ravenroot.api.persistence.ExecutionManifestDigest;
+import ai.ravenroot.api.persistence.DerivedExecutionAncestry;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.SagaCommandIntent;
+import ai.ravenroot.api.persistence.SagaWrite;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.ProcessInventoryEntry;
@@ -29,15 +35,23 @@ import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeMessage;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.Set;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Holds one process instance's lease for the life of a traversal and writes the runner's lifecycle
@@ -110,13 +124,49 @@ public final class ExecutionRecorder implements AutoCloseable {
     private final ExecutionKey key;
     private final Duration leaseTtl;
     private final ScheduledExecutorService renewals;
+    /** Coordinates renewal with close without making a virtual cleanup thread contend on a monitor. */
+    private final ReentrantLock leaseLifecycle = new ReentrantLock();
+    /** Serializes revision-bearing operations without pinning a Java 21 carrier during store waits. */
+    private final ReentrantLock operationLock = new ReentrantLock();
 
     private LeaseHandle lease;
     private long revision;
+    private boolean sourceOutcomeAmbiguous;
     private volatile boolean closed;
+    private final AtomicBoolean closeStarted = new AtomicBoolean();
     private volatile boolean fenceLost;
     private volatile ExecutionStoreFailure fenceLostBecause;
     private ScheduledFuture<?> renewalTask;
+
+    /**
+     * Records the terminal result produced by a recovered continuation.
+     *
+     * <p>The application records ordinary execution results, but its original completion stage has
+     * already ended with a durable-suspension signal by the time a recovery worker resumes this
+     * traversal. The recovery path therefore owns the eventual result write. An existing record is
+     * authoritative and makes a replay a no-op; this also keeps retry timestamps from manufacturing
+     * a conflicting fingerprint after a crash between the result write and trigger acknowledgement.</p>
+     */
+    void recordRecoveredResult(String graphVersion, UUID traversalId, GraphExecutionResult result,
+                               Throwable failure, Instant endedAt) {
+        Objects.requireNonNull(graphVersion, "graphVersion");
+        Objects.requireNonNull(traversalId, "traversalId");
+        Objects.requireNonNull(endedAt, "endedAt");
+        if (!store.supports(StoreCapability.EXECUTION_RESULTS)) return;
+        if (await(store.loadExecutionResult(key.tenantId(), traversalId)).isPresent()) return;
+        var nodes = result == null
+                ? ai.ravenroot.api.persistence.ExecutionResultNodes.empty()
+                : ai.ravenroot.api.persistence.ExecutionResultNodes.of(result.visitedNodes(),
+                        result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
+                        result.untakenEdges());
+        var status = failure == null ? ProcessInstanceStatus.COMPLETED : ProcessInstanceStatus.FAILED;
+        var reason = failure == null ? null : ExecutionTermination.reasonOf(failure);
+        Object payload = result == null ? null : result.payload();
+        var durable = ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId,
+                new GraphVersionPin(graphVersion), status, reason, endedAt, endedAt, payload, nodes,
+                failure, store.maxExecutionResultPayloadBytes());
+        await(store.recordExecutionResult(durable));
+    }
 
     private ExecutionRecorder(ExecutionStore store, ExecutionKey key, Duration leaseTtl,
                               LeaseHandle lease, long revision, ScheduledExecutorService renewals) {
@@ -149,6 +199,63 @@ public final class ExecutionRecorder implements AutoCloseable {
             }
             throw refused;
         }
+        return claimed(store, key, leaseTtl, revision, lease);
+    }
+
+    /**
+     * Claims the instance within the caller's remaining admission deadline.
+     *
+     * <p>A timed-out claim may still commit. The completion callback releases such a late lease;
+     * expiry remains the backstop if that best-effort release cannot complete.</p>
+     */
+    static ExecutionRecorder open(ExecutionStore store, ExecutionKey key, String workerId,
+                                  Duration leaseTtl, long revision, Duration waitBound) {
+        Objects.requireNonNull(store, "store");
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(workerId, "workerId");
+        Objects.requireNonNull(leaseTtl, "leaseTtl");
+        Objects.requireNonNull(waitBound, "waitBound");
+        if (waitBound.isZero() || waitBound.isNegative()) {
+            throw new IllegalArgumentException("waitBound must be positive");
+        }
+        CompletionStage<LeaseHandle> claim = store.claim(key, workerId, leaseTtl);
+        LeaseHandle lease;
+        try {
+            lease = claim.toCompletableFuture().get(waitBound.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (ExecutionException wrapped) {
+            ExecutionStoreException refused = ExecutionStoreException.unwrap(wrapped);
+            if (refused != null && refused.failure() instanceof ExecutionStoreFailure.LeaseHeldByAnother) {
+                throw new ExecutionInstanceBusyException(key, refused);
+            }
+            if (refused != null) throw refused;
+            throw new CompletionException(wrapped.getCause());
+        } catch (TimeoutException timedOut) {
+            releaseLateClaim(store, claim);
+            throw new ExecutionStoreException(new ExecutionStoreFailure.OutcomeUnknown(key,
+                    "lease claim did not resolve within the admission bound"), timedOut);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            releaseLateClaim(store, claim);
+            throw new ExecutionStoreException(new ExecutionStoreFailure.OutcomeUnknown(key,
+                    "interrupted while waiting for the lease claim"), interrupted);
+        }
+        return claimed(store, key, leaseTtl, revision, lease);
+    }
+
+    private static void releaseLateClaim(ExecutionStore store, CompletionStage<LeaseHandle> claim) {
+        claim.whenComplete((lateLease, ignoredFailure) -> {
+            if (lateLease != null) {
+                try {
+                    store.release(lateLease);
+                } catch (RuntimeException ignored) {
+                    // Lease expiry is the recovery backstop when a late best-effort release fails.
+                }
+            }
+        });
+    }
+
+    private static ExecutionRecorder claimed(ExecutionStore store, ExecutionKey key,
+            Duration leaseTtl, long revision, LeaseHandle lease) {
         var renewals = Executors.newSingleThreadScheduledExecutor(runnable -> {
             var thread = new Thread(runnable, "ravenroot-lease-" + key.processInstanceId());
             thread.setDaemon(true);
@@ -205,15 +312,23 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /** Renews immediately. Visible for tests, which drive the clock rather than waiting on it. */
-    public synchronized void renewNow() {
-        if (closed || fenceLost) {
-            return;
-        }
+    public void renewNow() {
+        operationLock.lock();
         try {
-            lease = await(store.renew(lease, leaseTtl));
-        } catch (ExecutionStoreException lost) {
-            loseFence(lost.failure());
-            throw lost;
+            leaseLifecycle.lock();
+            try {
+                if (closed || fenceLost) return;
+                try {
+                    lease = await(store.renew(lease, leaseTtl));
+                } catch (ExecutionStoreException lost) {
+                    loseFence(lost.failure());
+                    throw lost;
+                }
+            } finally {
+                leaseLifecycle.unlock();
+            }
+        } finally {
+            operationLock.unlock();
         }
     }
 
@@ -225,52 +340,174 @@ public final class ExecutionRecorder implements AutoCloseable {
      * asynchronous write would let the action overtake the record — which is the one ordering this
      * design does not survive losing.</p>
      */
-    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events) {
-        record(transitions, events, List.of());
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events) {
+        operationLock.lock();
+        try {
+            record(transitions, events, List.of());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Adds durable agent accounting to the same fenced commit as its lifecycle and audit events. */
-    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations) {
-        requireFence();
-        if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
-                && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())) {
-            return;
-        }
-        var batch = ExecutionBatch.to(key)
-                .expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease);
-        if (transitions != null) {
-            transitions.forEach(batch::apply);
-        }
-        if (events != null && store.supports(StoreCapability.EVENT_JOURNAL)) {
-            // Journalled inside this same transaction. An adapter without the capability would
-            // reject the batch, taking the aggregate write down with it, so the events are omitted
-            // rather than the transitions lost — the transitions are the durability guarantee and
-            // the journal is a projection of them.
-            //
-            // This path initially used only an EMPTY list, and that was deliberate rather than
-            // an omission. The journal is append-only, so a node event published then with an
-            // absent-but-existing causationId would have been a permanently false row that no later
-            // later update could amend — backfilling causation on an immutable log is rewriting history.
-            // An empty journal is honest; a semantically premature one is wrong forever. EventEnvelope's
-            // causation contract supplies the causal model, and this list is filled from
-            // GraphRunner.ExecutionState.
-            events.forEach(batch::publish);
-        }
-        if (agentBudgetOperations != null) {
-            agentBudgetOperations.forEach(batch::applyAgentBudget);
-        }
+        operationLock.lock();
         try {
-            StoredProcessInstance applied = await(store.apply(batch.build()));
-            revision = applied.revision();
-        } catch (ExecutionStoreException failed) {
-            if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
-                    || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
-                loseFence(failed.failure());
-            }
-            throw failed;
+            record(transitions, events, agentBudgetOperations, List.of());
+        } finally {
+            operationLock.unlock();
         }
+    }
+
+    java.util.Optional<ReplayInvocationEvidence> replayEvidence(UUID traversalId, UUID invocationId,
+                                             UUID attemptId,
+                                             String nodeId, Set<UUID> parents,
+                                             ai.ravenroot.api.execution.NodeCommand command,
+                                             String outcome, Map<String, Integer> iteration,
+                                             ai.ravenroot.api.persistence.OpaquePayload output,
+                                             ai.ravenroot.api.persistence.OpaquePayload attributes,
+                                             Instant captured) {
+        if (!store.supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)
+                || output.size() > store.maxPayloadBytes() || attributes.size() > store.maxPayloadBytes()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new ReplayInvocationEvidence(key, traversalId, invocationId, attemptId, nodeId, parents,
+                command, outcome, iteration, output, attributes, captured,
+                captured.plus(store.terminalRetention())));
+    }
+
+    /** Records positive quiescence while this worker still owns the terminal source fence. */
+    public void recordReplaySettlement(ExecutionManifestDigest manifestDigest) {
+        operationLock.lock();
+        try {
+            requireFence();
+            if (!store.supports(StoreCapability.SELECTIVE_REPLAY_EVIDENCE)) return;
+            StoredProcessInstance source = await(store.load(key));
+            var inventory = await(store.findProcessInstance(key)).orElseThrow(() ->
+                    new IllegalStateException("terminal source inventory disappeared before settlement"));
+            Instant now = Instant.now();
+            Instant retainedUntil = inventory.retainedUntil().orElseGet(() -> now.plus(store.terminalRetention()));
+            await(store.recordReplaySettlement(new ReplaySourceSettlement(key, source.revision(),
+                    lease.fencingToken(), manifestDigest, sourceOutcomeAmbiguous, now, retainedUntil), lease));
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
+    /**
+     * Remembers that a dispatched source attempt lacks durable successful outcome proof.
+     *
+     * <p>This bit is monotonic for the recorder's lease. It includes a callback that arrives only
+     * after cancellation made the aggregate terminal, because local quiescence cannot turn that
+     * masked outcome into proof that no external effect occurred.</p>
+     */
+    public void markReplaySourceOutcomeAmbiguous() {
+        operationLock.lock();
+        try {
+            sourceOutcomeAmbiguous = true;
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
+    /** Commits completed invocation evidence atomically with its lifecycle transition. */
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+                                    List<AgentBudgetOperation> agentBudgetOperations,
+                                    List<ReplayInvocationEvidence> replayEvidence) {
+        operationLock.lock();
+        try {
+            requireFence();
+            if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
+                    && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())
+                    && (replayEvidence == null || replayEvidence.isEmpty())) {
+                return;
+            }
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease);
+            if (transitions != null) {
+                transitions.forEach(batch::apply);
+            }
+            if (events != null && store.supports(StoreCapability.EVENT_JOURNAL)) {
+                // Journalled inside this same transaction. An adapter without the capability would
+                // reject the batch, taking the aggregate write down with it, so the events are omitted
+                // rather than the transitions lost — the transitions are the durability guarantee and
+                // the journal is a projection of them.
+                //
+                // This path initially used only an EMPTY list, and that was deliberate rather than
+                // an omission. The journal is append-only, so a node event published then with an
+                // absent-but-existing causationId would have been a permanently false row that no later
+                // later update could amend — backfilling causation on an immutable log is rewriting history.
+                // An empty journal is honest; a semantically premature one is wrong forever. EventEnvelope's
+                // causation contract supplies the causal model, and this list is filled from
+                // GraphRunner.ExecutionState.
+                events.forEach(batch::publish);
+            }
+            if (agentBudgetOperations != null) {
+                agentBudgetOperations.forEach(batch::applyAgentBudget);
+            }
+            if (replayEvidence != null) replayEvidence.forEach(batch::captureReplayEvidence);
+            try {
+                StoredProcessInstance applied = await(store.apply(batch.build()));
+                revision = applied.revision();
+            } catch (ExecutionStoreException failed) {
+                if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                        || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                    loseFence(failed.failure());
+                }
+                throw failed;
+            }
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
+    /**
+     * Commits saga state and application-command intents under this execution's live fence.
+     *
+     * <p>The call is synchronous for the same reason as {@link #record(List, List)}: an intent must
+     * be durable before the participant is invoked. A command placed in {@code commands} therefore
+     * shares the exact store transaction and execution revision with the state that made it
+     * eligible.</p>
+     *
+     * @param writes conditional saga aggregate replacements
+     * @param commands stable application commands created by those replacements
+     */
+    public void recordSaga(List<SagaWrite> writes, List<SagaCommandIntent> commands) {
+        operationLock.lock();
+        try {
+            requireFence();
+            if ((writes == null || writes.isEmpty()) && (commands == null || commands.isEmpty())) return;
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease);
+            if (writes != null) writes.forEach(batch::writeSaga);
+            if (commands != null) commands.forEach(batch::enqueueSagaCommand);
+            try {
+                StoredProcessInstance applied = await(store.apply(batch.build()));
+                revision = applied.revision();
+            } catch (ExecutionStoreException failed) {
+                if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                        || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                    loseFence(failed.failure());
+                }
+                throw failed;
+            }
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
+    /** Returns a saga from the same tenant/process stream this recorder fences. */
+    public java.util.Optional<ai.ravenroot.api.persistence.SagaSnapshot> saga(UUID sagaId) {
+        return await(store.loadSaga(key, java.util.Objects.requireNonNull(sagaId, "sagaId")));
+    }
+
+    /** Whether the composed store promises the saga aggregate and command-outbox contract. */
+    public boolean supportsDurableSagas() {
+        return store.supports(StoreCapability.DURABLE_SAGAS)
+                && store.supports(StoreCapability.DURABLE);
     }
 
     /**
@@ -279,131 +516,171 @@ public final class ExecutionRecorder implements AutoCloseable {
      * <p>The approval, handler, timer, journal row, and three WAITING transitions are one batch.
      * No independent writer can race the runner's revision between the node dispatch and this wait.</p>
      */
-    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+    public void suspendForToolApproval(ToolApprovalRegistration approval,
                                                      HandlerRegistration handler,
                                                      TimerSchedule timer,
                                                      EventEnvelope event) {
-        suspendForToolApproval(approval, handler, timer, event, null);
+        operationLock.lock();
+        try {
+            suspendForToolApproval(approval, handler, timer, event, null);
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Approval wait plus its optional HELD economic reservation, in one fenced commit. */
-    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+    public void suspendForToolApproval(ToolApprovalRegistration approval,
                                                      HandlerRegistration handler,
                                                      TimerSchedule timer,
                                                      EventEnvelope event,
                                                      AgentBudgetOperation budgetOperation) {
-        requireFence();
-        if (!approval.traversalId().equals(handler.traversalId())
-                || !approval.invocationId().equals(handler.invocationId())
-                || !approval.approvalId().equals(handler.handlerId())) {
-            throw new IllegalArgumentException("approval and handler scope do not match");
+        operationLock.lock();
+        try {
+            requireFence();
+            if (!approval.traversalId().equals(handler.traversalId())
+                    || !approval.invocationId().equals(handler.invocationId())
+                    || !approval.approvalId().equals(handler.handlerId())) {
+                throw new IllegalArgumentException("approval and handler scope do not match");
+            }
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease)
+                    .apply(new ExecutionTransition.AttemptTransitioned(approval.traversalId(),
+                            approval.invocationId(), approval.attemptId(), NodeAttemptStatus.WAITING))
+                    .apply(new ExecutionTransition.InvocationTransitioned(approval.traversalId(),
+                            approval.invocationId(), NodeInvocationStatus.WAITING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(approval.traversalId(),
+                            TraversalStatus.WAITING))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                    .registerToolApproval(approval)
+                    .registerHandler(handler)
+                    .scheduleTimer(timer);
+            if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+                batch.publish(event);
+            }
+            if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
+            StoredProcessInstance applied = await(store.apply(batch.build()));
+            revision = applied.revision();
+        } finally {
+            operationLock.unlock();
         }
-        var batch = ExecutionBatch.to(key)
-                .expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease)
-                .apply(new ExecutionTransition.AttemptTransitioned(approval.traversalId(),
-                        approval.invocationId(), approval.attemptId(), NodeAttemptStatus.WAITING))
-                .apply(new ExecutionTransition.InvocationTransitioned(approval.traversalId(),
-                        approval.invocationId(), NodeInvocationStatus.WAITING))
-                .apply(new ExecutionTransition.TraversalTransitioned(approval.traversalId(),
-                        TraversalStatus.WAITING))
-                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
-                .registerToolApproval(approval)
-                .registerHandler(handler)
-                .scheduleTimer(timer);
-        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
-            batch.publish(event);
-        }
-        if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
-        StoredProcessInstance applied = await(store.apply(batch.build()));
-        revision = applied.revision();
     }
 
     /** Atomically parks the exact attempt with its governed runner job and continuation. */
-    public synchronized void suspendForRunner(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit,
+    public void suspendForRunner(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit,
                                               EventEnvelope event) {
-        requireFence();
-        var id = submit.identity();
-        if (!key.equals(id.execution())) throw new IllegalArgumentException("runner admission scope mismatch");
-        var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).fencedBy(lease)
-                .apply(new ExecutionTransition.AttemptTransitioned(id.traversalId(), id.invocationId(),
-                        id.attemptId(), NodeAttemptStatus.WAITING))
-                .apply(new ExecutionTransition.InvocationTransitioned(id.traversalId(), id.invocationId(), NodeInvocationStatus.WAITING))
-                .apply(new ExecutionTransition.TraversalTransitioned(id.traversalId(), TraversalStatus.WAITING))
-                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
-                .runner(submit).publish(event);
-        revision = await(store.apply(batch.build())).revision();
+        operationLock.lock();
+        try {
+            requireFence();
+            var id = submit.identity();
+            if (!key.equals(id.execution())) throw new IllegalArgumentException("runner admission scope mismatch");
+            var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).fencedBy(lease)
+                    .apply(new ExecutionTransition.AttemptTransitioned(id.traversalId(), id.invocationId(),
+                            id.attemptId(), NodeAttemptStatus.WAITING))
+                    .apply(new ExecutionTransition.InvocationTransitioned(id.traversalId(), id.invocationId(), NodeInvocationStatus.WAITING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(id.traversalId(), TraversalStatus.WAITING))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                    .runner(submit).publish(event);
+            revision = await(store.apply(batch.build())).revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Applies one runner lifecycle change and its audit event through the current process fence. */
-    public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event) {
-        applyRunner(operation, event, java.util.List.of());
+    public void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event) {
+        operationLock.lock();
+        try {
+            applyRunner(operation, event, java.util.List.of());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Commits an operator continuation disposition with its graph transitions and audit atomically. */
-    public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event,
+    public void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event,
                                           java.util.List<ExecutionTransition> transitions) {
-        requireFence();
-        var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease).runner(operation).publish(event);
-        transitions.forEach(batch::apply);
-        revision = await(store.apply(batch.build())).revision();
+        operationLock.lock();
+        try {
+            requireFence();
+            var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease).runner(operation).publish(event);
+            transitions.forEach(batch::apply);
+            revision = await(store.apply(batch.build())).revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Confirms the core signal against immutable durable acceptance before unwinding engine workers. */
-    public synchronized boolean confirmsRunnerJob(UUID jobId, NodeMessage message) {
-        if (!key.tenantId().equals(message.security().tenantId()) || !key.processInstanceId().equals(message.processInstanceId())) return false;
-        var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
-        var entry = workspace == null ? null : workspace.jobs().get(jobId);
-        if (entry == null) return false;
-        var id = entry.job().identity();
-        return id.traversalId().equals(message.traversalId()) && id.invocationId().equals(message.invocationId())
-                && id.attemptId().equals(message.attemptId());
+    public boolean confirmsRunnerJob(UUID jobId, NodeMessage message) {
+        operationLock.lock();
+        try {
+            if (!key.tenantId().equals(message.security().tenantId()) || !key.processInstanceId().equals(message.processInstanceId())) return false;
+            var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
+            var entry = workspace == null ? null : workspace.jobs().get(jobId);
+            if (entry == null) return false;
+            var id = entry.job().identity();
+            return id.traversalId().equals(message.traversalId()) && id.invocationId().equals(message.invocationId())
+                    && id.attemptId().equals(message.attemptId());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Confirms accepted runner evidence and lifecycle admission at this recorder's CAS revision. */
-    public synchronized boolean confirmsRunnerTerminal(ai.ravenroot.api.runner.RunnerJob job) {
-        if (!key.equals(job.identity().execution()) || !job.state().terminal()) return false;
-        if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, revision)) return false;
-        var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
-        var entry = workspace == null ? null : workspace.jobs().get(job.identity().runnerJobId());
-        return entry != null && !entry.continuationUncertain() && java.util.Arrays.equals(
-                ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), job)),
-                ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), entry.job())));
+    public boolean confirmsRunnerTerminal(ai.ravenroot.api.runner.RunnerJob job) {
+        operationLock.lock();
+        try {
+            if (!key.equals(job.identity().execution()) || !job.state().terminal()) return false;
+            if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, revision)) return false;
+            var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
+            var entry = workspace == null ? null : workspace.jobs().get(job.identity().runnerJobId());
+            return entry != null && !entry.continuationUncertain() && java.util.Arrays.equals(
+                    ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), job)),
+                    ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), entry.job())));
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Atomically parks one invocation behind a first-class durable human task. */
-    public synchronized void suspendForHumanTask(HumanTaskRegistration task,
+    public void suspendForHumanTask(HumanTaskRegistration task,
                                                  HandlerRegistration handler,
                                                  List<TimerSchedule> timers,
                                                  EventEnvelope event) {
-        requireFence();
-        Objects.requireNonNull(task, "task");
-        Objects.requireNonNull(handler, "handler");
-        Objects.requireNonNull(timers, "timers");
-        if (!task.traversalId().equals(handler.traversalId())
-                || !task.invocationId().equals(handler.invocationId())
-                || !task.taskId().equals(handler.handlerId())) {
-            throw new IllegalArgumentException("human task and handler scope do not match");
+        operationLock.lock();
+        try {
+            requireFence();
+            Objects.requireNonNull(task, "task");
+            Objects.requireNonNull(handler, "handler");
+            Objects.requireNonNull(timers, "timers");
+            if (!task.traversalId().equals(handler.traversalId())
+                    || !task.invocationId().equals(handler.invocationId())
+                    || !task.taskId().equals(handler.handlerId())) {
+                throw new IllegalArgumentException("human task and handler scope do not match");
+            }
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease)
+                    .apply(new ExecutionTransition.AttemptTransitioned(task.traversalId(),
+                            task.invocationId(), task.attemptId(), NodeAttemptStatus.WAITING))
+                    .apply(new ExecutionTransition.InvocationTransitioned(task.traversalId(),
+                            task.invocationId(), NodeInvocationStatus.WAITING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(task.traversalId(),
+                            TraversalStatus.WAITING))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                    .registerHumanTask(task)
+                    .registerHandler(handler);
+            timers.forEach(batch::scheduleTimer);
+            if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+                batch.publish(Objects.requireNonNull(event, "event"));
+            }
+            StoredProcessInstance applied = await(store.apply(batch.build()));
+            revision = applied.revision();
+        } finally {
+            operationLock.unlock();
         }
-        var batch = ExecutionBatch.to(key)
-                .expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease)
-                .apply(new ExecutionTransition.AttemptTransitioned(task.traversalId(),
-                        task.invocationId(), task.attemptId(), NodeAttemptStatus.WAITING))
-                .apply(new ExecutionTransition.InvocationTransitioned(task.traversalId(),
-                        task.invocationId(), NodeInvocationStatus.WAITING))
-                .apply(new ExecutionTransition.TraversalTransitioned(task.traversalId(),
-                        TraversalStatus.WAITING))
-                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
-                .registerHumanTask(task)
-                .registerHandler(handler);
-        timers.forEach(batch::scheduleTimer);
-        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
-            batch.publish(Objects.requireNonNull(event, "event"));
-        }
-        StoredProcessInstance applied = await(store.apply(batch.build()));
-        revision = applied.revision();
     }
 
     /**
@@ -427,18 +704,23 @@ public final class ExecutionRecorder implements AutoCloseable {
      *
      * @param pause the hold to commit, carrying its bounded continuation.
      */
-    public synchronized void commitExecutionPause(ExecutionPauseRegistration pause) {
-        requireFence();
-        Objects.requireNonNull(pause, "pause");
-        var batch = ExecutionBatch.to(key)
-                .expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease)
-                .apply(new ExecutionTransition.TraversalTransitioned(pause.traversalId(),
-                        TraversalStatus.WAITING))
-                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
-                .registerExecutionPause(pause);
-        StoredProcessInstance applied = await(store.apply(batch.build()));
-        revision = applied.revision();
+    public void commitExecutionPause(ExecutionPauseRegistration pause) {
+        operationLock.lock();
+        try {
+            requireFence();
+            Objects.requireNonNull(pause, "pause");
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease)
+                    .apply(new ExecutionTransition.TraversalTransitioned(pause.traversalId(),
+                            TraversalStatus.WAITING))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                    .registerExecutionPause(pause);
+            StoredProcessInstance applied = await(store.apply(batch.build()));
+            revision = applied.revision();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -456,10 +738,15 @@ public final class ExecutionRecorder implements AutoCloseable {
      *                        would be the first of two, leaving the second illegal.
      * @param processStatus the state the process instance moves to, under the same rule.
      */
-    public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
+    public void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
                                                   TraversalStatus traversalStatus,
                                                   ProcessInstanceStatus processStatus) {
-        settleExecutionPause(transition, traversalId, traversalStatus, processStatus, null);
+        operationLock.lock();
+        try {
+            settleExecutionPause(transition, traversalId, traversalStatus, processStatus, null);
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -483,28 +770,33 @@ public final class ExecutionRecorder implements AutoCloseable {
      *                          distinguishes the termination. Ignored for a non-terminal status,
      *                          which the aggregate refuses to qualify.
      */
-    public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
+    public void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
                                                   TraversalStatus traversalStatus,
                                                   ProcessInstanceStatus processStatus,
                                                   ai.ravenroot.api.application.ExecutionTerminationReason
                                                           terminationReason) {
-        requireFence();
-        Objects.requireNonNull(transition, "transition");
-        Objects.requireNonNull(traversalId, "traversalId");
-        var batch = ExecutionBatch.to(key)
-                .expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease)
-                .applyExecutionPause(transition);
-        if (traversalStatus != null) {
-            batch.apply(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus,
-                    traversalStatus.terminal() ? terminationReason : null));
+        operationLock.lock();
+        try {
+            requireFence();
+            Objects.requireNonNull(transition, "transition");
+            Objects.requireNonNull(traversalId, "traversalId");
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease)
+                    .applyExecutionPause(transition);
+            if (traversalStatus != null) {
+                batch.apply(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus,
+                        traversalStatus.terminal() ? terminationReason : null));
+            }
+            if (processStatus != null) {
+                batch.apply(new ExecutionTransition.ProcessTransitioned(processStatus,
+                        processStatus.terminal() ? terminationReason : null));
+            }
+            StoredProcessInstance applied = await(store.apply(batch.build()));
+            revision = applied.revision();
+        } finally {
+            operationLock.unlock();
         }
-        if (processStatus != null) {
-            batch.apply(new ExecutionTransition.ProcessTransitioned(processStatus,
-                    processStatus.terminal() ? terminationReason : null));
-        }
-        StoredProcessInstance applied = await(store.apply(batch.build()));
-        revision = applied.revision();
     }
 
     /**
@@ -514,61 +806,76 @@ public final class ExecutionRecorder implements AutoCloseable {
      * task after its registration commits but before the runner observes the suspension signal. The
      * immutable registration remains the authority in that legal interleaving.</p>
      */
-    public synchronized boolean confirmsHumanTask(UUID taskId, NodeMessage message) {
-        if (!key.tenantId().equals(message.security().tenantId())
-                || !key.processInstanceId().equals(message.processInstanceId())) {
-            return false;
+    public boolean confirmsHumanTask(UUID taskId, NodeMessage message) {
+        operationLock.lock();
+        try {
+            if (!key.tenantId().equals(message.security().tenantId())
+                    || !key.processInstanceId().equals(message.processInstanceId())) {
+                return false;
+            }
+            var task = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
+            if (task == null || !task.key().equals(key)) return false;
+            HumanTaskRegistration request = task.request();
+            return request.traversalId().equals(message.traversalId())
+                    && request.invocationId().equals(message.invocationId())
+                    && request.attemptId().equals(message.attemptId())
+                    && request.nodeId().equals(message.nodeId())
+                    && request.requester().equals(message.security());
+        } finally {
+            operationLock.unlock();
         }
-        var task = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
-        if (task == null || !task.key().equals(key)) return false;
-        HumanTaskRegistration request = task.request();
-        return request.traversalId().equals(message.traversalId())
-                && request.invocationId().equals(message.invocationId())
-                && request.attemptId().equals(message.attemptId())
-                && request.nodeId().equals(message.nodeId())
-                && request.requester().equals(message.security());
     }
 
     /** Commits the exact redeemed effect outcome through this recorder's current claim fence. */
-    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+    public void completeToolApproval(UUID approvalId, boolean succeeded,
                                                   EventEnvelope event) {
-        completeToolApproval(approvalId, succeeded, event, null);
+        operationLock.lock();
+        try {
+            completeToolApproval(approvalId, succeeded, event, null);
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Outcome transition plus optional reservation settlement through the same claim fence. */
-    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+    public void completeToolApproval(UUID approvalId, boolean succeeded,
                                                   EventEnvelope event,
                                                   AgentBudgetOperation budgetOperation) {
-        requireFence();
-        Objects.requireNonNull(approvalId, "approvalId");
-        var transition = succeeded
-                ? new ai.ravenroot.api.persistence.ToolApprovalTransition.Succeeded(approvalId)
-                : new ai.ravenroot.api.persistence.ToolApprovalTransition.Failed(approvalId);
-        for (int writeAttempt = 1; writeAttempt <= 3; writeAttempt++) {
-            var batch = ExecutionBatch.to(key)
-                    .expecting(RevisionExpectation.exactly(revision))
-                    .fencedBy(lease)
-                    .applyToolApproval(transition);
-            if (store.supports(StoreCapability.EVENT_JOURNAL)) {
-                batch.publish(Objects.requireNonNull(event, "event"));
-            }
-            if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
-            try {
-                StoredProcessInstance applied = await(store.apply(batch.build()));
-                revision = applied.revision();
-                return;
-            } catch (ExecutionStoreException failed) {
-                if (failed.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
-                        && writeAttempt < 3) {
-                    revision = await(store.load(key)).revision();
-                    continue;
+        operationLock.lock();
+        try {
+            requireFence();
+            Objects.requireNonNull(approvalId, "approvalId");
+            var transition = succeeded
+                    ? new ai.ravenroot.api.persistence.ToolApprovalTransition.Succeeded(approvalId)
+                    : new ai.ravenroot.api.persistence.ToolApprovalTransition.Failed(approvalId);
+            for (int writeAttempt = 1; writeAttempt <= 3; writeAttempt++) {
+                var batch = ExecutionBatch.to(key)
+                        .expecting(RevisionExpectation.exactly(revision))
+                        .fencedBy(lease)
+                        .applyToolApproval(transition);
+                if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+                    batch.publish(Objects.requireNonNull(event, "event"));
                 }
-                if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
-                        || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
-                    loseFence(failed.failure());
+                if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
+                try {
+                    StoredProcessInstance applied = await(store.apply(batch.build()));
+                    revision = applied.revision();
+                    return;
+                } catch (ExecutionStoreException failed) {
+                    if (failed.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
+                            && writeAttempt < 3) {
+                        revision = await(store.load(key)).revision();
+                        continue;
+                    }
+                    if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                            || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                        loseFence(failed.failure());
+                    }
+                    throw failed;
                 }
-                throw failed;
             }
+        } finally {
+            operationLock.unlock();
         }
     }
 
@@ -576,30 +883,45 @@ public final class ExecutionRecorder implements AutoCloseable {
      * Confirms that a core signal names the exact invocation this recorder durably registered.
      * Later approval lifecycle transitions do not invalidate that immutable proof.
      */
-    public synchronized boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
-        if (!key.tenantId().equals(message.security().tenantId())
-                || !key.processInstanceId().equals(message.processInstanceId())) {
-            return false;
+    public boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
+        operationLock.lock();
+        try {
+            if (!key.tenantId().equals(message.security().tenantId())
+                    || !key.processInstanceId().equals(message.processInstanceId())) {
+                return false;
+            }
+            DurableToolApproval approval = await(store.loadToolApproval(key, approvalId)).orElse(null);
+            if (approval == null) return false;
+            ToolApprovalRegistration request = approval.request();
+            return request.traversalId().equals(message.traversalId())
+                    && request.invocationId().equals(message.invocationId())
+                    && request.attemptId().equals(message.attemptId())
+                    && request.nodeId().equals(message.nodeId())
+                    && request.requester().equals(message.security());
+        } finally {
+            operationLock.unlock();
         }
-        DurableToolApproval approval = await(store.loadToolApproval(key, approvalId)).orElse(null);
-        if (approval == null) return false;
-        ToolApprovalRegistration request = approval.request();
-        return request.traversalId().equals(message.traversalId())
-                && request.invocationId().equals(message.invocationId())
-                && request.attemptId().equals(message.attemptId())
-                && request.nodeId().equals(message.nodeId())
-                && request.requester().equals(message.security());
     }
 
     /** Immutable graph pin this fenced recorder is writing under. */
-    public synchronized GraphVersionPin graphVersionPin() {
-        return await(store.load(key)).graphVersionPin();
+    public GraphVersionPin graphVersionPin() {
+        operationLock.lock();
+        try {
+            return await(store.load(key)).graphVersionPin();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /** Current fenced aggregate snapshot used to seed a trusted re-entry runner. */
-    public synchronized ai.ravenroot.api.application.ProcessInstance storedState() {
-        requireFence();
-        return await(store.load(key)).state();
+    public ai.ravenroot.api.application.ProcessInstance storedState() {
+        operationLock.lock();
+        try {
+            requireFence();
+            return await(store.load(key)).state();
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -617,10 +939,15 @@ public final class ExecutionRecorder implements AutoCloseable {
      *
      * @return the current persisted origin, or an empty origin when none was recorded
      */
-    public synchronized ExecutionOrigin origin() {
-        requireFence();
-        return await(store.findProcessInstance(key)).map(ProcessInventoryEntry::origin)
-                .orElse(ExecutionOrigin.none());
+    public ExecutionOrigin origin() {
+        operationLock.lock();
+        try {
+            requireFence();
+            return await(store.findProcessInstance(key)).map(ProcessInventoryEntry::origin)
+                    .orElse(ExecutionOrigin.none());
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     private void loseFence(ExecutionStoreFailure because) {
@@ -646,8 +973,13 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /** The revision the instance is at after the last successful write. */
-    public synchronized long revision() {
-        return revision;
+    public long revision() {
+        operationLock.lock();
+        try {
+            return revision;
+        } finally {
+            operationLock.unlock();
+        }
     }
 
     /**
@@ -703,21 +1035,75 @@ public final class ExecutionRecorder implements AutoCloseable {
      * nobody experiences in production.</p>
      */
     @Override
-    public synchronized void close() {
-        if (closed) return;
-        closed = true;
-        if (renewalTask != null) {
-            renewalTask.cancel(false);
-        }
-        renewals.shutdownNow();
+    public void close() {
         try {
             // Release is fenced by worker identity and token, and an already-lost release is a
             // no-op by contract. Always offer the last handle: a failed renewal can mark the local
             // fence lost while the store still retains this worker's lease, and skipping release in
             // that case delays an orderly continuation until the full TTL expires.
-            await(store.release(lease));
+            await(beginClose());
         } catch (RuntimeException expiryWillHandleIt) {
             // A failed release is the crash path, which the store already handles by expiry.
+        }
+    }
+
+    /**
+     * Starts the best-effort release without waiting for the store.
+     *
+     * <p>Admission and lifecycle cleanup call this form. They may run on a Java 21 virtual thread,
+     * sometimes while the deployment dispatch lock is held, so even a bounded blocking wait would
+     * consume the only scheduler carrier and could prevent the store completion it is waiting for.
+     * Lease expiry remains the recovery backstop.</p>
+     */
+    void closeBestEffort() {
+        try {
+            if (operationLock.tryLock()) {
+                try {
+                    observeRelease(beginClose());
+                } finally {
+                    operationLock.unlock();
+                }
+                return;
+            }
+            Thread.ofVirtual().name("ravenroot-recorder-release-" + key.processInstanceId()).start(() -> {
+                try {
+                    observeRelease(beginClose());
+                } catch (RuntimeException ignored) {
+                    // Expiry is the backstop for a failed asynchronous release.
+                }
+            });
+        } catch (RuntimeException ignored) {
+            // Expiry is the backstop when even initiating the release fails.
+        }
+    }
+
+    private static void observeRelease(CompletionStage<Void> release) {
+        release.whenComplete((ignored, failure) -> {
+            // Observing the stage keeps exceptional completions contained. Expiry handles them.
+        });
+    }
+
+    private CompletionStage<Void> beginClose() {
+        operationLock.lock();
+        try {
+            leaseLifecycle.lock();
+            try {
+                if (!closeStarted.compareAndSet(false, true)) {
+                    return CompletableFuture.completedFuture(null);
+                }
+                // Volatile publication makes every recorder operation fail closed from this point. A
+                // ReentrantLock lets a virtual cleanup thread wait for an in-flight renewal without
+                // pinning its carrier, then releases the renewed handle rather than a stale one.
+                closed = true;
+                ScheduledFuture<?> task = renewalTask;
+                if (task != null) task.cancel(false);
+                renewals.shutdownNow();
+                return store.release(lease);
+            } finally {
+                leaseLifecycle.unlock();
+            }
+        } finally {
+            operationLock.unlock();
         }
     }
 

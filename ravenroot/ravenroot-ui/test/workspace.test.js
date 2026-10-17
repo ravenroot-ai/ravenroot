@@ -482,7 +482,7 @@ describe('the per-document runtime event tail', () => {
     // run state has one obvious place to put it, which is how this defect is prevented next time.
     expect(Object.keys(record.execution).sort())
       .toEqual([
-        'commandFlight', 'events', 'executionId', 'finished', 'generation', 'graphVersion', 'monitoringFlow',
+        'commandFlight', 'events', 'executionId', 'finished', 'generation', 'graphVersion', 'intentGeneration', 'monitoringFlow',
         'outcomeClaim', 'paused', 'processInstanceId', 'reconciliationClient', 'reconciliationController',
         'reconciliationState', 'retiredOutcomeClaim',
       ]);

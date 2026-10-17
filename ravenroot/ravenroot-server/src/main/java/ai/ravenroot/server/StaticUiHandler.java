@@ -9,10 +9,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** Serves the optional Ravenroot UI without introducing a second runtime process. */
 final class StaticUiHandler implements HttpHandler {
+    private static final Pattern FRAME_SRC_DIRECTIVE =
+            Pattern.compile("(?i)(^|;\\s*)frame-src\\s+([^;]*)");
     private final Path externalDirectory;
     private final ClassLoader classLoader;
 
@@ -70,6 +74,21 @@ final class StaticUiHandler implements HttpHandler {
         }
 
         var headers = exchange.getResponseHeaders();
+        if ("index.html".equals(relativePath)) {
+            String csp = headers.getFirst("Content-Security-Policy");
+            if (csp != null) {
+                headers.set("Content-Security-Policy", allowSameOriginFrames(csp));
+            }
+        } else if ("frontend-plugin-sandbox.html".equals(relativePath)) {
+            // This one static document is framed by the same-origin Workbench. The sandbox attribute
+            // still gives it an opaque origin, while its dedicated CSP closes every network and
+            // nesting channel. X-Frame-Options cannot express that same-origin parent relationship
+            // after sandboxing and DENY would prevent the frame from loading altogether.
+            headers.remove("X-Frame-Options");
+            headers.set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; object-src 'none'; "
+                    + "frame-ancestors 'self'; form-action 'none'; script-src 'self' blob:; "
+                    + "style-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; worker-src 'none'");
+        }
         headers.set("Content-Type", contentType(relativePath));
         headers.set("Cache-Control", relativePath.startsWith("assets/")
                 ? "public, max-age=31536000, immutable"
@@ -84,6 +103,20 @@ final class StaticUiHandler implements HttpHandler {
         try (var output = exchange.getResponseBody()) {
             output.write(asset.bytes());
         }
+    }
+
+    static String allowSameOriginFrames(String csp) {
+        var matcher = FRAME_SRC_DIRECTIVE.matcher(csp);
+        if (!matcher.find()) {
+            return csp + (csp.endsWith(";") ? " " : "; ") + "frame-src 'self'";
+        }
+        String sources = matcher.group(2).trim();
+        if (Arrays.stream(sources.split("\\s+")).anyMatch("'self'"::equals)) {
+            return csp;
+        }
+        String effectiveSources = "'none'".equals(sources) ? "'self'" : sources + " 'self'";
+        return matcher.replaceFirst(java.util.regex.Matcher.quoteReplacement(
+                matcher.group(1) + "frame-src " + effectiveSources));
     }
 
     private String normalize(String requestPath) {

@@ -71,6 +71,20 @@ Then open `http://127.0.0.1:5173/`, or load an example directly:
 - Programmable GraphML: `http://127.0.0.1:5173/?file=/examples/ravenroot-programmable.graphml`
 - Graphify JSON: `http://127.0.0.1:5173/?file=/examples/graphify-minimal.json`
 
+The `file` query parameter is a startup import. Ravenroot waits until service configuration and any
+stored workspace restoration finish, then imports GraphML, XML, or Graphify JSON without replacing
+restored documents, edits, presentation choices, or running work created while it was waiting. A
+canonical empty, untouched startup draft may be reused; any populated or changed draft is preserved
+and the import opens as a new ordinary document. Startup without `file` still opens the four-node
+Start → Do something → {End, Error} workflow. The status strip offers **Retry** after a
+download, validation, or readiness failure and **Cancel** while an import is pending. A same-origin
+URL starts when the workspace is ready. A cross-origin URL first shows only its origin and requires
+**Confirm origin**; its server must also satisfy the page's CSP and CORS policy. Startup imports reject
+HTTP redirects before following them, including redirects within the same origin. Use the final file
+URL directly so its origin can be confirmed before downloading. Access tokens are
+never attached to the graph download. The displayed filename comes from the URL's final path segment,
+without its query or fragment; a path ending in `/` uses `imported.graphml`.
+
 For live execution, start `ravenroot-server` on port 8080. Enter an access token in the command bar
 and select **Authenticate**. The token exists only in page memory: it is not written to browser
 storage, cookies or URLs, and **Forget token** removes it immediately. Press Play or

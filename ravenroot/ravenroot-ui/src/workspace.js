@@ -76,6 +76,19 @@ export function createDocumentRecord({
       sourceGraphVersion: provenance?.sourceGraphVersion || null,
       deploymentId: provenance?.deploymentId || null,
     },
+    authoring: {
+      providerDocumentId: null,
+      revision: null,
+      graphId: null,
+      releaseVersion: null,
+      releasedGraphId: null,
+      releasedVersion: null,
+      released: false,
+      published: false,
+      draftDeleted: false,
+      saveFlight: null,
+      saveError: null,
+    },
     // Owned by app.js, one per document. Held here so the record is the single home of the state.
     cy: null,
     visualGroupState: {},
@@ -156,6 +169,9 @@ export function createDocumentRecord({
       reconciliationClient: null,
       // Monotonic binding identity and the synchronous command gate. Neither crosses a serializer.
       generation: 0,
+      // Monotonic user intent survives a fast refusal or terminal result that clears every live
+      // binding before an asynchronous workspace/import decision completes.
+      intentGeneration: 0,
       commandFlight: null,
       reconciliationController: null,
       // Exactly-once terminal reporting for only this generation; replaced bindings retire it.
@@ -214,7 +230,8 @@ export function createDocumentRecord({
 }
 
 export function documentIsEditable(document_) {
-  return document_?.mode === DOCUMENT_MODES.DRAFT && document_?.graph?.format !== 'graphify';
+  return document_?.mode === DOCUMENT_MODES.DRAFT && document_?.graph?.format !== 'graphify'
+    && !document_?.authoring?.draftDeleted;
 }
 
 export function forkDocumentRecord(source, { documentId = createDocumentIncarnation(), tenantId = source?.tenantId,

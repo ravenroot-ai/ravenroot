@@ -67,20 +67,21 @@ embedded application deliberately wants every maintained package on its classpat
 
 ### Embed Ravenroot in a JVM application
 
-Use the core runtime with an execution-engine adapter discovered at runtime. The first public alpha
-coordinates are:
+Use the core runtime with an execution-engine adapter discovered at runtime. The upcoming
+`0.7.0-alpha.1` source line uses these coordinates. They are not published yet; the newest verified
+published prerelease is `0.6.1-alpha.1`:
 
 ```xml
 <dependencies>
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-core</artifactId>
-    <version>0.6.1-alpha.1</version>
+    <version>0.7.0-alpha.1</version>
   </dependency>
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-pekko</artifactId>
-    <version>0.6.1-alpha.1</version>
+    <version>0.7.0-alpha.1</version>
     <scope>runtime</scope>
   </dependency>
 </dependencies>
@@ -121,6 +122,7 @@ operational responsibilities and recovery paths.*
 ## Documentation
 
 - **Workflow authors:** [workspace and graph authoring](docs/user-guide/workspace-authoring.md),
+  [illustrated workspace guide](docs/user-guide/illustrated-workspace.md),
   [payloads, outcomes, and routing](docs/user-guide/payload-routing.md), and
   [core and optional node reference](docs/reference/coverage-inventory.md)
 - **Extension authors:** [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md)
@@ -134,16 +136,22 @@ operational responsibilities and recovery paths.*
   [command-line tools](docs/reference/command-line-tools.md)
 - **Architects and reviewers:** [product boundaries](docs/architecture/product-boundaries.md),
   [architecture and concepts](docs/architecture/index.md), and
-  [architecture decision records](adr/README.md)
+  [architecture decision records](adr/README.md), and
+  [primary-source platform comparison](docs/reference/platform-comparison.md)
+- **Teachers and learners:** [education pathway](docs/education/index.md),
+  [register-machine exercise](docs/education/register-machine-exercise.md), and
+  [finite-automata architecture evidence](docs/examples/finite-automata/)
 
 Browse the complete [Ravenroot documentation](https://docs.ravenroot.ai/).
 
 ## Release status
 
-Ravenroot begins its public lifecycle at `0.1.0-alpha.1`. Alpha releases provide an early,
-versioned surface for evaluating graph authoring, execution, extension, deployment, and operational
-contracts while the project evolves rapidly. Published artifacts and images are identified by an
-explicit version or immutable digest.
+Ravenroot publishes alpha prereleases for evaluating graph authoring, execution, extension,
+deployment, and operational contracts while the project evolves rapidly. The newest verified
+published prerelease is `0.6.1-alpha.1`; `0.7.0-alpha.1` is the current development line and is not a
+published release. Published artifacts and images are identified by an explicit version or immutable
+digest. Source availability, Maven coordinates, release assets, and container tags are checked as
+separate channels.
 
 ## Contributing
 

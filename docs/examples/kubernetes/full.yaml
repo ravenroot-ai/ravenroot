@@ -1,4 +1,4 @@
-# Release target 0.6.1-alpha.1: resolve its published digest before applying.
+# Release target 0.7.0-alpha.1: resolve its published digest before applying.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata: {name: ravenroot-data}
@@ -33,7 +33,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: ravenroot
-          image: ghcr.io/ravenroot-ai/ravenroot:0.6.1-alpha.1
+          image: ghcr.io/ravenroot-ai/ravenroot:0.7.0-alpha.1
           ports: [{name: http, containerPort: 8080}]
           env:
             - {name: RAVENROOT_PORT, value: "8080"}

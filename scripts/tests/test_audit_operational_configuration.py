@@ -5,11 +5,13 @@ import hashlib
 import io
 import copy
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from collections import Counter
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -88,7 +90,12 @@ def production_reappearance_fixture() -> tuple[
     checkpoint, checkpoint_raw = committed_inventory(REAPPEARANCE_CHECKPOINT_REVISION)
     active_ids = {entry["id"] for entry in document["entries"]}
     retired = {entry["id"]: entry for entry in document["retiredEntries"]}
-    collisions = sorted(active_ids & set(retired))
+    collisions = sorted(identifier for identifier in active_ids & set(retired)
+                        if retired[identifier].get("status") == "pending-review")
+    document["retiredEntries"] = [
+        entry for entry in document["retiredEntries"]
+        if entry.get("id") not in active_ids or entry.get("id") in collisions
+    ]
     candidate_by_id = {candidate.id: candidate for candidate in candidates}
     records = [{
         "kind": audit.REAPPEARANCE_KIND,
@@ -608,7 +615,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 shutil.copy2(ROOT / path, target)
             schema = root / audit.HELM_SCHEMA_PATH
             schema.write_text(schema.read_text(encoding="utf-8").replace(
-                '"const": true', '"const": false', 1), encoding="utf-8")
+                '"runAsNonRoot": { "type": "boolean", "const": true }', '"runAsNonRoot": { "type": "boolean", "const": false }', 1), encoding="utf-8")
             errors = audit.helm_authority_errors(root, None, {}, candidates)
             self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
 
@@ -1134,6 +1141,39 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.replace(item, line=item.line + 1) if item.id == identifier else item
             for item in candidates)
         self.assertEqual([], anchored_errors(moved, discovered=moved_candidates))
+
+    def test_reviewed_identity_reappearance_preserves_exact_retired_semantics(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        candidates = audit.discover(ROOT)
+        records = [record for record in document["normalizedIdentityReappearanceHistory"]
+                   if record.get("kind") == audit.REVIEWED_REAPPEARANCE_KIND]
+        self.assertEqual(2, len(records))
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, document, candidates)
+        self.assertEqual([], errors)
+        self.assertTrue({record["candidateId"] for record in records} <= allowed)
+
+        changed = copy.deepcopy(document)
+        identifier = records[0]["candidateId"]
+        next(entry for entry in changed["entries"]
+             if entry["id"] == identifier)["rationale"] = "Changed after the checkpoint."
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, changed, candidates)
+        self.assertTrue(any("current semantic metadata differs" in error for error in errors), errors)
+        self.assertEqual(set(), allowed)
+
+    def test_reviewed_reappearance_payload_excludes_only_historical_source_evidence(self) -> None:
+        retired = {
+            "status": "retained", "classification": "protocol-or-format-invariant",
+            "rationale": "Reviewed authority.", "retirementRationale": "Preserved retirement.",
+            "evidence": "historic source rendering", "customAuthority": "closed-v1",
+        }
+        self.assertEqual({
+            "status": "retained", "classification": "protocol-or-format-invariant",
+            "rationale": "Reviewed authority.", "retirementRationale": "Preserved retirement.",
+            "customAuthority": "closed-v1",
+        }, audit.reviewed_reappearance_semantic_payload(retired))
+
 
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
@@ -2151,16 +2191,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_731_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_789_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(98, len(details))
+            self.assertEqual(120, len(details))
             self.assertEqual(
-                {"methods": 108, "path": 98, "summary": 432, "successStatuses": 100},
+                {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(738, len(entries))
+            self.assertEqual(837, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -2172,7 +2212,31 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
 
-    def test_runner_routes_include_put_without_opening_the_method_vocabulary(self) -> None:
+    def test_route_table_bound_clause_keys_follow_approved_identity_migrations(self) -> None:
+        document = {
+            "routeTableAuthorities": {audit.ROUTE_TABLE_AUTHORITY_ID: {
+                "candidateIdsByRole": {"summary": ["oc-old"]},
+                "descriptorCandidateIds": [{
+                    "candidateIds": {"summary": ["oc-old"]},
+                }],
+                "publishedBoundClauses": {
+                    "oc-old": ["StableEdgeId.MAX_UTF8_BYTES"],
+                },
+            }},
+            "reconciliationHistory": [{"candidateId": "oc-old"}],
+        }
+
+        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
+
+        authority = document["routeTableAuthorities"][audit.ROUTE_TABLE_AUTHORITY_ID]
+        self.assertEqual(["oc-new"], authority["candidateIdsByRole"]["summary"])
+        self.assertEqual(["oc-new"],
+                         authority["descriptorCandidateIds"][0]["candidateIds"]["summary"])
+        self.assertEqual({"oc-new": ["StableEdgeId.MAX_UTF8_BYTES"]},
+                         authority["publishedBoundClauses"])
+        self.assertEqual("oc-old", document["reconciliationHistory"][0]["candidateId"])
+
+    def test_route_table_accepts_reviewed_put_and_patch_without_opening_the_method_vocabulary(self) -> None:
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
@@ -2183,6 +2247,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                    for identifier in item["candidateIds"]["methods"])
         }
         self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
+        palette_patch_routes = {
+            item["path"] for item in details
+            if any(candidates[identifier].expression == '"PATCH"'
+                   for identifier in item["candidateIds"]["methods"])
+        }
+        self.assertEqual({
+            "/v1/node-palettes/{paletteId}",
+            "/v1/node-palettes/templates/{templateId}",
+        }, palette_patch_routes)
         self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
         self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
         self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})
@@ -2277,10 +2350,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("not the supported direct RouteDescriptor table" in error
                                 for error in errors), errors)
 
+            final_descriptor = (
+                "                            ErrorCode.UNKNOWN_RESOURCE.code(), "
+                "ErrorCode.CONFLICT.code()), NEVER, false));"
+            )
             chained = original_route.replace(
-                "                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false));",
-                "                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false))"
-                ".stream().filter(route -> false).toList();",
+                final_descriptor,
+                final_descriptor[:-2] + ").stream().filter(route -> false).toList();",
                 1,
             )
             self.assertNotEqual(original_route, chained)
@@ -2435,10 +2511,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNotNone(generate_span)
             start, end = generate_span
             ignored_routes = original_generator[start:end].replace(
-                "json.append(routes.stream()", "String ignored = routes.stream()", 1)
-            ignored_routes = ignored_routes.replace(
-                '.collect(Collectors.joining(",\\n")));',
-                '.collect(Collectors.joining(",\\n"));\n        json.append("");', 1)
+                "json.append(byPath.entrySet().stream()",
+                "String ignored = byPath.entrySet().stream()", 1)
             self.assertNotEqual(original_generator[start:end], ignored_routes)
             generator_path.write_text(
                 original_generator[:start] + ignored_routes + original_generator[end:],
@@ -2449,7 +2523,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             changed["consumerBodyDigests"]["openApiGenerate"] = audit.java_method_digest(
                 mutated, "OpenApiSpecGenerator", "generate")
             errors = self.route_table_errors(root, changed, entries, candidates)
-            self.assertTrue(any("routes-to-pathEntry append chain" in error for error in errors), errors)
+            self.assertTrue(any("grouped method-specific publication" in error
+                                for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
             success_span = audit.java_method_span(
@@ -4294,7 +4369,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -4538,7 +4613,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 432 |",
+                "| Retained published contract descriptions | 461 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4546,7 +4621,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 431 |",
+                "| Retained published contract descriptions | 460 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6309,7 +6384,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
@@ -6505,6 +6580,40 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
 
 
 class ActivityCapturePolicyAuditTest(unittest.TestCase):
+    def test_live_references_remap_exact_declared_fields_and_fail_closed_elsewhere(self) -> None:
+        old, new = "oc-live-before", "oc-live-after"
+        authority = {
+            "candidateIds": [old],
+            "contracts": [{
+                "candidateIds": [old],
+                "defaultEvidence": [old],
+                "rationale": old,
+                "unsupportedCandidateIds": [old],
+            }],
+        }
+        history = [{"candidateIds": [old], "source": old}]
+        document = {
+            "activityCaptureAuthorities": {"activity-capture-settings": authority},
+            "reconciliationHistory": copy.deepcopy(history),
+        }
+
+        audit.remap_declared_candidate_references(document, {old: new})
+
+        self.assertEqual([new], authority["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["defaultEvidence"])
+        self.assertEqual(old, authority["contracts"][0]["rationale"])
+        self.assertEqual([old], authority["contracts"][0]["unsupportedCandidateIds"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        live_locations = audit.candidate_reference_locations(document, {new})
+        self.assertTrue(live_locations)
+        self.assertTrue(all(audit.allowed_migrated_reference(path)
+                            for path in live_locations), live_locations)
+        undeclared = audit.candidate_reference_locations(document, {old})
+        self.assertTrue(any(not audit.allowed_migrated_reference(path)
+                            and not audit.immutable_historical_reference(path)
+                            for path in undeclared), undeclared)
+
     def test_source_derived_authority_rejects_unknown_defaults_bounds_and_wiring(self) -> None:
         paths = tuple(audit.ACTIVITY_CAPTURE_SOURCE_PROOFS)
         with synthetic_repository() as location:
@@ -6527,8 +6636,37 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
                                  if discovered[identifier].path == schema_path]
             self.assertTrue(values_candidates)
             self.assertTrue(schema_candidates)
-            self.assertTrue(all(62 <= candidate.line <= 72 for candidate in values_candidates))
-            self.assertTrue(all(69 <= candidate.line <= 85 for candidate in schema_candidates))
+            values_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1]).read_text()
+            values_start = re.search(r"(?m)^activityCapture:\s*$", values_source)
+            self.assertIsNotNone(values_start)
+            assert values_start is not None
+            next_values_key = re.search(
+                r"(?m)^[A-Za-z][A-Za-z0-9_-]*:\s*(?:#.*)?$",
+                values_source[values_start.end():],
+            )
+            values_end = (values_start.end() + next_values_key.start() - 1
+                          if next_values_key is not None else len(values_source) - 1)
+            values_lines = (
+                audit.line_number(values_source, values_start.start()),
+                audit.line_number(values_source, values_end),
+            )
+            schema_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[2]).read_text()
+            schema_start = re.search(r'"activityCapture"\s*:\s*\{', schema_source)
+            self.assertIsNotNone(schema_start)
+            assert schema_start is not None
+            schema_open = schema_source.find("{", schema_start.start())
+            schema_close = audit.matching_delimiter(
+                audit.strip_c_comments_and_literals(schema_source), schema_open, "{", "}")
+            self.assertIsNotNone(schema_close)
+            assert schema_close is not None
+            schema_lines = (
+                audit.line_number(schema_source, schema_start.start()),
+                audit.line_number(schema_source, schema_close),
+            )
+            self.assertTrue(all(values_lines[0] <= candidate.line <= values_lines[1]
+                                for candidate in values_candidates))
+            self.assertTrue(all(schema_lines[0] <= candidate.line <= schema_lines[1]
+                                for candidate in schema_candidates))
             self.assertTrue(all(candidate.role.startswith("activityCapture.")
                                 for candidate in values_candidates + schema_candidates
                                 if candidate.kind == "configuration-scalar"))
@@ -6551,6 +6689,213 @@ class ActivityCapturePolicyAuditTest(unittest.TestCase):
                     self.assertIsNone(
                         audit.activity_capture_authority_from_source(root, discovered))
                 path.write_text(original, encoding="utf-8")
+
+
+class GraphAuthoringPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        paths = {
+            *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+            *audit.GRAPH_AUTHORING_TEST_PROOFS,
+            audit.GRAPH_AUTHORING_ROUTE_PATH, audit.GRAPH_AUTHORING_SERVER_PATH,
+            audit.GRAPH_AUTHORING_APPLICATION_PATH, audit.GRAPH_AUTHORING_UI_PATH,
+            *(path for path, _method in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS),
+            audit.GRAPH_AUTHORING_AUTHORIZATION_PATH, audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
+            Path(audit.HELM_VALUES_PATH), Path(audit.HELM_SCHEMA_PATH),
+            Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+        }
+        for relative in paths:
+            destination = cls.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.graph_authoring_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The graph authoring and publication boundary must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            metadata = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "graphAuthoringAuthority": audit.GRAPH_AUTHORING_AUTHORITY_ID,
+                **{key: contract[key] for key in (
+                    "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+                    "validation", "scope", "pinning", "coverage")},
+                "rationale": "The closed graph authoring configuration owns this server-side setting.",
+            }
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(metadata))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    graphAuthoringAuthority=audit.GRAPH_AUTHORING_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def test_exact_boundary_closes_settings_routes_artifacts_ui_and_deployment_carriers(self) -> None:
+        authority = self.authority
+        self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS), len(authority["contracts"]))
+        identifiers = [identifier for contract in authority["contracts"]
+                       for identifier in contract["candidateIds"]]
+        identifiers += [identifier for partition in authority["semanticPartitions"]
+                        for identifier in partition["candidateIds"]]
+        self.assertEqual(len(identifiers), len(set(identifiers)))
+        self.assertEqual(set(identifiers), audit.graph_authoring_cohort_candidate_ids(
+            self.root, self.discovered))
+        self.assertEqual([], audit.graph_authoring_authority_errors(
+            self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: authority},
+            self.entries, self.discovered))
+        self.assertEqual({
+            "/v1/graph-authoring", "/v1/graph-authoring/{id}",
+            "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
+            "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
+            "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+            "/v1/graph-artifacts/{graphId}/{version}/import",
+            "/v1/graph-artifacts/{graphId}/{version}/deploy",
+        }, set(authority["routePaths"]))
+
+    def test_removed_auth_store_tenant_and_limit_guards_or_drifted_carriers_fail_closed(self) -> None:
+        mutations = (
+            (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
+             "maxDocumentBytes > 100 * 1024 * 1024", "maxDocumentBytes > 101 * 1024 * 1024"),
+            (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
+             "if (tenantNamespaces.isEmpty())", "if (false)"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GraphAuthoringHttpApi.java"),
+             "AuthorizationAction.GRAPH_RELEASE", "AuthorizationAction.GRAPH_WRITE"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "PublishedGraphArtifactCatalog.java"),
+             "artifact.sourceCommit().equals(sourceRevision)", "true"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "PublishedGraphArtifactHttpApi.java"),
+             "artifact.token().getBytes(StandardCharsets.US_ASCII)",
+             "expectedArtifactRef.getBytes(StandardCharsets.US_ASCII)"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GraphReleaseMetadata.java"),
+             "MAX_RELEASE_VERSION = 9_007_199_254_740_991L",
+             "MAX_RELEASE_VERSION = Long.MAX_VALUE"),
+            (audit.GRAPH_AUTHORING_APPLICATION_PATH,
+             'if (graphDefinitionStore == null) {\n'
+             '            throw new UnsupportedOperationException("published graph imports require',
+             'if (false) {\n'
+             '            throw new UnsupportedOperationException("published graph imports require'),
+            (audit.GRAPH_AUTHORING_APPLICATION_PATH,
+             ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);",
+             ".inspect(bytes, ai.ravenroot.api.application.GraphAdmissionPurpose.EXECUTION);"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "applyAcceptedGraphMl(target.graph, result", "void applyAcceptedGraphMl(target.graph, result"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes;\n"
+             "  showLoading();",
+             "const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes + 1;\n"
+             "  showLoading();"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "if (signal.aborted || !startupImportBindingIsCurrent(binding)) {\n"
+             "    throw new StartupImportError('stale-authority',\n"
+             "      'The service or workspace changed during the import. Retry in the current workspace.');\n"
+             "  }\n  let graph;",
+             "if (signal.aborted) {\n"
+             "    throw new StartupImportError('stale-authority',\n"
+             "      'The service or workspace changed during the import. Retry in the current workspace.');\n"
+             "  }\n  let graph;"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })",
+             "parsePreparedGraph(text, target.filename, { automatic: true })"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "fetch(input, { signal, redirect: 'manual' })",
+             "fetch(input, { signal, redirect: 'follow' })"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "if (response.type === 'opaqueredirect')", "if (false)"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "return isEmptyWorkflowDocument(target.graph) && !hasRuntimeActivity",
+             "return true && !hasRuntimeActivity"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "return isEmptyWorkflowDocument(target.graph) && !hasRuntimeActivity",
+             "return isEmptyWorkflowDocument(target.graph)"),
+            (audit.GRAPH_AUTHORING_UI_PATH,
+             "execution?.intentGeneration !== initial.runtimeIntentGeneration",
+             "false"),
+            (audit.GRAPH_AUTHORING_GRAPH_PARSERS_PATH,
+             "total += value.byteLength;\n      if (total > maxBytes)",
+             "total += value.byteLength;\n      if (false)"),
+            (audit.GRAPH_AUTHORING_STARTUP_IMPORT_PATH,
+             "outcome.kind !== 'ready' || !sameBinding(flight?.binding, outcome.binding)",
+             "outcome.kind !== 'ready'"),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "authoring-capability.js"),
+             "return actions.blocked();", "return actions.local();"),
+            (Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+             "RAVENROOT_CREDENTIAL_6769742D617574686F72696E67",
+             "RAVENROOT_CREDENTIAL_UNSCOPED"),
+            (audit.GRAPH_AUTHORING_RAW_KUBERNETES_PATH,
+             "value: LOCAL", "value: GIT"),
+            (audit.GRAPH_AUTHORING_ROUTE_PATH,
+             '"/v1/graph-artifacts/{graphId}/{version}/import"',
+             '"/v1/graph-artifacts/{graphId}/{version}/load"'),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, mutation=after):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(
+                        audit.graph_authoring_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_redirect_policy_cannot_be_weakened_by_only_refreshing_the_method_digest(self) -> None:
+        path = self.root / audit.GRAPH_AUTHORING_UI_PATH
+        original = path.read_text(encoding="utf-8")
+        for before, after in (
+                ("redirect: 'manual'", "redirect: 'follow'"),
+                ("if (response.type === 'opaqueredirect')", "if (false)")):
+            with self.subTest(mutation=after):
+                self.assertEqual(1, original.count(before))
+                mutated = original.replace(before, after, 1)
+                span = audit._javascript_function_span(mutated, "runStartupImport")
+                self.assertIsNotNone(span)
+                digest = hashlib.sha256(audit.normalized(mutated[slice(*span)]).encode("utf-8")).hexdigest()
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_UI_METHOD_PROOFS,
+                                         {"runStartupImport": digest}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(
+                            self.root, self.discovered))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_authority_and_candidate_markers_are_mandatory(self) -> None:
+        self.assertTrue(audit.graph_authoring_authority_errors(
+            self.root, None, self.entries, self.discovered))
+        entries = copy.deepcopy(self.entries)
+        entries[self.authority["candidateIds"][0]].pop("graphAuthoringAuthority")
+        errors = audit.graph_authoring_authority_errors(
+            self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: self.authority},
+            entries, self.discovered)
+        self.assertTrue(any("partition" in error or "marker" in error for error in errors), errors)
+
+    def test_inventory_dispatches_the_mandatory_graph_authoring_authority(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads(
+                (root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "graph_authoring_authority_errors",
+                    return_value=["graph-authoring-routing-probe"]) as routed:
+                self.assertIn("graph-authoring-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
 
 
 class ProgramGithubPolicyAuditTest(unittest.TestCase):
@@ -7510,6 +7855,89 @@ class EmbedEnabledAuditTest(unittest.TestCase):
                 self.entries, self.discovered, {}))
 
 
+class SagaOutboxCapacityAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        for relative in audit.SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS:
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "ravenroot"], cwd=self.root, check=True)
+        self.discovered = {candidate.id: candidate for candidate in audit.discover(self.root)}
+
+    def fixture(self, setting):
+        authority = audit.saga_outbox_capacity_authority(
+            self.root, setting, self.discovered)
+        self.assertIsNotNone(authority)
+        specification = audit.SAGA_OUTBOX_CAPACITY_SETTINGS[setting]
+        contract = {
+            "bindingAuthority": authority["bindingAuthority"],
+            "defaultAuthority": authority["defaultAuthority"],
+            "field": specification["field"],
+            "owner": audit.SAGA_OUTBOX_CAPACITY_PATH + "#SagaOutboxCapacity",
+            "bindings": [specification["property"]],
+            "default": specification["default"],
+            "defaultEvidence": authority["defaultAuthority"]["candidateIds"],
+        }
+        entries = {
+            identifier: dict(self.discovered[identifier].source_fields(), setting=setting)
+            for identifier in authority["candidateIds"]
+        }
+        return contract, entries
+
+    def errors(self, setting, contract, entries):
+        return [
+            *audit.binding_authority_errors(
+                self.root, setting, contract, list(entries.values()), entries,
+                self.discovered, {}),
+            *audit.default_authority_errors(
+                self.root, setting, contract, entries, self.discovered),
+        ]
+
+    def test_property_only_capacity_settings_have_closed_typed_authority(self):
+        all_ids = set()
+        for setting in audit.SAGA_OUTBOX_CAPACITY_SETTINGS:
+            contract, entries = self.fixture(setting)
+            self.assertEqual([], self.errors(setting, contract, entries))
+            self.assertFalse(all_ids.intersection(entries))
+            all_ids.update(entries)
+        self.assertEqual(10, len(all_ids))
+
+    def test_metadata_source_consumers_and_atomic_refusal_proof_cannot_drift(self):
+        setting = "saga.outbox.maximum-outstanding-commands"
+        contract, entries = self.fixture(setting)
+        for field, value in (
+                ("owner", "foreign/Owner.java#Owner"), ("field", "maximumOutstandingBytes"),
+                ("bindings", []), ("default", "unbounded"), ("defaultEvidence", []),
+                ("bindingAuthority", None), ("defaultAuthority", None)):
+            with self.subTest(metadata=field):
+                changed = copy.deepcopy(contract); changed[field] = value
+                self.assertTrue(self.errors(setting, changed, entries))
+        mutations = (
+            (audit.SAGA_OUTBOX_CAPACITY_PATH,
+             "ravenroot.saga.outbox.maxOutstandingCommands", "ravenroot.saga.outbox.unbounded"),
+            (audit.SAGA_OUTBOX_CAPACITY_PATH, "new SagaOutboxCapacity(128,", "new SagaOutboxCapacity(129,"),
+            (audit.SAGA_OUTBOX_CAPACITY_PATH,
+             "maximumOutstandingCommands > 1_000_000", "maximumOutstandingCommands > 2_000_000"),
+            ("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
+             "InMemoryExecutionStore.java", "SagaOutboxCapacity.configured()", "SagaOutboxCapacity.DEFAULTS"),
+            ("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
+             "ExecutionStoreContract.java", "assertThrows", "removedAssertion"),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(source=relative):
+                path = self.root / relative; original = path.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    self.assertTrue(self.errors(setting, contract, entries))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+
 class RunnerCoordinatorBindingAuditTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -7986,6 +8414,44 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                 encoding="utf-8",
             )
             unrelated.write_text("accepted after preparation\n", encoding="utf-8")
+            later_pom = root / "ravenroot/later-module/pom.xml"
+            later_pom.parent.mkdir()
+            later_pom.write_text(
+                "<project><parent><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-parent</artifactId>"
+                "<version>0.6.0-alpha.1</version></parent>"
+                "<groupId>ai.ravenroot.extensions</groupId><artifactId>later-module</artifactId>"
+                "<version>0.6.0-alpha.1</version>"
+                "<description>accepted after preparation</description>"
+                "<dependencies><dependency><groupId>ai.ravenrooted.partner</groupId>"
+                "<artifactId>coincidental-version</artifactId>"
+                "<version>0.6.0-alpha.1</version></dependency>"
+                "<dependency><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-application-api</artifactId>"
+                "<version>0.6.0-alpha.1</version></dependency></dependencies>"
+                "<properties><ravenroot.version>0.6.0-alpha.1</ravenroot.version>"
+                "<external.version>0.6.0-alpha.1</external.version></properties></project>\n",
+                encoding="utf-8",
+            )
+            external_project_pom = root / "ravenroot/external-project/pom.xml"
+            external_project_pom.parent.mkdir()
+            external_project_source = (
+                "<project><groupId>ai.ravenrooted.partner</groupId>"
+                "<artifactId>external-project</artifactId>"
+                "<version>0.6.0-alpha.1</version>"
+                "<description>preserve every external project byte</description></project>\n"
+            )
+            external_project_pom.write_text(external_project_source, encoding="utf-8")
+            external_parent_pom = root / "ravenroot/external-parent/pom.xml"
+            external_parent_pom.parent.mkdir()
+            external_parent_source = (
+                "<project><parent><groupId>ai.ravenrooted.partner</groupId>"
+                "<artifactId>external-parent</artifactId>"
+                "<version>0.6.0-alpha.1</version></parent>"
+                "<artifactId>external-child</artifactId><version>0.6.0-alpha.1</version>"
+                "<description>preserve inherited external ownership</description></project>\n"
+            )
+            external_parent_pom.write_text(external_parent_source, encoding="utf-8")
             commit("amend prepared release evidence")
             reverse_release_preparation_delta(root, preparation, "0.6.0-alpha.1")
 
@@ -7996,6 +8462,27 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
             self.assertEqual("release-notes:\n  metadata: original\n",
                              navigation.read_text(encoding="utf-8"))
             self.assertEqual("accepted after preparation\n", unrelated.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "<project><parent><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-parent</artifactId>"
+                "<version>0.5.1-alpha.1</version></parent>"
+                "<groupId>ai.ravenroot.extensions</groupId><artifactId>later-module</artifactId>"
+                "<version>0.5.1-alpha.1</version>"
+                "<description>accepted after preparation</description>"
+                "<dependencies><dependency><groupId>ai.ravenrooted.partner</groupId>"
+                "<artifactId>coincidental-version</artifactId>"
+                "<version>0.6.0-alpha.1</version></dependency>"
+                "<dependency><groupId>ai.ravenroot</groupId>"
+                "<artifactId>ravenroot-application-api</artifactId>"
+                "<version>0.5.1-alpha.1</version></dependency></dependencies>"
+                "<properties><ravenroot.version>0.5.1-alpha.1</ravenroot.version>"
+                "<external.version>0.6.0-alpha.1</external.version></properties></project>\n",
+                later_pom.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(external_project_source,
+                             external_project_pom.read_text(encoding="utf-8"))
+            self.assertEqual(external_parent_source,
+                             external_parent_pom.read_text(encoding="utf-8"))
 
             unexpected = root / "unexpected-runtime-policy.txt"
             unexpected.write_text("ordinary\n", encoding="utf-8")
@@ -8184,6 +8671,123 @@ RELEASE_PREPARATION_PATHS = {
 }
 
 
+def is_ravenroot_maven_group(group: str | None) -> bool:
+    return group == "ai.ravenroot" or (group is not None and group.startswith("ai.ravenroot."))
+
+
+def rewrite_ravenroot_pom_version(
+        source: str, prepared_version: str, source_version: str, path: str) -> str:
+    """Rewrite only Maven version elements owned by Ravenroot coordinates."""
+    try:
+        ET.fromstring(source)
+    except ET.ParseError as error:
+        raise AssertionError(f"{path}: later Maven module is not valid XML") from error
+
+    token_pattern = re.compile(
+        r"(?s)<!--.*?-->|<\?.*?\?>|<!\[CDATA\[.*?\]\]>|<![^>]*>|"
+        r"<(?P<close>/)?(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)(?P<tail>[^>]*)>"
+    )
+    elements: list[dict[str, object]] = []
+    stack: list[dict[str, object]] = []
+    for match in token_pattern.finditer(source):
+        name = match.group("name")
+        if name is None:
+            continue
+        local_name = name.rsplit(":", 1)[-1]
+        if match.group("close"):
+            if not stack or stack[-1]["name"] != local_name:
+                raise AssertionError(f"{path}: later Maven module has mismatched XML tags")
+            element = stack.pop()
+            element["close_start"] = match.start()
+            element["end"] = match.end()
+            continue
+        element = {
+            "name": local_name,
+            "parent": stack[-1] if stack else None,
+            "open_end": match.end(),
+            "close_start": match.end(),
+            "end": match.end(),
+        }
+        elements.append(element)
+        if not match.group("tail").rstrip().endswith("/"):
+            stack.append(element)
+    if stack:
+        raise AssertionError(f"{path}: later Maven module has unclosed XML tags")
+
+    projects = [element for element in elements if element["name"] == "project"
+                and element["parent"] is None]
+    if len(projects) != 1:
+        raise AssertionError(f"{path}: later Maven module must contain one project element")
+    project = projects[0]
+
+    def children(element: dict[str, object], name: str) -> list[dict[str, object]]:
+        return [candidate for candidate in elements
+                if candidate["parent"] is element and candidate["name"] == name]
+
+    def scalar(element: dict[str, object], name: str) -> str | None:
+        matches = children(element, name)
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise AssertionError(f"{path}: Maven {element['name']} has repeated {name}")
+        match = matches[0]
+        value = source[int(match["open_end"]):int(match["close_start"])].strip()
+        if "<" in value:
+            raise AssertionError(f"{path}: Maven {element['name']} has non-scalar {name}")
+        return value
+
+    parents = children(project, "parent")
+    if len(parents) > 1:
+        raise AssertionError(f"{path}: Maven project has repeated parent coordinates")
+    parent = parents[0] if parents else None
+    project_group = scalar(project, "groupId")
+    inherited_group = scalar(parent, "groupId") if parent is not None else None
+    ravenroot_project = is_ravenroot_maven_group(project_group or inherited_group)
+
+    targets: list[dict[str, object]] = []
+
+    def add_coordinate_version(element: dict[str, object], coordinate: str) -> None:
+        group = scalar(element, "groupId")
+        artifact = scalar(element, "artifactId")
+        version = scalar(element, "version")
+        if (is_ravenroot_maven_group(group) and artifact
+                and version == prepared_version):
+            targets.extend(children(element, "version"))
+        elif (coordinate == "project" and ravenroot_project and artifact
+              and version == prepared_version):
+            targets.extend(children(element, "version"))
+
+    add_coordinate_version(project, "project")
+    if parent is not None:
+        add_coordinate_version(parent, "parent")
+    for dependency in (element for element in elements if element["name"] == "dependency"):
+        add_coordinate_version(dependency, "dependency")
+    if ravenroot_project:
+        for properties in children(project, "properties"):
+            for version_property in children(properties, "ravenroot.version"):
+                value = source[
+                    int(version_property["open_end"]):int(version_property["close_start"])
+                ].strip()
+                if value == prepared_version:
+                    targets.append(version_property)
+
+    replacements: list[tuple[int, int]] = []
+    for target in targets:
+        start = int(target["open_end"])
+        end = int(target["close_start"])
+        raw = source[start:end]
+        value_start = start + len(raw) - len(raw.lstrip())
+        value_end = end - (len(raw) - len(raw.rstrip()))
+        if source[value_start:value_end] != prepared_version:
+            raise AssertionError(f"{path}: Ravenroot version coordinate is not an exact scalar")
+        replacements.append((value_start, value_end))
+
+    updated = source
+    for start, end in sorted(set(replacements), reverse=True):
+        updated = updated[:start] + source_version + updated[end:]
+    return updated
+
+
 def reverse_release_preparation_delta(
         root: Path, preparation_revision: str, target_version: str) -> None:
     """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
@@ -8231,6 +8835,36 @@ def reverse_release_preparation_delta(
 
     if not any(path == notes for _, path in changes):
         raise AssertionError("release preparation did not add its release notes")
+
+    def revision_product_version(revision: str) -> str:
+        source = subprocess.run(
+            ["git", "show", f"{revision}:ravenroot/pom.xml"], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        project = re.sub(r"(?s)<parent>.*?</parent>", "", source)
+        match = re.search(r"<version>([^<]+)</version>", project)
+        if match is None:
+            raise AssertionError(f"{revision}: release source has no product version")
+        return match.group(1)
+
+    prepared_version = revision_product_version(preparation_revision)
+    source_version = revision_product_version(parent)
+    if prepared_version != target_version or prepared_version == source_version:
+        raise AssertionError("release preparation versions do not match the requested inverse")
+
+    # A module may be added after the historical preparation while the branch still carries the
+    # prepared product version. It is absent from the preparation diff, so reconstruct only its
+    # exact Ravenroot version coordinates and retain every other later source byte.
+    current_pom_paths = set(subprocess.run(
+        ["git", "ls-files", "*pom.xml"], cwd=root,
+        check=True, capture_output=True, text=True,
+    ).stdout.splitlines())
+    later_pom_updates: dict[str, str] = {}
+    for path in sorted(current_pom_paths - pom_paths):
+        source = (root / path).read_text(encoding="utf-8")
+        updated = rewrite_ravenroot_pom_version(source, prepared_version, source_version, path)
+        if updated != source:
+            later_pom_updates[path] = updated
     if subprocess.run(
             ["git", "status", "--porcelain"], cwd=root, check=True,
             capture_output=True, text=True,
@@ -8245,6 +8879,13 @@ def reverse_release_preparation_delta(
         input=patch, check=True, capture_output=True,
     )
     subprocess.run(["git", "rm", "--", notes], cwd=root, check=True, capture_output=True)
+    for path, contents in later_pom_updates.items():
+        (root / path).write_text(contents, encoding="utf-8")
+    if later_pom_updates:
+        subprocess.run(
+            ["git", "add", "--", *later_pom_updates], cwd=root,
+            check=True, capture_output=True,
+        )
 
 
 if __name__ == "__main__":

@@ -17,10 +17,16 @@
       url: /user-guide/
     - title: Workspace and graph authoring
       url: /user-guide/workspace-authoring.html
+    - title: Illustrated workspace guide
+      url: /user-guide/illustrated-workspace.html
+    - title: Repository-backed graph authoring
+      url: /user-guide/repository-authoring.html
     - title: Payloads, outcomes, and routing
       url: /user-guide/payload-routing.html
     - title: Test, Run, and execution control
       url: /user-guide/test-run-observe.html
+    - title: Observe deployments and processes
+      url: /user-guide/process-monitoring.html
     - title: Human Task confirmations
       url: /user-guide/human-task-confirmations.html
     - title: Governed agents and runners
@@ -29,8 +35,10 @@
       url: /operator-guide/kubernetes-runners.html
     - title: Disposable Agent example repository
       url: /examples/governed-runner/disposable-repository/
-    - title: Register Machine example library
-      url: /examples/register-machine/
+    - title: Intergraph call examples
+      url: /examples/intergraph/
+    - title: Illustrated lakehouse scenario
+      url: /examples/lakehouse/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -50,20 +58,28 @@
       url: /operator-guide/identity-browser.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
+    - title: Graph source control and published deployments
+      url: /operator-guide/graph-source-control.html
     - title: Durable activity content capture
       url: /operator-guide/activity-capture.html
     - title: Global lifecycle console
       url: /operator-guide/lifecycle-console.html
+    - title: Selective derived executions
+      url: /operator-guide/selective-derived-executions.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
     - title: Plugin bundle lifecycle
       url: /operator-guide/plugin-bundles.html
+    - title: Configuration packager
+      url: /operator-guide/configuration-packager.html
     - title: Authoring assistant
       url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations
       url: /operator-guide/embed-operations.html
     - title: Human Task operations
       url: /operator-guide/human-tasks.html
+    - title: Durable sagas and application-command outbox
+      url: /operator-guide/saga-outbox.html
 
 - title: Integrator guide
   items:
@@ -71,6 +87,8 @@
       url: /integrator-guide/
     - title: Application, HTTP, SSE, and CLI
       url: /integrator-guide/application-http.html
+    - title: Activity archive client
+      url: /integrator-guide/activity-archive-client.html
     - title: Embed the read-only viewer quickstart
       url: /integrator-guide/embed-viewer-quickstart.html
     - title: Embedded-viewer protocol
@@ -125,10 +143,21 @@
     - title: Embed, privacy, and audit
       url: /security/embed-privacy.html
 
+- title: Education
+  items:
+    - title: Education pathway
+      url: /education/
+    - title: Execute a register-machine loop
+      url: /education/register-machine-exercise.html
+    - title: Register-machine examples
+      url: /examples/register-machine/
+
 - title: Reference
   items:
     - title: Reference overview
       url: /reference/
+    - title: Platform comparison
+      url: /reference/platform-comparison.html
     - title: GraphML profile
       url: /reference/graphml.html
     - title: Register Machine Profile v1
@@ -145,8 +174,12 @@
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
+    - title: Intergraph calls
+      url: /reference/intergraph-calls.html
     - title: Session memory
       url: /reference/session-memory.html
+    - title: Personal node palettes
+      url: /reference/personal-node-palettes.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: Interaction WebSocket protocol
@@ -206,6 +239,8 @@
       url: /reference/bundles/slack.html
     - title: Restricted SpEL
       url: /reference/bundles/spel.html
+    - title: System One
+      url: /reference/bundles/system-one.html
     - title: Microsoft Teams
       url: /reference/bundles/teams.html
     - title: Telegram
@@ -242,12 +277,18 @@
       url: /developer-guide/embed-viewer-verification.html
     - title: Extensions and adapters
       url: /developer-guide/extension-development.html
+    - title: Frontend drawing model plugins
+      url: /developer-guide/frontend-drawing-models.html
+    - title: Textbook DFA projection reference
+      url: /education/finite-state-exercise.html
     - title: API, documentation, and releases
       url: /developer-guide/api-doc-release.html
     - title: Governance and releases
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.7.0-alpha.1 release notes
+      url: /releases/v0.7.0-alpha.1.html
     - title: Ravenroot 0.6.1-alpha.1 release notes
       url: /releases/v0.6.1-alpha.1.html
     - title: Ravenroot 0.6.0-alpha.1 release notes

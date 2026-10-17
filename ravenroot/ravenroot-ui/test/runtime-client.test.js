@@ -22,6 +22,27 @@ import {
   validateStartupFailure,
 } from '../src/runtime-client.js';
 
+describe('graph authoring runtime capability', () => {
+  const configuration = {
+    schemaVersion: 2, graphDocumentMaxBytes: 1024,
+    programAuthoring: { maxSourceBytes: 1024 * 1024, maxBuildRequestBytes: 10 * 1024 * 1024,
+      maxProgramsPerBuild: 256 },
+  };
+
+  it('keeps local file authoring when older servers omit the capability', () => {
+    expect(validateRuntimeConfiguration(configuration)).not.toHaveProperty('graphAuthoring');
+  });
+
+  it('accepts the server-owned Git repository display without provider coordinates', () => {
+    const value = validateRuntimeConfiguration({ ...configuration, graphAuthoring: {
+      mode: 'git', provider: 'github', operations: ['SAVE'], repositoryDisplay: 'platform/graphs',
+      releaseBranch: 'main', maxDocumentBytes: 1024,
+    } }).graphAuthoring;
+    expect(value).toMatchObject({ mode: 'git', repositoryDisplay: 'platform/graphs' });
+    expect(value).not.toHaveProperty('apiBase');
+  });
+});
+
 describe('bounded startup diagnostics', () => {
   const incidentId = 'incident:0123456789abcdef';
   const nodeRef = 'sha256:0123456789abcdef0123456789abcdef';
@@ -984,6 +1005,22 @@ describe('durable process inventory client (issue 154)', () => {
     await expect(client.processInstanceTraversals('')).rejects.toThrow(/require an id/);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('reads payload-free saga diagnostics for one process instance', async () => {
+    const payload = { sagas: [{ sagaId: 'b', scope: 'order', revision: 4,
+      disposition: 'UNRESOLVED', cancellationRequested: false,
+      actionableReason: 'reconcile participant', steps: [] }], outbox: [] };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200, text: async () => JSON.stringify(payload),
+    });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.processInstanceSagas('aaaaaaaa-0000-0000-0000-000000000001'))
+      .resolves.toEqual(payload);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      '/v1/executions/aaaaaaaa-0000-0000-0000-000000000001/sagas');
+    await expect(client.processInstanceSagas('')).rejects.toThrow(/require an id/);
+  });
 });
 
 function streamResponse(frames, status = 200) {
@@ -1096,8 +1133,8 @@ describe('Ravenroot runtime client security boundary', () => {
 
   it.each([
     [401, 'Authentication expired'],
-    [403, 'Access revoked'],
-  ])('surfaces a current service %s and clears only that credential snapshot', async (status, message) => {
+    [403, 'Insufficient permissions'],
+  ])('surfaces service %s and invalidates only a definitive 401', async (status, message) => {
     const provider = memoryTokenProvider('stale');
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: false,
@@ -1111,12 +1148,12 @@ describe('Ravenroot runtime client security boundary', () => {
       status,
       message,
     }));
-    expect(await provider.getAccessToken()).toBe('');
+    expect(await provider.getAccessToken()).toBe(status === 401 ? '' : 'stale');
   });
 
   it.each([
     [401, 'Authentication expired'],
-    [403, 'Access revoked'],
+    [403, 'Insufficient permissions'],
   ])('retains a replacement credential after a delayed JSON %s', async (status, message) => {
     const rejected = deferredValue();
     const provider = memoryTokenProvider('token-a');
@@ -1210,7 +1247,7 @@ describe('Ravenroot runtime client security boundary', () => {
     const error = await client.nodeTypes().catch(caught => caught);
 
     expect(error).toBeInstanceOf(RuntimeAuthorizationError);
-    expect(error).toMatchObject({ status: 403, message: 'Access revoked' });
+    expect(error).toMatchObject({ status: 403, message: 'Insufficient permissions' });
     expect(error.message).not.toContain('provider-secret-canary');
     expect(await provider.getAccessToken()).toBe('token');
   });
@@ -1252,7 +1289,7 @@ describe('Ravenroot runtime client security boundary', () => {
         return true;
       }),
     };
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 401 });
     const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
     try {
       const request = client.nodeTypes().catch(error => error);
@@ -1261,7 +1298,7 @@ describe('Ravenroot runtime client security boundary', () => {
       releaseClear.resolve();
 
       await expect(request).resolves.toEqual(expect.objectContaining({
-        name: 'RuntimeAuthorizationError', status: 403, message: 'Access revoked',
+        name: 'RuntimeAuthorizationError', status: 401, message: 'Authentication expired',
       }));
       expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer token-a');
       expect(current.accessToken).toBe('token-b');
@@ -1666,7 +1703,7 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(fetchImpl.mock.calls.map(([, request]) => request.headers.Authorization))
       .toEqual(['Bearer expired', 'Bearer fresh']);
-    expect(await provider.getAccessToken()).toBe('');
+    expect(await provider.getAccessToken()).toBe('fresh');
   });
 
   it('does not invoke a legacy SSE refresh or clear without an atomic snapshot capability', async () => {
@@ -1789,7 +1826,7 @@ describe('Ravenroot runtime client security boundary', () => {
       await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
       provider.setAccessToken('token-b');
       response.resolve({ ok: false, status: 403 });
-      await vi.waitFor(() => expect(states.at(-1)).toEqual(['revoked', 'Access revoked']));
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['revoked', 'Insufficient permissions']));
 
       expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer token-a');
       expect(await provider.getAccessToken()).toBe('token-b');

@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.amqp091;
 
+import ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException;
 import ai.ravenroot.api.catalog.NodeTypeDescriptorValidator;
 import ai.ravenroot.api.deployment.IngressReceipt;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -18,12 +19,43 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmqpConsumeContractTest {
+    @Test
+    void savedConsumerProfilesAndInboundAuthorityAreRevalidatedForTheDestinationTenant() {
+        var protocol = new AmqpConsumerTestSupport.FakeProtocol();
+        var matching = behavior(protocol);
+        assertDoesNotThrow(() -> matching.validateTemplateReferences(
+                configuration(Map.of()), AmqpTestSupport.TENANT));
+
+        var missingPolicy = new AmqpConsumeNodeBehavior(ignored -> Optional.empty(),
+                (tenant, name) -> Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2)),
+                (tenant, name) -> Optional.empty(), protocol, Runnable::run, Clock.systemUTC());
+        assertThrows(NodeTemplateReferenceUnavailableException.class, () -> missingPolicy.validateTemplateReferences(
+                configuration(Map.of()), AmqpTestSupport.TENANT));
+        assertThrows(NodeTemplateReferenceUnavailableException.class, () -> matching.validateTemplateReferences(
+                configuration(Map.of("queue", "unauthorized.q")), AmqpTestSupport.TENANT));
+        AtomicInteger profileCalls = new AtomicInteger();
+        AtomicInteger policyCalls = new AtomicInteger();
+        var malformedFirst = new AmqpConsumeNodeBehavior(ignored -> Optional.empty(), (tenant, name) -> {
+            profileCalls.incrementAndGet();
+            return Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2));
+        }, (tenant, name) -> {
+            policyCalls.incrementAndGet();
+            return Optional.of(AmqpConsumerTestSupport.policy());
+        }, protocol, Runnable::run, Clock.systemUTC());
+        var malformed = assertThrows(IllegalArgumentException.class, () -> malformedFirst.validateTemplateReferences(
+                configuration(Map.of("prefetch", "not-a-number")), AmqpTestSupport.TENANT));
+        assertEquals(IllegalArgumentException.class, malformed.getClass());
+        assertEquals(0, profileCalls.get(), "authored settings must be refused before profile resolution");
+        assertEquals(0, policyCalls.get(), "authored settings must be refused before policy resolution");
+    }
+
     @Test void typedEmissionVocabularyIsExactlyTheTrustedDeclaration() {
         Set<String> expected = Set.of("amqp-consumer-already-active", "amqp-consumer-failed",
                 "amqp-consumer-policy-unavailable", "amqp-consumer-unavailable", "amqp-profile-unavailable",

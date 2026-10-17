@@ -210,10 +210,13 @@ test('Viewer node drag persists layout while Editing direct drag of an unselecte
   const before = await page.evaluate(() => window.cy.getElementById('start').position());
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(start.x, start.y + 90, { steps: 12 });
+  // Move away from the bottom-left minimap. With additional command-bar controls the stage can be
+  // shorter at this test viewport, so moving down can put the persisted node visibly behind the
+  // minimap and make the next pointer gesture correctly hit that overlay instead of the node.
+  await page.mouse.move(start.x, start.y - 90, { steps: 12 });
   await page.mouse.up();
   await expect.poll(() => page.evaluate(() => window.cy.getElementById('start').position().y))
-    .toBeGreaterThan(before.y);
+    .toBeLessThan(before.y);
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Move start/);
 
   await page.locator('#btn-modify').click();

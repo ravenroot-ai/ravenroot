@@ -6799,12 +6799,12 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
              "  showLoading();"),
             (audit.GRAPH_AUTHORING_UI_PATH,
              "if (signal.aborted || !startupImportBindingIsCurrent(binding)) {\n"
-             "    throw new StartupImportError('stale-authority',\n"
-             "      'The service or workspace changed during the import. Retry in the current workspace.');\n"
+             "    throw productError(\"workspace.startup.failure.stale-authority\", new StartupImportError('stale-authority',\n"
+             "      'The service or workspace changed during the import. Retry in the current workspace.'));\n"
              "  }\n  let graph;",
              "if (signal.aborted) {\n"
-             "    throw new StartupImportError('stale-authority',\n"
-             "      'The service or workspace changed during the import. Retry in the current workspace.');\n"
+             "    throw productError(\"workspace.startup.failure.stale-authority\", new StartupImportError('stale-authority',\n"
+             "      'The service or workspace changed during the import. Retry in the current workspace.'));\n"
              "  }\n  let graph;"),
             (audit.GRAPH_AUTHORING_UI_PATH,
              "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })",

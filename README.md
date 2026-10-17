@@ -140,7 +140,7 @@ operational responsibilities and recovery paths.*
   [primary-source platform comparison](docs/reference/platform-comparison.md)
 - **Teachers and learners:** [education pathway](docs/education/index.md),
   [register-machine exercise](docs/education/register-machine-exercise.md), and
-  [two-state DFA visualization](docs/education/finite-state-exercise.md)
+  [finite-automata architecture evidence](docs/examples/finite-automata/)
 
 Browse the complete [Ravenroot documentation](https://docs.ravenroot.ai/).
 

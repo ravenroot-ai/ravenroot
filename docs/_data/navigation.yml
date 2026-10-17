@@ -149,8 +149,6 @@
       url: /education/
     - title: Execute a register-machine loop
       url: /education/register-machine-exercise.html
-    - title: Visualize a two-state DFA
-      url: /education/finite-state-exercise.html
     - title: Register-machine examples
       url: /examples/register-machine/
 
@@ -281,6 +279,8 @@
       url: /developer-guide/extension-development.html
     - title: Frontend drawing model plugins
       url: /developer-guide/frontend-drawing-models.html
+    - title: Textbook DFA projection reference
+      url: /education/finite-state-exercise.html
     - title: API, documentation, and releases
       url: /developer-guide/api-doc-release.html
     - title: Governance and releases

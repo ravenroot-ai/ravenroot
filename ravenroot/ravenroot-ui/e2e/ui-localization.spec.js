@@ -21,6 +21,20 @@ const pseudo = (locale, direction, marker) => ({
 const italian = pseudo('it', 'ltr', '⟦IT⟧');
 italian.messages['workspace.template.app.name'] = '<img src=x onerror="globalThis.__catalogExecuted=true">Nome';
 italian.messages['workspace.template.app.registered.name.or.future.behavior'] = '" autofocus onfocus="globalThis.__catalogExecuted=true';
+Object.assign(italian.messages, {
+  'workspace.node.palette.action.saveSelected': '⟦IT-SAVE⟧',
+  'workspace.node.palette.view.rename': '⟦IT-RENAME⟧',
+  'workspace.node.palette.view.delete': '⟦IT-DELETE⟧',
+  'workspace.node.palette.view.in': '{label} ⟦IT-IN⟧ {palette}',
+  'workspace.panel.show': '⟦IT-SHOW⟧ {name}',
+  'workspace.app.close': '⟦IT-CLOSE⟧ {name}',
+  'workspace.program.history.entry': '⟦IT-ENTRY⟧ {phase}|{revision}|{state}',
+  'workspace.program.history.revision': '⟦IT-REV⟧ {revision}',
+  'workspace.program.history.state.failed': '⟦IT-FAILED⟧',
+  'workspace.workflow.validation.oneStart': '⟦IT-ONE-START⟧',
+  'workspace.workflow.validation.edgeId': '⟦IT-EDGE-ID⟧ {reason}',
+  'workspace.edge.validation.stableId.nonblank': '⟦IT-NONBLANK⟧',
+});
 // Two complete synthetic catalogs share the production 512 KiB configuration ceiling.
 // Keep long RTL labels while omitting redundant English prose from long messages.
 const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
@@ -115,6 +129,117 @@ test('switches a complete catalog live while preserving a dirty selected documen
   await expect(page.locator('html')).toHaveAttribute('lang', 'it');
   await openLanguageDialog(page, 'it');
   await expect(page.locator('#language-selection')).toHaveValue('it');
+});
+
+test('switches every structural presentation surface live while preserving authored and machine values', async ({ page }, testInfo) => {
+  await configure(page);
+  await page.route('**/v1/configuration', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 }),
+  }));
+  await page.route('**/v1/node-types', route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/v1/events**', route => route.fulfill({ contentType: 'text/event-stream', body: '' }));
+  await page.goto('/');
+  await expect(page.locator('#node-catalog')).toContainText('empty node catalog');
+  const identity = await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    const start = owner.graph.nodes.find(node => node.kind === 'START');
+    const duplicateStart = structuredClone(start);
+    duplicateStart.id = 'duplicate-start-machine-id';
+    duplicateStart.name = 'Auteur duplicate start';
+    owner.graph.nodes.push(duplicateStart);
+    owner.graph.nodeMap[duplicateStart.id] = duplicateStart;
+    owner.graph.edges[0].id = ' ';
+    const activeId = owner.id;
+    const documentId = window.ravenroot.openDocument({ name: 'Auteur workflow.graphml' });
+    window.ravenroot.activateDocument(activeId);
+    window.ravenroot._renderPersonalPalettesForTest({
+      pending: false, error: '',
+      palettes: [{ id: 'palette-machine-id', name: 'Palette Ω' }], templates: [],
+    });
+    window.ravenroot._showReadOnlyProgramReadinessForTest({ id: 'program-machine-id', name: 'Auteur program' }, {
+      phase: 'FAILED', revision: 17, detail: 'Opaque provider diagnostic', updatedAt: '2026-10-17T00:00:00Z',
+    });
+    return { documentId };
+  });
+
+  const palette = page.locator('.node-palette[data-palette-id="palette-machine-id"]');
+  await expect(palette).toBeVisible();
+  await palette.locator('summary').click();
+  for (const action of ['Save selected node', 'Rename', 'Delete']) {
+    const button = palette.getByRole('button', { name: action, exact: true });
+    await expect(button).toHaveText(action);
+    await expect(button).toHaveAttribute('data-tooltip', `${action} in Palette Ω`);
+  }
+  const rails = page.locator('.rail-panel-btn');
+  const railCount = await rails.count();
+  expect(railCount).toBeGreaterThan(1);
+  for (let index = 0; index < railCount; index += 1) {
+    const rail = rails.nth(index);
+    await expect(rail).toHaveAttribute('aria-label', /^Show .+ panel$/u);
+    expect(await rail.getAttribute('data-tooltip')).toBe(await rail.getAttribute('aria-label'));
+  }
+  const timeline = page.locator('.program-timeline li');
+  await expect(timeline).toContainText('FAILED · revision 17 · failed');
+  await page.locator('#document-switcher').click();
+  const close = page.locator(`[data-document-close="${identity.documentId}"]`);
+  await expect(close).toHaveAttribute('aria-label', 'Close Auteur workflow.graphml');
+  await expect(close).toHaveAttribute('title', 'Close Auteur workflow.graphml');
+  await page.keyboard.press('Escape');
+
+  await openLanguageDialog(page);
+  await page.locator('#language-selection').selectOption('it');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'it');
+  for (const [english, localized] of [['Save selected node', '⟦IT-SAVE⟧'], ['Rename', '⟦IT-RENAME⟧'], ['Delete', '⟦IT-DELETE⟧']]) {
+    const button = palette.getByRole('button', { name: localized, exact: true });
+    await expect(button).toHaveText(localized);
+    await expect(button).toHaveAttribute('data-tooltip', `${localized} ⟦IT-IN⟧ Palette Ω`);
+    await expect(palette).not.toContainText(`⟦IT⟧${english}⟦IT⟧`);
+  }
+  for (let index = 0; index < railCount; index += 1) {
+    const rail = rails.nth(index);
+    await expect(rail).toHaveAttribute('aria-label', /^⟦IT-SHOW⟧ /u);
+    expect(await rail.getAttribute('data-tooltip')).toBe(await rail.getAttribute('aria-label'));
+  }
+  await expect(timeline).toHaveText('⟦IT-ENTRY⟧ FAILED|⟦IT-REV⟧ 17|⟦IT-FAILED⟧');
+  await expect(timeline).toHaveAttribute('data-program-phase', 'FAILED');
+  await expect(timeline).toHaveAttribute('data-state', 'failed');
+  const programIdentity = await timeline.evaluate(element => ({
+    programPhase: element.dataset.programPhase, programState: element.dataset.state,
+  }));
+  await expect(page.locator('.program-status')).toHaveText('Opaque provider diagnostic');
+  await page.locator('.language-dialog button[type="submit"]').click();
+  const programScreenshot = testInfo.outputPath('structural-program-live-switch.png');
+  await page.screenshot({ path: programScreenshot, fullPage: true });
+  await testInfo.attach('structural program live switch', { path: programScreenshot, contentType: 'image/png' });
+
+  await page.locator('#document-switcher').click();
+  await expect(close).toHaveAttribute('aria-label', '⟦IT-CLOSE⟧ Auteur workflow.graphml');
+  await expect(close).toHaveAttribute('title', '⟦IT-CLOSE⟧ Auteur workflow.graphml');
+  await page.keyboard.press('Escape');
+
+  await openLanguageDialog(page, 'it');
+  await page.locator('#language-selection').selectOption('en');
+  await page.locator('.language-dialog button[type="submit"]').click();
+  await page.evaluate(() => window.ravenroot._renderWorkflowValidationForTest());
+  await expect(page.locator('.validation-list li')).toHaveText([
+    'The graph must contain exactly one START node', 'Edge id must be a nonblank string',
+  ]);
+  await openLanguageDialog(page);
+  await page.locator('#language-selection').selectOption('it');
+  await expect(page.locator('.validation-list li')).toHaveText(['⟦IT-ONE-START⟧', '⟦IT-EDGE-ID⟧ ⟦IT-NONBLANK⟧']);
+  await page.locator('.language-dialog button[type="submit"]').click();
+  const validationScreenshot = testInfo.outputPath('structural-validation-live-switch.png');
+  await page.screenshot({ path: validationScreenshot, fullPage: true });
+  await testInfo.attach('structural validation live switch', { path: validationScreenshot, contentType: 'image/png' });
+  expect(await page.evaluate(documentId => ({
+    paletteId: document.querySelector('.node-palette')?.dataset.paletteId,
+    railPanel: document.querySelector('.rail-panel-btn')?.dataset.railPanel,
+    documentId: document.querySelector(`[data-document-close="${CSS.escape(documentId)}"]`)?.dataset.documentClose,
+  }), identity.documentId)).toEqual({
+    paletteId: 'palette-machine-id', railPanel: expect.any(String), documentId: identity.documentId,
+  });
+  expect(programIdentity).toEqual({ programPhase: 'FAILED', programState: 'failed' });
+  await expect(palette.locator('summary')).toHaveText('Palette Ω');
 });
 
 test('applies exact-to-base-to-English fallback and rejects malformed configuration', async ({ page }) => {

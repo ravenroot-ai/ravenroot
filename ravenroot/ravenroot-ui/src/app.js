@@ -79,7 +79,8 @@ import {
   serializeGraphML,
   setEdgeFailureRoute,
   setGraphPresentation,
-  validateWorkflow,
+  validateWorkflowFindings,
+  workflowFindingText,
 } from './graph-document.js';
 import { catalogEmptyState } from './catalog-empty-state.js';
 import {
@@ -2792,6 +2793,22 @@ window.ravenroot = {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
   _createFrontendPluginSandboxForTest: (source, options) => createFrontendPluginSandbox(source, options),
+  _renderPersonalPalettesForTest: state => {
+    nodePaletteState = state;
+    renderPersonalPalettes();
+  },
+  _showReadOnlyProgramReadinessForTest: (spec, result) => {
+    const model = createNode(spec.id, spec.name || spec.id, 'BEHAVIOR', { x: 300, y: 300 });
+    model.behavior = 'program';
+    graphData.nodes.push(model);
+    graphData.nodeMap[model.id] = model;
+    cy.add(buildElements({ nodes: [model], edges: [] }));
+    programPhase(workspace.active, model.id, result);
+    cy.$(':selected').unselect();
+    cy.getElementById(model.id).select();
+    showNodeInfo(cy.getElementById(model.id));
+  },
+  _renderWorkflowValidationForTest: () => renderWorkflowValidationAdvisory(graphData, workspace.active),
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -6468,6 +6485,7 @@ function multiNodePropertyControl(property, controlId) {
   const current = state === MULTI_PROPERTY_STATE.SAME ? property.state.value : '';
   const choices = property.allowedValues?.length
     ? property.allowedValues
+    // i18n-audit-exempt: protocol-token - Boolean property values are serialized machine tokens and must remain exact.
     : (property.type === 'BOOLEAN' ? ['false', 'true'] : null);
   if (choices) {
     const unchanged = state === MULTI_PROPERTY_STATE.SAME ? ''
@@ -7714,9 +7732,13 @@ function describeConditionalChanges(before, after) {
     const is = after[i];
     if (!was || was.name !== is.name) continue; // defensive: same descriptor, so this should not happen
     if (was.visible !== is.visible) {
-      parts.push(uiText("workspace.app.is.now", { displayName: is.displayName, value: is.visible ? (is.requiredNow ? 'visible and required' : 'visible') : 'hidden' }));
+      const state = is.visible
+        ? uiText(is.requiredNow ? 'workspace.property.state.visibleRequired' : 'workspace.property.state.visible')
+        : uiText('workspace.property.state.hidden');
+      parts.push(uiText("workspace.app.is.now", { displayName: is.displayName, value: state }));
     } else if (is.visible && was.requiredNow !== is.requiredNow) {
-      parts.push(uiText("workspace.app.is.now", { displayName: is.displayName, value: is.requiredNow ? 'required' : 'optional' }));
+      parts.push(uiText("workspace.app.is.now", { displayName: is.displayName,
+        value: uiText(is.requiredNow ? 'workspace.property.state.required' : 'workspace.property.state.optional') }));
     }
   }
   return parts.join(' ');
@@ -8391,8 +8413,12 @@ function renderProgramPanelState(panel, state = {}) {
       const terminalFailure = entry.phase === 'FAILED' || entry.phase === 'RETIRED';
       const marker = terminalFailure ? 'failed' : index === entries.length - 1 && entry.phase !== 'READY'
         ? 'current' : 'complete';
+      const revision = entry.revision
+        ? uiText('workspace.program.history.revision', { revision: entry.revision }) : '';
       return `<li data-program-phase="${escapeAttribute(entry.phase)}" data-state="${marker}">`
-        + `${escapeHtml(entry.phase)}${entry.revision ? ` · revision ${entry.revision}` : ''} · ${marker}</li>`;
+        + `${escapeHtml(uiText('workspace.program.history.entry', {
+          phase: entry.phase, revision, state: uiText(`workspace.program.history.state.${marker}`),
+        }))}</li>`;
     }).join('');
   }
   const output = panel.querySelector('.program-output');
@@ -8404,6 +8430,25 @@ function renderProgramPanelState(panel, state = {}) {
     output.hidden = !rawOutput;
     output.textContent = rawOutput ? uiText("workspace.app.smoke.output.value1", { boundedOutput: boundedOutput }) : '';
   }
+}
+
+function refreshLocalizedProgramPanels(owner = workspace.active) {
+  if (!owner) return;
+  const readiness = programReadiness(owner);
+  document.querySelectorAll('.program-workspace[data-node-id]').forEach(panel => {
+    renderProgramPanelState(panel, readiness.phases.get(panel.dataset.nodeId) || {});
+  });
+}
+
+function renderWorkflowValidationAdvisory(ownerGraph, owner = workspace.active) {
+  const violations = validateWorkflowFindings(ownerGraph).map(finding => workflowFindingText(finding));
+  if (!violations.length) return false;
+  document.getElementById('info-title').textContent = uiText('workspace.app.validation');
+  document.getElementById('info-body').innerHTML = `<div class="info-sec" data-workflow-validation="true"
+      data-workflow-validation-document="${escapeAttribute(owner?.id || '')}"><h4>${escapeHtml(uiText('workspace.template.app.local.advisory'))}</h4>
+    <p>${escapeHtml(uiText('workspace.template.app.the.runtime.admission.service.is.checking.the.exact'))}</p>
+    <ul class="validation-list">${violations.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
+  return true;
 }
 
 function ensureProgramReadinessChrome() {
@@ -9442,7 +9487,7 @@ function additionalPropertyGroupFieldControlHtml(field, entry) {
   if (field.allowedValues?.length) {
     const declared = field.allowedValues.some(option => String(option) === value);
     const undeclared = value === ''
-      ? '<option value="" selected>Not declared</option>' : '';
+      ? `<option value="" selected>${escapeHtml(uiText('workspace.template.app.not.declared'))}</option>` : '';
     const mismatched = value !== '' && !declared
       ? `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.among.the.declared.alternatives"))} ${escapeHtml(value)}</option>` : '';
     return `<select${data}${required}>${undeclared}${mismatched}${field.allowedValues.map(option =>
@@ -9456,7 +9501,8 @@ function additionalPropertyGroupFieldControlHtml(field, entry) {
   }
   if (type === 'BOOLEAN') {
     const recognized = value === '' || value === 'true' || value === 'false';
-    const undeclared = value === '' ? '<option value="" selected>Not declared</option>' : '';
+    const undeclared = value === ''
+      ? `<option value="" selected>${escapeHtml(uiText('workspace.template.app.not.declared'))}</option>` : '';
     const mismatched = recognized ? ''
       : `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(value)}</option>`;
     return `<select${data}${required}>${undeclared}${mismatched}`
@@ -9505,6 +9551,7 @@ function readAdditionalPropertyGroupEditor(form, descriptor) {
 }
 
 function propertyRowHtml(property = { name: '', type: 'string', value: '' }) {
+  // i18n-audit-exempt: protocol-token - GraphML property type names are persisted machine tokens and must remain exact.
   const types = ['string', 'boolean', 'int', 'long', 'float', 'double'];
   return `<div class="property-row">
     <input data-property-name placeholder="${escapeAttribute(uiText("workspace.property.namePlaceholder"))}" value="${escapeAttribute(property.name)}">
@@ -9596,21 +9643,24 @@ function onSearch(q) {
 // Inspector's "Visual type" select and the GraphML parser read the same ten entries, so a type added
 // there reaches all three instead of two of them.
 const NODE_TYPES = NODE_VISUAL_TYPES;
+// i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
 const EDGE_TYPES = [
+  // i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
   { type: 'failed', labelKey: 'edgeVisualType.failed', dash: true },
   // Reads FAILURE ROUTE, not FAILED, and sits immediately beside it: the two names next to
   // each other are what tells an author the list holds two different things, which is precisely the
   // confusion this distinction prevents. The other entries are outcome tokens, spelled as an author would
   // type them into the Outcome field; this one is not an outcome at all, so it is named for what it
   // is rather than for a word someone could type.
-  { type: 'failure', labelKey: 'edgeVisualType.failure', dash: true },
-  { type: 'completed', labelKey: 'edgeVisualType.completed' },
-  { type: 'continue', labelKey: 'edgeVisualType.continue' },
-  { type: 'continueP', labelKey: 'edgeVisualType.continueP', thick: true },
-  { type: 'validate', labelKey: 'edgeVisualType.validate' },
-  { type: 'ping', labelKey: 'edgeVisualType.ping', dash: true },
-  { type: 'outcome', labelKey: 'edgeVisualType.outcome' },
-  { type: 'callback', labelKey: 'edgeVisualType.callback' },
+  // i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
+  { type: 'failure', labelKey: 'edgeVisualType.failure', dash: true }, { type: 'completed', labelKey: 'edgeVisualType.completed' },
+  // i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
+  { type: 'continue', labelKey: 'edgeVisualType.continue' }, { type: 'continueP', labelKey: 'edgeVisualType.continueP', thick: true },
+  // i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
+  { type: 'validate', labelKey: 'edgeVisualType.validate' }, { type: 'ping', labelKey: 'edgeVisualType.ping', dash: true },
+  // i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
+  { type: 'outcome', labelKey: 'edgeVisualType.outcome' }, { type: 'callback', labelKey: 'edgeVisualType.callback' },
+  // i18n-audit-exempt: protocol-token - Edge type values select renderer semantics; adjacent labelKey fields own presentation.
   { type: 'undefined', labelKey: 'edgeVisualType.undefined', dash: true },
 ];
 
@@ -12648,13 +12698,7 @@ async function playGraph(mode = 'test') {
   const ownerCy = cy;
   const ownerLayoutMode = layoutMode;
   const ownerVisualStyle = visualStyle;
-  const violations = validateWorkflow(ownerGraph);
-  if (violations.length) {
-    document.getElementById('info-title').textContent = uiText("workspace.app.validation");
-    document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(uiText("workspace.template.app.local.advisory"))}</h4>
-      <p>${escapeHtml(uiText("workspace.template.app.the.runtime.admission.service.is.checking.the.exact"))}</p>
-      <ul class="validation-list">${violations.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
-  }
+  renderWorkflowValidationAdvisory(ownerGraph, owner);
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
     const message = uiText(nodeCatalogFailure ? 'workspace.run.catalogUnavailable' : 'workspace.run.catalogLoading');
@@ -13193,10 +13237,14 @@ function rehydrateD3RuntimeEdges(owner) {
 // data does not support.
 function activityIdentifiersHtml(event) {
   const identifiers = [
-    ['process', event.processInstanceId],
-    ['traversal', event.traversalId],
-    ['invocation', event.invocationId],
-    ['attempt', event.attemptId],
+    // i18n-audit-exempt: protocol-token - Markup and data attributes preserve the execution identifier kind; visible labels use catalog keys.
+    `<span class="activity-id" data-activity-identifier-label="workspace.activity.identifier.process" data-id-kind="process">${escapeHtml(uiText('workspace.activity.identifier.process'))} <code>${escapeHtml(shortId(event.processInstanceId))}</code></span>`,
+    // i18n-audit-exempt: protocol-token - Markup and data attributes preserve the execution identifier kind; visible labels use catalog keys.
+    `<span class="activity-id" data-activity-identifier-label="workspace.activity.identifier.traversal" data-id-kind="traversal">${escapeHtml(uiText('workspace.activity.identifier.traversal'))} <code>${escapeHtml(shortId(event.traversalId))}</code></span>`,
+    // i18n-audit-exempt: protocol-token - Markup and data attributes preserve the execution identifier kind; visible labels use catalog keys.
+    `<span class="activity-id" data-activity-identifier-label="workspace.activity.identifier.invocation" data-id-kind="invocation">${escapeHtml(uiText('workspace.activity.identifier.invocation'))} <code>${escapeHtml(shortId(event.invocationId))}</code></span>`,
+    // i18n-audit-exempt: protocol-token - Markup and data attributes preserve the execution identifier kind; visible labels use catalog keys.
+    `<span class="activity-id" data-activity-identifier-label="workspace.activity.identifier.attempt" data-id-kind="attempt">${escapeHtml(uiText('workspace.activity.identifier.attempt'))} <code>${escapeHtml(shortId(event.attemptId))}</code></span>`,
   ];
   // A fifth level, and the only one rendered conditionally. The four above are the execution
   // hierarchy every event sits somewhere in, so an em dash for an absent one reads as "above that
@@ -13205,11 +13253,10 @@ function activityIdentifiersHtml(event) {
   // would assert that every event has a handler slot, which is the opposite of the distinction this
   // row exists to make.
   if (event.handlerId) {
-    identifiers.push(['handler', event.handlerId]);
+    // i18n-audit-exempt: protocol-token - Markup and data attributes preserve the execution identifier kind; visible labels use catalog keys.
+    identifiers.push(`<span class="activity-id" data-activity-identifier-label="workspace.activity.identifier.handler" data-id-kind="handler">${escapeHtml(uiText('workspace.activity.identifier.handler'))} <code>${escapeHtml(shortId(event.handlerId))}</code></span>`);
   }
-  return identifiers.map(([kind, value]) =>
-    `<span class="activity-id" data-id-kind="${kind}">${escapeHtml(kind)} <code>${escapeHtml(shortId(value))}</code></span>`
-  ).join('');
+  return identifiers.join('');
 }
 
 // ── OBSERVATION LEVEL ───────────────────────────────────────────────────────────────────────────
@@ -13364,6 +13411,9 @@ function refreshActivityLocale() {
       timeStyle: 'medium', hour12: false,
     });
   });
+  document.querySelectorAll('#activity-log [data-activity-identifier-label]').forEach(element => {
+    element.firstChild.nodeValue = `${uiText(element.dataset.activityIdentifierLabel)} `;
+  });
 }
 
 // `identifiersHtml` is optional: `addActivityMessage`'s own synthetic UI messages ("Submitting…",
@@ -13392,7 +13442,7 @@ function appendActivity(title, detail, css, occurredAt, identifiersHtml = '') {
   if (identifiersHtml) {
     const identifiersRow = document.createElement('div');
     identifiersRow.className = 'activity-ids';
-    // Produced only by activityIdentifiersHtml, which escapes every value before returning markup.
+    // Produced only by activityIdentifiersHtml, which context-escapes every catalog and event value.
     identifiersRow.innerHTML = identifiersHtml;
     content.append(identifiersRow);
   }
@@ -15019,7 +15069,7 @@ function renderRailPanels() {
       return `<button class="rail-btn rail-panel-btn" type="button"
           data-rail-panel="${escapeAttribute(entry.id)}"
           aria-expanded="${entry.closed ? 'false' : 'true'}"
-          aria-label="Show ${escapeAttribute(name)} panel" data-tooltip="Show ${escapeAttribute(name)} panel"
+          aria-label="${escapeAttribute(uiText('workspace.panel.show', { name }))}" data-tooltip="${escapeAttribute(uiText('workspace.panel.show', { name }))}"
         ><svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-p-${escapeAttribute(entry.id)}"/></svg></button>`;
     }).join('');
   }
@@ -15243,8 +15293,8 @@ function syncDocumentSwitcher() {
       </button>
       <button class="document-switcher-close" type="button"
         data-document-close="${escapeAttribute(document_.id)}"
-        aria-label="Close ${escapeAttribute(document_.displayName)}"
-        title="Close ${escapeAttribute(document_.displayName)}">×</button>
+        aria-label="${escapeAttribute(uiText('workspace.app.close', { name: document_.displayName }))}"
+        title="${escapeAttribute(uiText('workspace.app.close', { name: document_.displayName }))}">×</button>
     </li>`;
   }).join('');
 }
@@ -16242,7 +16292,7 @@ function openPanelsIndex(anchor) {
   const items = PANELS.map(descriptor => {
     const entry = panelLayout.panels.find(panel => panel.id === descriptor.id);
     const closed = Boolean(entry?.closed);
-    const where = closed ? 'closed' : zoneLabel(entry.zone);
+    const where = closed ? uiText('workspace.panel.closed') : zoneLabel(entry.zone);
     return `<button class="popover-item" type="button" data-index-panel="${escapeAttribute(descriptor.id)}"
         data-closed="${closed}"
       ><span class="popover-name">${escapeHtml(descriptor.title)}</span
@@ -16942,6 +16992,8 @@ uiLocalization.subscribe(() => {
   // Several locale refreshers rebuild catalog-derived controls. Capture the active working view
   // first so that their paint-only rebuild cannot reset history, selection, or an inspector draft.
   captureActiveDocument();
+  const validationOwnerId = document.querySelector('[data-workflow-validation="true"]')
+    ?.dataset.workflowValidationDocument;
   const selectedIds = cy && !cy.destroyed() ? cy.elements(':selected').map(element => element.id()) : [];
   const formErrors = [...document.querySelectorAll('form')].filter(form => form.getAttribute('id') && form._localizedError)
     .map(form => [form.getAttribute('id'), form._localizedError]);
@@ -16964,6 +17016,7 @@ uiLocalization.subscribe(() => {
   renderRailPanels();
   renderNodeCatalog();
   renderPersonalPalettes();
+  refreshLocalizedProgramPanels();
   const programApproveButton = document.getElementById('btn-program-approve');
   if (programApproveButton) programApproveButton.textContent = uiText('workspace.app.approve.program.batch');
   renderSelectedHumanTasks();
@@ -17006,6 +17059,16 @@ uiLocalization.subscribe(() => {
   for (const [id, message] of formErrors) {
     const form = document.getElementById(id);
     if (form) showFormError(form, message);
+  }
+  if (validationOwnerId === workspace.activeId) {
+    // Selection repaint is intentionally microtask-coalesced. Schedule the advisory after it so
+    // a locale switch cannot leave the selected element's old inspector over the validation the
+    // user was reading. Recheck ownership because a document switch in between must win.
+    queueMicrotask(() => {
+      if (validationOwnerId === workspace.activeId) {
+        renderWorkflowValidationAdvisory(graphData, workspace.active);
+      }
+    });
   }
   // Rail/catalog rebuilds can recreate statically annotated chrome. Reapply history presentation
   // last so a dirty document never inherits the shell's initial "saved" fallback.

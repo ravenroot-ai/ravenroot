@@ -23,6 +23,7 @@ import { validateEdgeConnection, validateEdgeId } from './edge-gestures.js';
 import { resolveDescriptorNodeType } from './catalog-node-icon.js';
 import { catalogPropertyHasDeclaredDefault } from './adapter-binding.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups, visualGroupsValue } from './visual-groups.js';
+import { uiText } from './ui-text.js';
 
 export function editVisualGroups(graph, groups, history = null, label = 'Edit visual groups') {
   if (!canModifyGraph(graph)) return null;
@@ -142,23 +143,23 @@ export function createNodeForInsertion(graph, position, options = {}) {
 
 /** Inserts an immutable saved template as one fresh, disconnected node and one undo step. */
 export function addTemplateNodeAt(graph, position, template, history = null) {
-  if (!canModifyGraph(graph)) return { node: null, reason: 'This graph cannot be edited' };
+  if (!canModifyGraph(graph)) return { node: null, reason: uiText('workspace.graphEditing.notEditable') };
   const saved = template?.node;
   const kind = String(saved?.kind || '').toUpperCase();
   if (!['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR'].includes(kind)) {
-    return { node: null, reason: 'The saved template has an unsupported node kind' };
+    return { node: null, reason: uiText('workspace.graphEditing.unsupportedTemplateKind') };
   }
   if (['START', 'END', 'ERROR'].includes(kind) && graph.nodes.some(node => node.kind === kind)) {
-    return { node: null, reason: `This workflow already has a ${kind} terminal` };
+    return { node: null, reason: uiText('workspace.graphEditing.terminalExists', { kind }) };
   }
   for (const property of saved.workspaceReferences || []) {
     const referenced = String(saved.properties?.[property] || '').trim();
     const destination = referenced ? graph.nodeMap?.[referenced] : null;
     if (referenced && !destination) {
-      return { node: null, reason: `Saved reference ${property} names a node outside this workflow` };
+      return { node: null, reason: uiText('workspace.graphEditing.referenceOutside', { property }) };
     }
     if (destination && (destination.kind !== 'BEHAVIOR' || destination.behavior !== 'workspace')) {
-      return { node: null, reason: `Saved reference ${property} must name a Workspace node in this workflow` };
+      return { node: null, reason: uiText('workspace.graphEditing.referenceWorkspace', { property }) };
     }
   }
   const prefix = String(saved.behavior || kind.toLowerCase()).replace(/[^a-zA-Z0-9_-]/g, '-') || 'node';
@@ -185,7 +186,7 @@ export function addTemplateNodeAt(graph, position, template, history = null) {
 // then one history entry: an invalid source cannot strand a node, while undo/redo always moves the
 // valid pair together.
 export function addConnectedNodeAt(graph, position, source, history = null, options = {}) {
-  if (!canModifyGraph(graph)) return { node: null, edge: null, reason: 'This graph cannot be edited' };
+  if (!canModifyGraph(graph)) return { node: null, edge: null, reason: uiText('workspace.graphEditing.notEditable') };
   const node = createNodeForInsertion(graph, position, options);
   const proposal = {
     ...graph,

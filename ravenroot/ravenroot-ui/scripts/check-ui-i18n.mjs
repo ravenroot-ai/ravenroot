@@ -95,13 +95,55 @@ function createBindingResolver(ast) {
     ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'Program'].includes(item.type));
   const identifierOwners = new Map();
   walk.ancestor(ast, { Identifier(node, ancestors) { identifierOwners.set(node, ownerOf(ancestors)); } });
+  const collectPattern = (pattern, value, scope, start, origin, owner) => {
+    if (!pattern || !value) return;
+    if (pattern.type === 'Identifier') {
+      declarations.push({ name: pattern.name, value, scope, start, origin, owner });
+      return;
+    }
+    if (pattern.type === 'AssignmentPattern') {
+      collectPattern(pattern.left, value, scope, start, origin, owner);
+      return;
+    }
+    if (pattern.type === 'ArrayPattern') {
+      pattern.elements.forEach((entry, index) => {
+        if (!entry) return;
+        const values = value.type === 'ArrayExpression'
+          ? value.elements.flatMap(item => item?.type === 'ArrayExpression' && item.elements[index]
+            ? [item.elements[index]] : [])
+          : [];
+        if (values.length) collectPattern(entry,
+          values.length === 1 ? values[0] : { type: 'ArrayExpression', elements: values },
+          scope, start, origin, owner);
+      });
+      return;
+    }
+    if (pattern.type === 'ObjectPattern') {
+      pattern.properties.forEach(entry => {
+        const key = entry.key?.name ?? entry.key?.value;
+        const objects = value.type === 'ObjectExpression' ? [value]
+          : value.type === 'ArrayExpression' ? value.elements.filter(item => item?.type === 'ObjectExpression') : [];
+        const values = objects.flatMap(object => object.properties
+          .filter(item => (item.key?.name ?? item.key?.value) === key).map(item => item.value));
+        if (values.length) collectPattern(entry.value,
+          values.length === 1 ? values[0] : { type: 'ArrayExpression', elements: values },
+          scope, start, origin, owner);
+      });
+    }
+  };
   walk.ancestor(ast, {
     VariableDeclarator(node, ancestors) {
-      if (node.id.type !== 'Identifier' || !node.init) return;
+      if (!node.init) return;
       const scope = [...ancestors].reverse().find(ancestor => ancestor !== node
         && ['BlockStatement', 'Program', 'FunctionDeclaration', 'FunctionExpression',
           'ArrowFunctionExpression'].includes(ancestor.type)) || ast;
-      declarations.push({ name: node.id.name, value: node.init, scope, start: node.start, origin: node, owner: ownerOf(ancestors) });
+      collectPattern(node.id, node.init, scope, node.start, node, ownerOf(ancestors));
+    },
+    ForOfStatement(node, ancestors) {
+      if (node.left.type !== 'VariableDeclaration') return;
+      const declaration = node.left.declarations[0];
+      const scope = node.body.type === 'BlockStatement' ? node.body : node;
+      collectPattern(declaration.id, node.right, scope, node.start, declaration, ownerOf(ancestors));
     },
   });
   walk.ancestor(ast, { AssignmentExpression(node, ancestors) {
@@ -286,6 +328,38 @@ function presentationFlow(ast, isExempt = () => false) {
     } });
     return result;
   };
+  const mapCallbackValues = (mapped, parameter, collection) => {
+    const source = collection?.type === 'Identifier' ? bindingValue(bindings, collection) : collection;
+    if (parameter?.type === 'Identifier') {
+      mapped.set(parameter.name, source || collection);
+      return;
+    }
+    if (parameter?.type !== 'ObjectPattern' || source?.type !== 'ArrayExpression') return;
+    for (const entry of parameter.properties) {
+      const key = entry.key?.name ?? entry.key?.value;
+      const values = source.elements.flatMap(item => item?.type === 'ObjectExpression'
+        ? item.properties.filter(property => (property.key?.name ?? property.key?.value) === key)
+          .map(property => property.value)
+        : []);
+      const target = entry.value?.type === 'AssignmentPattern' ? entry.value.left : entry.value;
+      if (target?.type === 'Identifier' && values.length) {
+        mapped.set(target.name, values.length === 1 ? values[0] : { type: 'ArrayExpression', elements: values });
+      }
+    }
+  };
+  const pushedValues = (identifier, owner) => {
+    const body = owner?.type === 'Program' ? owner : owner?.body;
+    if (!body) return [];
+    const values = [];
+    walk.ancestor(body, { CallExpression(call, ancestors) {
+      if (ancestors.slice(0, -1).some(item => functionTypes.has(item.type) && item !== owner)) return;
+      if (call.callee.type === 'MemberExpression' && call.callee.object.type === 'Identifier'
+          && call.callee.object.name === identifier.name && call.callee.property.name === 'push') {
+        values.push(...call.arguments);
+      }
+    } });
+    return values;
+  };
   // Propagate locally thrown errors through calls/callbacks to catch bindings. Keep
   // developer diagnostics separate from productError's structured presentation key.
   const exceptionBlocks = new Map();
@@ -348,6 +422,7 @@ function presentationFlow(ast, isExempt = () => false) {
       });
       const value = bindingValue(bindings, node);
       if (value) recur(value);
+      pushedValues(node, owner).forEach(recur);
     } else if (node.type === 'Literal') {
       if (typeof node.value === 'string' && hasWords(node.value)) onLiteral(node);
     } else if (node.type === 'TemplateLiteral') {
@@ -390,6 +465,20 @@ function presentationFlow(ast, isExempt = () => false) {
       if (name === 'productError') { recur(node.arguments[localizedError ? 2 : 1]); return; }
       if (['escapeHtml', 'escapeAttribute', 'String'].includes(name)) return recur(node.arguments[0]);
       if (node.callee.type === 'MemberExpression' && ['join', 'trim', 'toString'].includes(name)) return recur(node.callee.object);
+      if (node.callee.type === 'MemberExpression' && ['map', 'flatMap'].includes(name)) {
+        const callback = resolveFunction(node.arguments[0]);
+        if (!callback) return recur(node.arguments[0]);
+        const mapped = new Map(substitutions);
+        const first = callback.params[0]?.type === 'AssignmentPattern'
+          ? callback.params[0].left : callback.params[0];
+        // When the callback presents the entire collection element (rather than selecting an
+        // object member), the producing call itself is a presentation flow. This catches the common
+        // validator shape that returns an array populated through `push()`.
+        if (first?.type === 'Identifier') recur(node.callee.object);
+        mapCallbackValues(mapped, first, node.callee.object);
+        return returns(callback).forEach(value => trace(value, callback, onLiteral,
+          new Set(next).add(callback), mapped, localizedError));
+      }
       if (node.callee.type === 'Identifier' && owner?.params.some(param => param.name === node.callee.name)) recur(node.callee);
       const fn = resolveFunction(node.callee);
       if (fn && !next.has(fn)) {
@@ -398,7 +487,7 @@ function presentationFlow(ast, isExempt = () => false) {
           const param = parameter.type === 'AssignmentPattern' ? parameter.left : parameter;
           if (param.type === 'Identifier' && node.arguments[index]) mapped.set(param.name, node.arguments[index]);
         });
-        for (const value of returns(fn)) trace(value, owner, onLiteral, new Set(next).add(fn), mapped, localizedError);
+        for (const value of returns(fn)) trace(value, fn, onLiteral, new Set(next).add(fn), mapped, localizedError);
       }
     }
   }
@@ -411,12 +500,26 @@ function presentationFlow(ast, isExempt = () => false) {
       if (substitutions.has(node.name)) return recur(substitutions.get(node.name));
       const value = bindingValue(bindings, node);
       if (value) recur(value); else trace(node, owner, onLiteral);
+      pushedValues(node, owner).forEach(recur);
     } else if (node.type === 'ConditionalExpression') { recur(node.consequent); recur(node.alternate); }
     else if (node.type === 'LogicalExpression' || node.type === 'BinaryExpression') { recur(node.left); recur(node.right); }
     else if (node.type === 'Literal' || node.type === 'TemplateLiteral') {
       const expressions = node.expressions || [];
       const html = node.type === 'Literal' ? String(node.value || '') : node.quasis
         .map((item, index) => item.value.cooked + (index < expressions.length ? `__EXPR_${index}__` : '')).join('');
+      // A helper may return one syntactic attribute fragment which is interpolated into a larger
+      // start tag. parse5 necessarily reads that isolated fragment as a text node; it is still HTML
+      // structure, not copy. Keep the allow-list to attributes whose values are machine data so a
+      // product sentence cannot disappear merely because it begins with whitespace.
+      if (/^\s+(?:(?:disabled|required|selected|checked|readonly|multiple)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?|(?:value|min|max|step|data-[\w-]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))\s*$/u.test(html)) {
+        expressions.forEach(recur);
+        return;
+      }
+      const structural = html.replaceAll(/__EXPR_\d+__/gu, '');
+      if (/^\s*(?:value|min|max|step|data-[\w-]+)\s*=\s*(?:""|'')\s*>?\s*$/u.test(structural)) {
+        expressions.forEach(recur);
+        return;
+      }
       const inspectText = text => {
         if (hasWords(text.replaceAll(/__EXPR_\d+__/gu, ''))) onLiteral(node);
         for (const match of text.matchAll(/__EXPR_(\d+)__/gu)) recur(expressions[Number(match[1])]);
@@ -430,6 +533,23 @@ function presentationFlow(ast, isExempt = () => false) {
     } else if (node.type === 'CallExpression') {
       const name = nameOf(node.callee);
       if (['escapeHtml', 'escapeAttribute'].includes(name)) trace(node.arguments[0], owner, onLiteral);
+      else if (node.callee.type === 'MemberExpression' && ['join', 'trim', 'toString'].includes(name)) {
+        recur(node.callee.object);
+      } else if (node.callee.type === 'MemberExpression' && ['map', 'flatMap'].includes(name)) {
+        const callback = resolveFunction(node.arguments[0]);
+        if (!callback) recur(node.arguments[0]);
+        else {
+          const mapped = new Map(substitutions);
+          const first = callback.params[0]?.type === 'AssignmentPattern'
+            ? callback.params[0].left : callback.params[0];
+          if (first?.type === 'Identifier') {
+            trace(node.callee.object, owner, onLiteral, new Set(next), substitutions);
+          }
+          mapCallbackValues(mapped, first, node.callee.object);
+          returns(callback).forEach(value => traceHtml(value, callback, onLiteral,
+            new Set(next).add(callback), mapped));
+        }
+      }
       else if (name !== 'htmlText') {
         const fn = resolveFunction(node.callee);
         if (fn && !next.has(fn)) {
@@ -547,6 +667,219 @@ export function findPresentationSinkViolations(source, { sourceType = 'module' }
     },
   });
   return [...new Set(violations)].sort((left, right) => left - right);
+}
+
+// Follow exported return values into presentation sinks in importing modules. The ordinary flow
+// analysis above is deliberately lexical; this second pass supplies the missing module boundary
+// without recognizing validator names or maintaining a list of known English messages.
+export function findCrossModulePresentationSinkViolations(sources) {
+  const modules = new Map(Object.entries(sources).map(([file, source]) => {
+    const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
+    return [file, { file, source, ast, bindings: createBindingResolver(ast) }];
+  }));
+  const functionTypes = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+  const functions = module => {
+    const result = new Map();
+    walk.simple(module.ast, {
+      FunctionDeclaration(node) { if (node.id?.name) result.set(node.id.name, node); },
+      VariableDeclarator(node) {
+        if (node.id.type === 'Identifier' && functionTypes.has(node.init?.type)) result.set(node.id.name, node.init);
+      },
+    });
+    return result;
+  };
+  const functionsByModule = new Map([...modules].map(([file, module]) => [file, functions(module)]));
+  const exported = new Map();
+  for (const [file, module] of modules) {
+    walk.simple(module.ast, {
+      ExportNamedDeclaration(node) {
+        if (node.declaration?.type === 'FunctionDeclaration') {
+          exported.set(`${file}:${node.declaration.id.name}`, node.declaration);
+        }
+        if (node.declaration?.type === 'VariableDeclaration') {
+          node.declaration.declarations.forEach(item => {
+            if (item.id.type === 'Identifier' && functionTypes.has(item.init?.type)) {
+              exported.set(`${file}:${item.id.name}`, item.init);
+            }
+          });
+        }
+        node.specifiers.forEach(specifier => {
+          const local = specifier.local?.name;
+          const name = specifier.exported?.name;
+          const fn = functionsByModule.get(file)?.get(local);
+          if (name && fn) exported.set(`${file}:${name}`, fn);
+        });
+      },
+    });
+  }
+  const resolveModule = (from, specifier) => {
+    if (!specifier.startsWith('.')) return null;
+    let candidate = path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
+    if (!path.posix.extname(candidate)) candidate += '.js';
+    return modules.has(candidate) ? candidate : null;
+  };
+  const importsByModule = new Map();
+  for (const [file, module] of modules) {
+    const imports = new Map();
+    walk.simple(module.ast, { ImportDeclaration(node) {
+      const target = resolveModule(file, node.source.value);
+      if (!target) return;
+      node.specifiers.forEach(specifier => {
+        if (specifier.type === 'ImportSpecifier') {
+          imports.set(specifier.local.name, { file: target, name: specifier.imported.name });
+        }
+      });
+    } });
+    importsByModule.set(file, imports);
+  }
+  const summaries = new Map();
+  const summarize = (file, name, visiting = new Set()) => {
+    const id = `${file}:${name}`;
+    if (summaries.has(id)) return summaries.get(id);
+    if (visiting.has(id)) return [];
+    const fn = exported.get(id);
+    const module = modules.get(file);
+    if (!fn || !module) return [];
+    const literals = new Map();
+    const sourceLines = module.source.split('\n');
+    const recordLiteral = node => {
+      const line = node.loc.start.line;
+      const exempt = [sourceLines[line - 1], sourceLines[line - 2]].some(value =>
+        /i18n-audit-exempt: (?:authored-content|protocol-token|diagnostic-content) - .{15,}/u.test(value || ''));
+      if (!exempt) literals.set(node.start, node);
+    };
+    const next = new Set(visiting).add(id);
+    const localFunctions = functionsByModule.get(file);
+    const returns = [];
+    if (fn.body.type !== 'BlockStatement') returns.push(fn.body);
+    else walk.ancestor(fn.body, { ReturnStatement(node, ancestors) {
+      if (!ancestors.slice(0, -1).some(item => functionTypes.has(item.type))) returns.push(node.argument);
+    } });
+    const collect = (node, substitutions = new Map(), seen = new Set()) => {
+      if (!node || seen.has(node)) return;
+      const walked = new Set(seen).add(node);
+      if (localizationCall(node)) return;
+      if (node.type === 'Literal') {
+        if (typeof node.value === 'string' && hasWords(node.value)) recordLiteral(node);
+      } else if (node.type === 'TemplateLiteral') {
+        node.quasis.filter(item => hasWords(item.value.cooked)).forEach(recordLiteral);
+      } else if (node.type === 'Identifier') {
+        if (substitutions.has(node.name)) collect(substitutions.get(node.name), substitutions, walked);
+        else {
+          const value = bindingValue(module.bindings, node);
+          if (value) collect(value, substitutions, walked);
+          if (fn.body.type === 'BlockStatement') walk.ancestor(fn.body, { CallExpression(call, ancestors) {
+            if (ancestors.slice(0, -1).some(item => functionTypes.has(item.type))) return;
+            if (call.callee.type === 'MemberExpression' && call.callee.object.type === 'Identifier'
+                && call.callee.object.name === node.name && call.callee.property.name === 'push') {
+              call.arguments.forEach(argument => collect(argument, substitutions, walked));
+            }
+          } });
+        }
+      } else if (node.type === 'ArrayExpression') node.elements.forEach(item => collect(item, substitutions, walked));
+      else if (node.type === 'ObjectExpression') node.properties
+        .filter(item => ['label', 'shortLabel', 'caption', 'help', 'title', 'message', 'emptyText',
+          'placeholder', 'ariaLabel', 'ariaDescription', 'error', 'warning', 'description', 'detail',
+          'displayName', 'category', 'reason'].includes(item.key?.name ?? item.key?.value))
+        .forEach(item => collect(item.value, substitutions, walked));
+      else if (node.type === 'ConditionalExpression') {
+        collect(node.consequent, substitutions, walked); collect(node.alternate, substitutions, walked);
+      } else if (node.type === 'LogicalExpression' || node.type === 'BinaryExpression') {
+        collect(node.left, substitutions, walked); collect(node.right, substitutions, walked);
+      } else if (node.type === 'CallExpression') {
+        const calleeName = node.callee.type === 'Identifier' ? node.callee.name : null;
+        const local = calleeName && localFunctions.get(calleeName);
+        if (local) {
+          const mapped = new Map(substitutions);
+          local.params.forEach((parameter, index) => {
+            const target = parameter.type === 'AssignmentPattern' ? parameter.left : parameter;
+            if (target.type === 'Identifier' && node.arguments[index]) mapped.set(target.name, node.arguments[index]);
+          });
+          const localReturns = [];
+          if (local.body.type !== 'BlockStatement') localReturns.push(local.body);
+          else walk.ancestor(local.body, { ReturnStatement(statement, ancestors) {
+            if (!ancestors.slice(0, -1).some(item => functionTypes.has(item.type))) localReturns.push(statement.argument);
+          } });
+          localReturns.forEach(value => collect(value, mapped, walked));
+        }
+      }
+    };
+    returns.forEach(value => collect(value));
+    const result = [...literals.values()].map(node => ({ file, line: node.loc.start.line }));
+    summaries.set(id, result);
+    return result;
+  };
+  const findings = new Set();
+  if (modules.size === 1) {
+    for (const [file, module] of modules) {
+      findPresentationSinkViolations(module.source).forEach(line => findings.add(`${file}:${line}`));
+    }
+  }
+  for (const [file, module] of modules) {
+    const imports = importsByModule.get(file);
+    if (!imports.size) continue;
+    const bindings = module.bindings;
+    const importedSummaries = (node, seen = new Set(), presentationBoundary = false) => {
+      if (!node || seen.has(node)) return [];
+      const next = new Set(seen).add(node);
+      if (node.type === 'Identifier') {
+        const imported = imports.get(node.name);
+        if (imported) return presentationBoundary ? summarize(imported.file, imported.name) : [];
+        const value = bindingValue(bindings, node);
+        return value ? importedSummaries(value, next, presentationBoundary) : [];
+      }
+      if (node.type === 'CallExpression') {
+        const direct = node.callee.type === 'Identifier' ? imports.get(node.callee.name) : null;
+        if (direct) return presentationBoundary ? summarize(direct.file, direct.name) : [];
+        if (localizationCall(node)) {
+          return node.arguments.slice(1).flatMap(item => importedSummaries(item, next, true));
+        }
+        const name = node.callee.type === 'MemberExpression'
+          ? (node.callee.computed ? node.callee.property.value : node.callee.property.name) : node.callee.name;
+        if (node.callee.type === 'MemberExpression' && ['map', 'flatMap', 'join', 'trim', 'toString'].includes(name)) {
+          return importedSummaries(node.callee.object, next,
+            presentationBoundary || ['map', 'flatMap'].includes(name));
+        }
+        if (node.callee.type === 'Identifier' && ['escapeHtml', 'escapeAttribute', 'String'].includes(name)) {
+          return node.arguments.flatMap(item => importedSummaries(item, next, presentationBoundary));
+        }
+        return [];
+      }
+      if (node.type === 'MemberExpression') return importedSummaries(node.object, next,
+        presentationBoundary || (node.computed ? node.property.value : node.property.name) === 'reason');
+      if (node.type === 'TemplateLiteral') return node.expressions.flatMap(item => importedSummaries(item, next, presentationBoundary));
+      if (node.type === 'ArrayExpression') return node.elements.flatMap(item => importedSummaries(item, next, presentationBoundary));
+      if (node.type === 'ObjectExpression') return node.properties.flatMap(item => importedSummaries(item.value, next, presentationBoundary));
+      if (node.type === 'ConditionalExpression') return [
+        ...importedSummaries(node.consequent, next, presentationBoundary),
+        ...importedSummaries(node.alternate, next, presentationBoundary)];
+      if (node.type === 'LogicalExpression' || node.type === 'BinaryExpression') return [
+        ...importedSummaries(node.left, next, presentationBoundary),
+        ...importedSummaries(node.right, next, presentationBoundary)];
+      return [];
+    };
+    const record = expression => importedSummaries(expression, new Set(), true)
+      .forEach(item => findings.add(`${item.file}:${item.line}`));
+    walk.simple(module.ast, {
+      AssignmentExpression(node) {
+        if (node.left.type !== 'MemberExpression') return;
+        const property = node.left.computed ? node.left.property.value : node.left.property.name;
+        if (['textContent', 'innerText', 'innerHTML', 'title', 'placeholder', 'ariaLabel', 'ariaDescription',
+          'ariaValueText', 'outerHTML'].includes(property)) record(node.right);
+      },
+      CallExpression(node) {
+        const name = node.callee.type === 'MemberExpression'
+          ? (node.callee.computed ? node.callee.property.value : node.callee.property.name) : node.callee.name;
+        if (['alert', 'confirm', 'prompt', 'announce', 'announceGraph', 'showToast', 'showInspectorMessage',
+          'addActivityMessage'].includes(name)) node.arguments.slice(0, 2).forEach(record);
+        if (['setAttribute', 'attr'].includes(name)
+            && /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u.test(node.arguments[0]?.value || '')) {
+          record(node.arguments[1]);
+        }
+      },
+    });
+  }
+  return [...findings].sort();
 }
 
 function auditJavascript() {
@@ -742,6 +1075,17 @@ function auditJavascript() {
         inspectRecord(node.argument);
       },
     });
+  }
+  const moduleSources = Object.fromEntries(sources.filter(entry => entry.sourceType === 'module')
+    .map(entry => [entry.file, fs.readFileSync(path.join(root, entry.file), 'utf8')]));
+  for (const finding of findCrossModulePresentationSinkViolations(moduleSources)) {
+    const separator = finding.lastIndexOf(':');
+    const file = finding.slice(0, separator);
+    const line = Number(finding.slice(separator + 1));
+    const lines = moduleSources[file]?.split('\n') || [];
+    const exempt = [lines[line - 1], lines[line - 2]].some(value =>
+      /i18n-audit-exempt: (?:authored-content|protocol-token|diagnostic-content) - .{15,}/u.test(value || ''));
+    if (!exempt) fail(file, line, 'cross-module product text reaches a presentation sink');
   }
 }
 

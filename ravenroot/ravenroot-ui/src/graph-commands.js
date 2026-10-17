@@ -521,8 +521,9 @@ export function createCommandHistory(options = {}) {
 // ═══════════════════════════════════════════════════════════════
 
 export function discardChangesMessage(documentName) {
-  return `${documentName || 'This workflow'} has unsaved changes.\n\n`
-    + 'OK discards them. Cancel keeps the current workflow so you can save it as GraphML first.';
+  return uiText('workspace.document.discardChanges', {
+    name: documentName || uiText('workspace.document.thisWorkflow'),
+  });
 }
 
 // Browsers ignore any custom text on beforeunload and only honour the fact that a handler asked to

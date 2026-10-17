@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { findPresentationSinkViolations } from '../scripts/check-ui-i18n.mjs';
+import {
+  findCrossModulePresentationSinkViolations,
+  findPresentationSinkViolations,
+} from '../scripts/check-ui-i18n.mjs';
 
 describe('UI localization source audit fixtures', () => {
   it('finds inline text hidden in a template conditional', () => {
@@ -113,6 +116,78 @@ describe('UI localization source audit fixtures', () => {
       function markup() { return '<b>' + escapeHtml(uiText('fixture.message')) + '</b>'; }
       node.innerHTML = markup();
     `)).toEqual([]);
+  });
+
+  it('finds a destructured literal iterable value that reaches a presentation sink', () => {
+    expect(findPresentationSinkViolations(`
+      for (const [label, action] of [['Save selected node', 'save'], ['Rename', 'rename']]) {
+        button.textContent = label;
+        button.dataset.action = action;
+      }
+    `)).toEqual([2]);
+  });
+
+  it('finds an object-destructured iterable value while preserving its machine field', () => {
+    expect(findPresentationSinkViolations(`
+      for (const { copy, id } of [{ copy: 'Change setting', id: 'machine-id' }]) {
+        button.textContent = copy;
+        button.dataset.id = id;
+      }
+    `)).toEqual([2]);
+  });
+
+  it('finds presentation text returned by map callbacks before join reaches HTML', () => {
+    expect(findPresentationSinkViolations(`
+      host.innerHTML = documents.map(document_ =>
+        \`<button aria-label="Close \${escapeAttribute(document_.name)}">×</button>\`).join('');
+    `)).toEqual([3]);
+  });
+
+  it('finds presentation text returned through an opaque HTML helper', () => {
+    expect(findPresentationSinkViolations(`
+      function choice() { return '<option>Not declared</option>'; }
+      host.insertAdjacentHTML('beforeend', choice());
+    `)).toEqual([2]);
+  });
+
+  it('finds returned reason records consumed as presentation', () => {
+    expect(findPresentationSinkViolations(`
+      function validate() { return { ok: false, reason: 'Choose a source node' }; }
+      feedback.textContent = validate().reason;
+    `)).toEqual([2]);
+  });
+
+  it('finds copy pushed into a same-module returned validation array', () => {
+    const source = `function validate(graph) { const errors=[]; if (!graph.nodes.length) errors.push('A start is required'); return errors; } root.innerHTML = validate(graph).map(message=>\`<li>\${escapeHtml(message)}</li>\`).join('');`;
+    expect(findPresentationSinkViolations(source)).toEqual([1]);
+    expect(findCrossModulePresentationSinkViolations({ 'src/probe.js': source }))
+      .toEqual(['src/probe.js:1']);
+  });
+
+  it('finds presentation arrays returned across a real module import boundary', () => {
+    expect(findCrossModulePresentationSinkViolations({
+      'producer.js': `
+        export function validate() {
+          const violations = [];
+          violations.push('Every node needs an ID');
+          return violations;
+        }
+      `,
+      'consumer.js': `
+        import { validate } from './producer.js';
+        target.innerHTML = validate().map(item => \`<li>\${escapeHtml(item)}</li>\`).join('');
+      `,
+    })).toEqual(['producer.js:4']);
+  });
+
+  it.each([
+    `target.textContent = validate();`,
+    `target.textContent = uiText('fixture.error', { reason: validate() });`,
+  ])('finds a directly presented imported string return: %s', consumer => {
+    expect(findCrossModulePresentationSinkViolations({
+      'producer.js': `export function validate() { return 'A valid edge is required'; }`,
+      'consumer.js': `import { validate } from './producer.js'; ${consumer}`,
+    })).toEqual(['producer.js:1']);
   });
 
 });

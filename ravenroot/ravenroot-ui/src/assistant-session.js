@@ -40,10 +40,11 @@ export const READY = 'ready';
 export const DEGRADED = 'degraded';
 export const ERROR = 'error';
 
-export const SERVICE_UNAVAILABLE = 'service-unavailable';
-export const NO_PROFILE = 'no-profile';
-export const INSECURE_REFUSED = 'insecure-refused';
-export const HOST_NOT_ALLOWLISTED = 'host-not-allowlisted';
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
+export const SERVICE_UNAVAILABLE = 'service-unavailable'; export const NO_PROFILE = 'no-profile';
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
+export const INSECURE_REFUSED = 'insecure-refused'; export const HOST_NOT_ALLOWLISTED = 'host-not-allowlisted';
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
 export const NOT_SIGNED_IN = 'not-signed-in';
 
 // ── THE FIFTH REASON, AND WHY IT IS NOT THE FOURTH WEARING A NEW NAME ─────────────────────
@@ -59,6 +60,7 @@ export const NOT_SIGNED_IN = 'not-signed-in';
 // missing. Before the server projected both onto the same wire state, so an author in this
 // state read "Sign in to Ravenroot and try again" while already signed in to Ravenroot — a sentence
 // that is not merely unhelpful but false, and one that names a remedy that changes nothing.
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
 export const NOT_LINKED = 'not-linked';
 
 // Most fundamental first. See the header — this order is a contract.

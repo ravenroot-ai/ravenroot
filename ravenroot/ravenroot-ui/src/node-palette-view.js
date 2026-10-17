@@ -69,7 +69,12 @@ export function renderNodePalettes(container, state, callbacks) {
 
     const actions = document.createElement('div');
     actions.className = 'palette-actions';
-    for (const [label, action] of [['Save selected node', 'save'], ['Rename', 'rename'], ['Delete', 'delete']]) {
+    for (const [labelKey, action] of [
+      ['workspace.node.palette.action.saveSelected', 'save'],
+      ['workspace.node.palette.view.rename', 'rename'],
+      ['workspace.node.palette.view.delete', 'delete'],
+    ]) {
+      const label = uiText(labelKey);
       const button = document.createElement('button');
       button.type = 'button'; button.textContent = label;
       button.dataset.tooltip = uiText("workspace.node.palette.view.in", { label, palette: palette.name });

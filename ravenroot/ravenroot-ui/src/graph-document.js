@@ -1,5 +1,5 @@
 import { productError } from './product-error.js';
-import { assertStableEdgeId, stableEdgeIdViolation } from './stable-edge-id.js';
+import { assertStableEdgeId, stableEdgeIdFinding } from './stable-edge-id.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups } from './visual-groups.js';
 import { uiText } from './ui-text.js';
 
@@ -696,19 +696,20 @@ export function planJoinSemanticsMigration(graph) {
   return { alreadyDeclared: false, changes };
 }
 
-export function validateWorkflow(graph) {
+export function validateWorkflowFindings(graph) {
   const violations = [];
+  const finding = (key, params = {}) => ({ key, params });
   if (!graph || graph.format === 'graphify') {
-    return ['Graphify JSON is a knowledge graph view, not an executable Ravenroot workflow'];
+    return [finding('workspace.workflow.validation.graphify')];
   }
   const ids = new Set();
   for (const node of graph.nodes || []) {
-    if (!node.id || !String(node.id).trim()) violations.push('Every node needs an ID');
-    if (ids.has(node.id)) violations.push(`Duplicate node ID: ${node.id}`);
+    if (!node.id || !String(node.id).trim()) violations.push(finding('workspace.workflow.validation.nodeIdRequired'));
+    if (ids.has(node.id)) violations.push(finding('workspace.workflow.validation.duplicateNodeId', { id: node.id }));
     ids.add(node.id);
-    if (!NODE_KINDS.includes(node.kind)) violations.push(`Node ${node.id} has an invalid kind`);
+    if (!NODE_KINDS.includes(node.kind)) violations.push(finding('workspace.workflow.validation.invalidNodeKind', { id: node.id }));
     if (node.kind === 'BEHAVIOR' && !String(node.behavior || '').trim()) {
-      violations.push(`Behavior node ${node.id} needs a behavior name`);
+      violations.push(finding('workspace.workflow.validation.behaviorRequired', { id: node.id }));
     }
   }
   const starts = (graph.nodes || []).filter(node => node.kind === 'START');
@@ -718,24 +719,22 @@ export function validateWorkflow(graph) {
   // node kind remains available, and the default document from "New" still includes the recommended
   // error terminal.
   const errors = (graph.nodes || []).filter(node => node.kind === 'ERROR');
-  if (starts.length !== 1) violations.push('The graph must contain exactly one START node');
-  if (ends.length !== 1) violations.push('The graph must contain exactly one END node');
+  if (starts.length !== 1) violations.push(finding('workspace.workflow.validation.oneStart'));
+  if (ends.length !== 1) violations.push(finding('workspace.workflow.validation.oneEnd'));
   // The comparison is a CEILING, not an equality, and the shape of it is load-bearing:
   // MinimalStructureParityTest reads the operator as written and refuses to absorb a change of form,
   // so `>` here and MIN_ERROR_NODES=0 in GraphDefinition are two halves of one statement. A second
   // ERROR node is still refused, on both sides, for the payload-writer reason recorded on the
   // constant above. Removing the minimum does not change the maximum.
   if (errors.length > MAX_ERROR_NODE_COUNT) {
-    violations.push(MAX_ERROR_NODE_COUNT === 1
-      ? 'The graph must contain at most one ERROR node'
-      : `The graph must contain at most ${MAX_ERROR_NODE_COUNT} ERROR nodes`);
+    violations.push(finding('workspace.workflow.validation.maximumErrors', { count: MAX_ERROR_NODE_COUNT }));
   }
   for (const edge of graph.edges || []) {
-    const edgeIdViolation = stableEdgeIdViolation(edge.id);
-    if (edgeIdViolation) violations.push(`Edge id ${edgeIdViolation}`);
-    if (!ids.has(edge.source)) violations.push(`Edge ${edge.id} has an unknown source`);
-    if (!ids.has(edge.target)) violations.push(`Edge ${edge.id} has an unknown target`);
-    if (!String(edge.outcome || '').trim()) violations.push(`Edge ${edge.id} needs an outcome`);
+    const edgeIdFinding = stableEdgeIdFinding(edge.id);
+    if (edgeIdFinding) violations.push(finding('workspace.workflow.validation.edgeId', { edgeIdFinding }));
+    if (!ids.has(edge.source)) violations.push(finding('workspace.workflow.validation.unknownSource', { id: edge.id }));
+    if (!ids.has(edge.target)) violations.push(finding('workspace.workflow.validation.unknownTarget', { id: edge.id }));
+    if (!String(edge.outcome || '').trim()) violations.push(finding('workspace.workflow.validation.outcomeRequired', { id: edge.id }));
     // Mirrors GraphDefinition.validate(): an edge is a failure route OR an outcome edge,
     // never both, and the only signal that tells the two apart is the outcome still being the
     // default. The edge inspector is built so that it cannot produce this combination -- it parks
@@ -745,12 +744,54 @@ export function validateWorkflow(graph) {
     // instead of in the editor, which is the error relocation exists to close.
     if (edgeDeclaresFailureRoute(edge)
         && String(edge.outcome || DEFAULT_EDGE_OUTCOME).trim() !== DEFAULT_EDGE_OUTCOME) {
-      violations.push(`Edge ${edge.id} declares ${FAILURE_ROUTE_PROPERTY}=${FAILURE_ROUTE_TRUE}`
-        + ` together with the explicit outcome '${edge.outcome}';`
-        + ' an edge is a failure route or an outcome edge, never both');
+      violations.push(finding('workspace.workflow.validation.failureRouteOutcome', {
+        id: edge.id, property: FAILURE_ROUTE_PROPERTY, value: FAILURE_ROUTE_TRUE, outcome: edge.outcome,
+      }));
     }
   }
   return violations;
+}
+
+export function workflowFindingText(finding, text = uiText) {
+  const params = { ...(finding?.params || {}) };
+  if (params.edgeIdFinding) {
+    const edgeFinding = params.edgeIdFinding;
+    params.reason = text(`workspace.edge.validation.stableId.${edgeFinding.kind}`, edgeFinding.params);
+    delete params.edgeIdFinding;
+  }
+  return text(finding.key, params);
+}
+
+export function validateWorkflow(graph) {
+  return validateWorkflowFindings(graph).map(finding => {
+    if (finding.params?.edgeIdFinding) {
+      const edgeFinding = finding.params.edgeIdFinding;
+      const reason = edgeFinding.kind === 'nonblank' ? 'must be a nonblank string'
+        : edgeFinding.kind === 'unicode' ? 'must be well-formed Unicode'
+          : `uses ${edgeFinding.params.bytes} UTF-8 bytes; maximum is ${edgeFinding.params.maximum}`;
+      return `Edge id ${reason}`;
+    }
+    return workflowFindingText(finding, (key, params = {}) => {
+      const messages = {
+        'workspace.workflow.validation.graphify': 'Graphify JSON is a knowledge graph view, not an executable Ravenroot workflow',
+        'workspace.workflow.validation.nodeIdRequired': 'Every node needs an ID',
+        'workspace.workflow.validation.duplicateNodeId': `Duplicate node ID: ${params.id}`,
+        'workspace.workflow.validation.invalidNodeKind': `Node ${params.id} has an invalid kind`,
+        'workspace.workflow.validation.behaviorRequired': `Behavior node ${params.id} needs a behavior name`,
+        'workspace.workflow.validation.oneStart': 'The graph must contain exactly one START node',
+        'workspace.workflow.validation.oneEnd': 'The graph must contain exactly one END node',
+        'workspace.workflow.validation.maximumErrors': params.count === 1
+          ? 'The graph must contain at most one ERROR node'
+          : `The graph must contain at most ${params.count} ERROR nodes`,
+        'workspace.workflow.validation.unknownSource': `Edge ${params.id} has an unknown source`,
+        'workspace.workflow.validation.unknownTarget': `Edge ${params.id} has an unknown target`,
+        'workspace.workflow.validation.outcomeRequired': `Edge ${params.id} needs an outcome`,
+        'workspace.workflow.validation.failureRouteOutcome': `Edge ${params.id} declares ${params.property}=${params.value}`
+          + ` together with the explicit outcome '${params.outcome}'; an edge is a failure route or an outcome edge, never both`,
+      };
+      return messages[key];
+    });
+  });
 }
 
 export function serializeGraphML(graph) {

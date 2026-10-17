@@ -280,17 +280,35 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     f"normalize {history_version} to {previous}")
                 history_cursor = parent
                 history_version = previous
-            self.assertGreaterEqual(
-                len(expected_normalizations), 2,
-                "fixture must exercise real release preparation plus later integration alignment",
-            )
+            normalize_authoritative_version_history(source_fixture)
+            self.assertEqual(source_version, product_version(source_fixture))
+            if expected_normalizations:
+                self.assertEqual(
+                    list(reversed(expected_normalizations)),
+                    fixture_git(
+                    source_fixture, "log", f"-{len(expected_normalizations)}",
+                    "--format=%s").splitlines(),
+                )
+            first_alignment = str(expected_next(parse_tag(f"v{source_version}"), "minor"))
+            second_alignment = str(expected_next(parse_tag(f"v{first_alignment}"), "minor"))
+            bump_surfaces(source_fixture, source_version, first_alignment)
+            fixture_git(source_fixture, "add", ".")
+            fixture_git(
+                source_fixture, "-c", "user.name=Test", "-c",
+                "user.email=test@example.invalid", "commit", "-qm",
+                "controlled first integration alignment")
+            bump_surfaces(source_fixture, first_alignment, second_alignment)
+            fixture_git(source_fixture, "add", ".")
+            fixture_git(
+                source_fixture, "-c", "user.name=Test", "-c",
+                "user.email=test@example.invalid", "commit", "-qm",
+                "controlled second integration alignment")
             normalize_authoritative_version_history(source_fixture)
             self.assertEqual(source_version, product_version(source_fixture))
             self.assertEqual(
-                list(reversed(expected_normalizations)),
-                fixture_git(
-                    source_fixture, "log", f"-{len(expected_normalizations)}",
-                    "--format=%s").splitlines(),
+                [f"normalize {first_alignment} to {source_version}",
+                 f"normalize {second_alignment} to {first_alignment}"],
+                fixture_git(source_fixture, "log", "-2", "--format=%s").splitlines(),
             )
             self.assertEqual(
                 [],

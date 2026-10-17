@@ -134,6 +134,19 @@ class MinimalStructureParityTest {
     private static final Pattern RULE_HEAD = Pattern.compile(
             "if\\s*\\(\\s*(\\w+)\\.length\\s*(!==|===|!=|==|<=|>=|<|>)\\s*([A-Za-z_$][\\w$]*|\\d+)\\s*\\)");
 
+    /**
+     * Binds a counted collection to the terminal kind it actually selects. Presentation findings
+     * deliberately carry catalog keys now, so their bodies no longer repeat English kind names;
+     * the filter remains the structural source of truth for what {@link #RULE_HEAD} counts.
+     */
+    private static final Pattern TERMINAL_COLLECTION = Pattern.compile(
+            "(?:const|let)\\s+(\\w+)\\s*=\\s*\\([^;]+?\\)\\.filter\\(\\s*(\\w+)\\s*=>\\s*\\2\\.kind\\s*===\\s*['\"]([A-Z]+)['\"]\\s*\\)\\s*;",
+            Pattern.DOTALL);
+
+    /** A cardinality rejection must append a typed finding, independent of its key or translation. */
+    private static final Pattern FINDING_APPEND = Pattern.compile(
+            "\\bviolations\\s*\\.\\s*push\\s*\\(\\s*finding\\s*\\(");
+
     private record DeclaredRule(String collection, String operator, String operand, int count, String body) {
 
         /**
@@ -392,6 +405,36 @@ class MinimalStructureParityTest {
         assertTrue(refusal.getMessage().contains("needs a human"), refusal.getMessage());
     }
 
+    @Test
+    void refusesACollectionWhoseTerminalKindNoLongerMatches() {
+        String source = readEditorSource();
+        String mismatched = source.replace("node.kind === 'START'", "node.kind === 'END'");
+        assertTrue(!mismatched.equals(source),
+                () -> "the START collection this rewrite targets is no longer written that way in "
+                        + EDITOR_VALIDATOR + "; this test is rewriting nothing and proving nothing");
+
+        var refusal = assertThrows(IllegalStateException.class, () -> parseEditorRules(mismatched));
+        assertTrue(refusal.getMessage().contains("more than one cardinality guard for END"),
+                refusal.getMessage());
+        assertTrue(refusal.getMessage().contains("needs a human"), refusal.getMessage());
+    }
+
+    @Test
+    void refusesACardinalityGuardThatNoLongerAppendsAFinding() {
+        String source = readEditorSource();
+        String nonEnforcing = source.replace(
+                "violations.push(finding('workspace.workflow.validation.maximumErrors', { count: MAX_ERROR_NODE_COUNT }));",
+                "finding('workspace.workflow.validation.maximumErrors', { count: MAX_ERROR_NODE_COUNT });");
+        assertTrue(!nonEnforcing.equals(source),
+                () -> "the ERROR finding append this rewrite targets is no longer written that way in "
+                        + EDITOR_VALIDATOR + "; this test is rewriting nothing and proving nothing");
+
+        var refusal = assertThrows(IllegalStateException.class, () -> parseEditorRules(nonEnforcing));
+        assertTrue(refusal.getMessage().contains("does not structurally append a typed finding"),
+                refusal.getMessage());
+        assertTrue(refusal.getMessage().contains("needs a human"), refusal.getMessage());
+    }
+
     /**
      * Runs the Java validator against the range the editor declares: accepted at both ends of it,
      * refused one above the ceiling, and refused one below the floor where a below exists. Throws
@@ -469,35 +512,65 @@ class MinimalStructureParityTest {
     /**
      * Extracts one cardinality rule per terminal kind from the editor's source.
      *
-     * <p>A candidate whose body names no terminal kind is skipped — the file has other
-     * {@code .length} guards, such as the one-top-level-graph check in {@code serializeGraphML}, and
-     * they are not cardinality rules. Everything else is either resolved exactly or refused: a body
-     * naming two kinds is ambiguous, and an operand that does not resolve to an integer literal is
-     * unreadable. Both throw.</p>
+     * <p>A candidate whose collection is not structurally bound to a constrained terminal kind is
+     * skipped — the file has other {@code .length} guards, such as the one-top-level-graph check in
+     * {@code serializeGraphML}, and they are not cardinality rules. Everything else is either
+     * resolved exactly or refused: duplicate kind guards, a body that no longer appends a finding,
+     * and an operand that does not resolve to an integer literal all throw.</p>
      */
     static Map<NodeKind, DeclaredRule> parseEditorRules(String source) {
+        Map<String, NodeKind> collectionKinds = terminalCollections(source);
         var rules = new LinkedHashMap<NodeKind, DeclaredRule>();
         Matcher matcher = RULE_HEAD.matcher(source);
         while (matcher.find()) {
-            String body = bodyAfter(source, matcher.end());
-            Set<NodeKind> named = kindsNamedIn(body);
-            if (named.isEmpty()) {
+            NodeKind kind = collectionKinds.get(matcher.group(1));
+            if (kind == null) {
                 continue;
             }
-            if (named.size() > 1) {
-                throw new IllegalStateException("A cardinality rule in " + EDITOR_VALIDATOR
-                        + " names more than one terminal kind " + named + ", so which one it constrains"
-                        + " cannot be read with certainty; this needs a human rather than a guess. Rule: "
+            String body = bodyAfter(source, matcher.end());
+            if (!FINDING_APPEND.matcher(body).find()) {
+                throw new IllegalStateException("The cardinality guard for " + kind + " in "
+                        + EDITOR_VALIDATOR + " does not structurally append a typed finding to the"
+                        + " violations array. It may no longer enforce the rule, or may use a shape"
+                        + " this test cannot read; this needs a human rather than a guess. Rule: "
                         + matcher.group());
             }
-            NodeKind kind = named.iterator().next();
-            rules.putIfAbsent(kind, new DeclaredRule(matcher.group(1), matcher.group(2), matcher.group(3),
-                    resolveOperand(source, matcher.group(3)), body));
+            DeclaredRule previous = rules.putIfAbsent(kind,
+                    new DeclaredRule(matcher.group(1), matcher.group(2), matcher.group(3),
+                            resolveOperand(source, matcher.group(3)), body));
+            if (previous != null) {
+                throw new IllegalStateException("The editor declares more than one cardinality guard"
+                        + " for " + kind + " in " + EDITOR_VALIDATOR + "; this test cannot choose one"
+                        + " without weakening parity, so this needs a human.");
+            }
         }
         // Reported in a stable order so a failure message reads the same on every run.
         var ordered = new LinkedHashMap<NodeKind, DeclaredRule>();
         CARDINALITY_CONSTRAINED_KINDS.stream().filter(rules::containsKey).forEach(kind -> ordered.put(kind, rules.get(kind)));
         return ordered;
+    }
+
+    private static Map<String, NodeKind> terminalCollections(String source) {
+        var collections = new LinkedHashMap<String, NodeKind>();
+        Matcher matcher = TERMINAL_COLLECTION.matcher(source);
+        while (matcher.find()) {
+            NodeKind kind;
+            try {
+                kind = NodeKind.valueOf(matcher.group(3));
+            } catch (IllegalArgumentException unknown) {
+                continue;
+            }
+            if (!CARDINALITY_CONSTRAINED_KINDS.contains(kind)) {
+                continue;
+            }
+            NodeKind previous = collections.putIfAbsent(matcher.group(1), kind);
+            if (previous != null && previous != kind) {
+                throw new IllegalStateException("The editor collection '" + matcher.group(1)
+                        + "' selects both " + previous + " and " + kind + " in " + EDITOR_VALIDATOR
+                        + "; its cardinality cannot be read with certainty and needs a human.");
+            }
+        }
+        return collections;
     }
 
     /**
@@ -527,17 +600,6 @@ class MinimalStructureParityTest {
                     + " certainty; this needs a human rather than the first match.");
         }
         return value;
-    }
-
-    /** Whole-word kind names. {@code REQUIRED_ERROR_NODE_COUNT} does not match: {@code _} is a word character. */
-    private static Set<NodeKind> kindsNamedIn(String body) {
-        var named = new LinkedHashSet<NodeKind>();
-        for (NodeKind kind : CARDINALITY_CONSTRAINED_KINDS) {
-            if (Pattern.compile("\\b" + kind.name() + "\\b").matcher(body).find()) {
-                named.add(kind);
-            }
-        }
-        return named;
     }
 
     /**

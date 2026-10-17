@@ -14879,7 +14879,7 @@ GRAPH_AUTHORING_SETTINGS = (
     ("graph.authoring.draft-branch", "draftBranch", "RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH", "draft", "Confined Git branch distinct from the release branch."),
     ("graph.authoring.release-branch", "releaseBranch", "RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "main", "Confined Git branch distinct from the draft branch."),
     ("graph.authoring.gitlab-api-base", "apiBase", "RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE", "https://gitlab.com/api/v4", "Absolute HTTPS GitLab API base ending in /api/v4; no credentials, query or fragment."),
-    ("graph.authoring.gitlab-project", "project", "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "required for GitLab", "Positive project ID or complete confined nested namespace/project path."),
+    ("graph.authoring.gitlab-project", "repositoryName", "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "required for GitLab", "Positive project ID or complete confined nested namespace/project path."),
     ("graph.authoring.github-api-base", "apiBase", "RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE", "https://api.github.com", "Absolute HTTPS origin/path without credentials, query, or fragment."),
     ("graph.authoring.credential-mode", "credentialMode", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "required in Git mode", "PAT or APP; NONE only in local mode."),
     ("graph.authoring.credential-reference", "credentialReference", "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE", "required in Git mode", "Opaque server-side credential reference."),

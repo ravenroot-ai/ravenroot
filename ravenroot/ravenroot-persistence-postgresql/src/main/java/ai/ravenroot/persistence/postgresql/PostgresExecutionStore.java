@@ -2087,14 +2087,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
             }
             acquiredLock = lockId;
             var handle = new OwnedSourceCheckpoints(tenantId, namespace, owner, lockId);
+            boolean rejected;
             synchronized (sourceCheckpointOwners) {
-                if (closed.get()) {
-                    releaseAdvisoryLock(owner, lockId);
-                    owner.close();
-                    throw new IllegalStateException("source checkpoint store is closed");
-                }
-                sourceCheckpointOwners.add(handle);
+                rejected = closed.get();
+                if (!rejected) sourceCheckpointOwners.add(handle);
             }
+            if (rejected) throw new IllegalStateException("source checkpoint store is closed");
             return handle;
         } catch (IllegalStateException failure) {
             if (acquiredLock != null && owner != null) releaseAdvisoryLock(owner, acquiredLock);

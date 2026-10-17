@@ -13903,7 +13903,7 @@ SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS = {
         "4da9cc0c08f46491f7c65a2dae5cf63d78a98339e0c9d65a09a68c63b69c7b48",
     "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/"
     "postgresql/PostgresExecutionStore.java":
-        "78b9f983e077844238904e81ad8c46db02dc68ef2fbcd26ec972475a11324074",
+        "c40b44108a1f6dac54d025495c8da0923c77a08d64e80937bb194596d9cfba85",
     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
     "ExecutionStoreContract.java":
         "5ee3bc4bd46a9aad8f11c59071c5004f5b21469dfb3dceefe03e171b85a0a5c0",

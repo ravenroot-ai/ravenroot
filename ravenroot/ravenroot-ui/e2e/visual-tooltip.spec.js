@@ -137,6 +137,8 @@ test('keeps focused tooltips inside wide and narrow viewports without covering t
       page.locator('[data-layout-splitter="right"]'),
     ];
     for (const control of controls) {
+      await expect(control).toBeVisible();
+      await page.evaluate(() => document.activeElement?.blur());
       await control.focus();
       await expect(page.locator('#visual-tooltip')).toBeVisible();
       const geometry = await page.evaluate(element => {

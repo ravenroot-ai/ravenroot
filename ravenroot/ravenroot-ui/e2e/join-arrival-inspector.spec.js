@@ -100,7 +100,7 @@ test.describe('Kind of arrival inspector control', () => {
 
     await selectNode(page, 'a');
     await expect(page.locator('#node-join-kind')).toHaveCount(0);
-    await expect(page.locator('.node-join-fixed')).toContainText('Not a join · 1 incoming edge; 2 required');
+    await expect(page.locator('.node-join-fixed')).toContainText('Not a join · one incoming edge; 2 required.');
   });
 
   test('an undeclared fan-in defaults to "No join" as the selection, but reports the true legacy-inferred effective behaviour', async ({ page }) => {

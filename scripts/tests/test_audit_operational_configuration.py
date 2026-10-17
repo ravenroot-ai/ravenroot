@@ -1364,7 +1364,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        self.assertEqual(1240, len(program["candidateIds"]))
+        self.assertEqual(1239, len(program["candidateIds"]))
         self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
@@ -2272,7 +2272,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ("RunnerCodec.java", "1_048_576"): "security-ceiling-or-default",
             ("RunnerPlaneConfiguration.java", "RAVENROOT_RUNNER_CONFIG"): "protocol-or-format-invariant",
             ("RunnerPlaneConfiguration.java", "1_048_577"): "security-ceiling-or-default",
-            ("runner-panel.js", "'Workspaces, named Agents and runners'"): "presentation-text",
+            ("ui-dynamic-text.js", '"Workspaces, named Agents and runners"'): "presentation-text",
             ("RunnerArtifactStore.java", "64"): "security-ceiling-or-default",
             ("TelemetryBridge.java", 'ravenroot.runner.observations'): "protocol-or-format-invariant",
             ("TelemetryBridge.java", 'ravenroot.runner.worker.active'): "protocol-or-format-invariant",

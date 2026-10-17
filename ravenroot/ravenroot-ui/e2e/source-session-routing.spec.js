@@ -182,7 +182,7 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
   }));
   await page.locator('#btn-run').click();
   await expect(confirmation).resolves.toMatch(/No initial payload or traversal/);
-  await expect(page.locator('#source-session-status')).toContainText('Listening · 1 local source');
+  await expect(page.locator('#source-session-status')).toContainText('Listening · one local source');
   await expect(page.locator('#source-session-status')).toHaveAttribute('role', 'status');
   await expect(page.locator('#btn-stop')).toBeEnabled();
   await expect(page.locator('#btn-pause')).toBeDisabled();
@@ -194,7 +194,7 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
   expect(calls.executionCalls.filter(call => call.method === 'POST')).toHaveLength(0);
 
   await page.locator('#btn-stop').click();
-  await expect(page.locator('#source-session-status')).toContainText('Stopped · 1 local source');
+  await expect(page.locator('#source-session-status')).toContainText('Stopped · one local source');
   expect(calls.sourceCalls.some(call => call.method === 'DELETE')).toBe(true);
 
   await page.locator('#btn-play').click();
@@ -569,7 +569,7 @@ test('an ambiguous stop restores the last honest state and keeps observing witho
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('#source-session-status')).toHaveText('Listening · 1 local source');
+  await expect(page.locator('#source-session-status')).toHaveText('Listening · one local source');
 });
 
 test('an ambiguous start becomes UNKNOWN until observation proves the listener state', async ({ page }) => {
@@ -600,7 +600,7 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('#source-session-status')).toHaveText('Listening · 1 local source');
+  await expect(page.locator('#source-session-status')).toHaveText('Listening · one local source');
 });
 
 /**
@@ -618,7 +618,7 @@ test('a listening source paints its nodes from traversals the document was never
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening · 1 local source');
+  await expect(page.locator('#source-session-status')).toContainText('Listening · one local source');
 
   const painted = () => page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
@@ -663,7 +663,7 @@ test('another deployment traffic is still dropped rather than painted on whichev
 
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#btn-run').click();
-    await expect(page.locator('#source-session-status')).toContainText('Listening · 1 local source');
+    await expect(page.locator('#source-session-status')).toContainText('Listening · one local source');
 
     await page.waitForTimeout(1_500);
     expect(await page.evaluate(() => window.ravenroot.activeDocument().cy

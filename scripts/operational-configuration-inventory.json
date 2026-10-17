@@ -417215,7 +417215,7 @@
     {
       "id": "oc-1ff3180265dbec1b0b14",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 662,
+      "line": 665,
       "symbol": "if",
       "kind": "fixed-declaration",
       "role": "category",
@@ -417230,7 +417230,7 @@
     {
       "id": "oc-5c31a0d34789560a62f1",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 667,
+      "line": 670,
       "symbol": "catch",
       "kind": "fixed-declaration",
       "role": "fallback",
@@ -417245,7 +417245,7 @@
     {
       "id": "oc-39c37406cc06cad4a116",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 706,
+      "line": 709,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "absoluteSeconds",
@@ -417260,7 +417260,7 @@
     {
       "id": "oc-d2939f7a41e469e81490",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 706,
+      "line": 709,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "absoluteSeconds",
@@ -417275,7 +417275,7 @@
     {
       "id": "oc-7c68444ea21b962d6729",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 707,
+      "line": 710,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417290,7 +417290,7 @@
     {
       "id": "oc-9103247287f42bc50b47",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 708,
+      "line": 711,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417305,7 +417305,7 @@
     {
       "id": "oc-1053b11ec81e49212d74",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 708,
+      "line": 711,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417320,7 +417320,7 @@
     {
       "id": "oc-19b796d3bcbeee1b8428",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 708,
+      "line": 711,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417335,7 +417335,7 @@
     {
       "id": "oc-7cbc8fcdfe723e784715",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 708,
+      "line": 711,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417350,7 +417350,7 @@
     {
       "id": "oc-139b75935a1f217951cf",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 708,
+      "line": 711,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417365,7 +417365,7 @@
     {
       "id": "oc-1a23f4a55b641f648bea",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 709,
+      "line": 712,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417380,7 +417380,7 @@
     {
       "id": "oc-12cabe79d9ae3950213a",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 710,
+      "line": 713,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417395,7 +417395,7 @@
     {
       "id": "oc-fd217a04bffdf1303fa8",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 710,
+      "line": 713,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417410,7 +417410,7 @@
     {
       "id": "oc-45d87be038e467405f39",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 710,
+      "line": 713,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417425,7 +417425,7 @@
     {
       "id": "oc-b56b3049818a2a9003a6",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 710,
+      "line": 713,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -417440,7 +417440,7 @@
     {
       "id": "oc-8398645ce13f7def6c15",
       "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-      "line": 711,
+      "line": 714,
       "symbol": "formatUiDuration",
       "kind": "fixed-declaration",
       "role": "units",
@@ -1004466,6 +1004466,19 @@
         }
       ],
       "semanticReviews": []
+    },
+    {
+      "id": "issue-561-attempt6-canonical-empty-export-roundtrip",
+      "issue": "#561",
+      "sourceRevision": "fb6bb53411cf422b45028827498b53c2040ad221",
+      "targetRevision": "39dbf5314762700dbb6e17c24069e7b7b46e11f2",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "d9f00dab62c8369063b3ff808b499163ca5a2beca98d83fba08638f9637d069f",
+      "targetCandidateDigest": "3c205582dff5394cdecef0f43abe66da91483ebb0b5954b2fa0250b7c7337f8c",
+      "mappings": [],
+      "retirements": [],
+      "additions": [],
+      "semanticReviews": []
     }
   ],
   "semanticReviewHistory": [
@@ -1079375,7 +1079388,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "5e739c181a2c9f69553d3574fcc2a6769abecd173fa398034ecff1716f17872b"
+    "digest": "83f88febd669fcbc32ff40289b00e07aa8866923f541b1d98b551d87a1d5a912"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {

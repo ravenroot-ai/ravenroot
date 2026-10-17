@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 156.
+Checked source reconciliations: 157.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 31250 candidates.
@@ -128,10 +128,10 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 31250 |
-| Unchanged identities | 31246 |
+| Unchanged identities | 31250 |
 | Approved identity migrations | 0 |
-| Approved retirements | 4 |
-| Semantically classified additions | 4 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 31250 |
 
 ## Final semantic review
@@ -20426,22 +20426,22 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e1c15311e79b35bd1a75` | `ravenroot/ravenroot-ui/src/ui-text.js:527` `module` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
 | `oc-edc7b07675401b46c144` | `ravenroot/ravenroot-ui/src/ui-text.js:527` `module` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
 | `oc-f9cab252f5c6d277b32d` | `ravenroot/ravenroot-ui/src/ui-text.js:527` `module` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-1ff3180265dbec1b0b14` | `ravenroot/ravenroot-ui/src/ui-text.js:662` `if` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-5c31a0d34789560a62f1` | `ravenroot/ravenroot-ui/src/ui-text.js:667` `catch` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-39c37406cc06cad4a116` | `ravenroot/ravenroot-ui/src/ui-text.js:706` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-d2939f7a41e469e81490` | `ravenroot/ravenroot-ui/src/ui-text.js:706` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-7c68444ea21b962d6729` | `ravenroot/ravenroot-ui/src/ui-text.js:707` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-1053b11ec81e49212d74` | `ravenroot/ravenroot-ui/src/ui-text.js:708` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-139b75935a1f217951cf` | `ravenroot/ravenroot-ui/src/ui-text.js:708` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-19b796d3bcbeee1b8428` | `ravenroot/ravenroot-ui/src/ui-text.js:708` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-7cbc8fcdfe723e784715` | `ravenroot/ravenroot-ui/src/ui-text.js:708` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-9103247287f42bc50b47` | `ravenroot/ravenroot-ui/src/ui-text.js:708` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-1a23f4a55b641f648bea` | `ravenroot/ravenroot-ui/src/ui-text.js:709` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-12cabe79d9ae3950213a` | `ravenroot/ravenroot-ui/src/ui-text.js:710` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-45d87be038e467405f39` | `ravenroot/ravenroot-ui/src/ui-text.js:710` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-b56b3049818a2a9003a6` | `ravenroot/ravenroot-ui/src/ui-text.js:710` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
-| `oc-fd217a04bffdf1303fa8` | `ravenroot/ravenroot-ui/src/ui-text.js:710` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
-| `oc-8398645ce13f7def6c15` | `ravenroot/ravenroot-ui/src/ui-text.js:711` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-1ff3180265dbec1b0b14` | `ravenroot/ravenroot-ui/src/ui-text.js:665` `if` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-5c31a0d34789560a62f1` | `ravenroot/ravenroot-ui/src/ui-text.js:670` `catch` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-39c37406cc06cad4a116` | `ravenroot/ravenroot-ui/src/ui-text.js:709` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-d2939f7a41e469e81490` | `ravenroot/ravenroot-ui/src/ui-text.js:709` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-7c68444ea21b962d6729` | `ravenroot/ravenroot-ui/src/ui-text.js:710` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-1053b11ec81e49212d74` | `ravenroot/ravenroot-ui/src/ui-text.js:711` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-139b75935a1f217951cf` | `ravenroot/ravenroot-ui/src/ui-text.js:711` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-19b796d3bcbeee1b8428` | `ravenroot/ravenroot-ui/src/ui-text.js:711` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-7cbc8fcdfe723e784715` | `ravenroot/ravenroot-ui/src/ui-text.js:711` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-9103247287f42bc50b47` | `ravenroot/ravenroot-ui/src/ui-text.js:711` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-1a23f4a55b641f648bea` | `ravenroot/ravenroot-ui/src/ui-text.js:712` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-12cabe79d9ae3950213a` | `ravenroot/ravenroot-ui/src/ui-text.js:713` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-45d87be038e467405f39` | `ravenroot/ravenroot-ui/src/ui-text.js:713` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-b56b3049818a2a9003a6` | `ravenroot/ravenroot-ui/src/ui-text.js:713` `formatUiDuration` | ui | retained | derived | This zero/one or display arithmetic atom is derived control flow or rendering state, not operator policy. |
+| `oc-fd217a04bffdf1303fa8` | `ravenroot/ravenroot-ui/src/ui-text.js:713` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
+| `oc-8398645ce13f7def6c15` | `ravenroot/ravenroot-ui/src/ui-text.js:714` `formatUiDuration` | ui | retained | protocol-or-format-invariant | This atom is stable locale, catalog, DOM, storage, renderer, or embed wire vocabulary; changing it affects compatibility rather than operating policy. |
 | `oc-31752d98fa82286d7937` | `ravenroot/ravenroot-ui/src/viewer-core.js:6` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-0172c86df3e252213dc6` | `ravenroot/ravenroot-ui/src/viewer-core.js:8` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-2d33f1ee56b8c3d2029f` | `ravenroot/ravenroot-ui/src/viewer-core.js:8` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |

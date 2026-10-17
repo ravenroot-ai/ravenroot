@@ -10,6 +10,7 @@ import {
   validateUiCatalog,
 } from '../src/ui-text.js';
 import { productError } from '../src/product-error.js';
+import { repositoryReviewMessageKey, validateGraphAuthoringCapability } from '../src/graph-authoring-client.js';
 
 describe('UI text catalogs', () => {
   it('translates structured product validation reasons while preserving unknown diagnostics', () => {
@@ -27,6 +28,29 @@ describe('UI text catalogs', () => {
     expect(text('commands.file.open.label')).toBe('Ouvrir…');
     expect(text('commands.file.new.label')).toBe('Nouveau document');
     expect(text('commands.file.save.label')).toBe('Save GraphML');
+  });
+
+  it('localizes provider-specific review nouns while preserving opaque repository URLs', () => {
+    const url = 'https://gitlab.example/group/project/-/merge_requests/17';
+    const text = createUiText({ locale: 'fr', catalogs: { fr: {
+      'workspace.app.existing': 'Existant',
+      'workspace.app.pull.request': 'demande de tirage',
+      'workspace.app.merge.request': 'demande de fusion',
+      'workspace.notice.graph.review': '{detail1} {reviewType} : {url}',
+    } } });
+
+    const gitlab = validateGraphAuthoringCapability({
+      mode: 'git', provider: 'gitlab', operations: ['RELEASE_PROPOSAL'],
+    });
+    const github = validateGraphAuthoringCapability({
+      mode: 'git', provider: 'github', operations: ['RELEASE_PROPOSAL'],
+    });
+    expect(text('workspace.notice.graph.review', {
+      detail1: text('workspace.app.existing'),
+      reviewType: text(repositoryReviewMessageKey(gitlab.provider)),
+      url,
+    })).toBe(`Existant demande de fusion : ${url}`);
+    expect(text(repositoryReviewMessageKey(github.provider))).toBe('demande de tirage');
   });
 
   it('canonicalizes locale casing and underscore separators', () => {

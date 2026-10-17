@@ -61,6 +61,8 @@ graphAuthoring:
   draftBranch: draft
   releaseBranch: main
   githubApiBase: https://api.github.com
+  gitlabApiBase: https://gitlab.com/api/v4
+  gitlabProject: ""
   credentialMode: APP
   credentialSecretName: ""
   credentialSecretKey: credential

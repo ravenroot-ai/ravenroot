@@ -239,6 +239,7 @@ import {
   decodeGraphMl,
   parseAuthoredReleaseVersion,
   repositorySourceStatus,
+  repositoryReviewMessageKey,
 } from './graph-authoring-client.js';
 import {
   applyAssistantGraphProposal,
@@ -15801,7 +15802,12 @@ async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
   if (!gitAuthoringEnabled() || !id) return false;
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
-    addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", { detail1: result.reused ? uiText("workspace.app.existing") : uiText("workspace.app.new"), url: result.url }), 'completed'); return true;
+    const reviewType = uiText(repositoryReviewMessageKey(graphAuthoringCapability.provider));
+    addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
+      detail1: result.reused ? uiText("workspace.app.existing") : uiText("workspace.app.new"),
+      reviewType,
+      url: result.url,
+    }), 'completed'); return true;
   } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
 }
 

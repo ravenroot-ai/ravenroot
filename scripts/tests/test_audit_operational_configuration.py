@@ -250,45 +250,22 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 )
                 return str(prepared["version"])
 
-            source_version = str(latest_release(ROOT))
             source_fixture = isolated_tree("source", ROOT, "HEAD")
-            expected_normalizations = []
-            history_cursor = fixture_git(source_fixture, "rev-parse", "HEAD")
-            history_version = product_version(source_fixture)
-            while history_version != source_version:
-                transition = None
-                for revision in fixture_git(
-                        source_fixture, "rev-list", "--topo-order", history_cursor,
-                        "--", "ravenroot/pom.xml").splitlines():
-                    ancestry = fixture_git(
-                        source_fixture, "rev-list", "--parents", "-n", "1", revision).split()
-                    if len(ancestry) != 2:
-                        continue
-                    parent = ancestry[1]
-                    prepared = revision_product_version(source_fixture, revision)
-                    previous = revision_product_version(source_fixture, parent)
-                    if prepared == history_version and previous != prepared:
-                        transition = (parent, previous)
-                        break
-                self.assertIsNotNone(
-                    transition,
-                    f"immutable root-POM history has no transition from {history_version}",
-                )
-                assert transition is not None
-                parent, previous = transition
-                expected_normalizations.append(
-                    f"normalize {history_version} to {previous}")
-                history_cursor = parent
-                history_version = previous
-            normalize_authoritative_version_history(source_fixture)
-            self.assertEqual(source_version, product_version(source_fixture))
-            if expected_normalizations:
+            source_version = normalize_release_fixture_source(source_fixture)
+            if fixture_git(source_fixture, "status", "--porcelain"):
+                self.assertEqual(source_version, product_version(source_fixture))
                 self.assertEqual(
-                    list(reversed(expected_normalizations)),
-                    fixture_git(
-                    source_fixture, "log", f"-{len(expected_normalizations)}",
-                    "--format=%s").splitlines(),
+                    [],
+                    audit.check(
+                        source_fixture,
+                        source_fixture / "scripts/operational-configuration-inventory.json",
+                        source_fixture / "docs/architecture/operational-configuration-audit.md",
+                    ),
                 )
+                fixture_git(source_fixture, "add", ".")
+                fixture_git(source_fixture, "-c", "user.name=Test", "-c",
+                            "user.email=test@example.invalid", "commit", "-qm",
+                            "ordinary authoritative source snapshot")
             first_alignment = str(expected_next(parse_tag(f"v{source_version}"), "minor"))
             second_alignment = str(expected_next(parse_tag(f"v{first_alignment}"), "minor"))
             bump_surfaces(source_fixture, source_version, first_alignment)
@@ -6842,6 +6819,10 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
 
     def test_removed_auth_store_tenant_and_limit_guards_or_drifted_carriers_fail_closed(self) -> None:
         mutations = (
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS
+                  if path.name == "GitlabAuthoringRepository.java"),
+             'action.put("last_commit_id", original.lastCommit())',
+             'action.put("last_commit_id", "unconditional")'),
             (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
              "maxDocumentBytes > 100 * 1024 * 1024", "maxDocumentBytes > 101 * 1024 * 1024"),
             (audit.GRAPH_AUTHORING_CONFIGURATION_PATH,
@@ -8592,6 +8573,7 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
                     ["git", *arguments], cwd=root, check=True, capture_output=True, text=True,
                 ).stdout.strip()
 
+
             def exercise_later_security_note(root: Path) -> None:
                 source_version = normalize_authoritative_version_history(root)
                 fragments = sorted(
@@ -8837,6 +8819,148 @@ def rewrite_ravenroot_pom_version(
     for start, end in sorted(set(replacements), reverse=True):
         updated = updated[:start] + source_version + updated[end:]
     return updated
+
+
+class ReleaseFixtureDevelopmentNormalizationTest(unittest.TestCase):
+    def test_malformed_nonforward_inconsistent_and_other_stage_versions_are_refused(self):
+        for version, findings in (("malformed", []), ("0.6.0-alpha.1", []),
+                                  ("0.8.0-beta.1", []), ("0.8.0-alpha.1", ["mirror mismatch"])):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as location:
+                root = Path(location)
+                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                with mock.patch(__name__ + ".latest_release", return_value=parse_tag("v0.7.0-alpha.1")), \
+                        mock.patch(__name__ + ".product_version", return_value=version), \
+                        mock.patch("scripts.check_product_version.errors", return_value=findings), \
+                        mock.patch("scripts.prepare_release.bump_surfaces") as bump:
+                    with self.assertRaises((AssertionError, ValueError)):
+                        normalize_release_fixture_source(root)
+                    bump.assert_not_called()
+
+    def test_missing_release_notes_cannot_be_reinterpreted_as_a_development_bump(self):
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            git("init", "-q"); git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            pom = root / "ravenroot/pom.xml"; pom.parent.mkdir()
+            fragment = root / ".changes/example.fix.md"; fragment.parent.mkdir()
+            pom.write_text("<project><version>0.7.0-alpha.1</version></project>")
+            fragment.write_text("Original release change.")
+            git("add", "."); git("commit", "-qm", "source"); git("tag", "v0.7.0-alpha.1")
+            pom.write_text("<project><version>0.8.0-alpha.1</version></project>")
+            fragment.unlink()
+            git("add", "."); git("commit", "-qm", "corrupt preparation without notes")
+            before = pom.read_bytes()
+            with mock.patch("scripts.check_product_version.errors", return_value=[]), \
+                    mock.patch("scripts.prepare_release.bump_surfaces") as bump:
+                with self.assertRaisesRegex(AssertionError, "did not add its release notes"):
+                    normalize_release_fixture_source(root)
+                bump.assert_not_called()
+            self.assertEqual(before, pom.read_bytes())
+            self.assertEqual("", git("status", "--porcelain"))
+
+
+def normalize_release_fixture_source(root: Path) -> str:
+    """Normalize an isolated source fixture; never authorize a production version transition."""
+    from scripts.check_product_version import errors as version_surface_errors
+
+    if root.resolve() == ROOT.resolve():
+        raise AssertionError("version normalization requires an isolated source fixture")
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(["git", *arguments], cwd=root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    common = Path(git("rev-parse", "--git-common-dir"))
+    if not common.is_absolute():
+        common = root / common
+    if common.resolve() != (root / ".git").resolve():
+        raise AssertionError("version normalization requires an independent cloned repository")
+    if git("status", "--porcelain"):
+        raise AssertionError("authoritative source fixture must start clean")
+    source_version = str(latest_release(root))
+    current_version = product_version(root)
+    findings = version_surface_errors(current_version, root)
+    if findings:
+        raise AssertionError("source fixture has inconsistent version surfaces: " + "; ".join(findings))
+    if current_version == source_version:
+        return source_version
+    current = parse_tag(f"v{current_version}")
+    previous = parse_tag(f"v{source_version}")
+    if not current.prerelease or current.prerelease != previous.prerelease \
+            or current.semantic_key() <= previous.semantic_key():
+        raise AssertionError("source fixture requires a coherent forward development prerelease")
+
+    # Inspect the actual version-changing commit, not every unrelated source commit. A genuine
+    # preparation must still pass its existing exact inverse, including notes and fragment rules.
+    def revision_version(revision: str) -> str:
+        project = ET.fromstring(git("show", f"{revision}:ravenroot/pom.xml"))
+        namespace = project.tag.split("}")[0] + "}" if "}" in project.tag else ""
+        version = project.find(namespace + "version")
+        if version is None or not version.text:
+            raise AssertionError("historical source fixture has no direct product version")
+        return str(parse_tag("v" + version.text.strip()))
+
+    transition = None
+    changes = []
+    for revision in git("log", "--format=%H", "HEAD", "--", "ravenroot/pom.xml").splitlines():
+        ancestry = git("rev-list", "--parents", "-n", "1", revision).split()
+        if len(ancestry) != 2:
+            continue
+        parent = ancestry[1]
+        prepared = revision_version(revision)
+        original = revision_version(parent)
+        if prepared != current_version or original == current_version:
+            continue
+        if parse_tag("v" + original).semantic_key() >= current.semantic_key():
+            raise AssertionError("development fixture transition must move forward")
+        transition = revision
+        changes = [line.split("\t") for line in git("diff", "--name-status", parent, revision).splitlines()]
+        has_preparation_evidence = (root / f"docs/releases/v{current_version}.md").exists() or any(
+            len(row) != 2 or row[1].startswith("docs/releases/")
+            or row[0] == "D" and row[1].startswith(".changes/") for row in changes)
+        if original == source_version and has_preparation_evidence:
+            reverse_release_preparation_delta(root, revision, current_version)
+            for path, contents in bump_ui_examples(root, current_version, source_version).items():
+                path.write_text(contents, encoding="utf-8")
+            if version_surface_errors(source_version, root):
+                raise AssertionError("release inverse left inconsistent fixture version surfaces")
+            return source_version
+        break
+    if transition is None:
+        raise AssertionError("no exact version transition is reachable from the source fixture")
+    notes = f"docs/releases/v{current_version}.md"
+    if (root / notes).exists() or any(
+            len(row) != 2 or row[1].startswith("docs/releases/")
+            or row[0] == "D" and row[1].startswith(".changes/") for row in changes):
+        raise AssertionError("development normalization cannot bypass release-preparation evidence")
+
+    # The clone may retain immutable notes for an earlier, still untagged preparation. Moving
+    # mirrors backwards would collide with those notes when testing a minor preparation. Give
+    # this isolated fixture a local released baseline at its coherent development version instead.
+    # No product bytes change, no ref is replaced, and no shared repository is a push destination.
+    before = {path: (root / path).read_bytes() for path in git("ls-files").splitlines()
+              if (root / path).is_file()}
+    before_tree = git("write-tree")
+    source_tags = git("show-ref", "--tags")
+    synthetic_tag = "v" + current_version
+    if git("tag", "--list", synthetic_tag):
+        raise AssertionError("development fixture baseline must not replace an existing tag")
+    # Remove push destinations in the independent clone before adding the synthetic fixture ref.
+    for remote in git("remote").splitlines():
+        git("remote", "remove", remote)
+    git("tag", synthetic_tag, "HEAD")
+    if git("remote") or git("write-tree") != before_tree or git("status", "--porcelain"):
+        raise AssertionError("development fixture baseline changed source or retained a remote")
+    if any((root / path).read_bytes() != contents for path, contents in before.items()):
+        raise AssertionError("development fixture baseline changed protected source bytes")
+    after_tags = git("show-ref", "--tags").splitlines()
+    expected_tags = source_tags.splitlines() + [git("rev-parse", "HEAD") + " refs/tags/" + synthetic_tag]
+    if sorted(after_tags) != sorted(expected_tags) or str(latest_release(root)) != current_version:
+        raise AssertionError("development fixture baseline changed an unrelated tag")
+    return current_version
 
 
 def reverse_release_preparation_delta(

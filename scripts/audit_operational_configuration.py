@@ -8086,7 +8086,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'javascript',
   '',
   'validateRuntimeConfiguration',
-  'e62c6375e9e2872f9ff0608d00eeaa95409eb2cca502443f74ce09f494d4edc3',
+  '5b5000e1952333c8a0762fbc586004c4fc2fe1933447fc5463a28584960680f0',
   1),
  ('ravenroot/ravenroot-ui/src/runtime-client.js',
   'javascript',
@@ -8393,7 +8393,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'f720412a03658001b4c75fa1170814fd5b210b0a33a1b9208373cabc3b7df9bd',
+  '849c7d5b780e10adf8431d578fccc463689eb30d1299665da309024657fe7687',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -11101,8 +11101,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                'rationale': 'The literal is user-facing program-authoring status/help text.',
                                'candidateIds': ['oc-42aa86187035ff50bd36',
                                                 'oc-b6a8afcabdd51ce9a1e3',
-                                                'oc-ebd242dd7cb634e7c45e',
-                                                'oc-fab56ab5f23eea7791d8']},
+                                                'oc-ebd242dd7cb634e7c45e']},
  'ui.program-language-selection': {'classification': 'presentation-text',
                                    'status': 'retained',
                                    'rationale': 'The token renders selected-state presentation for a program '
@@ -14757,7 +14756,7 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
         "fc6894ee287b9c0913f5c64a3ef0c2404d85a738ea7e2d22b2a3a1f92b0f9612",
     GRAPH_AUTHORING_STARTUP_IMPORT_PATH:
-        "fe40703b1b5dbb37dabba0015c1624b8e9110bc743cef56c18dfb67264543a70",
+        "c3f93cba9c62402622022c92bd49f2d96b5e582b7f62efaaebbf139573b2c6b7",
     GRAPH_AUTHORING_PUBLISHER_PATH:
         "d0419b38a9b27141904f35c58e589e88ed924fd6e746f088a57f86fd81511dc8",
 }
@@ -14827,26 +14826,26 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
 }
 GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",
-    "primaryPersistenceUnavailable": "eafe8e454b04629988c9872c068c74bce85257e23272a54193eb45f523feb360",
+    "primaryPersistenceUnavailable": "e6325797cadcfc282e01703089b6d50635473c5b8a4823209cb45609c2c17456",
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
     "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
-    "openRepositoryGraph": "3a4d4f1aa89d27b33f2d1f3c97a66b96ed862b03b676e120d0bb948c0ec22f02",
-    "saveRepositoryGraph": "0489bca68694899ee22bce723e7db7e92f6af8d7125f93dd66147780d40d0499",
-    "repositoryHistory": "455dba6b85e8b9e2d202aa851c0e9c073b740eee02ec45bc8c6233aff5b19dcb",
-    "repositoryDiscard": "5048fc18dfcc587d53b40a41b759de139d5f0b178323a9bab81eee12025b2fc0",
-    "repositoryDelete": "954a18af00d54b9aabaa5731898bf33cdd740f14831a382546ff15870d2049d7",
-    "repositoryRelease": "def7c49bdc1e193b5b4303446a614ac288469056511210809886e932ca94b95f",
-    "publishedArtifacts": "1c482b902b5dc8ec5ab654d5c7e886c3cff091856baa8ad1c4cb8ea298eb2908",
-    "connectRuntime": "409ba299be0186b8b5ee42f8aef09f0f0649a380bbef43d9f15a747de4e2cba2",
-    "createStartupImportPlaceholder": "8629a76a81d1669525f458040a9c14e4d2d886bba2b890a9b7974ca377e5211d",
+    "openRepositoryGraph": "bd1673de33f98e36820afd7ee9760286a44d53a87f1882c821a7d9939472320f",
+    "saveRepositoryGraph": "4e526f34f8e7dacb75eb20484d1d129d5c1a7a93e2736c8ddf09cea1cb082c66",
+    "repositoryHistory": "bb355befff4ea8b04c4e64863b7f431b1f7dc814b77eb8cace32b344a541c240",
+    "repositoryDiscard": "be75ee53c19a19b4bca346023b085d0d1db797bdedd9dc5822bdf5f6b6371186",
+    "repositoryDelete": "9536467e9e5975d388388ecac8fdcce7df2f03fb69647ba17a582dbb1acd800f",
+    "repositoryRelease": "49d641edcc2936280760645b50cbe3fdfcf74423347a18d7f0de413fa36ae2b9",
+    "publishedArtifacts": "f770dd4ca2ee47ab091d3bb7a387c1fe3d520ba9daec639c27257c06b97d331c",
+    "connectRuntime": "f6624bb684dd2f701f997662cd8686f75ed18d1acc3e337d01e471f947df93bb",
+    "createStartupImportPlaceholder": "651de7c5d71fe15900eb89fa9be6af66dc777a8d9cdccabb0930c1722122fb04",
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
     "startupImportBindingIsCurrent": "5b79d5f6babdfab051815044c3733970c2bb9cd701915b6ac68c098e7df150d4",
     "startupImportPlaceholderIsUntouched": "c7250f2af0a9444f5a61fd6a92dfdcd77d960a2cf8b682effa17287487c4e176",
     "startupImportFailure": "081e9af5a6a425f33f74d165d70f1537af97bb75e3d73d347b17691b0df7beaf",
-    "parsePreparedGraph": "bf35edb6a58f448772bc3436a73f545345837ca12a31b175fb4fe5095a00c7e9",
-    "runStartupImport": "ea1e0c6687de24f7da54a115df92593ff8d39695c022d64ec0dabe3cfa168c23",
+    "parsePreparedGraph": "adedc817150cc3d2e1544f66d507bfb8aca8273ba302e835a85f9a253f1a3db4",
+    "runStartupImport": "ab2397437c8b1a9d7943014357c85eb76264d569b41b0188657b90beb3b7ff16",
     "renderStartupImport": "d68694e197928c9bc52a5b2d9060d24a8d0aac2e0bb3fd8488604333b72e7104",
-    "initializeStartupImport": "a06fe540103b1e659e771465ad4d4000939c324e5bd8bfc56208494641ed7758",
+    "initializeStartupImport": "63da6a54dd7b14053d7cf73af89254f405979abfa181e9e40a3e6cdefe8ed207",
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):

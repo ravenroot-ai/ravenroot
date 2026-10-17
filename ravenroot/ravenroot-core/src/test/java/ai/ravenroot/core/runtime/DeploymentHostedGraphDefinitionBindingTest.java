@@ -6,8 +6,11 @@ import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.IngressReceipt;
 import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.deployment.RequestReplyLimits;
+import ai.ravenroot.api.application.ExecutionEventType;
+import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.persistence.CanonicalGraphMl;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionManifest;
 import ai.ravenroot.api.persistence.ExecutionManifestStore;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -23,6 +26,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionStoreFailure;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredGraphDefinition;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
+import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
@@ -32,6 +36,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -42,8 +48,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -90,6 +98,29 @@ class DeploymentHostedGraphDefinitionBindingTest {
                 <node id="start"><data key="node-kind">START</data></node>
                 <node id="end"><data key="node-kind">END</data></node>
                 <edge id="start-end" source="start" target="end">
+                  <data key="edge-outcome">continue</data>
+                </edge>
+              </graph>
+            </graphml>
+            """;
+
+    private static final String ONE_EFFECT_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="node-behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="one-effect" edgedefault="directed">
+                <node id="start"><data key="node-kind">START</data></node>
+                <node id="effect">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">record-effect</data>
+                </node>
+                <node id="end"><data key="node-kind">END</data></node>
+                <edge id="e1" source="start" target="effect">
+                  <data key="edge-outcome">continue</data>
+                </edge>
+                <edge id="e2" source="effect" target="end">
                   <data key="edge-outcome">continue</data>
                 </edge>
               </graph>
@@ -324,6 +355,116 @@ class DeploymentHostedGraphDefinitionBindingTest {
     }
 
     @Test
+    void unresolvedFirstNodeStartCannotExtendAdmissionOrDispatchAfterCancellation() throws Exception {
+        Path database = databaseDirectory.resolve("delayed-node-start.db");
+        DeploymentId deploymentId = DeploymentId.of("delayed-node-start-" + UUID.randomUUID());
+        UUID processInstanceId = durableProcessId(deploymentId);
+        var effects = new AtomicInteger();
+        var terminal = new CountDownLatch(1);
+        var monitor = new ExecutionMonitor();
+        var behaviors = new BehaviorRegistry().register("record-effect", message -> {
+            effects.incrementAndGet();
+            return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+        });
+        try (var engine = new JoinTestEngine();
+             var realExecutions = new SqliteExecutionStore(database, clock());
+             var definitions = new SqliteGraphDefinitionStore(database, clock(),
+                     GraphDefinitionReferences.NONE);
+             var subscription = monitor.subscribe(event -> {
+                 if (processInstanceId.equals(event.processInstanceId())
+                         && (event.type() == ExecutionEventType.EXECUTION_COMPLETED
+                         || event.type() == ExecutionEventType.EXECUTION_FAILED
+                         || event.type() == ExecutionEventType.EXECUTION_CANCELLED)) {
+                     terminal.countDown();
+                 }
+             })) {
+            var executions = new DelayedNodeStartedStore(realExecutions);
+            byte[] graph = ONE_EFFECT_GRAPH.getBytes(StandardCharsets.UTF_8);
+            var deployment = new DefaultGraphDeployment(deploymentId, engine, behaviors, monitor,
+                    fixedIdentities(processInstanceId), graph,
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executions.store(),
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "worker-delayed-node-start",
+                    Duration.ofSeconds(30),
+                    RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                    definitions, GraphExecutionLimits.DEFAULTS, null, null, null, null,
+                    GraphRunner.DEFAULT_SHUTDOWN_BOUND, Duration.ofMillis(300));
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            long started = System.nanoTime();
+            IngressReceipt receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(),
+                    "payload", "poller-1", "key-A");
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt,
+                    "execution acceptance already owns custody before runner node persistence starts");
+            assertTrue(elapsedMillis < 2_000,
+                    () -> "inline NODE_STARTED persistence retained admission for " + elapsedMillis + "ms");
+            assertTrue(executions.entered.await(10, TimeUnit.SECONDS));
+            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            executions.release();
+            assertTrue(terminal.await(10, TimeUnit.SECONDS),
+                    "the late NODE_STARTED result must settle the cancelled traversal");
+            assertEquals(0, effects.get(), "the business node cannot run after stop has settled");
+
+            var redelivery = new DefaultGraphDeployment(deploymentId, engine, behaviors, monitor,
+                    fixedIdentities(processInstanceId), graph,
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executions.store(),
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "worker-delayed-node-redelivery",
+                    Duration.ofSeconds(30),
+                    RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                    definitions, GraphExecutionLimits.DEFAULTS, null, null, null, null,
+                    GraphRunner.DEFAULT_SHUTDOWN_BOUND, Duration.ofMillis(300));
+            redelivery.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertInstanceOf(IngressReceipt.Duplicate.class,
+                    redelivery.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                            "poller-1", "key-A"));
+            redelivery.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            var journal = realExecutions.readJournal(IDENTITY.tenantId(), 0, 100)
+                    .toCompletableFuture().join();
+            assertEquals(1, journal.stream()
+                    .filter(record -> "NODE_STARTED".equals(record.envelope().eventType())).count(),
+                    "redelivery must not start a second node attempt");
+            assertTrue(journal.stream()
+                            .noneMatch(record -> "NODE_COMPLETED".equals(record.envelope().eventType())),
+                    "a late NODE_STARTED completion cannot dispatch the cancelled node effect");
+        }
+    }
+
+    @Test
+    void barrierCancellationBeforeDeferredRunnerRegistrationPreventsNodeStart() throws Exception {
+        Path database = databaseDirectory.resolve("deferred-runner-cancel.db");
+        DeploymentId deploymentId = DeploymentId.of("deferred-runner-cancel-" + UUID.randomUUID());
+        UUID processInstanceId = durableProcessId(deploymentId);
+        try (var engine = new JoinTestEngine();
+             var executions = new SqliteExecutionStore(database, clock());
+             var definitions = new SqliteGraphDefinitionStore(database, clock(),
+                     GraphDefinitionReferences.NONE)) {
+            var handoff = new QueuedExecutor();
+            var deployment = boundedDeployment(deploymentId, engine, executions, definitions, null,
+                    fixedIdentities(processInstanceId), Duration.ofSeconds(2),
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), handoff);
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class,
+                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                            "poller-1", "key-A"));
+            assertTrue(handoff.submitted.await(10, TimeUnit.SECONDS));
+
+            var barrier = deployment.barrier(2).toCompletableFuture();
+            barrier.get(2, TimeUnit.SECONDS);
+            assertEquals(1, deployment.endedByLastBarrier(),
+                    "the admitted ticket stays visible while runner registration is deferred");
+            handoff.runSubmitted();
+
+            assertTrue(executions.readJournal(IDENTITY.tenantId(), 0, 100).toCompletableFuture().join()
+                            .stream().noneMatch(record -> "NODE_STARTED".equals(record.envelope().eventType())),
+                    "cancellation published before registration must prevent the first node write");
+            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void lateDefinitionAndManifestCommitsConvergeOnRedeliveryWithoutDuplicateExecution() throws Exception {
         Path database = databaseDirectory.resolve("late-prerequisites.db");
         DeploymentId deploymentId = DeploymentId.of("late-prerequisites-" + UUID.randomUUID());
@@ -545,6 +686,20 @@ class DeploymentHostedGraphDefinitionBindingTest {
                 GraphRunner.DEFAULT_SHUTDOWN_BOUND, bound);
     }
 
+    private DefaultGraphDeployment boundedDeployment(DeploymentId deploymentId, JoinTestEngine engine,
+            ExecutionStore executions, GraphDefinitionStore definitions,
+            ai.ravenroot.core.manifest.ExecutionManifestService manifests,
+            ExecutionIdentitySource identities, Duration bound, BehaviorRegistry behaviors,
+            Executor durableRunnerExecutor) {
+        return new DefaultGraphDeployment(deploymentId, engine, behaviors, new ExecutionMonitor(), identities,
+                graphBytes(), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executions,
+                DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "worker-" + UUID.randomUUID(),
+                Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                definitions, GraphExecutionLimits.DEFAULTS, null, null, manifests, null,
+                GraphRunner.DEFAULT_SHUTDOWN_BOUND, bound, durableRunnerExecutor);
+    }
+
     private static UUID durableProcessId(DeploymentId deploymentId) {
         return UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + deploymentId.value()
                 + "/poller-1" + '\0' + "key-A").getBytes(StandardCharsets.UTF_8));
@@ -739,6 +894,75 @@ class DeploymentHostedGraphDefinitionBindingTest {
     }
 
     private enum DelayOperation { PIN, LOAD }
+
+    private static final class QueuedExecutor implements Executor {
+        private final AtomicReference<Runnable> command = new AtomicReference<>();
+        private final CountDownLatch submitted = new CountDownLatch(1);
+
+        @Override public void execute(Runnable submittedCommand) {
+            assertTrue(command.compareAndSet(null, submittedCommand));
+            submitted.countDown();
+        }
+
+        private void runSubmitted() {
+            Runnable submittedCommand = command.getAndSet(null);
+            assertNotNull(submittedCommand);
+            submittedCommand.run();
+        }
+    }
+
+    /** Commits NODE_STARTED but withholds its completion so inline runner startup is deterministic. */
+    private static final class DelayedNodeStartedStore {
+        private final ExecutionStore delegate;
+        private final ExecutionStore store;
+        private final AtomicBoolean delayed = new AtomicBoolean();
+        private final AtomicReference<CompletionStage<StoredProcessInstance>> actual = new AtomicReference<>();
+        private final AtomicReference<CompletableFuture<StoredProcessInstance>> gate = new AtomicReference<>();
+        private final CountDownLatch entered = new CountDownLatch(1);
+
+        private DelayedNodeStartedStore(ExecutionStore delegate) {
+            this.delegate = delegate;
+            this.store = (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                    new Class<?>[] { ExecutionStore.class }, this::invoke);
+        }
+
+        private ExecutionStore store() {
+            return store;
+        }
+
+        private Object invoke(Object proxy, java.lang.reflect.Method method, Object[] arguments) throws Throwable {
+            try {
+                Object result = method.invoke(delegate, arguments);
+                if (!method.getName().equals("apply") || arguments == null || arguments.length != 1
+                        || !(arguments[0] instanceof ExecutionBatch batch)
+                        || batch.events().stream().noneMatch(event -> "NODE_STARTED".equals(event.eventType()))
+                        || !delayed.compareAndSet(false, true)) {
+                    return result;
+                }
+                @SuppressWarnings("unchecked")
+                CompletionStage<StoredProcessInstance> committed =
+                        (CompletionStage<StoredProcessInstance>) result;
+                var visible = new CompletableFuture<StoredProcessInstance>();
+                actual.set(committed);
+                gate.set(visible);
+                entered.countDown();
+                return visible;
+            } catch (InvocationTargetException wrapped) {
+                throw wrapped.getCause();
+            }
+        }
+
+        private void release() {
+            CompletionStage<StoredProcessInstance> committed = actual.get();
+            CompletableFuture<StoredProcessInstance> visible = gate.get();
+            assertNotNull(committed);
+            assertNotNull(visible);
+            committed.whenComplete((stored, failure) -> {
+                if (failure == null) visible.complete(stored);
+                else visible.completeExceptionally(failure);
+            });
+        }
+    }
 
     /** Delays one manifest result after the delegate has already committed or loaded it. */
     private static final class DelayedManifestStore implements ExecutionManifestStore {

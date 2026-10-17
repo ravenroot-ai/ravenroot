@@ -206,6 +206,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final Duration inboxRetention;
     /** One end-to-end deadline shared by every persistence wait in a durable admission attempt. */
     private final Duration storeCallBound;
+    /** Starts durable source runners after their accepted ticket is visible to lifecycle barriers. */
+    private final Executor durableRunnerExecutor;
     /**
      * This pod's worker identity for lease ownership, and how long a traversal's lease lives.
      * Same convention and default as {@code DefaultRavenrootApplication}: the identity distinguishes
@@ -691,6 +693,29 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 storeCallBound);
     }
 
+    /** Package-private deterministic seam for durable runner handoff before registration. */
+    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                           ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                           ai.ravenroot.core.manifest.ExecutionManifestService executionManifests,
+                           String executionContextDeploymentId,
+                           Duration runnerShutdownStepBound,
+                           Duration storeCallBound,
+                           Executor durableRunnerExecutor) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                Clock.systemUTC(), graphDefinitionStore, graphExecutionLimits, agentBudgets,
+                humanTasks, executionManifests, executionContextDeploymentId, runnerShutdownStepBound,
+                storeCallBound, durableRunnerExecutor);
+    }
+
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
     DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
                            ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
@@ -765,6 +790,28 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                            String executionContextDeploymentId,
                            Duration runnerShutdownStepBound,
                            Duration storeCallBound) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
+                graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
+                executionManifests, executionContextDeploymentId, runnerShutdownStepBound,
+                storeCallBound, VIRTUAL_THREADS);
+    }
+
+    private DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits, Clock clock,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                           ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                           ai.ravenroot.core.manifest.ExecutionManifestService executionManifests,
+                           String executionContextDeploymentId,
+                           Duration runnerShutdownStepBound,
+                           Duration storeCallBound,
+                           Executor durableRunnerExecutor) {
         this.executionManifests = executionManifests;
         this.graphDefinitionStore = graphDefinitionStore;
         this.agentBudgets = agentBudgets;
@@ -776,6 +823,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         this.graphExecutionLimits = Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
         this.runnerShutdownStepBound = Objects.requireNonNull(runnerShutdownStepBound, "runnerShutdownStepBound");
         this.storeCallBound = Objects.requireNonNull(storeCallBound, "storeCallBound");
+        this.durableRunnerExecutor = Objects.requireNonNull(durableRunnerExecutor, "durableRunnerExecutor");
         if (runnerShutdownStepBound.isZero() || runnerShutdownStepBound.isNegative()) {
             throw new IllegalArgumentException("runnerShutdownStepBound must be positive");
         }
@@ -1337,17 +1385,38 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
      *
      * <p>Taken under {@link #lock} so a barrier's snapshot sees the unit either still awaiting dispatch
      * or gone, never admitted with its dispatch state already cleared -- which the barrier would read
-     * as a dispatched traversal and count as ended.</p>
+     * as a dispatched traversal and count as ended. If another lifecycle operation owns the lock,
+     * cleanup is queued on a virtual thread instead of extending an expired admission call. The unit
+     * and its durable-event reservation remain installed until that queued cleanup runs.</p>
      */
     private void releaseAdmission(UUID traversalId, Semaphore permits) {
-        lock.lock();
-        try {
-            awaitingDispatch.remove(traversalId);
-            admitted.remove(traversalId);
-        } finally {
-            lock.unlock();
+        releaseAdmission(traversalId, permits, null, null);
+    }
+
+    private void releaseAdmission(UUID traversalId, Semaphore permits, Runnable afterDeferredRelease,
+                                  java.util.concurrent.atomic.AtomicBoolean deferredEventRelease) {
+        if (lock.tryLock()) {
+            try {
+                awaitingDispatch.remove(traversalId);
+                admitted.remove(traversalId);
+            } finally {
+                lock.unlock();
+            }
+            permits.release();
+            return;
         }
-        permits.release();
+        if (deferredEventRelease != null) deferredEventRelease.set(true);
+        CompletableFuture.runAsync(() -> {
+            lock.lock();
+            try {
+                awaitingDispatch.remove(traversalId);
+                admitted.remove(traversalId);
+            } finally {
+                lock.unlock();
+            }
+            permits.release();
+            if (afterDeferredRelease != null) afterDeferredRelease.run();
+        }, VIRTUAL_THREADS);
     }
 
     @Override
@@ -1881,6 +1950,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
          * perpetually overtaken by a busy source.
          */
         private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock(true);
+        private final java.util.concurrent.atomic.AtomicBoolean consumerOpening =
+                new java.util.concurrent.atomic.AtomicBoolean();
         private int lifecycle; // 0 provisional, 1 active, 2 retired
 
         SourceContext(String nodeId, String behavior, SecurityContext identity, IngressRouteOwner ingressOwner, long generation) {
@@ -1909,15 +1980,30 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 }
                 @Override public void close() {
                     if (!closed.compareAndSet(false, true)) return;
+                    java.util.List<StableConsumerIngress> retired;
                     lifecycleLock.writeLock().lock();
                     try {
                         lifecycle = 2;
-                        java.util.List.copyOf(consumers).forEach(StableConsumerIngress::close);
+                        retired = java.util.List.copyOf(consumers);
+                        retired.forEach(StableConsumerIngress::retireUnderLifecycleLock);
                         consumers.clear();
                     } finally {
                         lifecycleLock.writeLock().unlock();
                     }
-                    packageAuthority.close();
+                    try {
+                        packageAuthority.close();
+                    } finally {
+                        long cleanupDeadline = persistenceDeadline();
+                        for (StableConsumerIngress consumer : retired) {
+                            try {
+                                awaitStore(consumer.closeStoreAsync(), cleanupDeadline,
+                                        "source checkpoint ownership close");
+                            } catch (RuntimeException ignored) {
+                                // The handle was revoked under the lifecycle lock. Store ownership
+                                // remains with its asynchronous close until pending writes settle.
+                            }
+                        }
+                    }
                 }
             };
         }
@@ -1925,19 +2011,37 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         private boolean active() {
             lifecycleLock.readLock().lock();
             try {
-                if (lifecycle != 1) return false;
-                lock.lock();
-                try {
-                    return activationGeneration == generation
-                            && status.state() != DeploymentState.STOPPING
-                            && status.state() != DeploymentState.STOPPED
-                            && status.state() != DeploymentState.FAILED;
-                } finally {
-                    lock.unlock();
-                }
+                return activeUnderLifecycleLock();
             } finally {
                 lifecycleLock.readLock().unlock();
             }
+        }
+
+        private boolean activeUnderLifecycleLock() {
+            if (lifecycle != 1) return false;
+            lock.lock();
+            try {
+                return activeGeneration();
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private boolean activeUnderLifecycleLock(long deadlineNanos) {
+            if (lifecycle != 1) return false;
+            lockUntil(lock, deadlineNanos, "deployment admission lock");
+            try {
+                return activeGeneration();
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private boolean activeGeneration() {
+            return activationGeneration == generation
+                    && status.state() != DeploymentState.STOPPING
+                    && status.state() != DeploymentState.STOPPED
+                    && status.state() != DeploymentState.FAILED;
         }
 
         @Override
@@ -2000,21 +2104,66 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
 
         @Override public ai.ravenroot.api.deployment.DurableConsumerIngress openDurableConsumer(String consumerId) {
-            context.lifecycleLock.writeLock().lock();
+            long deadlineNanos = persistenceDeadline();
+            if (consumerId == null || !consumerId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
+                throw new IllegalArgumentException("invalid consumer identity");
+            if (executionStore == null) throw new UnsupportedOperationException("durable source store required");
+            if (!context.consumerOpening.compareAndSet(false, true))
+                throw new IllegalStateException("source consumer already opening");
+            boolean releaseOpening = true;
             try {
-                if (!context.active()) throw new IllegalStateException("source authority is retired");
-                if (consumerId == null || !consumerId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
-                    throw new IllegalArgumentException("invalid consumer identity");
-                if (executionStore == null) throw new UnsupportedOperationException("durable source store required");
-                if (!context.consumers.isEmpty()) throw new IllegalStateException("source consumer already opened");
+                lockUntil(context.lifecycleLock.writeLock(), deadlineNanos, "source ownership reservation");
                 String namespace = encodeSourcePart(context.behavior) + "/"
                         + encodeSourcePart(context.nodeId) + "/" + consumerId;
-                var store = executionStore.openSourceCheckpointStore(context.identity.tenantId(), namespace);
-                var consumer = new StableConsumerIngress(context, store, namespace);
-                context.consumers.add(consumer);
-                return consumer;
+                try {
+                    if (!context.activeUnderLifecycleLock(deadlineNanos))
+                        throw new IllegalStateException("source authority is retired");
+                    if (!context.consumers.isEmpty())
+                        throw new IllegalStateException("source consumer already opened");
+                } finally {
+                    context.lifecycleLock.writeLock().unlock();
+                }
+
+                var opening = CompletableFuture.supplyAsync(() -> executionStore.openSourceCheckpointStore(
+                        context.identity.tenantId(), namespace), VIRTUAL_THREADS);
+                ai.ravenroot.api.persistence.SourceCheckpointStore store;
+                try {
+                    store = awaitStore(opening, deadlineNanos, "source checkpoint ownership open");
+                } catch (RuntimeException | Error failure) {
+                    releaseOpening = false;
+                    opening.whenComplete((lateStore, openFailure) -> {
+                        try {
+                            if (lateStore != null) closeQuietly(lateStore);
+                        } finally {
+                            context.consumerOpening.set(false);
+                        }
+                    });
+                    throw failure;
+                }
+
+                try {
+                    lockUntil(context.lifecycleLock.writeLock(), deadlineNanos,
+                            "source ownership publication");
+                    try {
+                        if (!context.activeUnderLifecycleLock(deadlineNanos))
+                            throw new IllegalStateException("source authority is retired");
+                        if (!context.consumers.isEmpty())
+                            throw new IllegalStateException("source consumer already opened");
+                        var consumer = new StableConsumerIngress(context, store, namespace);
+                        context.consumers.add(consumer);
+                        context.consumerOpening.set(false);
+                        releaseOpening = false;
+                        return consumer;
+                    } finally {
+                        context.lifecycleLock.writeLock().unlock();
+                    }
+                } catch (RuntimeException | Error failure) {
+                    releaseOpening = false;
+                    closeSourceStoreAsync(store, () -> context.consumerOpening.set(false));
+                    throw failure;
+                }
             } finally {
-                context.lifecycleLock.writeLock().unlock();
+                if (releaseOpening) context.consumerOpening.set(false);
             }
         }
 
@@ -2030,12 +2179,20 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
 
         @Override public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
                 IngressTarget target, Object payload, String sourceId, String idempotentKey) {
-            context.lifecycleLock.readLock().lock();
+            long deadlineNanos = persistenceDeadline();
+            boolean lifecycleLocked = false;
             try {
-                return context.active() && context.identity.equals(security) ? ingress.offerDurably(security, target, payload, sourceId, idempotentKey)
+                lockUntil(context.lifecycleLock.readLock(), deadlineNanos, "source lifecycle admission");
+                lifecycleLocked = true;
+                return context.activeUnderLifecycleLock(deadlineNanos) && context.identity.equals(security)
+                        ? ((IngressView) ingress).offerDurablyScoped(security, target, payload, sourceId,
+                                idempotentKey, null, null, deadlineNanos)
                         : new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+            } catch (PersistenceWaitUnresolvedException unresolved) {
+                return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                        "source lifecycle admission did not resolve within its bound");
             } finally {
-                context.lifecycleLock.readLock().unlock();
+                if (lifecycleLocked) context.lifecycleLock.readLock().unlock();
             }
         }
 
@@ -2091,19 +2248,30 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         private boolean authorized(SecurityContext security) {
             return !closed && context.active() && context.identity.equals(security);
         }
+        private boolean authorized(SecurityContext security, long deadlineNanos) {
+            return !closed && context.activeUnderLifecycleLock(deadlineNanos)
+                    && context.identity.equals(security);
+        }
         @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
             // A stable durable handle never offers volatile custody.
             return IngressDisposition.REJECTED_ADMISSION_CLOSED;
         }
         @Override public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
                 IngressTarget target, Object payload, String sourceId, String idempotentKey) {
-            context.lifecycleLock.readLock().lock();
+            long deadlineNanos = persistenceDeadline();
+            boolean lifecycleLocked = false;
             try {
-                if (!authorized(security)) return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+                lockUntil(context.lifecycleLock.readLock(), deadlineNanos, "stable source lifecycle admission");
+                lifecycleLocked = true;
+                if (!authorized(security, deadlineNanos))
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
                 return ((IngressView) ingress).offerDurablyScoped(security, target, payload, sourceId,
-                        idempotentKey, store, namespace);
+                        idempotentKey, store, namespace, deadlineNanos);
+            } catch (PersistenceWaitUnresolvedException unresolved) {
+                return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                        "stable source lifecycle admission did not resolve within its bound");
             } finally {
-                context.lifecycleLock.readLock().unlock();
+                if (lifecycleLocked) context.lifecycleLock.readLock().unlock();
             }
         }
         @Override public CompletionStage<ai.ravenroot.api.deployment.DurableIngressStartState> startState(
@@ -2166,18 +2334,23 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         @Override public int bufferCapacity() { return ingress.bufferCapacity(); }
         @Override public IngressOverflowPolicy overflowPolicy() { return ingress.overflowPolicy(); }
         @Override public void close() {
+            boolean retire;
             context.lifecycleLock.writeLock().lock();
             try {
-                if (closed) return;
-                closed = true;
-                context.consumers.remove(this);
-                try { store.close(); } catch (RuntimeException ignored) {
-                    // Revocation is already final; an adapter cleanup failure cannot keep the
-                    // source's package authority alive or skip retirement of its siblings.
-                }
+                retire = retireUnderLifecycleLock();
             } finally {
                 context.lifecycleLock.writeLock().unlock();
             }
+            if (retire) closeQuietly(store);
+        }
+        private boolean retireUnderLifecycleLock() {
+            if (closed) return false;
+            closed = true;
+            context.consumers.remove(this);
+            return true;
+        }
+        private CompletionStage<Void> closeStoreAsync() {
+            return closeSourceStoreAsync(store, () -> { });
         }
     }
 
@@ -2491,6 +2664,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             SecurityContext security, UUID processInstanceId, UUID traversalId, Object payload,
             ExecutionRecorder recorder,
             ai.ravenroot.api.persistence.ResolvedOperationalPolicy executionOperationalPolicy) {
+        return executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder,
+                executionOperationalPolicy, false);
+    }
+
+    private CompletionStage<GraphExecutionResult> executeHosted(GraphRunner activeRunner,
+            SecurityContext security, UUID processInstanceId, UUID traversalId, Object payload,
+            ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy executionOperationalPolicy,
+            boolean deferRunnerStart) {
         ai.ravenroot.api.persistence.ExecutionKey key = new ai.ravenroot.api.persistence.ExecutionKey(
                 security.tenantId(), processInstanceId);
         AutoCloseable budgetBinding = null;
@@ -2500,12 +2682,31 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     ? null : agentBudgets.bindLive(key, recorder);
             humanTaskBinding = humanTasks == null || recorder == null
                     ? null : humanTasks.bindLive(key, recorder, activeRunner);
-            CompletionStage<GraphExecutionResult> execution = activeRunner.execute(security,
-                    processInstanceId, traversalId, payload, graphVersion, executionContextDeploymentId,
-                    traversalId.toString(), recorder, executionOperationalPolicy,
-                    executionOperationalPolicy == null ? graphExecutionLimits
-                            : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
-                                    executionOperationalPolicy));
+            CompletionStage<GraphExecutionResult> execution;
+            if (deferRunnerStart) {
+                // Durable acceptance, definition/manifest binding and the execution lease are already
+                // committed. Start only this durable source path on a virtual thread so a synchronous
+                // first NODE_STARTED store write cannot retain the deployment dispatch lock or extend
+                // the source's admission call. The traversal remains in `admitted` before this task is
+                // submitted, so a concurrent barrier publishes cancellation even if execute() has not
+                // registered its coordinator yet; GraphRunner reads that mark before dispatching an
+                // effect. Volatile and request/reply ingress retain their synchronous dispatch ordering.
+                execution = CompletableFuture.supplyAsync(() -> activeRunner.execute(security,
+                        processInstanceId, traversalId, payload, graphVersion,
+                        executionContextDeploymentId, traversalId.toString(), recorder,
+                        executionOperationalPolicy,
+                        executionOperationalPolicy == null ? graphExecutionLimits
+                                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                                        executionOperationalPolicy)), durableRunnerExecutor)
+                        .thenCompose(stage -> stage);
+            } else {
+                execution = activeRunner.execute(security, processInstanceId, traversalId, payload,
+                        graphVersion, executionContextDeploymentId, traversalId.toString(), recorder,
+                        executionOperationalPolicy,
+                        executionOperationalPolicy == null ? graphExecutionLimits
+                                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                                        executionOperationalPolicy));
+            }
             AutoCloseable finalBudgetBinding = budgetBinding;
             AutoCloseable finalHumanTaskBinding = humanTaskBinding;
             return execution.whenComplete((result, failure) -> {
@@ -2572,6 +2773,35 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         } catch (ArithmeticException overflow) {
             return Long.MAX_VALUE;
         }
+    }
+
+    private void lockUntil(java.util.concurrent.locks.Lock candidate, long deadlineNanos,
+                           String operation) {
+        long remaining = deadlineNanos - System.nanoTime();
+        if (remaining <= 0) {
+            throw new PersistenceWaitUnresolvedException(operation + " exceeded the admission bound");
+        }
+        try {
+            if (!candidate.tryLock(remaining, TimeUnit.NANOSECONDS)) {
+                throw new PersistenceWaitUnresolvedException(
+                        operation + " did not resolve within the admission bound");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new PersistenceWaitUnresolvedException("interrupted while waiting for " + operation,
+                    interrupted);
+        }
+    }
+
+    private static CompletableFuture<Void> closeSourceStoreAsync(
+            ai.ravenroot.api.persistence.SourceCheckpointStore store, Runnable afterClose) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                closeQuietly(store);
+            } finally {
+                afterClose.run();
+            }
+        }, VIRTUAL_THREADS);
     }
 
     private Duration remainingStoreTime(long deadlineNanos, String operation) {
@@ -2737,12 +2967,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         @Override
         public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
                 IngressTarget target, Object payload, String sourceId, String idempotentKey) {
-            return offerDurablyScoped(security, target, payload, sourceId, idempotentKey, null, null);
+            long deadlineNanos = persistenceDeadline();
+            return offerDurablyScoped(security, target, payload, sourceId, idempotentKey, null, null,
+                    deadlineNanos);
         }
 
         private ai.ravenroot.api.deployment.IngressReceipt offerDurablyScoped(SecurityContext security,
                 IngressTarget target, Object payload, String sourceId, String idempotentKey,
-                ai.ravenroot.api.persistence.SourceCheckpointStore sourceStore, String sourceNamespace) {
+                ai.ravenroot.api.persistence.SourceCheckpointStore sourceStore, String sourceNamespace,
+                long deadlineNanos) {
             Objects.requireNonNull(sourceId, "sourceId");
             Objects.requireNonNull(idempotentKey, "idempotentKey");
             if (executionStore == null) {
@@ -2761,16 +2994,21 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             UUID processInstanceId = eventId;
             UUID traversalId = UUID.nameUUIDFromBytes((eventId + "\0traversal")
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            long deadlineNanos = persistenceDeadline();
             if (!activeDurableEvents.add(eventId)) {
                 return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                         "the same durable event is still being admitted");
             }
+            var deferredEventRelease = new java.util.concurrent.atomic.AtomicBoolean();
             try {
                 GraphRunner activeRunner;
                 Semaphore permits;
                 long generation;
-                lock.lock();
+                try {
+                    lockUntil(lock, deadlineNanos, "deployment admission lock");
+                } catch (PersistenceWaitUnresolvedException unresolved) {
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                            "deployment admission did not resolve within its bound");
+                }
                 try {
                     DeploymentState currentState = status.state();
                     activeRunner = runner;
@@ -2809,7 +3047,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     // Javadoc): the traversal is not dispatched, because dispatching now could duplicate
                     // work a delayed, eventually-successful write already durably recorded. Reconciliation
                     // is re-offering the same idempotentKey once the caller has backed off.
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                             "durable commit did not resolve within its bound");
                 }
@@ -2829,21 +3068,25 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                             recorder = resumeUnstartedTraversal(security, processInstanceId, traversalId,
                                     deadlineNanos);
                             if (recorder == null) {
-                                releaseAdmission(traversalId, permits);
+                                releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                                        deferredEventRelease);
                                 return new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
                             }
                             resumed = true;
                         } catch (ExecutionInstanceBusyException busy) {
-                            releaseAdmission(traversalId, permits);
+                            releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                                    deferredEventRelease);
                             return new ai.ravenroot.api.deployment.IngressReceipt.Refused(
                                     "process instance is already leased by another worker");
                         } catch (RuntimeException recoveryFailure) {
-                            releaseAdmission(traversalId, permits);
+                            releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                                    deferredEventRelease);
                             return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                                     "durable traversal recovery did not resolve");
                         }
                     } else {
-                        releaseAdmission(traversalId, permits);
+                        releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                                deferredEventRelease);
                         return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                                 "durable traversal acceptance did not resolve");
                     }
@@ -2851,28 +3094,33 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     // Fail closed, expressed in the receipt the caller already knows how to read.
                     // Unreachable today; see IngressDisposition.REJECTED_INSTANCE_BUSY for why, and why
                     // the refuse-versus-queue choice belongs to the re-entry work rather than here.
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     return new ai.ravenroot.api.deployment.IngressReceipt.Refused(
                             "process instance is already leased by another worker");
                 } catch (ai.ravenroot.api.persistence.GraphDefinitionStoreException
                          | ai.ravenroot.api.persistence.ExecutionManifestStoreException
                          | PersistenceWaitUnresolvedException persistenceFailure) {
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                             "durable traversal prerequisites did not resolve");
                 } catch (RuntimeException | Error recordFailure) {
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     throw recordFailure;
                 }
                 try {
                     executionOperationalPolicy = resolveHostedPolicy(security, processInstanceId, recorder,
                             deadlineNanos);
                 } catch (RuntimeException policyFailure) {
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                             "durable traversal policy did not resolve");
                 } catch (Error policyFailure) {
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     throw policyFailure;
                 }
                 try {
@@ -2881,15 +3129,24 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     // barrier may have closed that generation while it ran; this is where that is decided,
                     // by the exact equality ADR 0038 D6 requires. The durable record stands either way;
                     // a redelivery has the same execution identity and cannot create a second traversal.
-                    lock.lock();
+                    try {
+                        lockUntil(lock, deadlineNanos, "deployment dispatch lock");
+                    } catch (PersistenceWaitUnresolvedException unresolved) {
+                        closeQuietly(recorder);
+                        releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                                deferredEventRelease);
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                                "durable dispatch did not resolve within its bound");
+                    }
                     try {
                         if (!awaitingDispatch.remove(traversalId)) {
                             closeQuietly(recorder);
-                            releaseAdmission(traversalId, permits);
+                            releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                                    deferredEventRelease);
                             return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
                         }
                         executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder,
-                                executionOperationalPolicy)
+                                executionOperationalPolicy, true)
                                 .whenComplete((ignoredResult, ignoredError) -> {
                                     admitted.remove(traversalId);
                                     permits.release();
@@ -2898,14 +3155,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                         lock.unlock();
                     }
                 } catch (RuntimeException | Error dispatchFailure) {
-                    releaseAdmission(traversalId, permits);
+                    releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
+                            deferredEventRelease);
                     throw dispatchFailure;
                 }
                 return firstDelivery && !resumed
                         ? new ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted(idempotentKey)
                         : new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
             } finally {
-                activeDurableEvents.remove(eventId);
+                if (!deferredEventRelease.get()) activeDurableEvents.remove(eventId);
             }
         }
 

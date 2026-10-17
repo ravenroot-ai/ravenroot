@@ -123,11 +123,14 @@ final class AmqpConsumerSource implements InboundSource {
     @Override public CompletionStage<Void> rollback() { return stop(); }
     @Override public CompletionStage<Void> shutdown() { return stop(); }
     State state() { return state; }
-    long generation() { lifecycle.lock();
-        try { return generation;
+    long generation() {
+        lifecycle.lock();
+        try {
+            return generation;
         } finally {
             lifecycle.unlock();
-        } }
+        }
+    }
 
     private void run(InboundSourceContext context, CompletableFuture<Void> ready,
                      CompletableFuture<Void> stopped) {
@@ -177,22 +180,24 @@ final class AmqpConsumerSource implements InboundSource {
             fail(context, ready, failure);
         } finally {
             lifecycle.lock();
-        try { generation++; owner = null;
-        } finally {
-            lifecycle.unlock();
-        }
+            try {
+                generation++;
+                owner = null;
+            } finally {
+                lifecycle.unlock();
+            }
             if (password != null) java.util.Arrays.fill(password, '\0');
             if (secret != null) secret.close();
             if (resourceLease != null) resourceLease.close();
             lifecycle.lock();
-        try {
+            try {
                 if (!ready.isDone()) ready.completeExceptionally(
                         new IllegalStateException("AMQP source stopped before readiness"));
                 state = stopRequested ? State.STOPPED : State.FAILED;
                 stopped.complete(null); lifecycleChanged.signalAll();
-        } finally {
-            lifecycle.unlock();
-        }
+            } finally {
+                lifecycle.unlock();
+            }
         }
     }
 
@@ -299,16 +304,23 @@ final class AmqpConsumerSource implements InboundSource {
         catch (RuntimeException ignored) { }
     }
 
-    private long nextGeneration() { lifecycle.lock();
-        try { return ++generation;
+    private long nextGeneration() {
+        lifecycle.lock();
+        try {
+            return ++generation;
         } finally {
             lifecycle.unlock();
-        } }
-    private boolean current(long expected) { lifecycle.lock();
-        try { return !stopRequested && generation == expected;
+        }
+    }
+
+    private boolean current(long expected) {
+        lifecycle.lock();
+        try {
+            return !stopRequested && generation == expected;
         } finally {
             lifecycle.unlock();
-        } }
+        }
+    }
 
     private boolean ackIfCurrent(long expected, long deliveryTag) throws AmqpConsumerProtocol.Failure {
         lifecycle.lock();

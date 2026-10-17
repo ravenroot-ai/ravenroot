@@ -6630,10 +6630,34 @@ function closeInfo() {
 function readNodeEditorPatch(form, model) {
   const values = new FormData(form);
   const id = String(values.get('id') || '').trim();
+  const behavior = String(values.get('behavior') || '').trim();
   const custom = readPropertyEditor(form);
   const additionalGroups = readAdditionalPropertyGroupEditor(
-    form, catalogDescriptor(String(values.get('behavior') || '').trim()));
+    form, catalogDescriptor(behavior));
   const catalog = readCatalogPropertyEditor(form);
+  // Conditional catalog fields retain their draft and serialized value by default. AMQP destination
+  // modes are narrower: their runtime schemas reject inactive destination fields, so remove only
+  // those fields here, in the single read path shared by submit, autosave and draft comparison.
+  const removeCatalogProperty = name => {
+    delete catalog.properties[name];
+    delete catalog.propertyTypes[name];
+  };
+  if (behavior === 'amqp.consume') {
+    if ((catalog.properties.mode || 'Consumer') === 'Subscriber') {
+      removeCatalogProperty('queue');
+      removeCatalogProperty('resourceMode');
+    } else {
+      removeCatalogProperty('exchange');
+      removeCatalogProperty('bindingPattern');
+    }
+  } else if (behavior === 'amqp.publish') {
+    if ((catalog.properties.mode || 'Producer') === 'Publisher') {
+      removeCatalogProperty('queue');
+    } else if (catalog.properties.queue) {
+      removeCatalogProperty('exchange');
+      removeCatalogProperty('routingKey');
+    }
+  }
   const nature = readNatureEditor(form);
   // The bypass flag is read HERE and not at the submit site, and that placement is the
   // whole point rather than tidiness. This function has three callers: the submit handler, the
@@ -6652,7 +6676,7 @@ function readNodeEditorPatch(form, model) {
   return {
     name: String(values.get('name') || id).trim() || id,
     kind,
-    behavior: kind === 'BEHAVIOR' ? String(values.get('behavior') || '').trim() : '',
+    behavior: kind === 'BEHAVIOR' ? behavior : '',
     nodeType: kindOwnsNodeType(kind)
       ? kindToNodeType(kind) : String(values.get('nodeType') || kindToNodeType(kind)),
     isStart: kind === 'START',
@@ -7334,21 +7358,11 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
   // because a condition can name any other property in this same list, not only ones earlier in it.
   const resolvedValues = Object.fromEntries(
     descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
-  // A hidden field is inactive authoring state, so its retained draft value must not hide or
-  // require another field. Blank only this condition-time copy to a fixed point; controls still
-  // render from resolvedValues, preserving drafts when a mode is toggled back.
-  const conditionValues = { ...resolvedValues };
-  for (let pass = 0; pass < descriptor.properties.length; pass += 1) {
-    let changed = false;
-    for (const conditionalProperty of descriptor.properties) {
-      if (!isPropertyVisible(conditionalProperty, conditionValues)
-          && conditionValues[conditionalProperty.name] !== '') {
-        conditionValues[conditionalProperty.name] = '';
-        changed = true;
-      }
-    }
-    if (!changed) break;
-  }
+  // Publisher inherits a Producer queue only as an in-session draft. The queue stays mounted and
+  // retained, but cannot suppress the Publisher exchange/routing controls while its own row is
+  // hidden. Other descriptors keep the established rule that conditions see retained hidden values.
+  const conditionValues = descriptor.behavior === 'amqp.publish' && resolvedValues.mode === 'Publisher'
+    ? { ...resolvedValues, queue: '' } : resolvedValues;
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
     const title = property.displayName || property.name;
@@ -7677,17 +7691,8 @@ function readCurrentCatalogPropertyValues(container) {
  */
 function conditionalPropertyStates(descriptor, valuesByName) {
   const properties = descriptor?.properties || [];
-  const conditionValues = { ...valuesByName };
-  for (let pass = 0; pass < properties.length; pass += 1) {
-    let changed = false;
-    for (const property of properties) {
-      if (!isPropertyVisible(property, conditionValues) && conditionValues[property.name] !== '') {
-        conditionValues[property.name] = '';
-        changed = true;
-      }
-    }
-    if (!changed) break;
-  }
+  const conditionValues = descriptor?.behavior === 'amqp.publish' && valuesByName.mode === 'Publisher'
+    ? { ...valuesByName, queue: '' } : valuesByName;
   return properties.map(property => ({
     name: property.name,
     displayName: property.displayName,
@@ -7768,10 +7773,6 @@ function readCatalogPropertyEditor(form) {
   const properties = {};
   const propertyTypes = {};
   form.querySelectorAll('[data-catalog-property]').forEach(field => {
-    // Conditional fields stay mounted so changing their driver can restore the draft value during
-    // this edit session. They are nevertheless inactive authoring inputs while their wrapper is
-    // hidden and must not survive the whole-property-map replacement performed on Save.
-    if (field.closest('.catalog-property')?.hidden) return;
     const name = field.dataset.catalogProperty;
     const value = field.value;
     if (value === '') return;

@@ -91,13 +91,17 @@ function bindingValue(bindings, identifier) {
 
 function createBindingResolver(ast) {
   const declarations = [];
+  const ownerOf = ancestors => [...ancestors].reverse().find(item =>
+    ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'Program'].includes(item.type));
+  const identifierOwners = new Map();
+  walk.ancestor(ast, { Identifier(node, ancestors) { identifierOwners.set(node, ownerOf(ancestors)); } });
   walk.ancestor(ast, {
     VariableDeclarator(node, ancestors) {
       if (node.id.type !== 'Identifier' || !node.init) return;
       const scope = [...ancestors].reverse().find(ancestor => ancestor !== node
         && ['BlockStatement', 'Program', 'FunctionDeclaration', 'FunctionExpression',
           'ArrowFunctionExpression'].includes(ancestor.type)) || ast;
-      declarations.push({ name: node.id.name, value: node.init, scope, start: node.start });
+      declarations.push({ name: node.id.name, value: node.init, scope, start: node.start, origin: node, owner: ownerOf(ancestors) });
     },
   });
   walk.ancestor(ast, { AssignmentExpression(node, ancestors) {
@@ -107,11 +111,20 @@ function createBindingResolver(ast) {
       .sort((a, b) => (a.scope.end - a.scope.start) - (b.scope.end - b.scope.start))[0];
     if (declaration) declarations.push({ ...declaration, value: node.right, start: node.start });
   } });
-  return identifier => declarations.filter(declaration => declaration.name === identifier.name
-      && declaration.start < identifier.start
-      && declaration.scope.start <= identifier.start && declaration.scope.end >= identifier.end)
-    .sort((left, right) => (left.scope.end - left.scope.start) - (right.scope.end - right.scope.start)
-      || right.start - left.start)[0]?.value;
+  return identifier => {
+    const visible = declarations.filter(item => item.name === identifier.name
+      && item.scope.start <= identifier.start && item.scope.end >= identifier.end)
+      .sort((a, b) => (a.scope.end - a.scope.start) - (b.scope.end - b.scope.start) || b.start - a.start);
+    if (!visible.length) return undefined;
+    const nearest = visible[0];
+    // A closure can run after its declaration, so later writes to the captured binding
+    // are possible sources. Preserve ordinary lexical ordering for a direct local read.
+    if (identifierOwners.get(identifier) !== nearest.owner) {
+      const values = visible.filter(item => item.origin === nearest.origin).map(item => item.value);
+      return values.length === 1 ? values[0] : { type: 'ArrayExpression', elements: values };
+    }
+    return visible.find(item => item.start < identifier.start)?.value;
+  };
 }
 
 function outputLiterals(node, output = [], bindings = new Map(), seen = new Set()) {
@@ -119,6 +132,9 @@ function outputLiterals(node, output = [], bindings = new Map(), seen = new Set(
   if (localizationCall(node)) {
     outputLiterals(node.arguments[1], output, bindings, seen);
     return output;
+  }
+  if (node.type === 'CallExpression' && ['String', 'escapeHtml', 'escapeAttribute'].includes(node.callee.name)) {
+    return outputLiterals(node.arguments[0], output, bindings, seen);
   }
   if (node.type === 'Identifier' && !seen.has(node.start)) {
     const value = bindingValue(bindings, node);
@@ -164,12 +180,14 @@ function outputLiterals(node, output = [], bindings = new Map(), seen = new Set(
 // Derive wrapper signatures from their bodies, rather than recognizing wrapper names.
 // A parameter reaching a DOM/native-dialog sink makes that argument a sink at every call,
 // transitively. Return expressions and lexical aliases are followed at the use site.
-function presentationFlow(ast) {
+function presentationFlow(ast, isExempt = () => false) {
   const bindings = createBindingResolver(ast);
   const functions = [];
   const owners = new Map();
+  const identifierOwners = new Map();
   const calls = [];
   const sinks = [];
+  const catches = [];
   const signatures = new Map();
   const functionTypes = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
   const nameOf = node => node?.type === 'MemberExpression'
@@ -191,8 +209,23 @@ function presentationFlow(ast) {
       functions.push({ node, name, scope });
       signatures.set(node, new Set());
     },
+    Identifier(node, ancestors) { identifierOwners.set(node, [...ancestors].reverse().find(item => functionTypes.has(item.type))); },
     CallExpression(node, ancestors) { calls.push(node); owners.set(node,
       [...ancestors.slice(0, -1)].reverse().find(item => functionTypes.has(item.type))); },
+    TryStatement(node, ancestors) {
+      if (node.handler?.param?.type === 'Identifier') catches.push({
+        name: node.handler.param.name, scope: node.handler.body, block: node.block,
+        owner: [...ancestors].reverse().find(item => functionTypes.has(item.type)),
+      });
+    },
+    Property(node, ancestors) {
+      const name = node.key?.name ?? node.key?.value;
+      if (isExempt(node)) return;
+      if (['label', 'shortLabel', 'caption', 'help', 'title', 'message', 'emptyText', 'placeholder',
+        'ariaLabel', 'ariaDescription', 'error', 'warning', 'description', 'detail', 'displayName', 'category'].includes(name)) {
+        sinks.push({ expression: node.value, localizedError: name === 'error', owner: [...ancestors].reverse().find(item => functionTypes.has(item.type)) });
+      }
+    },
     AssignmentExpression(node, ancestors) {
       if (node.left.type !== 'MemberExpression') return;
       const property = nameOf(node.left);
@@ -253,25 +286,61 @@ function presentationFlow(ast) {
     } });
     return result;
   };
-  function trace(node, owner, onLiteral, visiting = new Set(), substitutions = new Map()) {
+  // Propagate locally thrown errors through calls/callbacks to catch bindings. Keep
+  // developer diagnostics separate from productError's structured presentation key.
+  const exceptionBlocks = new Map();
+  for (const { node } of functions) exceptionBlocks.set(node.body, { owner: node, throws: new Map(), calls: new Set() });
+  for (const caught of catches) exceptionBlocks.set(caught.block, { owner: caught.owner, throws: new Map(), calls: new Set() });
+  for (const [block, summary] of exceptionBlocks) {
+    const handled = (node, ancestors) => ancestors.some(item => item.type === 'TryStatement'
+      && item.handler && item.block.start <= node.start && item.block.end >= node.end);
+    walk.ancestor(block, {
+      ThrowStatement(node, ancestors) {
+        if (!ancestors.some(item => functionTypes.has(item.type)) && !handled(node, ancestors)) {
+          summary.throws.set(node, { node: node.argument, owner: summary.owner });
+        }
+      },
+      CallExpression(node, ancestors) {
+        if (ancestors.some(item => functionTypes.has(item.type)) || handled(node, ancestors)) return;
+        for (const fn of resolveCallables(node.callee, summary.owner)) summary.calls.add(fn.body);
+      },
+    });
+  }
+  let exceptionsChanged = true;
+  while (exceptionsChanged) {
+    exceptionsChanged = false;
+    for (const summary of exceptionBlocks.values()) for (const block of summary.calls) {
+      for (const [site, thrown] of exceptionBlocks.get(block)?.throws || []) {
+        if (!summary.throws.has(site)) { summary.throws.set(site, thrown); exceptionsChanged = true; }
+      }
+    }
+  }
+  const thrownFrom = block => [...(exceptionBlocks.get(block)?.throws.values() || [])];
+  function trace(node, owner, onLiteral, visiting = new Set(), substitutions = new Map(), localizedError = false) {
     if (!node || visiting.has(node)) return;
     const next = new Set(visiting).add(node);
-    const recur = child => trace(child, owner, onLiteral, next, substitutions);
+    const recur = child => trace(child, owner, onLiteral, next, substitutions, localizedError);
     if (node.type === 'ChainExpression') return recur(node.expression);
     if (functionTypes.has(node.type)) return returns(node).forEach(recur);
     if (localizationCall(node)) return recur(node.arguments[1]);
     if (node.type === 'Identifier') {
       if (substitutions.has(node.name)) return recur(substitutions.get(node.name));
-      owner?.params.forEach((raw, index) => {
+      const caught = catches.filter(item => item.name === node.name && item.scope.start <= node.start
+        && item.scope.end >= node.end).sort((a, b) => (a.scope.end - a.scope.start) - (b.scope.end - b.scope.start))[0];
+      if (caught) for (const thrown of thrownFrom(caught.block, caught.owner)) {
+        trace(thrown.node, thrown.owner, onLiteral, next, substitutions, localizedError);
+      }
+      const parameterOwner = identifierOwners.get(node) || owner;
+      parameterOwner?.params.forEach((raw, index) => {
         const param = raw.type === 'AssignmentPattern' ? raw.left : raw;
         if (param.type === 'Identifier' && param.name === node.name) {
-          signatures.get(owner)?.add(String(index));
+          signatures.get(parameterOwner)?.add(String(index) + (localizedError ? ':error' : ''));
           if (raw.type === 'AssignmentPattern') recur(raw.right);
         } else if (param.type === 'ObjectPattern') {
           for (const property of param.properties) {
             const value = property.value?.type === 'AssignmentPattern' ? property.value.left : property.value;
             if (value?.name === node.name) {
-              signatures.get(owner)?.add(`${index}.${property.key.name || property.key.value}`);
+              signatures.get(parameterOwner)?.add(`${index}.${property.key.name || property.key.value}${localizedError ? ':error' : ''}`);
               if (property.value.type === 'AssignmentPattern') recur(property.value.right);
             }
           }
@@ -292,15 +361,33 @@ function presentationFlow(ast) {
       node.properties.forEach(item => recur(item.value));
     } else if (node.type === 'ArrayExpression') node.elements.forEach(recur);
     else if (node.type === 'MemberExpression') {
-      let object = node.object;
-      if (object.type === 'Identifier') object = bindingValue(bindings, object) || object;
-      if (object.type === 'CallExpression' && nameOf(object.callee) === 'freeze') object = object.arguments[0];
-      if (object?.type === 'ObjectExpression') {
-        object.properties.filter(item => node.computed && node.property.type !== 'Literal'
-          || (item.key?.name ?? item.key?.value) === nameOf(node)).forEach(item => recur(item.value));
-      }
+      const project = (object, seen = new Set()) => {
+        if (!object || seen.has(object)) return false;
+        const visited = new Set(seen).add(object);
+        if (object.type === 'Identifier') {
+          const value = bindingValue(bindings, object);
+          if (value && project(value, visited)) return true;
+        }
+        if (object.type === 'CallExpression' && nameOf(object.callee) === 'freeze') return project(object.arguments[0], visited);
+        if (object.type === 'CallExpression') {
+          const fn = resolveFunction(object.callee);
+          if (fn && !visited.has(fn)) return returns(fn).map(value => project(value, new Set(visited).add(fn))).some(Boolean);
+        }
+        if (object.type === 'ArrayExpression') return object.elements.map(value => project(value, visited)).some(Boolean);
+        if (object.type === 'ObjectExpression') {
+          object.properties.filter(item => node.computed && node.property.type !== 'Literal'
+            || (item.key?.name ?? item.key?.value) === nameOf(node)).forEach(item => recur(item.value));
+          return true;
+        }
+        return false;
+      };
+      if (!project(node.object) && nameOf(node) === 'message') trace(node.object, owner, onLiteral, next, substitutions, false);
+    } else if (node.type === 'NewExpression' && /^(?:Error|TypeError|RangeError)$/u.test(nameOf(node.callee))) {
+      recur(node.arguments[0]);
     } else if (node.type === 'CallExpression') {
       const name = nameOf(node.callee);
+      if (name === 'uiErrorReason') return trace(node.arguments[0], owner, onLiteral, next, substitutions, true);
+      if (name === 'productError') { recur(node.arguments[localizedError ? 2 : 1]); return; }
       if (['escapeHtml', 'escapeAttribute', 'String'].includes(name)) return recur(node.arguments[0]);
       if (node.callee.type === 'MemberExpression' && ['join', 'trim', 'toString'].includes(name)) return recur(node.callee.object);
       if (node.callee.type === 'Identifier' && owner?.params.some(param => param.name === node.callee.name)) recur(node.callee);
@@ -311,7 +398,7 @@ function presentationFlow(ast) {
           const param = parameter.type === 'AssignmentPattern' ? parameter.left : parameter;
           if (param.type === 'Identifier' && node.arguments[index]) mapped.set(param.name, node.arguments[index]);
         });
-        for (const value of returns(fn)) trace(value, owner, onLiteral, new Set(next).add(fn), mapped);
+        for (const value of returns(fn)) trace(value, owner, onLiteral, new Set(next).add(fn), mapped, localizedError);
       }
     }
   }
@@ -354,7 +441,10 @@ function presentationFlow(ast) {
     }
   }
   const inspect = onLiteral => {
-    for (const { expression, owner, html } of sinks) (html ? traceHtml : trace)(expression, owner, onLiteral);
+    for (const { expression, owner, html, localizedError } of sinks) {
+      if (html) traceHtml(expression, owner, onLiteral);
+      else trace(expression, owner, onLiteral, new Set(), new Map(), localizedError);
+    }
     for (const call of calls) {
       const name = nameOf(call.callee);
       if (name === 'insertAdjacentHTML') traceHtml(call.arguments[1], owners.get(call), onLiteral);
@@ -363,13 +453,14 @@ function presentationFlow(ast) {
         for (const path of signatures.get(target) || []) arguments_.add(path);
       }
       for (const path of arguments_) {
-        const [index, property] = String(path).split('.');
+        const [argumentPath, kind] = String(path).split(':');
+        const [index, property] = argumentPath.split('.');
         let value = call.arguments[index];
         if (property) {
           if (value?.type === 'Identifier') value = bindingValue(bindings, value);
           value = value?.properties?.find(item => (item.key?.name ?? item.key?.value) === property)?.value;
         }
-        trace(value, owners.get(call), onLiteral);
+        trace(value, owners.get(call), onLiteral, new Set(), new Map(), kind === 'error');
       }
       if (name === 'setAttribute' && /^(?:title|placeholder|aria-(?:label|description|valuetext))$/u
         .test(call.arguments[0]?.value || '')) trace(call.arguments[1], owners.get(call), onLiteral);
@@ -470,7 +561,8 @@ function auditJavascript() {
         fail(file, line, 'inline product text reaches a presentation sink');
       }
     };
-    presentationFlow(ast).inspect(reportLiteral);
+    presentationFlow(ast, node => [lines[node.loc.start.line - 1], lines[node.loc.start.line - 2]].some(value =>
+      /i18n-audit-exempt: (?:authored-content|protocol-token|diagnostic-content) - .{15,}/u.test(value || ''))).inspect(reportLiteral);
     const report = node => {
       for (const literal of outputLiterals(node, [], bindings)) {
         reportLiteral(literal);

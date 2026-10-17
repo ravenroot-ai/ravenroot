@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import {
   UI_CATALOG_SCHEMA,
   UI_LOCALES_SCHEMA,
@@ -29,8 +30,8 @@ function openCatalogDatabase(indexedDB) {
     request.onupgradeneeded = () => request.result.createObjectStore(CATALOG_STORE,
       { keyPath: 'locale' });
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('Catalog storage is unavailable.'));
-    request.onblocked = () => reject(new Error('Catalog storage upgrade is blocked.'));
+    request.onerror = () => reject(request.error || productError("workspace.error.ui.localization.catalog.storage.is.unavailable", new Error('Catalog storage is unavailable.')));
+    request.onblocked = () => reject(productError("workspace.error.ui.localization.catalog.storage.upgrade.is.blocked", new Error('Catalog storage upgrade is blocked.')));
   });
 }
 
@@ -69,7 +70,7 @@ async function storedCatalogs(indexedDB, onDiagnostic) {
 
 async function writeStoredCatalog(indexedDB, catalog) {
   const database = await openCatalogDatabase(indexedDB);
-  if (!database) throw new Error('Catalog storage is unavailable.');
+  if (!database) throw productError("workspace.error.ui.localization.catalog.storage.is.unavailable", new Error('Catalog storage is unavailable.'));
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(CATALOG_STORE, 'readwrite');
     transaction.objectStore(CATALOG_STORE).put(catalog);
@@ -93,20 +94,20 @@ async function deleteStoredCatalog(indexedDB, locale) {
 
 export function validateUiLocalesConfiguration(value) {
   if (!plainObject(value) || value.schema !== UI_LOCALES_SCHEMA) {
-    throw new TypeError(`UI locale configuration schema must be "${UI_LOCALES_SCHEMA}".`);
+    throw productError("workspace.error.ui.localization.ui.locale.configuration.schema.must.be", new TypeError(`UI locale configuration schema must be "${UI_LOCALES_SCHEMA}".`), { value1: UI_LOCALES_SCHEMA });
   }
   const defaultLocale = value.defaultLocale === undefined ? null
     : normalizeUiLocale(value.defaultLocale);
-  if (!Array.isArray(value.catalogs)) throw new TypeError('UI locale configuration catalogs must be an array.');
+  if (!Array.isArray(value.catalogs)) throw productError("workspace.error.ui.localization.ui.locale.configuration.catalogs.must.be.an.array", new TypeError('UI locale configuration catalogs must be an array.'));
   const catalogs = value.catalogs.map(validateUiCatalog);
   const locales = new Set();
   for (const catalog of catalogs) {
-    if (locales.has(catalog.locale)) throw new TypeError(`Duplicate UI catalog "${catalog.locale}".`);
+    if (locales.has(catalog.locale)) throw productError("workspace.error.ui.localization.duplicate.ui.catalog", new TypeError(`Duplicate UI catalog "${catalog.locale}".`), { value1: catalog.locale });
     locales.add(catalog.locale);
   }
   if (defaultLocale !== null && defaultLocale !== 'en' && !locales.has(defaultLocale)
       && !locales.has(new Intl.Locale(defaultLocale).language)) {
-    throw new TypeError(`Configured default locale "${defaultLocale}" has no catalog.`);
+    throw productError("workspace.error.ui.localization.configured.default.locale.has.no.catalog", new TypeError(`Configured default locale "${defaultLocale}" has no catalog.`), { value1: defaultLocale });
   }
   return Object.freeze({ schema: UI_LOCALES_SCHEMA, defaultLocale,
     catalogs: Object.freeze(catalogs) });
@@ -116,7 +117,7 @@ function configurationDeadline(timeoutMs, controller) {
   let timer;
   const promise = new Promise((_resolve, reject) => {
     timer = globalThis.setTimeout(() => {
-      reject(new Error('UI locale configuration request timed out.'));
+      reject(productError("workspace.error.ui.localization.ui.locale.configuration.request.timed.out", new Error('UI locale configuration request timed out.')));
       controller.abort();
     }, timeoutMs);
   });
@@ -168,7 +169,7 @@ async function readConfiguration(fetch_, document_, onDiagnostic, timeoutMs) {
     deadline.clear();
   }
   try {
-    if (new TextEncoder().encode(text).byteLength > MAX_UI_CATALOG_BYTES) throw new RangeError('Configuration is too large.');
+    if (new TextEncoder().encode(text).byteLength > MAX_UI_CATALOG_BYTES) throw productError("workspace.error.ui.localization.configuration.is.too.large", new RangeError('Configuration is too large.'));
     return validateUiLocalesConfiguration(JSON.parse(text));
   } catch (failure) {
     report(onDiagnostic, 'CONFIG_INVALID', { reason: failure.message });
@@ -293,7 +294,7 @@ export async function initializeUiLocalization({
     },
     async importCatalog(value) {
       const catalog = validateUiCatalog(value);
-      if (catalog.locale === 'en') throw new TypeError('The built-in English source catalog cannot be replaced by an imported catalog.');
+      if (catalog.locale === 'en') throw productError("workspace.error.ui.localization.the.built.in.english.source.catalog.cannot.be.replaced.by.an.impo", new TypeError('The built-in English source catalog cannot be replaced by an imported catalog.'));
       await writeStoredCatalog(indexedDB, catalog);
       sources.set(catalog.locale, 'imported');
       available.add(catalog.locale);
@@ -302,7 +303,7 @@ export async function initializeUiLocalization({
     },
     async removeImportedCatalog(locale_) {
       const normalized = normalizeUiLocale(locale_);
-      if (sources.get(normalized) !== 'imported') throw new TypeError('Only imported UI catalogs can be removed.');
+      if (sources.get(normalized) !== 'imported') throw productError("workspace.error.ui.localization.only.imported.ui.catalogs.can.be.removed", new TypeError('Only imported UI catalogs can be removed.'));
       await deleteStoredCatalog(indexedDB, normalized);
       sources.delete(normalized);
       available.delete(normalized);

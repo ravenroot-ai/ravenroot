@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import {
   documentModeViewStates,
   normalizeDesignArrangement,
@@ -14,14 +15,14 @@ const MODES = new Set(['draft', 'test', 'deployed']);
 
 export function workspaceScope(serviceUrl, tenantId) {
   if (typeof serviceUrl !== 'string' || !serviceUrl || typeof tenantId !== 'string' || !tenantId) {
-    throw new TypeError('A workspace scope needs an exact service URL and tenant id');
+    throw productError("workspace.error.workspace.persistence.a.workspace.scope.needs.an.exact.service.url.and.tenant.id", new TypeError('A workspace scope needs an exact service URL and tenant id'));
   }
   return Object.freeze({ serviceUrl, tenantId, key: JSON.stringify([serviceUrl, tenantId]) });
 }
 
 function nullableString(value, label) {
   if (value === null || value === undefined) return null;
-  if (typeof value !== 'string' || !value) throw new TypeError(`${label} must be a non-empty string or null`);
+  if (typeof value !== 'string' || !value) throw productError("workspace.error.workspace.persistence.must.be.a.non.empty.string.or.null", new TypeError(`${label} must be a non-empty string or null`), { value1: label });
   return value;
 }
 
@@ -29,7 +30,7 @@ function persistedAuthoring(value) {
   if (!value?.providerDocumentId) return null;
   const revision = value.revision;
   if (!revision || ['draft', 'release', 'publication'].some(key => typeof revision[key] !== 'string' || !revision[key])) {
-    throw new TypeError('Repository authoring revision is invalid');
+    throw productError("workspace.error.workspace.persistence.repository.authoring.revision.is.invalid", new TypeError('Repository authoring revision is invalid'));
   }
   return Object.freeze({ providerDocumentId: nullableString(value.providerDocumentId, 'providerDocumentId'),
     revision: Object.freeze({ draft: revision.draft, release: revision.release, publication: revision.publication }),
@@ -62,21 +63,22 @@ export function canonicalGraphSnapshot(graph) {
 
 export function persistedDocument(document_) {
   if (!document_ || typeof document_ !== 'object' || !MODES.has(document_.mode)) {
-    throw new TypeError('Workspace document mode is invalid');
+    throw productError("workspace.error.workspace.persistence.workspace.document.mode.is.invalid", new TypeError('Workspace document mode is invalid'));
   }
   const documentId = String(document_.documentId || '');
   const tenantId = nullableString(document_.tenantId, 'tenantId');
-  if (!documentId) throw new TypeError('Workspace document id is required');
+  if (!documentId) throw productError("workspace.error.workspace.persistence.workspace.document.id.is.required", new TypeError('Workspace document id is required'));
   if (!document_.graph || !Array.isArray(document_.graph.nodes) || !Array.isArray(document_.graph.edges)) {
-    throw new TypeError('Workspace document graph is invalid');
+    throw productError("workspace.error.workspace.persistence.workspace.document.graph.is.invalid", new TypeError('Workspace document graph is invalid'));
   }
   if (document_.graph.format === 'deployment') {
-    throw new TypeError('Live deployment attachments are session-only workspace documents');
+    throw productError("workspace.error.workspace.persistence.live.deployment.attachments.are.session.only.workspace.documents", new TypeError('Live deployment attachments are session-only workspace documents'));
   }
   const graph = canonicalGraphSnapshot(document_.graph);
   return Object.freeze({
     documentId,
     name: String(document_.name || 'untitled.graphml'),
+    // i18n-audit-exempt: authored-content - Persisted document identity uses the original filename; it is not interface framing.
     displayName: String(document_.displayName || document_.name || 'untitled.graphml'),
     tenantId,
     mode: document_.mode,
@@ -130,13 +132,13 @@ export function validateWorkspaceSnapshot(value, scope) {
       || value.version !== WORKSPACE_SNAPSHOT_VERSION || value.key !== scope.key
       || value.serviceUrl !== scope.serviceUrl || value.tenantId !== scope.tenantId
       || !Array.isArray(value.documents)) {
-    throw new Error('Stored workspace is not a valid version 1 snapshot');
+    throw productError("workspace.error.workspace.persistence.stored.workspace.is.not.a.valid.version.1.snapshot", new Error('Stored workspace is not a valid version 1 snapshot'));
   }
   const ids = new Set();
   const documents = value.documents.map(document_ => {
     const normalized = persistedDocument(document_);
     if (normalized.tenantId !== scope.tenantId || ids.has(normalized.documentId)) {
-      throw new Error('Stored workspace violates tenant or document identity isolation');
+      throw productError("workspace.error.workspace.persistence.stored.workspace.violates.tenant.or.document.identity.isolation", new Error('Stored workspace violates tenant or document identity isolation'));
     }
     ids.add(normalized.documentId);
     normalized.graph.nodeMap = Object.fromEntries(normalized.graph.nodes.map(node => [node.id, node]));
@@ -149,7 +151,7 @@ export function validateWorkspaceSnapshot(value, scope) {
 }
 
 export function openWorkspaceDatabase(indexedDB = globalThis.indexedDB) {
-  if (!indexedDB) return Promise.reject(new Error('IndexedDB is unavailable'));
+  if (!indexedDB) return Promise.reject(productError("workspace.error.workspace.persistence.indexeddb.is.unavailable", new Error('IndexedDB is unavailable')));
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(WORKSPACE_DATABASE_NAME, WORKSPACE_DATABASE_VERSION);
     request.onupgradeneeded = () => {
@@ -158,8 +160,8 @@ export function openWorkspaceDatabase(indexedDB = globalThis.indexedDB) {
         database.createObjectStore(WORKSPACE_STORE_NAME, { keyPath: 'key' });
       }
     };
-    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
-    request.onblocked = () => reject(new Error('IndexedDB upgrade is blocked'));
+    request.onerror = () => reject(request.error || productError("workspace.error.workspace.persistence.indexeddb.open.failed", new Error('IndexedDB open failed')));
+    request.onblocked = () => reject(productError("workspace.error.workspace.persistence.indexeddb.upgrade.is.blocked", new Error('IndexedDB upgrade is blocked')));
     request.onsuccess = () => resolve(request.result);
   });
 }
@@ -168,9 +170,9 @@ function transaction(database, mode, operation) {
   return new Promise((resolve, reject) => {
     const tx = database.transaction(WORKSPACE_STORE_NAME, mode);
     const request = operation(tx.objectStore(WORKSPACE_STORE_NAME));
-    request.onerror = () => reject(request.error || new Error('Workspace storage request failed'));
-    tx.onabort = () => reject(tx.error || new Error('Workspace storage transaction aborted'));
-    tx.onerror = () => reject(tx.error || new Error('Workspace storage transaction failed'));
+    request.onerror = () => reject(request.error || productError("workspace.error.workspace.persistence.workspace.storage.request.failed", new Error('Workspace storage request failed')));
+    tx.onabort = () => reject(tx.error || productError("workspace.error.workspace.persistence.workspace.storage.transaction.aborted", new Error('Workspace storage transaction aborted')));
+    tx.onerror = () => reject(tx.error || productError("workspace.error.workspace.persistence.workspace.storage.transaction.failed", new Error('Workspace storage transaction failed')));
     tx.oncomplete = () => resolve(request.result);
   });
 }

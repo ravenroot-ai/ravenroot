@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { MAX_UI_CATALOG_BYTES } from './ui-localization.js';
 
 function element(document_, tag, attributes = {}) {
@@ -17,12 +18,12 @@ function localeName(locale, displayLocale) {
 }
 
 export async function readUiCatalogFile(file) {
-  if (file.size > MAX_UI_CATALOG_BYTES) throw new RangeError('UI catalog file is too large.');
+  if (file.size > MAX_UI_CATALOG_BYTES) throw productError("workspace.error.language.dialog.ui.catalog.file.is.too.large", new RangeError('UI catalog file is too large.'));
   return JSON.parse(await file.text());
 }
 
 export function createLanguageDialog({ document: document_, controller }) {
-  if (!document_ || !controller?.localization) throw new TypeError('Language dialog requires localization.');
+  if (!document_ || !controller?.localization) throw productError("workspace.error.language.dialog.language.dialog.requires.localization", new TypeError('Language dialog requires localization.'));
   const { localization } = controller;
   const dialog = element(document_, 'dialog', { className: 'language-dialog',
     'aria-labelledby': 'language-dialog-title' });

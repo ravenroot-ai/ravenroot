@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { uiErrorReason, uiText } from './ui-text.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TERMINAL = new Set(['COMPLETED', 'CANCELLED', 'DEADLINE_EXCEEDED']);
@@ -53,7 +54,7 @@ export function createRunnerWindow({ dialog }) {
   };
   const refresh = () => request(async owner => {
     const result = await owner.runnerCatalog();
-    if (!Array.isArray(result?.items) || result.items.length > 256) throw new Error('Unsupported runner catalogue');
+    if (!Array.isArray(result?.items) || result.items.length > 256) throw productError("workspace.error.runner.panel.unsupported.runner.catalogue", new Error('Unsupported runner catalogue'));
     return () => {
       catalog.replaceChildren(); refreshText();
       for (const resource of result.items) {
@@ -70,9 +71,9 @@ export function createRunnerWindow({ dialog }) {
   });
   const inspect = () => request(async owner => {
     const id = process.value.trim();
-    if (!UUID.test(id)) throw Object.assign(new Error(uiText('workspace.runner.validation.process')), { uiMessageKey: 'workspace.runner.validation.process' });
+    if (!UUID.test(id)) throw productError('workspace.runner.validation.process', new Error("Enter an exact process instance UUID."));
     const workspace = await owner.runnerWorkspace(id);
-    if (!Array.isArray(workspace?.jobs)) throw new Error('Unsupported runner workspace');
+    if (!Array.isArray(workspace?.jobs)) throw productError("workspace.error.runner.panel.unsupported.runner.workspace", new Error('Unsupported runner workspace'));
     return () => {
       refreshText();
       jobs.replaceChildren(element('h3', () => uiText("workspace.runner.panel.process.workspaces")));
@@ -122,7 +123,7 @@ export function createRunnerWindow({ dialog }) {
           for (const [resolution, label] of [['RESUME', () => uiText("workspace.runner.resume.successors")],
             ['ACKNOWLEDGE', () => uiText("workspace.runner.acknowledge.successors")], ['ABANDON', () => uiText("workspace.runner.abandon.traversal")]]) {
             const action = button(label, () => request(async current => {
-              if (!confirmation.checked) throw Object.assign(new Error(uiText('workspace.runner.validation.review')), { uiMessageKey: 'workspace.runner.validation.review' });
+              if (!confirmation.checked) throw productError('workspace.runner.validation.review', new Error("Confirm graph-state review before resolving."));
               await current.resolveRunnerContinuation(id, job.runnerJobId, workspace.revision, resolution);
               return () => { void inspect(); };
             }));
@@ -151,7 +152,7 @@ export function createRunnerWindow({ dialog }) {
   const save = () => request(async owner => {
     const value = JSON.parse(editor.value);
     if (typeof value.approved !== 'boolean' || !Number.isSafeInteger(value.expectedRevision)) {
-      throw Object.assign(new Error(uiText('workspace.runner.validation.approval')), { uiMessageKey: 'workspace.runner.validation.approval' });
+      throw productError('workspace.runner.validation.approval', new Error("Approval and expectedRevision must be explicit. New resources use expectedRevision 0."));
     }
     const resource = await owner.saveRunnerResource(value);
     return () => { editor.value = JSON.stringify({ ...resource, expectedRevision: resource.revision }, null, 2); void refresh(); };

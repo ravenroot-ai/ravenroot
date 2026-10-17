@@ -80,8 +80,8 @@ export class RuntimeAuthorizationError extends Error {
   constructor(message, status) {
     super(message);
     this.name = 'RuntimeAuthorizationError';
-    this.uiMessageKey = status === 401 ? 'workspace.runtime.auth.expired'
-      : message === 'Deployment observation was revoked' ? 'workspace.runtime.auth.revoked' : 'workspace.runtime.auth.insufficient';
+    productError(status === 401 ? 'workspace.runtime.auth.expired'
+      : message === 'Deployment observation was revoked' ? 'workspace.runtime.auth.revoked' : 'workspace.runtime.auth.insufficient', this);
     this.status = status;
   }
 }
@@ -112,7 +112,7 @@ export class RuntimeRequestError extends Error {
         : '';
     super(`${reason} (${where})${hint}`);
     this.name = 'RuntimeRequestError';
-    this.uiMessageKey = 'workspace.runtime.request.failure';
+    Object.defineProperty(this, 'uiMessageKey', { value: 'workspace.runtime.request.failure', enumerable: false });
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({ reason: uiReasonKey ? uiText(uiReasonKey) : reason, where,
       hint: status == null ? uiText('workspace.runtime.request.networkHint')
         : status === 404 ? uiText('workspace.runtime.request.routeHint') : '' }) });
@@ -218,7 +218,7 @@ export class ProgramSourceRejectedError extends Error {
   constructor({ diagnostic = '', line = 0, column = 0, artifactId = '' } = {}) {
     super(`The program source was rejected: ${diagnostic || 'the runtime stated no reason'}`);
     this.name = 'ProgramSourceRejectedError';
-    this.uiMessageKey = 'workspace.runtime.program.rejected';
+    Object.defineProperty(this, 'uiMessageKey', { value: 'workspace.runtime.program.rejected', enumerable: false });
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({
       diagnostic: diagnostic || uiText('workspace.runtime.program.noReason') }) });
     this.diagnostic = diagnostic;

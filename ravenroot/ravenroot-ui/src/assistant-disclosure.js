@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { ENGLISH_MESSAGES, uiText } from './ui-text.js';
 // The Article 50 disclosure: the guarantee that no model-generated turn reaches a natural person
 // before that person has been told the output is artificially generated (the disclosure contract).
@@ -152,7 +153,7 @@ export function disclosurePlan(transcript, turn, options = {}) {
 // module exists to avoid.
 export function admitTurn(transcript, turn, append, options = {}) {
   if (typeof append !== 'function') {
-    throw new TypeError('admitTurn requires an append function');
+    throw productError("workspace.error.assistant.disclosure.admitturn.requires.an.append.function", new TypeError('admitTurn requires an append function'));
   }
   return disclosurePlan(transcript, turn, options).turns
     .reduce((carry, entry) => append(carry, entry), transcript);

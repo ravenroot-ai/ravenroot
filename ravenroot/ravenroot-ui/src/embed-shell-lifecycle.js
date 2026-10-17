@@ -1,16 +1,17 @@
+import { productError } from './product-error.js';
 import { uiText } from './ui-text.js';
 
 const FAILURE_STATES = new Set(['error', 'expired', 'offline', 'incompatible']);
 const NODE_KINDS = new Set(['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR']);
 
 function requiredElement(value, name) {
-  if (!(value instanceof Element)) throw new TypeError(`${name} must be an element.`);
+  if (!(value instanceof Element)) throw productError("workspace.error.embed.shell.lifecycle.must.be.an.element", new TypeError(`${name} must be an element.`), { value1: name });
   return value;
 }
 
 function requiredText(value, name) {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new TypeError(`Invalid text alternative: ${name}.`);
+    throw productError("workspace.error.embed.shell.lifecycle.invalid.text.alternative", new TypeError(`Invalid text alternative: ${name}.`), { value1: name });
   }
   return value;
 }
@@ -21,7 +22,7 @@ function requiredText(value, name) {
  */
 export class EmbedShellFailure extends Error {
   constructor(kind) {
-    if (!FAILURE_STATES.has(kind)) throw new TypeError('Invalid embed shell failure kind.');
+    if (!FAILURE_STATES.has(kind)) throw productError("workspace.error.embed.shell.lifecycle.invalid.embed.shell.failure.kind", new TypeError('Invalid embed shell failure kind.'));
     super(`Embed shell ${kind}.`);
     this.name = 'EmbedShellFailure';
     this.kind = kind;
@@ -38,17 +39,17 @@ function failureState(failure) {
  */
 export function createEmbedTextAlternative(snapshot, t = uiText) {
   if (!Array.isArray(snapshot?.nodes) || !Array.isArray(snapshot?.edges)) {
-    throw new TypeError('Invalid text alternative projection.');
+    throw productError("workspace.error.embed.shell.lifecycle.invalid.text.alternative.projection", new TypeError('Invalid text alternative projection.'));
   }
 
   const nodes = snapshot.nodes.map(node => {
     const id = requiredText(node?.id, 'node.id');
     const kind = requiredText(node?.kind, 'node.kind');
-    if (!NODE_KINDS.has(kind)) throw new TypeError('Invalid text alternative: node.kind.');
+    if (!NODE_KINDS.has(kind)) throw productError("workspace.error.embed.shell.lifecycle.invalid.text.alternative.node.kind", new TypeError('Invalid text alternative: node.kind.'));
     return { id, kind };
   });
   const ids = new Set(nodes.map(node => node.id));
-  if (ids.size !== nodes.length) throw new TypeError('Invalid text alternative topology.');
+  if (ids.size !== nodes.length) throw productError("workspace.error.embed.shell.lifecycle.invalid.text.alternative.topology", new TypeError('Invalid text alternative topology.'));
 
   const outgoing = new Map(nodes.map(node => [node.id, []]));
   const incoming = new Map(nodes.map(node => [node.id, []]));
@@ -56,7 +57,7 @@ export function createEmbedTextAlternative(snapshot, t = uiText) {
     const source = requiredText(edge?.source, 'edge.source');
     const target = requiredText(edge?.target, 'edge.target');
     if (!ids.has(source) || !ids.has(target)) {
-      throw new TypeError('Invalid text alternative topology.');
+      throw productError("workspace.error.embed.shell.lifecycle.invalid.text.alternative.topology", new TypeError('Invalid text alternative topology.'));
     }
     outgoing.get(source).push(Object.freeze({ target }));
     incoming.get(target).push(Object.freeze({ source }));
@@ -122,7 +123,7 @@ export function installLocalFocusBoundary({ before, after, t = uiText }) {
   requiredElement(before, 'before sentinel');
   requiredElement(after, 'after sentinel');
   if (before.ownerDocument !== after.ownerDocument) {
-    throw new TypeError('Focus sentinels must share a document.');
+    throw productError("workspace.error.embed.shell.lifecycle.focus.sentinels.must.share.a.document", new TypeError('Focus sentinels must share a document.'));
   }
 
   const previous = [before, after].map(element => ({
@@ -187,7 +188,7 @@ export function createEmbedShellLifecycle({
   requiredElement(alternative, 'alternative');
   if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1
       || timeoutMilliseconds > 30_000) {
-    throw new RangeError('Embed shell timeout is out of bounds.');
+    throw productError("workspace.error.embed.shell.lifecycle.embed.shell.timeout.is.out.of.bounds", new RangeError('Embed shell timeout is out of bounds.'));
   }
 
   const removeFocusBoundary = installLocalFocusBoundary({ before, after, t });
@@ -214,8 +215,8 @@ export function createEmbedShellLifecycle({
   return Object.freeze({
     get state() { return state; },
     async run(task, { signal } = {}) {
-      if (destroyed) throw new Error('Embed shell is destroyed.');
-      if (typeof task !== 'function') throw new TypeError('Embed shell task must be a function.');
+      if (destroyed) throw productError("workspace.error.embed.shell.lifecycle.embed.shell.is.destroyed", new Error('Embed shell is destroyed.'));
+      if (typeof task !== 'function') throw productError("workspace.error.embed.shell.lifecycle.embed.shell.task.must.be.a.function", new TypeError('Embed shell task must be a function.'));
 
       cancelActive(new DOMException('Viewer operation superseded.', 'AbortError'));
       const operation = ++generation;
@@ -227,7 +228,7 @@ export function createEmbedShellLifecycle({
 
       const aborted = abortPromise(controller.signal);
       const deadline = performance.now() + timeoutMilliseconds;
-      const timer = setTimeout(() => controller.abort(new Error('Viewer operation timed out.')),
+      const timer = setTimeout(() => controller.abort(productError("workspace.error.embed.shell.lifecycle.viewer.operation.timed.out", new Error('Viewer operation timed out.'))),
         timeoutMilliseconds);
       active = { operation, controller, timer };
       transition('loading');
@@ -245,7 +246,7 @@ export function createEmbedShellLifecycle({
         lastSnapshot = snapshot;
         renderEmbedTextAlternative(alternative, snapshot, t);
         if (controller.signal.aborted || performance.now() >= deadline) {
-          throw controller.signal.reason ?? new Error('Viewer operation timed out.');
+          throw controller.signal.reason ?? productError("workspace.error.embed.shell.lifecycle.viewer.operation.timed.out", new Error('Viewer operation timed out.'));
         }
         if (destroyed || operation !== generation) {
           throw new DOMException('Viewer operation superseded.', 'AbortError');

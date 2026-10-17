@@ -1,4 +1,4 @@
-import { uiDateTime, uiText } from './ui-text.js';
+import { uiErrorReason, uiDateTime, uiText } from './ui-text.js';
 // The Credentials window is the ONE place in this product where a credential
 // value is typed.
 //
@@ -301,7 +301,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       listing = { loaded: false, surface: 'none', credentials: [] };
       renderList();
       publish();
-      say(() => uiText("workspace.credential.panel.the.credentials.you.hold.could.not.be.read", { value: error?.message || error }), 'error');
+      say(() => uiText("workspace.credential.panel.the.credentials.you.hold.could.not.be.read", { value: uiErrorReason(error) }), 'error');
     }
   }
 
@@ -340,7 +340,7 @@ export function createCredentialsWindow({ dialog, client = null, onCredentials =
       // RULE 1 again, on the failure path, and the message is the SERVICE's prose about the request
       // — never the request's contents.
       if (controls.value) controls.value.value = '';
-      say(() => uiText("workspace.credential.panel.was.not.stored.the.value.was.cleared.paste.it", { label: label, value: error?.message || error }), 'error');
+      say(() => uiText("workspace.credential.panel.was.not.stored.the.value.was.cleared.paste.it", { label: label, value: uiErrorReason(error) }), 'error');
     } finally {
       if (!disposed) setBusy(false);
     }

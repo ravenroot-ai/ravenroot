@@ -180,9 +180,9 @@ remain authored content. Provider packages that own additional UI copy should us
 package namespace and must not redefine Ravenroot core keys.
 
 The source audit parses static HTML, Java-generated embed HTML, DOM sinks, templates and conditional
-builders, indirect bindings, presentation records, and supported localization aliases. Local wrapper signatures are derived from their parameter flow into DOM and dialog sinks, including transitive calls, returned values, deferred callbacks, and opaque HTML helpers; fixtures reject unkeyed values passed through renamed wrappers. Metadata such as labels, display names, descriptions, and validation errors is checked even when consumed by another module. Persisted document identities, renderer expressions, and provider-authored diagnostics require narrowly documented exclusions when they resemble product text. It checks
+builders, indirect bindings, presentation records, and supported localization aliases. Local wrapper signatures are derived from their parameter flow into DOM and dialog sinks, including transitive calls, returned values, deferred and higher-order callbacks, captured assignments, local throw/catch paths, and opaque HTML helpers; fixtures reject unkeyed values passed through renamed wrappers. Metadata such as labels, display names, descriptions, and validation errors is checked even when consumed by another module. Persisted document identities, renderer expressions, and provider-authored diagnostics require narrowly documented exclusions when they resemble product text. It checks
 missing and unused keys, named parameters, constrained line-specific exclusions, HTML-context
-escaping, and production catalog contents. Run the supported checks from `ravenroot-ui`:
+escaping, and production catalog contents. Local errors keep their diagnostic message, class, and protocol fields; non-enumerable presentation metadata supplies a catalog key and parameters without entering JSON or persisted records. Retained status messages and open Human Task/import surfaces reevaluate their presentation when the language changes without restarting work or clearing drafts. Run the supported checks from `ravenroot-ui`:
 
 ```sh
 npm run check:i18n

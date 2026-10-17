@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { createReadOnlyRendererAdapter } from './viewer-renderer-adapter.js';
 import { viewerProjectionElements } from './viewer-presentation.js';
 
@@ -9,7 +10,7 @@ const DESIGN_ARRANGEMENTS = new Set([
 ]);
 function requireText(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new TypeError(`Invalid viewer projection: ${field}.`);
+    throw productError("workspace.error.viewer.core.invalid.viewer.projection", new TypeError(`Invalid viewer projection: ${field}.`), { value1: field });
   }
   return value;
 }
@@ -21,7 +22,7 @@ function finiteOrNull(value) {
 function projectionNode(node) {
   const id = requireText(node?.id, 'node.id');
   const kind = requireText(node?.kind, 'node.kind');
-  if (!NODE_KINDS.has(kind)) throw new TypeError('Invalid viewer projection: node.kind.');
+  if (!NODE_KINDS.has(kind)) throw productError("workspace.error.viewer.core.invalid.viewer.projection.node.kind", new TypeError('Invalid viewer projection: node.kind.'));
   const layout = node?.layout == null ? null : Object.freeze({
     x: finiteOrNull(node.layout.x),
     y: finiteOrNull(node.layout.y),
@@ -29,7 +30,7 @@ function projectionNode(node) {
     height: finiteOrNull(node.layout.height),
   });
   if (layout && Object.values(layout).some(value => value == null)) {
-    throw new TypeError('Invalid viewer projection: node.layout.');
+    throw productError("workspace.error.viewer.core.invalid.viewer.projection.node.layout", new TypeError('Invalid viewer projection: node.layout.'));
   }
   const visualType = typeof node?.visualType === 'string' && node.visualType
     ? node.visualType : kind.toLowerCase();
@@ -65,7 +66,7 @@ function projectionEdges(edges) {
 
 function projectionGroups(value, nodeIds) {
   if (value == null) return Object.freeze([]);
-  if (!Array.isArray(value) || value.length > 2_000) throw new TypeError('Invalid viewer projection: groups.');
+  if (!Array.isArray(value) || value.length > 2_000) throw productError("workspace.error.viewer.core.invalid.viewer.projection.groups", new TypeError('Invalid viewer projection: groups.'));
   const ids = new Set();
   const members = new Set();
   return Object.freeze(value.map(group => {
@@ -77,7 +78,7 @@ function projectionGroups(value, nodeIds) {
     if (!memberNodeIds || memberNodeIds.length < 2 || new Set(memberNodeIds).size !== memberNodeIds.length || ids.has(id)
       || memberNodeIds.some(member => !nodeIds.has(member) || members.has(member))
       || !memberNodeIds.includes(anchorNodeId) || typeof group.collapsed !== 'boolean') {
-      throw new TypeError('Invalid viewer projection: groups.');
+      throw productError("workspace.error.viewer.core.invalid.viewer.projection.groups", new TypeError('Invalid viewer projection: groups.'));
     }
     ids.add(id); memberNodeIds.forEach(member => members.add(member));
     return Object.freeze({ id, name, memberNodeIds: Object.freeze(memberNodeIds), anchorNodeId,
@@ -94,19 +95,19 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
     projection = projection.projection;
   }
   if (projection?.viewerContractVersion !== CONTRACT_VERSION) {
-    throw new TypeError('Incompatible viewer projection.');
+    throw productError("workspace.error.viewer.core.incompatible.viewer.projection", new TypeError('Incompatible viewer projection.'));
   }
   const nodes = Array.isArray(projection.nodes) ? projection.nodes.map(projectionNode) : null;
   const edges = projectionEdges(projection.edges);
-  if (nodes == null || edges == null) throw new TypeError('Invalid viewer projection.');
+  if (nodes == null || edges == null) throw productError("workspace.error.viewer.core.invalid.viewer.projection.2", new TypeError('Invalid viewer projection.'));
   if (nodes.length > budget.nodes || edges.length > budget.edges) {
-    throw new RangeError('Viewer projection exceeds the rendering budget.');
+    throw productError("workspace.error.viewer.core.viewer.projection.exceeds.the.rendering.budget", new RangeError('Viewer projection exceeds the rendering budget.'));
   }
 
   const nodeIds = new Set(nodes.map(node => node.id));
   if (nodeIds.size !== nodes.length
       || edges.some(edge => !nodeIds.has(edge.source) || !nodeIds.has(edge.target))) {
-    throw new TypeError('Invalid viewer projection topology.');
+    throw productError("workspace.error.viewer.core.invalid.viewer.projection.topology", new TypeError('Invalid viewer projection topology.'));
   }
   const groups = projectionGroups(projection.groups, nodeIds);
 
@@ -117,7 +118,7 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
   const designArrangement = projection.designArrangement == null ? null
     : requireText(projection.designArrangement, 'designArrangement');
   if (designArrangement != null && !DESIGN_ARRANGEMENTS.has(designArrangement)) {
-    throw new TypeError('Invalid viewer projection: designArrangement.');
+    throw productError("workspace.error.viewer.core.invalid.viewer.projection.designarrangement", new TypeError('Invalid viewer projection: designArrangement.'));
   }
 
   return Object.freeze({
@@ -140,7 +141,7 @@ export function createReadOnlyViewerCore(renderer, budget = VIEWER_BUDGET) {
   let generation = 0;
 
   function available() {
-    if (destroyed) throw new Error('Viewer is destroyed.');
+    if (destroyed) throw productError("workspace.error.viewer.core.viewer.is.destroyed", new Error('Viewer is destroyed.'));
   }
 
   return Object.freeze({
@@ -155,11 +156,11 @@ export function createReadOnlyViewerCore(renderer, budget = VIEWER_BUDGET) {
         await Promise.race([
           adapter.render(snapshot),
           new Promise((resolve, reject) => {
-            timeout = setTimeout(() => reject(new Error('Viewer render timed out.')),
+            timeout = setTimeout(() => reject(productError("workspace.error.viewer.core.viewer.render.timed.out", new Error('Viewer render timed out.'))),
               budget.renderMilliseconds);
           }),
         ]).finally(() => clearTimeout(timeout));
-        if (destroyed || operation !== generation) throw new Error('Viewer render superseded.');
+        if (destroyed || operation !== generation) throw productError("workspace.error.viewer.core.viewer.render.superseded", new Error('Viewer render superseded.'));
         state = snapshot.nodes.length === 0 ? 'empty' : 'ready';
         return snapshot;
       } catch (failure) {
@@ -175,7 +176,7 @@ export function createReadOnlyViewerCore(renderer, budget = VIEWER_BUDGET) {
     fit(padding = 60) { available(); return adapter.fit(padding); },
     zoomBy(factor) {
       available();
-      if (!Number.isFinite(factor) || factor <= 0) throw new TypeError('Zoom factor must be positive.');
+      if (!Number.isFinite(factor) || factor <= 0) throw productError("workspace.error.viewer.core.zoom.factor.must.be.positive", new TypeError('Zoom factor must be positive.'));
       return adapter.zoomBy(factor);
     },
     panBy(delta) { available(); return adapter.panBy(delta); },

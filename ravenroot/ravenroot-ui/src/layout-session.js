@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 /**
  * Keeps asynchronous layout callbacks tied to the Cytoscape instance that
  * started them.  This is deliberately state-only: callers own starting and
@@ -47,9 +48,9 @@ export function createLayoutSessions() {
   }
 
   function request({ documentId, cy, mode, kind = mode === 'elk' ? 'elk' : 'native', nativeCancel = null } = {}) {
-    if (documentId == null) throw new TypeError('A layout session requires a documentId.');
-    if (cy == null) throw new TypeError('A layout session requires a cy instance.');
-    if (!mode) throw new TypeError('A layout session requires a mode.');
+    if (documentId == null) throw productError("workspace.error.layout.session.a.layout.session.requires.a.documentid", new TypeError('A layout session requires a documentId.'));
+    if (cy == null) throw productError("workspace.error.layout.session.a.layout.session.requires.a.cy.instance", new TypeError('A layout session requires a cy instance.'));
+    if (!mode) throw productError("workspace.error.layout.session.a.layout.session.requires.a.mode", new TypeError('A layout session requires a mode.'));
 
     const replacement = replace(documentId, cy);
     const session = sessions.get(documentId);

@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { assertStableEdgeId, stableEdgeIdViolation } from './stable-edge-id.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups } from './visual-groups.js';
 import { uiText } from './ui-text.js';
@@ -338,6 +339,7 @@ export function createWorkflowDocument() {
   // is one of the outcomes the renderer already colors (red, dashed); `error` is not, and this reuses
   // that instead of introducing new render styling.
   const edgeToError = createEdge('edge-dosomething-error', 'dosomething', 'error', 'failed');
+  // i18n-audit-exempt: authored-content - This persisted node-id map's error member is the authored ERROR node, not an error presentation record.
   const nodeMap = { start, dosomething: doSomething, end, error };
   const graph = createEmptyWorkflowDocument();
   graph.nodes.push(start, doSomething, error, end);
@@ -412,6 +414,7 @@ export function createEdge(id, source, target, outcome = 'continue') {
     target,
     outcome: normalizedOutcome,
     command: '',
+    // i18n-audit-exempt: protocol-token - Persisted edge labels mirror the authored outcome token; translation must not change graph identity.
     label: normalizedOutcome,
     edgeType: outcomeToEdgeType(normalizedOutcome),
     color: '#8b949e',
@@ -756,16 +759,16 @@ export function serializeGraphML(graph) {
     ? graph.sourceXml
     : `<?xml version="1.0" encoding="UTF-8"?><graphml xmlns="${GRAPHML_NS}"><graph id="ravenroot-workflow" edgedefault="directed"/></graphml>`;
   const doc = parser.parseFromString(base, 'application/xml');
-  if (doc.querySelector('parsererror')) throw new Error('Cannot serialize an invalid GraphML source document');
+  if (doc.querySelector('parsererror')) throw productError("workspace.error.graph.document.cannot.serialize.an.invalid.graphml.source.document", new Error('Cannot serialize an invalid GraphML source document'));
   const root = doc.documentElement;
   if (!root || root.localName !== 'graphml' || root.namespaceURI !== GRAPHML_NS) {
-    throw new Error(`GraphML root must be {${GRAPHML_NS}}graphml`);
+    throw productError("workspace.error.graph.document.graphml.root.must.be.graphml", new Error(`GraphML root must be {${GRAPHML_NS}}graphml`), { value1: GRAPHML_NS });
   }
   const namespace = root.namespaceURI;
   const graphElements = Array.from(root.children)
     .filter(element => element.localName === 'graph' && element.namespaceURI === GRAPHML_NS);
   if (graphElements.length !== 1) {
-    throw new Error(`GraphML must contain exactly one top-level graph; found ${graphElements.length}`);
+    throw productError("workspace.error.graph.document.graphml.must.contain.exactly.one.top.level.graph.found", new Error(`GraphML must contain exactly one top-level graph; found ${graphElements.length}`), { value1: graphElements.length });
   }
   const graphElement = graphElements[0];
 
@@ -926,7 +929,7 @@ export function serializeGraphML(graph) {
       if (defaultElement && defaultElement.textContent.trim() === String(value).trim()) return;
     }
     if (data && data.children.length > 0) {
-      throw new Error(`Cannot overwrite complex GraphML data for key '${keyId}'`);
+      throw productError("workspace.error.graph.document.cannot.overwrite.complex.graphml.data.for.key", new Error(`Cannot overwrite complex GraphML data for key '${keyId}'`), { value1: keyId });
     }
     if (data && data.textContent.trim() === String(value).trim()) return;
     if (!data) {
@@ -947,7 +950,7 @@ export function serializeGraphML(graph) {
         && child.getAttribute('key') === definition.id)
       .forEach(child => {
         if (child.children.length > 0) {
-          throw new Error(`Cannot remove complex GraphML data for key '${definition.id}'`);
+          throw productError("workspace.error.graph.document.cannot.remove.complex.graphml.data.for.key", new Error(`Cannot remove complex GraphML data for key '${definition.id}'`), { value1: definition.id });
         }
         child.remove();
       });
@@ -1099,7 +1102,7 @@ export function serializeGraphML(graph) {
 function normalizeType(type) {
   const normalized = type || 'string';
   if (!['boolean', 'int', 'long', 'float', 'double', 'string'].includes(normalized)) {
-    throw new Error(`Unsupported GraphML scalar type '${normalized}'`);
+    throw productError("workspace.error.graph.document.unsupported.graphml.scalar.type", new Error(`Unsupported GraphML scalar type '${normalized}'`), { value1: normalized });
   }
   return normalized;
 }

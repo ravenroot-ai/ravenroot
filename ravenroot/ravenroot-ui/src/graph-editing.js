@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import {
   applyCommand,
   batchUpdateNodePropertiesCommand,
@@ -32,7 +33,7 @@ export function editVisualGroups(graph, groups, history = null, label = 'Edit vi
 
 export function createVisualGroup(graph, memberNodeIds, name, anchorNodeId, history = null) {
   const metadata = readVisualGroups(graph);
-  if (!['valid', 'none'].includes(metadata.status)) throw new Error('Remove unsupported visual group metadata before creating groups');
+  if (!['valid', 'none'].includes(metadata.status)) throw productError("workspace.error.graph.editing.remove.unsupported.visual.group.metadata.before.creating.groups", new Error('Remove unsupported visual group metadata before creating groups'));
   const group = { id: uniqueElementId('group', metadata.groups), name,
     memberNodeIds: [...new Set(memberNodeIds)], anchorNodeId, collapsed: true };
   editVisualGroups(graph, [...metadata.groups, group], history, `Create visual group ${name}`);

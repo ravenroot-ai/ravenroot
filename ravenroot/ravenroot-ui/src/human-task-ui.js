@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { uiDateTime, uiErrorReason, uiText } from './ui-text.js';
 import { humanTaskActionDisplayLabel, humanTaskActionLabelKey, utf8Length,
   validateDecisionComment } from './human-task-attention.js';
@@ -149,6 +150,17 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   onLaunch = async () => ({}), onInteractionSubmit = async () => ({}),
   onExternalReconcile = async () => {}, onRevoke = async () => {}, onClose = () => {} } = {}) {
   if (!dialog) return { open() {}, close() {}, suspend() {}, selected: () => null };
+  const textRecipes = new Map();
+  function paintText(node, value) {
+    if (typeof value === 'function') textRecipes.set(node, value); else textRecipes.delete(node);
+    node.textContent = typeof value === 'function' ? value() : value;
+  }
+  function localizedElement(document, tag, className, recipe) {
+    const node = element(document, tag, className);
+    paintText(node, recipe);
+    return node;
+  }
+  let errorRecipe = '';
   const prompt = dialog.querySelector('[data-human-task-prompt]');
   const identity = dialog.querySelector('[data-human-task-identity]');
   const review = dialog.querySelector('[data-human-task-review]');
@@ -186,7 +198,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   }
 
   function say(message = '') {
-    error.textContent = message;
+    errorRecipe = message;
+    paintText(error, message);
+    message = error.textContent;
     error.hidden = !message;
     comment.toggleAttribute('aria-invalid', Boolean(message));
   }
@@ -199,9 +213,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
 
   function clearReview() {
     review.hidden = true;
-    reviewStatus.textContent = '';
-    reviewText.textContent = '';
-    reviewDigest.textContent = '';
+    paintText(reviewStatus, '');
+    paintText(reviewText, '');
+    paintText(reviewDigest, '');
   }
 
   function clearInteraction({ revoke = false } = {}) {
@@ -220,15 +234,15 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   }
 
   function identify(value) {
-    prompt.textContent = value.presentation?.prompt || '';
-    identity.textContent = uiText("workspace.human.task.ui.task.value1.process.value2", { taskId: value.taskId, processInstanceId: value.processInstanceId || uiText('common.pending') })
+    paintText(prompt, value.presentation?.prompt || '');
+    paintText(identity, () => (uiText("workspace.human.task.ui.task.value1.process.value2", { taskId: value.taskId, processInstanceId: value.processInstanceId || uiText('common.pending') })
       + (value.traversalId ? uiText("workspace.humanTask.traversalSuffix", {
         traversalId: value.traversalId,
       }) : '')
       + (value.deploymentId ? uiText("workspace.humanTask.deploymentSuffix", {
         deploymentId: value.deploymentId,
       }) : '')
-      + uiText("workspace.human.task.ui.generation.value1", { generation: value.generation });
+      + uiText("workspace.human.task.ui.generation.value1", { generation: value.generation })));
   }
 
   function close() {
@@ -268,7 +282,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     if (!task || !capability || submitting) return;
     const check = validateDecisionComment(comment.value, task.presentation.commentRequirement,
       task.commentMaxUtf8Bytes);
-    if (!check.ok) { say(check.error); comment.focus(); return; }
+    if (!check.ok) { say(() => validateDecisionComment(comment.value, task.presentation.commentRequirement, task.commentMaxUtf8Bytes).error); comment.focus(); return; }
     const sourceTask = task;
     const token = generation;
     say();
@@ -308,7 +322,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         isCurrent: () => isCurrent(token, sourceTask) });
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
-        say(failure?.message || uiText("workspace.human.task.ui.the.decision.outcome.is.unknown.refresh.before.trying.another"));
+        say(() => ((failure?.message ? uiErrorReason(failure) : null) || uiText("workspace.human.task.ui.the.decision.outcome.is.unknown.refresh.before.trying.another")));
         setBusy(false);
       }
       return;
@@ -330,7 +344,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       const launchOrigin = new URL(launch.launchUri).origin;
       if (launchOrigin !== launch.origin
           || (launch.kind === 'EXTERNAL' && launch.origin === view?.location?.origin)) {
-        throw new Error('The registered presentation origin is not isolated from the Workbench.');
+        throw productError("workspace.error.human.task.ui.the.registered.presentation.origin.is.not.isolated.from.the.workb", new Error('The registered presentation origin is not isolated from the Workbench.'));
       }
       interactionLaunch = launch;
       interactionHost.hidden = false;
@@ -362,15 +376,15 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
             || message.capabilityId !== launch.capabilityId
             || !['complete', 'close', 'failure', 'reconcile'].includes(message.type)) return;
         if (utf8Length(JSON.stringify(message)) > launch.responseSchema.maxBytes + 8_192) {
-          say(uiText("workspace.human.task.ui.the.registered.presentation.returned.an.oversized.message.the.task"));
+          say(() => (uiText("workspace.human.task.ui.the.registered.presentation.returned.an.oversized.message.the.task")));
           clearInteraction({ revoke: true });
           setBusy(false);
           return;
         }
         if (message.type === 'close' || message.type === 'failure') {
-          say(message.type === 'failure'
+          say(() => (message.type === 'failure'
             ? uiText("workspace.human.task.ui.the.registered.presentation.reported.a.failure.the.task.remains")
-            : uiText("workspace.human.task.ui.the.registered.presentation.closed.the.task.remains.available"));
+            : uiText("workspace.human.task.ui.the.registered.presentation.closed.the.task.remains.available")));
           clearInteraction({ revoke: true }); setBusy(false); return;
         }
         if (launch.kind === 'EXTERNAL') {
@@ -389,7 +403,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           if (isCurrent(token, sourceTask)) { clearInteraction(); setBusy(false); close(); }
         }).catch(failure => {
           if (isCurrent(token, sourceTask)) {
-            say(failure?.message || uiText("workspace.human.task.ui.the.interaction.outcome.is.unknown.refresh.before.retrying"));
+            say(() => ((failure?.message ? uiErrorReason(failure) : null) || uiText("workspace.human.task.ui.the.interaction.outcome.is.unknown.refresh.before.retrying")));
             setBusy(false);
           }
         });
@@ -415,11 +429,11 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       interactionTimer = setTimeout(() => {
         if (!isCurrent(token, sourceTask)) return;
         clearInteraction(); setBusy(false);
-        say(uiText("workspace.human.task.ui.the.presentation.capability.expired.the.task.remains.available.and"));
+        say(() => (uiText("workspace.human.task.ui.the.presentation.capability.expired.the.task.remains.available.and")));
       }, Math.min(remaining, 2_147_483_647));
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
-        say(failure?.message || uiText("workspace.human.task.ui.the.registered.presentation.could.not.be.opened"));
+        say(() => ((failure?.message ? uiErrorReason(failure) : null) || uiText("workspace.human.task.ui.the.registered.presentation.could.not.be.opened")));
         setBusy(false);
       }
     }
@@ -439,10 +453,24 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   dialog.addEventListener('keydown', event => event.stopPropagation());
   comment.addEventListener('input', () => {
     say();
-    commentHint.textContent = uiText("workspace.human.task.ui.utf.8.bytes", { comment: utf8Length(comment.value), commentMaxUtf8Bytes: task?.commentMaxUtf8Bytes || 0 });
+    paintText(commentHint, () => (uiText("workspace.human.task.ui.utf.8.bytes", { comment: utf8Length(comment.value), commentMaxUtf8Bytes: task?.commentMaxUtf8Bytes || 0 })));
   });
 
   return {
+    refreshLocale() {
+      if (!task) return;
+      for (const [node, recipe] of textRecipes) {
+        if (dialog.contains(node)) node.textContent = recipe(); else textRecipes.delete(node);
+      }
+      interactionHost.setAttribute('aria-label', uiText("workspace.human.task.ui.registered.human.task.presentation"));
+      if (task) for (const button of actions.querySelectorAll('[data-human-task-action]')) {
+        const action = button.dataset.humanTaskAction;
+        const label = humanTaskActionName(action, task.presentation.labels[action]);
+        button.textContent = label;
+        button.setAttribute('aria-label', label);
+      }
+      say(errorRecipe);
+    },
     loading(nextTask, nextCapability, { show = false } = {}) {
       advance();
       submitting = false;
@@ -450,9 +478,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       capability = nextCapability;
       identify(task);
       review.hidden = false;
-      reviewStatus.textContent = uiText("workspace.human.task.ui.loading.authorized.review.content");
-      reviewText.textContent = '';
-      reviewDigest.textContent = '';
+      paintText(reviewStatus, () => (uiText("workspace.human.task.ui.loading.authorized.review.content")));
+      paintText(reviewText, '');
+      paintText(reviewDigest, '');
       commentField.hidden = true;
       actions.replaceChildren();
       say();
@@ -465,9 +493,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       if (!task) return;
       dialog.removeAttribute('aria-busy');
       review.hidden = false;
-      reviewStatus.textContent = message;
-      reviewText.textContent = '';
-      reviewDigest.textContent = '';
+      paintText(reviewStatus, message);
+      paintText(reviewText, '');
+      paintText(reviewDigest, '');
       say(message);
       if (!dialog.open) {
         dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
@@ -482,19 +510,19 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       clearReview();
       if (task.reviewPresentation) {
         review.hidden = false;
-        reviewStatus.textContent = task.reviewPresentation.text.length
+        paintText(reviewStatus, () => (task.reviewPresentation.text.length
           ? uiText("workspace.human.task.ui.exact.inert.text.plain.content.pinned.when")
-          : uiText("workspace.human.task.ui.this.task.has.an.empty.plain.text");
-        reviewText.textContent = task.reviewPresentation.text;
-        reviewDigest.textContent = uiText("workspace.human.task.ui.content", { contentDigest: task.reviewPresentation.contentDigest });
+          : uiText("workspace.human.task.ui.this.task.has.an.empty.plain.text")));
+        paintText(reviewText, task.reviewPresentation.text);
+        paintText(reviewDigest, () => (uiText("workspace.human.task.ui.content", { contentDigest: task.reviewPresentation.contentDigest })));
       }
       const mode = task.presentation.commentRequirement;
       commentField.hidden = mode === 'DISALLOWED';
       comment.required = mode === 'REQUIRED';
       comment.value = '';
-      commentHint.textContent = mode === 'REQUIRED'
+      paintText(commentHint, () => (mode === 'REQUIRED'
         ? uiText("workspace.human.task.ui.required.0.value1.utf.8.bytes", { commentMaxUtf8Bytes: task.commentMaxUtf8Bytes })
-        : uiText("workspace.human.task.ui.optional.0.value1.utf.8.bytes", { commentMaxUtf8Bytes: task.commentMaxUtf8Bytes });
+        : uiText("workspace.human.task.ui.optional.0.value1.utf.8.bytes", { commentMaxUtf8Bytes: task.commentMaxUtf8Bytes })));
       const registered = ['CUSTOM', 'EXTERNAL'].includes(task.interactionPresentation?.kind);
       actions.replaceChildren(...task.availableActions.map(action => {
         const actionName = humanTaskActionName(action, task.presentation.labels[action]);
@@ -507,9 +535,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         return button;
       }));
       if (registered) {
-        const launch = element(dialog.ownerDocument, 'button', 'btn human-task-presentation-launch',
-          task.interactionPresentation.kind === 'EXTERNAL'
-            ? uiText("workspace.human.task.ui.open.external.presentation") : uiText("workspace.human.task.ui.open.custom.presentation"));
+        const launch = localizedElement(dialog.ownerDocument, 'button', 'btn human-task-presentation-launch',
+          () => (task.interactionPresentation.kind === 'EXTERNAL'
+            ? uiText("workspace.human.task.ui.open.external.presentation") : uiText("workspace.human.task.ui.open.custom.presentation")));
         launch.type = 'button';
         launch.addEventListener('click', () => void launchRegisteredPresentation());
         actions.replaceChildren(launch);
@@ -517,7 +545,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       formHost.replaceChildren();
       formHost.hidden = task.interactionPresentation?.kind !== 'FORM';
       if (!formHost.hidden) {
-        formHost.append(element(dialog.ownerDocument, 'legend', '', uiText("workspace.human.task.ui.response")));
+        formHost.append(localizedElement(dialog.ownerDocument, 'legend', '', () => (uiText("workspace.human.task.ui.response"))));
         for (const field of task.interactionPresentation.formSchema.fields) {
           const wrapper = element(dialog.ownerDocument, 'div', 'human-task-form-field');
           const label = element(dialog.ownerDocument, 'label', '', field.label);
@@ -540,7 +568,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           if (field.type === 'ENUM') {
             const addOption = value => {
               const option = dialog.ownerDocument.createElement('option');
-              option.value = value; option.textContent = value; input.append(option);
+              option.value = value; paintText(option, value); input.append(option);
             };
             if (!field.required) addOption('');
             field.allowedValues.forEach(addOption);

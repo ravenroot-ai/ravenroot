@@ -1,6 +1,7 @@
+import { productError } from './product-error.js';
 import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 function requiredText(value, name) {
-  if (typeof value !== 'string' || !value.length) throw new TypeError(`${name} is missing`);
+  if (typeof value !== 'string' || !value.length) throw productError("workspace.error.graph.authoring.client.is.missing", new TypeError(`${name} is missing`), { value1: name });
   return value;
 }
 
@@ -13,26 +14,26 @@ export function parseAuthoredReleaseVersion(value) {
     const parsed = BigInt(value);
     if (parsed <= BigInt(MAX_AUTHORED_RELEASE_VERSION)) return Number(parsed);
   }
-  throw new TypeError('Authored release version must be a canonical safe positive integer');
+  throw productError("workspace.error.graph.authoring.client.authored.release.version.must.be.a.canonical.safe.positive.intege", new TypeError('Authored release version must be a canonical safe positive integer'));
 }
 
 function requiredSha256(value) {
   if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
-    throw new TypeError('Published graph digest must be lowercase SHA-256');
+    throw productError("workspace.error.graph.authoring.client.published.graph.digest.must.be.lowercase.sha.256", new TypeError('Published graph digest must be lowercase SHA-256'));
   }
   return value;
 }
 
 function requiredArtifactRef(value) {
   if (typeof value !== 'string' || !/^[0-9a-f]{64}:[0-9a-f]{64}$/.test(value)) {
-    throw new TypeError('Published artifact reference is malformed');
+    throw productError("workspace.error.graph.authoring.client.published.artifact.reference.is.malformed", new TypeError('Published artifact reference is malformed'));
   }
   return value;
 }
 
 function validatePublishedArtifacts(value) {
   if (!value || typeof value !== 'object' || !Array.isArray(value.items)) {
-    throw new Error('Published graph catalog response is malformed');
+    throw productError("workspace.error.graph.authoring.client.published.graph.catalog.response.is.malformed", new Error('Published graph catalog response is malformed'));
   }
   const identities = new Set();
   return Object.freeze({ items: Object.freeze(value.items.map(item => {
@@ -40,11 +41,11 @@ function validatePublishedArtifacts(value) {
         || typeof item.graphId !== 'string'
         || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(item.graphId)
         || item.graphId === 'submission') {
-      throw new Error('Published graph catalog response is malformed');
+      throw productError("workspace.error.graph.authoring.client.published.graph.catalog.response.is.malformed", new Error('Published graph catalog response is malformed'));
     }
     const releaseVersion = parseAuthoredReleaseVersion(item.releaseVersion);
     const identity = `${item.graphId}\0${releaseVersion}`;
-    if (identities.has(identity)) throw new Error('Published graph catalog contains duplicate identities');
+    if (identities.has(identity)) throw productError("workspace.error.graph.authoring.client.published.graph.catalog.contains.duplicate.identities", new Error('Published graph catalog contains duplicate identities'));
     identities.add(identity);
     return Object.freeze({ ...item, releaseVersion, sha256: requiredSha256(item.sha256),
       artifactRef: requiredArtifactRef(item.artifactRef) });
@@ -57,7 +58,7 @@ export function validateGraphAuthoringCapability(value) {
       || !['none', 'github'].includes(value.provider)
       || !Array.isArray(value.operations)
       || value.operations.some(item => typeof item !== 'string')) {
-    throw new Error('Runtime graph authoring capability is malformed');
+    throw productError("workspace.error.graph.authoring.client.runtime.graph.authoring.capability.is.malformed", new Error('Runtime graph authoring capability is malformed'));
   }
   return Object.freeze({
     mode: value.mode,
@@ -76,8 +77,8 @@ export class GraphAuthoringClient {
     if (typeof tokenProvider === 'function') this.tokenProvider = tokenProvider;
     else if (typeof tokenProvider?.getAccessToken === 'function') {
       this.tokenProvider = () => tokenProvider.getAccessToken();
-    } else throw new TypeError('tokenProvider must supply an access token');
-    if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
+    } else throw productError("workspace.error.graph.authoring.client.tokenprovider.must.supply.an.access.token", new TypeError('tokenProvider must supply an access token'));
+    if (typeof fetchImpl !== 'function') throw productError("workspace.error.graph.authoring.client.fetchimpl.must.be.a.function", new TypeError('fetchImpl must be a function'));
     // Calling a stored reference as `this.fetchImpl()` gives browser-native fetch the wrong
     // receiver in engines that enforce its Window binding. The wrapper invokes it as a plain
     // function while preserving injected test transports.
@@ -135,7 +136,7 @@ export class GraphAuthoringClient {
   }
 
   #mutationHeaders(revision, key, extra = {}) {
-    if (!revision) throw new TypeError('A source revision is required');
+    if (!revision) throw productError("workspace.error.graph.authoring.client.a.source.revision.is.required", new TypeError('A source revision is required'));
     return { ...extra, 'Idempotency-Key': requiredText(key, 'idempotency key'),
       'X-Ravenroot-Expected-Draft': requiredText(revision.draft, 'draft revision'),
       'X-Ravenroot-Expected-Release': requiredText(revision.release, 'release revision'),
@@ -152,7 +153,8 @@ export class GraphAuthoringClient {
     await invalidateRejectedCredential(response, this.credentialProvider, credential);
     if (options.empty && response.status === 204) return null;
     const value = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(value.error || `Graph authoring request failed (${response.status})`);
+    if (!response.ok) throw value.error ? new Error(value.error)
+      : productError('workspace.graphAuthoring.requestFailed', new Error(`Graph authoring request failed (${response.status})`), { status: response.status });
     return value;
   }
 }
@@ -186,14 +188,14 @@ export function repositorySourceStatus(authoring) {
  */
 export function applyAcceptedGraphMl(currentGraph, document_, parseGraphMl) {
   if (!currentGraph || currentGraph.format !== 'graphml' || typeof parseGraphMl !== 'function') {
-    throw new TypeError('An editable GraphML document and parser are required');
+    throw productError("workspace.error.graph.authoring.client.an.editable.graphml.document.and.parser.are.required", new TypeError('An editable GraphML document and parser are required'));
   }
   const accepted = parseGraphMl(decodeGraphMl(document_));
-  if (accepted?.format !== 'graphml') throw new Error('Repository save returned a non-GraphML document');
+  if (accepted?.format !== 'graphml') throw productError("workspace.error.graph.authoring.client.repository.save.returned.a.non.graphml.document", new Error('Repository save returned a non-GraphML document'));
   const graphId = accepted.graphProperties?.[GRAPH_ID_PROPERTY];
   const releaseVersion = accepted.graphProperties?.[RELEASE_VERSION_PROPERTY];
   if (graphId !== document_.graphId || String(releaseVersion) !== String(document_.releaseVersion)) {
-    throw new Error('Repository save returned inconsistent authored identity metadata');
+    throw productError("workspace.error.graph.authoring.client.repository.save.returned.inconsistent.authored.identity.metadata", new Error('Repository save returned inconsistent authored identity metadata'));
   }
   currentGraph.sourceXml = accepted.sourceXml;
   currentGraph.graphProperties = {

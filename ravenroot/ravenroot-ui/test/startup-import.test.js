@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createStartupImportController,
@@ -6,6 +6,10 @@ import {
   StartupImportError,
   startupImportTarget,
 } from '../src/startup-import.js';
+
+import { createUiLocalization, UI_CATALOG_SCHEMA, useUiLocalization } from '../src/ui-text.js';
+import { productError } from '../src/product-error.js';
+afterEach(() => useUiLocalization(createUiLocalization()));
 
 const PAGE = 'https://ui.example.test/editor?theme=dark';
 const clients = new Map();
@@ -212,5 +216,44 @@ describe('startup import orchestration', () => {
     await tick();
     expect(cancelled.snapshot().phase).toBe(STARTUP_IMPORT_PHASE.CANCELLED);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe('startup import live presentation', () => {
+  it('repaints pending, downloading, completed and failed state without rerunning or changing errors', async () => {
+    const messages = {
+      'workspace.import.waiting': 'Attente {filename}',
+      'workspace.startup.progress.downloading': 'Importation {filename}',
+      'workspace.startup.progress.completed': 'Importé {filename}',
+      'workspace.startup.failure.not-found': 'Absent',
+    };
+    const french = () => useUiLocalization(createUiLocalization({ locale: 'fr', catalogs: { fr: { schema: UI_CATALOG_SCHEMA, locale: 'fr', messages } } }));
+    let finish;
+    const run = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const onChange = vi.fn();
+    const controller = createStartupImportController({ rawUrl: '/flow.graphml', pageUrl: PAGE, run, onChange });
+    french(); controller.refreshLocale();
+    expect(onChange.mock.lastCall[0].message).toBe('Attente flow.graphml');
+    useUiLocalization(createUiLocalization());
+    controller.updateRuntime(ready(1));
+    expect(controller.snapshot().message).toBe('Importing flow.graphml…');
+    french(); controller.refreshLocale();
+    expect(onChange.mock.lastCall[0].message).toBe('Importation flow.graphml');
+    finish(); await tick();
+    expect(controller.snapshot().message).toBe('Importé flow.graphml');
+    useUiLocalization(createUiLocalization()); controller.refreshLocale();
+    expect(controller.snapshot().message).toBe('Imported flow.graphml.');
+    expect(run).toHaveBeenCalledTimes(1);
+    const error = productError('workspace.startup.failure.not-found', new StartupImportError('not-found', 'The graph file was not found. Check the source and retry.'));
+    const serialized = JSON.stringify(error);
+    const failedRun = vi.fn().mockRejectedValue(error);
+    const failed = createStartupImportController({ rawUrl: '/flow.graphml', pageUrl: PAGE, run: failedRun });
+    failed.updateRuntime(ready(2)); await tick();
+    french(); failed.refreshLocale();
+    expect(failed.snapshot()).toMatchObject({ message: 'Absent', errorCode: 'not-found', phase: STARTUP_IMPORT_PHASE.FAILED });
+    expect(failedRun).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(error)).toBe(serialized);
+    expect(error.publicMessage).toBe(error.message);
   });
 });

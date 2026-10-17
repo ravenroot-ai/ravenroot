@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
@@ -46,6 +47,7 @@ export function createDocumentRecord({
   id,
   documentId = id,
   incarnation = createDocumentIncarnation(),
+  // i18n-audit-exempt: authored-content - The default is the durable export filename, preserved as document identity across locale changes.
   name = 'untitled.graphml',
   displayName = name,
   graph = null,
@@ -55,7 +57,7 @@ export function createDocumentRecord({
   provenance = null,
 }) {
   const durableId = String(documentId || createDocumentIncarnation());
-  if (!Object.values(DOCUMENT_MODES).includes(mode)) throw new TypeError(`Unknown document mode: ${mode}`);
+  if (!Object.values(DOCUMENT_MODES).includes(mode)) throw productError("workspace.error.workspace.unknown.document.mode", new TypeError(`Unknown document mode: ${mode}`), { value1: mode });
   return {
     id: durableId,
     documentId: durableId,
@@ -236,7 +238,7 @@ export function documentIsEditable(document_) {
 
 export function forkDocumentRecord(source, { documentId = createDocumentIncarnation(), tenantId = source?.tenantId,
   graph = null, history = null, name = source?.name } = {}) {
-  if (!source) throw new TypeError('A source document is required');
+  if (!source) throw productError("workspace.error.workspace.a.source.document.is.required", new TypeError('A source document is required'));
   const forkGraph = graph || structuredClone(source.graph);
   if (forkGraph?.nodes) forkGraph.nodeMap = Object.fromEntries(forkGraph.nodes.map(node => [node.id, node]));
   const fork = createDocumentRecord({

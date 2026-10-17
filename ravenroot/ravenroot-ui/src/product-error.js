@@ -3,10 +3,10 @@
  * localizable reason. Protocol fields and server diagnostics remain untouched.
  */
 export function productError(uiMessageKey, message, uiMessageParams = {}) {
-  const error = new Error(message);
+  const error = message instanceof Error ? message : new Error(message);
   Object.defineProperties(error, {
     uiMessageKey: { value: uiMessageKey, enumerable: false },
-    uiMessageParams: { value: Object.freeze({ ...uiMessageParams }), enumerable: false },
+    uiMessageParams: { value: typeof uiMessageParams === 'function' ? uiMessageParams : Object.freeze({ ...uiMessageParams }), enumerable: false },
   });
   return error;
 }

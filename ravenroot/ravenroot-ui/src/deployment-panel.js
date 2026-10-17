@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { uiErrorReason, uiText } from './ui-text.js';
 // The Deployments window lets a graph with no effective SOURCE be "also registered and controlled as a local
 // deployment" for a graph with no effective SOURCE, and the tenant's own view of every deployment
@@ -219,7 +220,7 @@ export function createDeploymentsWindow({
     if (!derivedSource?.value.trim() || !request.boundaries[0].nodeId
         || !request.boundaries[0].predecessorInvocationIds[0]
         || !request.idempotencyKey || !request.reason) {
-      throw new Error('Source, boundary, predecessor, idempotency key, and reason are required.');
+      throw productError("workspace.error.deployment.panel.source.boundary.predecessor.idempotency.key.and.reason.are.requir", new Error('Source, boundary, predecessor, idempotency key, and reason are required.'));
     }
     return request;
   }
@@ -356,7 +357,7 @@ export function createDeploymentsWindow({
       const request = derivedRequest();
       const source = derivedSource.value.trim();
       if (derivedPreviewFingerprint !== JSON.stringify([source, request])) {
-        throw new Error('Preview this exact request again before starting.');
+        throw productError("workspace.error.deployment.panel.preview.this.exact.request.again.before.starting", new Error('Preview this exact request again before starting.'));
       }
       derivedStartButton.disabled = true;
       derivedBusy = true;
@@ -576,7 +577,7 @@ export function createDeploymentsWindow({
         if (entry.sagaError) {
           const diagnostic = doc.createElement('small');
           diagnostic.className = 'deployment-diagnostic';
-          paintText(diagnostic, () => uiText("workspace.deployment.panel.saga.status.unavailable", { reason: entry.sagaError }));
+          paintText(diagnostic, () => uiText("workspace.deployment.panel.saga.status.unavailable", { reason: uiErrorReason(entry.sagaError) }));
           item.append(diagnostic);
         } else if (Array.isArray(entry.sagas)) {
           const sagas = doc.createElement('ul');
@@ -698,7 +699,7 @@ export function createDeploymentsWindow({
     } catch (error) {
       if (disposed || selectedProcessId !== processInstanceId) return;
       processes = processes.map(entry => entry.processInstanceId === processInstanceId
-        ? { ...entry, sagaError: error?.message || String(error) } : entry);
+        ? { ...entry, sagaError: error } : entry);
     }
     renderProcesses();
   }

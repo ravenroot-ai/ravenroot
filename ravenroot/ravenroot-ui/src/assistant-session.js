@@ -33,7 +33,7 @@
 // each declared the string, a rename in one would silently turn admitted turns into `notice` in the
 // other — which is the disclosure being dropped, expressed as a typo.
 import { DISCLOSURE_ROLE } from './assistant-disclosure.js';
-import { uiText } from './ui-text.js';
+import { uiErrorReason, uiText } from './ui-text.js';
 
 export const INERT = 'inert';
 export const READY = 'ready';
@@ -276,7 +276,7 @@ export function deriveState({ availability, context, error } = {}, t = uiText) {
       state: ERROR,
       reason: error.reason || null,
       // Sanitized upstream by the client; carried, never interpreted, and never rendered as HTML.
-      message: String(error.message || t('assistant.request.failed')),
+      message: uiErrorReason(error) || t('assistant.request.failed'),
       canCompose: false,
     };
   }

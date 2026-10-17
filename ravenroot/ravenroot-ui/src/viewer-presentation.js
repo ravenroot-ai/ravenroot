@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import { getRendererPalette } from './theme-palette.js';
 import { COMMON_NODE_GLYPHS, nodeTypeCardShape } from './catalog-node-icon.js';
 import { CATALOG_NODE_SYMBOLS, catalogNodeSymbol } from './catalog-node-symbol.js';
@@ -60,6 +61,7 @@ export function viewerCardImage(nodeType, palette) {
  * The image is a packaged inline SVG, including the deterministic initial used for unknown types.
  */
 export function viewerDesignNodeStyle(nodeType, palette, {
+  // i18n-audit-exempt: protocol-token - Cytoscape's data expression selects an authored label; it is renderer syntax rather than visible copy.
   label = 'data(cardLabel)', fontSize = 20, bypassed = false, labelSide = 'bottom',
 } = {}) {
   const type = String(nodeType || 'node').toLowerCase();
@@ -275,12 +277,12 @@ export function viewerNodeLabel(node) {
   const type = viewerNodeType(node);
   const label = String(node?.label || node?.name || node?.id || '');
   const bypassed = Boolean(node?.bypassed);
-  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? ' · bypassed' : ''}`;
+  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? uiText("workspace.node.bypassed.suffix") : ''}`;
 }
 
 export function viewerCardLabel(node) {
   const label = String(node?.label || node?.name || node?.id || '');
-  return `${label}${node?.bypassed ? ' · bypassed' : ''}`;
+  return `${label}${node?.bypassed ? uiText("workspace.node.bypassed.suffix") : ''}`;
 }
 
 /** Closed mapping from the allowlisted wire projection into renderer data. */

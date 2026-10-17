@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 /**
  * Keeps the embedded viewer's renderer mounted while its containing surface changes size.
  * Native fullscreen is preferred, but a same-document fixed viewport is a deterministic fallback
@@ -9,7 +10,7 @@ export function createEmbedMaximizeController(root, button, {
   onResize = () => {},
   t = uiText,
 } = {}) {
-  if (!root || !button || !document || !window) throw new TypeError('Embed maximize controls are required.');
+  if (!root || !button || !document || !window) throw productError("workspace.error.embed.maximize.embed.maximize.controls.are.required", new TypeError('Embed maximize controls are required.'));
   let maximized = false;
   let nativeFullscreen = false;
   let returnFocus = null;

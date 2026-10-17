@@ -72,6 +72,10 @@ describe('UI localization source audit fixtures', () => {
   });
   it.each([
     `const say = text => { status.textContent = text; }; say('Inline status');`,
+    `try { throw new Error('Local failure'); } catch (error) { node.textContent = error.message; }`,
+    `function fail() { throw new Error('Local failure'); } try { fail(); } catch (error) { node.textContent = uiErrorReason(error); }`,
+    `async function request(action) { try { await action(); } catch (error) { node.textContent = uiErrorReason(error); } } request(() => { throw new Error('Local failure'); });`,
+    `try { throw productError('fixture.message', 'Diagnostic failure'); } catch (error) { node.textContent = error.message; }`,
     `function invoke(paint) { paint('Connect service'); } invoke(text => { status.textContent = text; });`,
     `function invoke(paint) { const alias = paint; alias('Connect service'); } invoke(text => { status.textContent = text; });`,
     `function invoke(paint) { paint('Connect service'); } function forward(callback) { invoke(callback); } forward(text => { status.textContent = text; });`,
@@ -83,6 +87,9 @@ describe('UI localization source audit fixtures', () => {
     `const fragment = '<b>Opaque HTML copy</b>'; node.insertAdjacentHTML('beforeend', fragment);`,
     `const values = ['First copy', 'Second copy']; node.textContent = values.join(' ');`,
     `let result = ''; result = 'Assigned copy'; node.textContent = result;`,
+    `let result = ''; const paint = () => { node.textContent = result; }; function update() { result = 'Later assigned copy'; }`,
+    `let message = ''; const state = () => ({ message }); function set(copy) { message = copy; } set('Later indirect copy');`,
+    `function warning(message) { return message + ' Repair the document.'; } export function state() { return { warning: warning('Invalid document') }; }`,
     `notify?.('Notification copy');`,
     `function fallback(value) { notify?.(value); } fallback('Fallback copy');`,
     `function showFormError(value) { error.textContent = value; } showFormError('Validation copy');`,
@@ -94,6 +101,9 @@ describe('UI localization source audit fixtures', () => {
 
   it('accepts deferred localized text and authored values through opaque wrappers', () => {
     expect(findPresentationSinkViolations(`
+      function report(error) { node.textContent = uiErrorReason(error); }
+      try { throw productError('fixture.message', 'Diagnostic failure'); } catch (error) { report(error); }
+      try { throw productError('fixture.message', 'Diagnostic failure'); } catch (error) { node.textContent = uiErrorReason(error); }
       function invoke(paint) { paint(uiText('fixture.message')); }
       invoke(text => { status.textContent = text; });
       function paint(node, render) { node.textContent = render(); }

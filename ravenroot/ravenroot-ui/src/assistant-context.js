@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 // The authoring assistant's context attachment claim, and the one place it can be falsified
 // (the assistant-tool boundary).
 //
@@ -117,7 +118,7 @@ function readClass(descriptor, source, budget) {
       ...base,
       state: UNAVAILABLE,
       reason: SOURCE_ERROR,
-      detail: String(error?.message || error || 'source failed'),
+      detail: String(error?.message || error || uiText('workspace.assistant.context.sourceFailed')),
     };
   }
 
@@ -145,7 +146,7 @@ function clampToBudget(raw, budget) {
   } catch (error) {
     // A cyclic or unserializable value cannot be sent; that is a source defect, reported as one
     // rather than silently attached in some partial form.
-    throw new Error(`context value is not serializable: ${error?.message || error}`);
+    throw productError("workspace.error.assistant.context.context.value.is.not.serializable", new Error(`context value is not serializable: ${error?.message || error}`), { value1: error?.message || error });
   }
   if (serialized.length <= budget) return { value: raw, truncated: false, omittedBytes: 0 };
   return {

@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
 import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
 import { createVisualGroup, editVisualGroups } from './graph-editing.js';
@@ -472,7 +473,7 @@ const NODE_ICONS = {
  * rather than two.
  */
 function bypassedNodeName(name, bypassed) {
-  return bypassed ? `${name} · bypassed` : name;
+  return bypassed ? `${name}${uiText('workspace.node.bypassed.suffix')}` : name;
 }
 
 function humanTaskNodeLabel(label, attention) {
@@ -887,7 +888,7 @@ async function deliverRuntimeEventAfterAuthority(event, client, authorityRequest
   await authorityRequest;
   if (runtimeClient !== client || workspaceAuthority.state !== 'ready'
       || workspaceAuthority.client !== client) {
-    throw new Error('Runtime event authority is unavailable');
+    throw productError("workspace.error.app.runtime.event.authority.is.unavailable", new Error('Runtime event authority is unavailable'));
   }
   handleRuntimeEvent(event, client);
 }
@@ -1077,6 +1078,7 @@ let runtimeConfiguration = null;
 let graphAuthoringCapability = pendingAuthoringCapability();
 let runtimeConnectionGeneration = 0;
 let startupImportController = null;
+let invalidStartupImportError = null;
 let startupImportPlaceholder = null;
 let invalidStartupImportVisible = false;
 const startupService = connectionService(document.getElementById('service-url').defaultValue, location.origin);
@@ -1344,7 +1346,7 @@ async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneratio
       && item.generation === locator.generation);
     if (!task) {
       humanTaskDecisionDialog.unavailable(
-        uiText("workspace.app.this.task.detail.is.unavailable.it.may.be.stale"));
+        () => uiText("workspace.app.this.task.detail.is.unavailable.it.may.be.stale"));
       clearHumanTaskSelection();
       return;
     }
@@ -1354,7 +1356,7 @@ async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneratio
     // only the locator and let the next authenticated reconnect try again; never cache the row.
     if (recoveryGeneration === humanTaskRecoveryGeneration) {
       humanTaskDecisionDialog.unavailable(
-        uiText("workspace.app.authorized.task.detail.could.not.be.loaded.refresh.or"));
+        () => uiText("workspace.app.authorized.task.detail.could.not.be.loaded.refresh.or"));
     }
   }
 }
@@ -2000,7 +2002,7 @@ function visualGroupDialog(title, { value = null, detail = '', submit = uiText("
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (workspace.active !== owner || owner.incarnation !== incarnation || !groupAuthoringAllowed(owner)) { close(); return; }
-    try { onCommit(input.value.trim()); close(); } catch (failure) { error.textContent = failure.message; }
+    try { onCommit(input.value.trim()); close(); } catch (failure) { error.textContent = uiErrorReason(failure); }
   });
   dialog.showModal(); if (value !== null) { input.focus(); input.select(); } else save.focus();
   return true;
@@ -3612,8 +3614,10 @@ function addDocumentRecord(name = defaultDocumentName(), displayName = allocateD
 function defaultDocumentName() {
   if (nextUntitledNumber === 1) {
     nextUntitledNumber += 1;
+    // i18n-audit-exempt: authored-content - Document filenames are persisted stable identities.
     return 'untitled.graphml';
   }
+  // i18n-audit-exempt: authored-content - Document filenames are persisted stable identities.
   const name = `untitled-${nextUntitledNumber}.graphml`;
   nextUntitledNumber += 1;
   return name;
@@ -3662,12 +3666,13 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
 }
 
 async function openDeploymentDocument(deploymentId, client = runtimeClient) {
-  if (!client) throw new Error('Connect to a Ravenroot service before opening a deployment.');
+  if (!client) throw productError("workspace.error.app.connect.to.a.ravenroot.service.before.opening.a.deployment", new Error('Connect to a Ravenroot service before opening a deployment.'));
   const envelope = await client.deploymentView(deploymentId);
   const graph = deploymentProjectionDocument(envelope);
   const id = openDocument({
+    // i18n-audit-exempt: authored-content - Document filenames are persisted stable identities.
     name: `${deploymentId}.deployment`,
-    displayName: allocateDocumentDisplayName(`${deploymentId} (deployment)`),
+    displayName: allocateDocumentDisplayName(uiText('workspace.document.deploymentName', { deploymentId })),
     graph,
     mode: DOCUMENT_MODES.DEPLOYED,
     provenance: {
@@ -3682,7 +3687,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     },
   });
   const owner = workspace.find(id);
-  if (!owner) throw new Error('The deployment canvas could not be created.');
+  if (!owner) throw productError("workspace.error.app.the.deployment.canvas.could.not.be.created", new Error('The deployment canvas could not be created.'));
   const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
   const repaint = frame => {
     const result = applyDeploymentViewFrame(state, frame);
@@ -8339,7 +8344,7 @@ function programGraph(owner) {
 }
 
 function programResultDetail(result) {
-  const identity = result.artifactId ? ` · Artifact ${result.artifactId}` : '';
+  const identity = result.artifactId ? uiText('workspace.program.artifactIdentity', { id: result.artifactId }) : '';
   const reused = result.phase === 'READY' ? ` · ${result.reused ? uiText("workspace.app.server.reused") : uiText("workspace.app.server.built")}` : '';
   const diagnostic = result.diagnostic ? ` · ${result.diagnostic}` : '';
   return `${result.phase || uiText("workspace.app.readiness.request.failed")}${identity}${reused}${diagnostic}`;
@@ -8551,7 +8556,7 @@ function programBuildPlan(owner) {
 function currentProgramAuthoringLimits() {
   if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient
       || !runtimeConfiguration.configuration?.programAuthoring) {
-    throw new Error('Program authoring is unavailable until the connected service returns valid configuration');
+    throw productError("workspace.error.app.program.authoring.is.unavailable.until.the.connected.service.retu", new Error('Program authoring is unavailable until the connected service returns valid configuration'));
   }
   return runtimeConfiguration.configuration.programAuthoring;
 }
@@ -8611,7 +8616,7 @@ function applyProgramBuildSnapshot(owner, plan, generation, snapshot) {
   const state = programReadiness(owner);
   if (state.generation !== generation || state.signature !== plan.signature) return false;
   if (state.activeBuildId && state.activeBuildId !== snapshot.buildId) {
-    throw new Error(`Program build changed identity from ${state.activeBuildId} to ${snapshot.buildId}`);
+    throw productError("workspace.error.app.program.build.changed.identity.from.to", new Error(`Program build changed identity from ${state.activeBuildId} to ${snapshot.buildId}`), { value1: state.activeBuildId, value2: snapshot.buildId });
   }
   if (snapshot.revision < state.activeRevision) return true;
   state.activeBuildId = snapshot.buildId;
@@ -9494,7 +9499,7 @@ function readAdditionalPropertyGroupEditor(form, descriptor) {
     })),
   }));
   if (!additionalPropertyGroupsValid(groups)) {
-    throw new TypeError('additional property group is incomplete');
+    throw productError("workspace.error.app.additional.property.group.is.incomplete", new TypeError('additional property group is incomplete'));
   }
   return serializeAdditionalPropertyGroups(groups);
 }
@@ -11788,9 +11793,9 @@ async function connectRuntime(atBoot = false) {
   const input = document.getElementById('service-url');
   const baseUrl = input.value.trim().replace(/\/$/, '');
   try { rememberedConnection.select(baseUrl); } catch (error) {
-    setRuntimeConnectionState('error', uiErrorReason(error));
+    setRuntimeConnectionState('error', () => (uiErrorReason(error)));
     const outcome = { kind: 'error', code: 'invalid-service-url',
-      message: uiText("workspace.import.invalidUrl") };
+      get message() { return uiText("workspace.import.invalidUrl"); } };
     startupImportController?.updateRuntime(outcome);
     return outcome;
   }
@@ -11800,11 +11805,11 @@ async function connectRuntime(atBoot = false) {
     let target;
     try {
       target = new URL(baseUrl, location.origin);
-      if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
+      if (!['http:', 'https:'].includes(target.protocol)) throw productError("workspace.error.app.unsupported.protocol", new Error('unsupported protocol'));
     } catch {
-      setRuntimeConnectionState('error', uiText("workspace.app.enter.a.valid.http.s.service.url"));
+      setRuntimeConnectionState('error', () => (uiText("workspace.app.enter.a.valid.http.s.service.url")));
       const outcome = { kind: 'error', code: 'invalid-service-url',
-        message: uiText("workspace.import.invalidUrl") };
+        get message() { return uiText("workspace.import.invalidUrl"); } };
       startupImportController?.updateRuntime(outcome);
       return outcome;
     }
@@ -11814,7 +11819,7 @@ async function connectRuntime(atBoot = false) {
       // the token stays put and the decision waits for the user's next deliberate action.
       if (atBoot) {
         setRuntimeConnectionState('authentication-required',
-          uiText("workspace.app.confirm.the.external.service.origin.to.connect"));
+          () => (uiText("workspace.app.confirm.the.external.service.origin.to.connect")));
         const outcome = { kind: 'service-confirmation-required' };
         startupImportController?.updateRuntime(outcome);
         return outcome;
@@ -11836,11 +11841,11 @@ async function connectRuntime(atBoot = false) {
         runtimeConfigurationRequest = null;
         runtimeConfiguration = null;
         graphAuthoringCapability = unavailableAuthoringCapability(
-          new Error('External service connection was cancelled'));
+          productError("workspace.error.app.external.service.connection.was.cancelled", new Error('External service connection was cancelled')));
         refreshCommands();
         syncGraphModeLabel();
         void configureHumanTasks();
-        setRuntimeConnectionState('authentication-required', uiText("workspace.app.external.service.connection.cancelled"));
+        setRuntimeConnectionState('authentication-required', () => (uiText("workspace.app.external.service.connection.cancelled")));
         const outcome = { kind: 'service-confirmation-required' };
         startupImportController?.updateRuntime(outcome);
         return outcome;
@@ -11886,7 +11891,7 @@ async function connectRuntime(atBoot = false) {
       syncGraphModeLabel();
       if (result.error || !configuration) {
         failWorkspaceAuthority(connectedClient, authorityGeneration,
-          uiText("workspace.app.workspace.authority.could.not.be.verified", { value: result.error?.message || 'configuration unavailable' }));
+          uiText("workspace.app.workspace.authority.could.not.be.verified", { value: result.error ? uiErrorReason(result.error) : uiText('common.unavailable') }));
         return result;
       }
       runtimeConfiguration = result;
@@ -11910,7 +11915,7 @@ async function connectRuntime(atBoot = false) {
   });
   const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
-    atBoot ? uiText("workspace.app.connecting.to.the.service") : uiText("workspace.app.connecting.to.the.selected.service"));
+    () => (atBoot ? uiText("workspace.app.connecting.to.the.service") : uiText("workspace.app.connecting.to.the.selected.service")));
   nodeCatalogPending = true;
   renderNodeCatalog();
   try {
@@ -11961,10 +11966,10 @@ async function connectRuntime(atBoot = false) {
     syncGraphModeLabel();
     nodeCatalogPending = false;
     renderNodeCatalog();
-    setRuntimeConnectionState('error', uiErrorReason(error));
+    setRuntimeConnectionState('error', () => (uiErrorReason(error)));
     addActivityMessage(uiMessage("workspace.notice.connection"), uiErrorReason(error), 'failed');
     const outcome = { kind: 'error', code: 'connection-failed',
-      message: uiText("workspace.import.connectionFailed") };
+      get message() { return uiText("workspace.import.connectionFailed"); } };
     startupImportController?.updateRuntime(outcome);
     return outcome;
   }
@@ -11977,22 +11982,22 @@ async function connectRuntime(atBoot = false) {
     outcome = [401, 403].includes(configurationResult.error?.status)
       ? { kind: 'authentication-required' }
       : { kind: 'error', code: 'configuration-unavailable',
-        message: uiText("workspace.import.invalidConfiguration") };
+        get message() { return uiText("workspace.import.invalidConfiguration"); } };
   } else if (workspaceAuthority.state === 'ready' && workspaceAuthority.client === connectedClient
       && workspaceAuthority.generation === authorityGeneration && !workspaceRestoreInProgress) {
     outcome = { kind: 'ready', binding: startupImportBinding() };
   } else {
     const workspaceFailure = configurationResult.workspaceFailure;
     const failures = {
-      'current-session-conflict': uiText("workspace.app.current.session.documents.must.remain.open.close.or.export"),
-      'current-session-changed': uiText("workspace.app.the.stored.workspace.was.not.replaced.because.the.current"),
-      'persistence-unavailable': uiText("workspace.app.the.current.workspace.could.not.be.saved.safely.keep"),
-      'restore-failed': uiText("workspace.app.the.stored.workspace.could.not.be.restored.current.documents"),
-      'stale-transition': uiText("workspace.app.the.service.or.workspace.changed.before.restoration.completed.retry"),
+      'current-session-conflict': () => uiText("workspace.app.current.session.documents.must.remain.open.close.or.export"),
+      'current-session-changed': () => uiText("workspace.app.the.stored.workspace.was.not.replaced.because.the.current"),
+      'persistence-unavailable': () => uiText("workspace.app.the.current.workspace.could.not.be.saved.safely.keep"),
+      'restore-failed': () => uiText("workspace.app.the.stored.workspace.could.not.be.restored.current.documents"),
+      'stale-transition': () => uiText("workspace.app.the.service.or.workspace.changed.before.restoration.completed.retry"),
     };
     outcome = { kind: 'error', code: workspaceFailure || 'workspace-not-ready',
-      message: failures[workspaceFailure]
-        || uiText("workspace.import.notReady") };
+      get message() { return failures[workspaceFailure]?.()
+        || uiText("workspace.import.notReady"); } };
   }
   startupImportController?.updateRuntime(outcome);
   return outcome;
@@ -12030,12 +12035,12 @@ function authenticateRuntime() {
     return;
   }
   if (!token) {
-    setRuntimeConnectionState('authentication-required', uiText("workspace.app.paste.an.access.token.to.authenticate"));
+    setRuntimeConnectionState('authentication-required', () => (uiText("workspace.app.paste.an.access.token.to.authenticate")));
     input.focus();
     return;
   }
   try { rememberedConnection.authenticate(document.getElementById('service-url').value, token); }
-  catch (error) { setRuntimeConnectionState('error', uiErrorReason(error)); return; }
+  catch (error) { setRuntimeConnectionState('error', () => (uiErrorReason(error))); return; }
   // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
   // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
   suspendHumanTaskRecovery();
@@ -12057,7 +12062,7 @@ async function revokeRuntimeAccess(rejected = false) {
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
   graphAuthoringCapability = unavailableAuthoringCapability(
-    new Error('Runtime access was revoked'));
+    productError("workspace.error.app.runtime.access.was.revoked", new Error('Runtime access was revoked')));
   refreshCommands();
   syncGraphModeLabel();
   workspacePersistenceReason = uiText("workspace.app.workspace.authority.was.revoked.documents.remain.open.for.export");
@@ -12083,9 +12088,9 @@ async function revokeRuntimeAccess(rejected = false) {
   nodeCatalogLoaded = false;
   nodeCatalogPending = false;
   renderNodeCatalog();
-  setRuntimeConnectionState(rejected ? 'authentication-required' : 'revoked', rejected
+  setRuntimeConnectionState(rejected ? 'authentication-required' : 'revoked', () => (rejected
     ? uiText("workspace.app.the.service.rejected.its.token.authenticate.with.a.replacement")
-    : uiText("workspace.app.browser.token.forgotten.service.retained.a.configured.server.token"));
+    : uiText("workspace.app.browser.token.forgotten.service.retained.a.configured.server.token")));
   refreshCommands();
   if (!rejected && startupServerAuth && connectionService(document.getElementById('service-url').value, location.origin) === startupService) {
     void connectRuntime();
@@ -12155,7 +12160,7 @@ async function executionLifecycleCommand(action) {
     if (result.status === 'unknown') {
       setExecutionReconciliationState(owner, 'unknown');
       if (workspace.activeId === owner.id) {
-        const reason = result.observationError?.message || result.commandError?.message
+        const reason = (result.observationError ? uiErrorReason(result.observationError) : null) || (result.commandError ? uiErrorReason(result.commandError) : null)
           || uiText("workspace.app.the.runtime.returned.no.readable.reason");
         addActivityMessage(uiMessage("workspace.notice.status.unknown", { action: uiText(`workspace.execution.action.${action}`) }),
           uiMessage("workspace.notice.execution.could.not.be.authoritatively.read.after.the.command", { shortId: shortId(flight.executionId), reason: reason }), 'failed');
@@ -12178,7 +12183,7 @@ async function executionLifecycleCommand(action) {
         uiMessage("workspace.notice.authoritative.state.execution", { commandOutcome: commandOutcome, status: status, paused: paused, shortId: shortId(flight.executionId) }),
         result.commandError ? 'failed' : 'completed');
       if (result.commandError) addActivityMessage(uiMessage("workspace.notice.request.response.unavailable", { action: uiText(`workspace.execution.action.${action}`) }),
-        uiMessage("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: result.commandError.message }),
+        uiMessage("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: uiErrorReason(result.commandError) }),
         'failed');
       document.getElementById('activity-summary').textContent =
         uiText("workspace.app.execution", { action: uiText(`workspace.execution.action.${action}`), action2: '', status: status, executionId: shortId(flight.executionId) });
@@ -12480,7 +12485,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
       onUnknown: ({ error, failureCount }) => {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
-        const reason = error?.message || uiText("workspace.app.the.runtime.returned.no.readable.reason");
+        const reason = uiErrorReason(error) || uiText("workspace.app.the.runtime.returned.no.readable.reason");
         addActivityMessage(uiMessage("workspace.notice.execution.status.unknown"),
           uiMessage("workspace.notice.execution.could.not.be.reconciled.after.checks.test.and", { shortId: shortId(executionId), failureCount: failureCount, reason: reason }),
           'failed');
@@ -13620,7 +13625,7 @@ async function startAssistantConnection() {
     assistantConnection = null;
     // Reported where the author is looking, and NOT as a transcript turn: nothing was asked of the
     // model, so a turn would put words in a conversation that did not happen.
-    showAssistantConnectionProgress(String(error?.message
+    showAssistantConnectionProgress(String(uiErrorReason(error)
       || uiText("workspace.app.the.connection.could.not.be.started")));
     renderAssistantState();
     return;
@@ -13691,7 +13696,7 @@ async function pollAssistantConnection() {
     // than retrying into a service that just failed — the author still has the code and can start
     // again, which is a decision they can make and this loop cannot.
     stopAssistantConnectionTimer();
-    showAssistantConnectionProgress(String(error?.message
+    showAssistantConnectionProgress(String(uiErrorReason(error)
       || uiText("workspace.app.the.connection.could.not.be.checked")));
     return;
   }
@@ -13903,7 +13908,7 @@ async function submitAssistantDraft() {
   } catch (error) {
     // Reported in the transcript AND in the state banner. Never a silent failure, and never a
     // fabricated answer standing in for one.
-    assistantError = { reason: error?.reason || null, message: error?.message || uiText("workspace.assistant.requestFailed") };
+    assistantError = { uiMessageKey: error?.uiMessageKey, uiMessageParams: error?.uiMessageParams, reason: error?.reason || null, message: uiErrorReason(error) || uiText("workspace.assistant.requestFailed") };
     pushAssistantTurn({ role: NOTICE, text: assistantError.message });
     // A failure that tells us the service is gone updates availability too, so the panel settles
     // into the inert state that names the cause rather than staying in a transient error.
@@ -14105,9 +14110,9 @@ function onReplaceFileInput(event) {
 
 function graphConfigurationUnavailable(cause = null) {
   const detail = cause?.message ? `: ${cause.message}` : '';
-  return new Error(
+  return productError("workspace.error.app.graph.document.loading.is.unavailable.until.the.connected.service", new Error(
     `Graph document loading is unavailable until the connected service returns valid configuration${detail}`,
-  );
+  ), { value1: cause ? `: ${uiErrorReason(cause)}` : '' });
 }
 
 async function graphDocumentByteLimitForLoad() {
@@ -14169,9 +14174,9 @@ async function loadFileObj(file) {
       clearActivity();
       addActivityMessage(uiMessage("workspace.notice.editor.18"), uiMessage("workspace.notice.loaded.2", { name: file.name }), 'completed');
     },
-    onRejected: err => alert(uiText("workspace.app.error") + err.message),
+    onRejected: err => alert(uiText("workspace.app.error") + uiErrorReason(err)),
     onError: err => {
-      alert(uiText("workspace.app.error") + err.message);
+      alert(uiText("workspace.app.error") + uiErrorReason(err));
       console.error(err);
     },
     onComplete: hideLoading,
@@ -14240,25 +14245,25 @@ function startupImportFailure(error, stage) {
   if (error?.name === 'AbortError' || error instanceof StartupImportError) return error;
   if (error instanceof GraphInputRejection
       && error.reason === GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE) {
-    return new StartupImportError('document-too-large',
-      'The graph is larger than the connected service allows. Choose a smaller file and retry.');
+    return productError("workspace.startup.failure.document-too-large", new StartupImportError('document-too-large',
+      'The graph is larger than the connected service allows. Choose a smaller file and retry.'));
   }
   if (stage === 'download') {
     const status = /^HTTP ([0-9]{3})$/.exec(error?.message || '')?.[1];
     if (status === '404') {
-      return new StartupImportError('not-found', 'The graph file was not found. Check the source and retry.');
+      return productError("workspace.startup.failure.not-found", new StartupImportError('not-found', 'The graph file was not found. Check the source and retry.'));
     }
-    return new StartupImportError('download-failed',
-      'The graph could not be downloaded. Check browser access and retry.');
+    return productError("workspace.startup.failure.download-failed", new StartupImportError('download-failed',
+      'The graph could not be downloaded. Check browser access and retry.'));
   }
-  return new StartupImportError('invalid-graph',
-    'The downloaded file is not valid supported GraphML or Graphify JSON.');
+  return productError("workspace.startup.failure.invalid-graph", new StartupImportError('invalid-graph',
+    'The downloaded file is not valid supported GraphML or Graphify JSON.'));
 }
 
 async function runStartupImport({ target, binding, signal }) {
   if (!startupImportBindingIsCurrent(binding)) {
-    throw new StartupImportError('stale-authority',
-      'The service or workspace changed before the import began. Retry in the current workspace.');
+    throw productError("workspace.startup.failure.stale-authority.before", new StartupImportError('stale-authority',
+      'The service or workspace changed before the import began. Retry in the current workspace.'));
   }
   const maxBytes = runtimeConfiguration.configuration.graphDocumentMaxBytes;
   showLoading();
@@ -14270,8 +14275,8 @@ async function runStartupImport({ target, binding, signal }) {
       // reject every redirect and let a new direct URL pass through the normal origin consent.
       const response = await fetch(input, { signal, redirect: 'manual' });
       if (response.type === 'opaqueredirect') {
-        throw new StartupImportError('redirect-not-allowed',
-          'The graph URL redirects to another location. Use the final file URL directly and confirm its origin if prompted.');
+        throw productError("workspace.startup.failure.redirect-not-allowed", new StartupImportError('redirect-not-allowed',
+          'The graph URL redirects to another location. Use the final file URL directly and confirm its origin if prompted.'));
       }
       return response;
     });
@@ -14281,8 +14286,8 @@ async function runStartupImport({ target, binding, signal }) {
     hideLoading();
   }
   if (signal.aborted || !startupImportBindingIsCurrent(binding)) {
-    throw new StartupImportError('stale-authority',
-      'The service or workspace changed during the import. Retry in the current workspace.');
+    throw productError("workspace.startup.failure.stale-authority", new StartupImportError('stale-authority',
+      'The service or workspace changed during the import. Retry in the current workspace.'));
   }
   let graph;
   try {
@@ -14291,8 +14296,8 @@ async function runStartupImport({ target, binding, signal }) {
     throw startupImportFailure(error, 'parse');
   }
   if (signal.aborted || !startupImportBindingIsCurrent(binding)) {
-    throw new StartupImportError('stale-authority',
-      'The service or workspace changed during the import. Retry in the current workspace.');
+    throw productError("workspace.startup.failure.stale-authority", new StartupImportError('stale-authority',
+      'The service or workspace changed during the import. Retry in the current workspace.'));
   }
   if (startupImportPlaceholderIsUntouched()) {
     completeReplaceActiveDocument(startupImportPlaceholder.document, graph, target.filename);
@@ -14335,12 +14340,13 @@ function initializeStartupImport(rawUrl) {
   } catch (error) {
     startupImportController = null;
     invalidStartupImportVisible = true;
+    invalidStartupImportError = error;
     const surface = document.getElementById('startup-import');
     surface.hidden = false;
     surface.dataset.phase = 'failed';
     document.getElementById('startup-import-file').textContent = uiText("workspace.app.graph.url");
     document.getElementById('startup-import-status').textContent = error instanceof StartupImportError
-      ? error.publicMessage : uiText("workspace.app.the.graph.url.is.invalid");
+      ? uiErrorReason(error) : uiText("workspace.app.the.graph.url.is.invalid");
     document.getElementById('startup-import-confirm').hidden = true;
     document.getElementById('startup-import-retry').hidden = true;
     document.getElementById('startup-import-cancel').hidden = false;
@@ -15487,7 +15493,7 @@ async function commitCloseAllDocuments() {
     const prepared = pending.dirtyChoice === 'save'
       ? classified.dirty.map(document_ => {
         const download = prepareDocumentDownload(document_.id);
-        if (!download) throw new Error('Document download preparation failed.');
+        if (!download) throw productError("workspace.error.app.document.download.preparation.failed", new Error('Document download preparation failed.'));
         return download;
       })
       : [];
@@ -15500,7 +15506,7 @@ async function commitCloseAllDocuments() {
           ? await stopActiveSourceSession(owner) : true;
         if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
         if (!stopped) {
-          throw new Error('Source session did not stop.');
+          throw productError("workspace.error.app.source.session.did.not.stop", new Error('Source session did not stop.'));
         }
       }
     }
@@ -15590,7 +15596,7 @@ function gitAuthoringEnabled() {
 }
 
 function primaryPersistenceUnavailable() {
-  const detail = graphAuthoringCapability.error?.message;
+  const detail = graphAuthoringCapability.error ? uiErrorReason(graphAuthoringCapability.error) : null;
   showInspectorMessage(uiText("workspace.notice.open.and.save.are.unavailable.until.authoring.capabilities.are", { detail1: detail ? `: ${detail}` : '.' }));
   return false;
 }
@@ -15758,11 +15764,11 @@ async function publishedArtifacts() {
     const selection = globalThis.prompt(uiText("workspace.app.published.versions.selecting.an.older.version.performs.rollback.enter", { value: choices.join('\n') }), '')?.trim();
     if (!selection) return false;
     const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})@([1-9][0-9]*)$/.exec(selection);
-    if (!match) throw new Error('Use graphId@version.');
+    if (!match) throw productError("workspace.error.app.use.graphid.version", new Error('Use graphId@version.'));
     const releaseVersion = parseAuthoredReleaseVersion(match[2]);
     const selected = page.items.find(item => item.graphId === match[1]
       && item.releaseVersion === releaseVersion);
-    if (!selected) throw new Error('Select an exact version from the verified catalog shown above.');
+    if (!selected) throw productError("workspace.error.app.select.an.exact.version.from.the.verified.catalog.shown.above", new Error('Select an exact version from the verified catalog shown above.'));
     const deploymentId = globalThis.prompt(uiText("workspace.app.deployment.name"), `${match[1]}-${match[2]}`)?.trim();
     if (!deploymentId) return false;
     await graphAuthoringClient.importArtifact(match[1], releaseVersion, selected.sha256, selected.artifactRef);
@@ -16567,7 +16573,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       && owner?.incarnation === incarnation && currentHumanTaskCapability() === capability
       && workspaceAuthority.generation === authorityGeneration && tenantAuthorityAllows(owner, client);
     if (!client || !capability || !current()) {
-      throw new Error('Reconnect to this document workspace before deciding this task.');
+      throw productError("workspace.error.app.reconnect.to.this.document.workspace.before.deciding.this.task", new Error('Reconnect to this document workspace before deciding this task.'));
     }
     try {
       const result = await client.settleHumanTask(task, action, comment, response, { capability });
@@ -16589,7 +16595,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
-      throw new Error('Reconnect to this document workspace before opening this presentation.');
+      throw productError("workspace.error.app.reconnect.to.this.document.workspace.before.opening.this.presenta", new Error('Reconnect to this document workspace before opening this presentation.'));
     }
     return client.issueHumanTaskInteraction(task, { capability });
   },
@@ -16597,20 +16603,20 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
-      throw new Error('Reconnect before completing this presentation.');
+      throw productError("workspace.error.app.reconnect.before.completing.this.presentation", new Error('Reconnect before completing this presentation.'));
     }
     let typedResponse = null;
     if (action === 'RESOLVE') {
       if (response?.contentType !== 'application/vnd.ravenroot.payload+json'
           || typeof response?.payloadBase64 !== 'string') {
-        throw new Error('The custom presentation returned an invalid typed response.');
+        throw productError("workspace.error.app.the.custom.presentation.returned.an.invalid.typed.response", new Error('The custom presentation returned an invalid typed response.'));
       }
       try {
         const binary = atob(response.payloadBase64);
         const bytes = Uint8Array.from(binary, unit => unit.charCodeAt(0));
         typedResponse = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
       } catch {
-        throw new Error('The custom presentation returned malformed response bytes.');
+        throw productError("workspace.error.app.the.custom.presentation.returned.malformed.response.bytes", new Error('The custom presentation returned malformed response bytes.'));
       }
     }
     // Custom hosts never receive or consume the delegated external-provider capability. The
@@ -16677,7 +16683,7 @@ deploymentsWindow = createDeploymentsWindow({
     source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
     const deployedId = openDocument({
       name: source.name,
-      displayName: allocateDocumentDisplayName(`${source.displayName} · deployed`),
+      displayName: allocateDocumentDisplayName(uiText('workspace.document.deployedName', { name: source.displayName })),
       graph: source.graph,
       tenantId: owner.tenantId,
       mode: DOCUMENT_MODES.DEPLOYED,
@@ -16966,6 +16972,13 @@ uiLocalization.subscribe(() => {
   credentialsWindow?.refreshLocale?.();
   deploymentsWindow?.refreshLocale?.();
   runnerWindow?.refreshLocale?.();
+  startupImportController?.refreshLocale();
+  humanTaskDecisionDialog?.refreshLocale?.();
+  if (invalidStartupImportVisible) {
+    document.getElementById('startup-import-file').textContent = uiText("workspace.app.graph.url");
+    document.getElementById('startup-import-status').textContent = invalidStartupImportError instanceof StartupImportError
+      ? uiErrorReason(invalidStartupImportError) : uiText("workspace.app.the.graph.url.is.invalid");
+  }
   drawingModelController?.refreshLocale?.();
   workspace.documents.forEach(owner => owner.visualGroupsRenderer?.refreshLocale?.());
   refreshCommands();

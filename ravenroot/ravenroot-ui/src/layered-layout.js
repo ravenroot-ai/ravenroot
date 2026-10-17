@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 /**
  * The Cytoscape side of the layered drawings: a layout extension that measures the rendered
  * nodes and labels, asks `layered-drawing.js` for positions and routes, animates the positions
@@ -37,6 +38,7 @@ export function measureLayeredNode(node, side = 'bottom') {
     : side === 'right'
       ? (beside > 0 ? { text, width: beside, height, side } : null)
       : (below > 0 ? { text, width: Math.max(0, labelled.w), height: below, side } : null);
+  // i18n-audit-exempt: protocol-token - Label is a geometry record containing authored text and a placement enum, not a product caption.
   return { id: node.id(), width, height, kind: node.data('kind'), label };
 }
 
@@ -56,7 +58,7 @@ function LayeredLayout(options) {
 
 LayeredLayout.prototype.run = function run() {
   const { cy, eles, mode } = this.options;
-  if (!isLayeredMode(mode)) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
+  if (!isLayeredMode(mode)) throw productError("workspace.error.layered.layout.unknown.layered.drawing.mode", new TypeError(`Unknown layered drawing mode: ${mode}`), { value1: mode });
   // The drawing reserves room for the label on the side this mode needs it; painting it there is
   // the editor's job, and it has to happen before the measurement, not after.
   const labelSide = layeredLabelSide(mode);

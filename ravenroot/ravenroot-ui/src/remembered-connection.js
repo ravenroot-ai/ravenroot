@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { uiText } from './ui-text.js';
 import { memoryTokenProvider } from './runtime-client.js';
 
@@ -8,11 +9,11 @@ const storageFailure = () => uiText("workspace.remembered.connection.browser.sto
 /** Public browser authority, including API prefix; never the proxy's private upstream identity. */
 export function connectionService(value, origin = globalThis.location?.origin) {
   const raw = String(value || '').trim();
-  if (raw.length > 2048 || /[\\\u0000-\u001f\u007f?#]/u.test(raw)) throw new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment');
+  if (raw.length > 2048 || /[\\\u0000-\u001f\u007f?#]/u.test(raw)) throw productError("workspace.error.remembered.connection.enter.a.valid.http.s.service.url.without.credentials.query.or.fra", new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment'));
   const url = new URL(raw || origin, origin);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
       || /%(?:2f|5c|2e|25)|\/\//i.test(url.pathname)) {
-    throw new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment');
+    throw productError("workspace.error.remembered.connection.enter.a.valid.http.s.service.url.without.credentials.query.or.fra", new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment'));
   }
   return url.origin + url.pathname.replace(/\/+$/, '');
 }
@@ -95,7 +96,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
       const empty = Object.freeze({ accessToken: '' });
       const assertUsable = () => {
         if (bound === service && rejectedSnapshot === memory.getAccessTokenSnapshot()) {
-          throw new Error('Authenticate with a replacement service token');
+          throw productError("workspace.error.remembered.connection.authenticate.with.a.replacement.service.token", new Error('Authenticate with a replacement service token'));
         }
       };
       return {

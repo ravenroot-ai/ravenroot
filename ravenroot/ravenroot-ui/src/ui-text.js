@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { STATIC_ENGLISH_MESSAGES } from './ui-static-text.js';
 import { DYNAMIC_ENGLISH_MESSAGES } from './ui-dynamic-text.js';
 
@@ -533,19 +534,19 @@ function plainObject(value) {
 
 export function normalizeUiLocale(locale, fallback = 'en') {
   const input = String(locale || fallback).replaceAll('_', '-');
-  if (input.length > MAX_LOCALE_LENGTH) throw new TypeError('UI locale is too long.');
+  if (input.length > MAX_LOCALE_LENGTH) throw productError("workspace.error.ui.text.ui.locale.is.too.long", new TypeError('UI locale is too long.'));
   try {
     const [normalized] = Intl.getCanonicalLocales(input);
-    if (!normalized) throw new TypeError('UI locale is empty.');
+    if (!normalized) throw productError("workspace.error.ui.text.ui.locale.is.empty", new TypeError('UI locale is empty.'));
     return normalized;
   } catch (failure) {
-    throw new TypeError(`Invalid UI locale "${input}".`, { cause: failure });
+    throw productError("workspace.error.ui.text.invalid.ui.locale", new TypeError(`Invalid UI locale "${input}".`, { cause: failure }), { value1: input });
   }
 }
 
 export function uiLocaleDirection(locale, declaredDirection) {
   if (declaredDirection !== undefined && declaredDirection !== 'ltr' && declaredDirection !== 'rtl') {
-    throw new TypeError('UI catalog direction must be "ltr" or "rtl".');
+    throw productError("workspace.error.ui.text.ui.catalog.direction.must.be.ltr.or.rtl", new TypeError('UI catalog direction must be "ltr" or "rtl".'));
   }
   if (declaredDirection) return declaredDirection;
   const parsed = new Intl.Locale(normalizeUiLocale(locale));
@@ -568,14 +569,14 @@ function placeholders(template) {
 
 function messageVariants(message, key) {
   if (typeof message === 'string') return { other: message };
-  if (!plainObject(message)) throw new TypeError(`UI text "${key}" must be a string or plural object.`);
+  if (!plainObject(message)) throw productError("workspace.error.ui.text.ui.text.must.be.a.string.or.plural.object", new TypeError(`UI text "${key}" must be a string or plural object.`), { value1: key });
   const entries = Object.entries(message);
   if (!entries.length || !Object.hasOwn(message, 'other')) {
-    throw new TypeError(`Plural UI text "${key}" must define "other".`);
+    throw productError("workspace.error.ui.text.plural.ui.text.must.define.other", new TypeError(`Plural UI text "${key}" must define "other".`), { value1: key });
   }
   for (const [category, value] of entries) {
     if (!PLURAL_CATEGORIES.has(category) || typeof value !== 'string') {
-      throw new TypeError(`Invalid plural category "${category}" for UI text "${key}".`);
+      throw productError("workspace.error.ui.text.invalid.plural.category.for.ui.text", new TypeError(`Invalid plural category "${category}" for UI text "${key}".`), { value1: category, value2: key });
     }
   }
   return message;
@@ -586,14 +587,14 @@ function validateMessage(key, message, sourceMessage) {
   const sourceVariants = sourceMessage === undefined ? null : messageVariants(sourceMessage, key);
   for (const [category, template] of Object.entries(variants)) {
     if (!template.length || template.length > MAX_MESSAGE_LENGTH) {
-      throw new TypeError(`UI text "${key}" has an invalid length.`);
+      throw productError("workspace.error.ui.text.ui.text.has.an.invalid.length", new TypeError(`UI text "${key}" has an invalid length.`), { value1: key });
     }
     const sourceTemplate = sourceVariants?.[category] ?? sourceVariants?.other;
     if (sourceTemplate !== undefined) {
       const actual = [...new Set(placeholders(template))].sort();
       const expected = [...new Set(placeholders(sourceTemplate))].sort();
       if (actual.join('\0') !== expected.join('\0')) {
-        throw new TypeError(`UI text "${key}" has incompatible named parameters.`);
+        throw productError("workspace.error.ui.text.ui.text.has.incompatible.named.parameters", new TypeError(`UI text "${key}" has incompatible named parameters.`), { value1: key });
       }
     }
   }
@@ -601,19 +602,19 @@ function validateMessage(key, message, sourceMessage) {
 
 export function validateUiCatalog(input, { sourceMessages = ENGLISH_MESSAGES } = {}) {
   if (!plainObject(input) || input.schema !== UI_CATALOG_SCHEMA) {
-    throw new TypeError(`UI catalog schema must be "${UI_CATALOG_SCHEMA}".`);
+    throw productError("workspace.error.ui.text.ui.catalog.schema.must.be", new TypeError(`UI catalog schema must be "${UI_CATALOG_SCHEMA}".`), { value1: UI_CATALOG_SCHEMA });
   }
   const locale = normalizeUiLocale(input.locale);
   const direction = uiLocaleDirection(locale, input.direction);
-  if (!plainObject(input.messages)) throw new TypeError('UI catalog messages must be an object.');
+  if (!plainObject(input.messages)) throw productError("workspace.error.ui.text.ui.catalog.messages.must.be.an.object", new TypeError('UI catalog messages must be an object.'));
   const entries = Object.entries(input.messages);
-  if (entries.length > MAX_CATALOG_KEYS) throw new RangeError('UI catalog has too many messages.');
+  if (entries.length > MAX_CATALOG_KEYS) throw productError("workspace.error.ui.text.ui.catalog.has.too.many.messages", new RangeError('UI catalog has too many messages.'));
   const messages = Object.create(null);
   for (const [key, message] of entries) {
     if (!/^[A-Za-z][A-Za-z0-9]*(?:[.-][A-Za-z0-9]+)+$/.test(key)) {
-      throw new TypeError(`Invalid UI text key "${key}".`);
+      throw productError("workspace.error.ui.text.invalid.ui.text.key", new TypeError(`Invalid UI text key "${key}".`), { value1: key });
     }
-    if (!Object.hasOwn(sourceMessages, key)) throw new TypeError(`Unknown UI text key "${key}".`);
+    if (!Object.hasOwn(sourceMessages, key)) throw productError("workspace.error.ui.text.unknown.ui.text.key", new TypeError(`Unknown UI text key "${key}".`), { value1: key });
     validateMessage(key, message, sourceMessages[key]);
     messages[key] = typeof message === 'string' ? message : Object.freeze({ ...message });
   }
@@ -623,14 +624,14 @@ export function validateUiCatalog(input, { sourceMessages = ENGLISH_MESSAGES } =
 
 function interpolate(template, params, key, numberFormat) {
   return template.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (_, name) => {
-    if (!Object.hasOwn(params, name)) throw new Error(`Missing UI text parameter "${name}" for "${key}"`);
+    if (!Object.hasOwn(params, name)) throw productError("workspace.error.ui.text.missing.ui.text.parameter.for", new Error(`Missing UI text parameter "${name}" for "${key}"`), { value1: name, value2: key });
     return typeof params[name] === 'number' ? numberFormat.format(params[name]) : String(params[name]);
   });
 }
 
 function catalogMessages(value, locale) {
   if (value?.schema === UI_CATALOG_SCHEMA) return validateUiCatalog(value).messages;
-  if (!plainObject(value)) throw new TypeError(`UI catalog for "${locale}" must be an object.`);
+  if (!plainObject(value)) throw productError("workspace.error.ui.text.ui.catalog.for.must.be.an.object", new TypeError(`UI catalog for "${locale}" must be an object.`), { value1: locale });
   const validated = validateUiCatalog({ schema: UI_CATALOG_SCHEMA, locale, messages: value });
   return validated.messages;
 }
@@ -683,12 +684,12 @@ let sharedUiLocalization = null;
 /** Stable delegate used by workspace modules; the main application swaps its backing locale live. */
 export const uiText = (key, params) => sharedUiText(key, params);
 export const uiErrorReason = error => error?.uiMessageKey
-  ? uiText(error.uiMessageKey, error.uiMessageParams || {})
+  ? uiText(error.uiMessageKey, typeof error.uiMessageParams === 'function' ? error.uiMessageParams() : error.uiMessageParams || {})
   : String(error?.message || error || uiText('common.unavailable'));
 Object.defineProperty(uiText, 'locale', { get: () => sharedUiLocalization?.locale ?? 'en' });
 export function useUiLocalization(localization) {
   if (!localization || typeof localization.text !== 'function') {
-    throw new TypeError('UI localization context is required.');
+    throw productError("workspace.error.ui.text.ui.localization.context.is.required", new TypeError('UI localization context is required.'));
   }
   sharedUiText = (key, params) => localization.text(key, params);
   sharedUiLocalization = localization;
@@ -766,7 +767,7 @@ export function createUiLocalization({ locale = 'en', catalogs = {}, onDiagnosti
     },
     availableLocales: () => Object.freeze(['en', ...[...available.keys()].filter(item => item !== 'en')]),
     subscribe(listener) {
-      if (typeof listener !== 'function') throw new TypeError('UI locale listener must be a function.');
+      if (typeof listener !== 'function') throw productError("workspace.error.ui.text.ui.locale.listener.must.be.a.function", new TypeError('UI locale listener must be a function.'));
       listeners.add(listener);
       return () => listeners.delete(listener);
     },

@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 export const THEME_STORAGE_KEY = 'ravenroot.ui.theme';
 export const PRODUCT_DEFAULT_THEME = 'dark';
 export const APPLICATION_THEMES = Object.freeze(['dark', 'light']);
@@ -8,7 +9,7 @@ export function normalizeTheme(value) {
 
 export function requireEmbedTheme(value) {
   const normalized = normalizeTheme(value);
-  if (normalized === null) throw new TypeError('Unsupported embed theme.');
+  if (normalized === null) throw productError("workspace.error.theme.resolution.unsupported.embed.theme", new TypeError('Unsupported embed theme.'));
   return normalized;
 }
 

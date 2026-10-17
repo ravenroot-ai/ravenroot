@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 /**
  * Owns the lifetime of one independently-rendered view per document.
  *
@@ -25,8 +26,8 @@ export function createRendererSessions() {
   });
 
   function register({ documentId, renderer, kind = 'renderer' } = {}) {
-    if (documentId == null) throw new TypeError('A renderer session requires a documentId.');
-    if (renderer == null) throw new TypeError('A renderer session requires a renderer handle.');
+    if (documentId == null) throw productError("workspace.error.renderer.session.a.renderer.session.requires.a.documentid", new TypeError('A renderer session requires a documentId.'));
+    if (renderer == null) throw productError("workspace.error.renderer.session.a.renderer.session.requires.a.renderer.handle", new TypeError('A renderer session requires a renderer handle.'));
 
     const id = String(documentId);
     const prior = sessions.get(id);

@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 // The parser's fallback-kind guard used to be a second, hand-written copy of the canonical
 // kind list (graph-document.js's NODE_KINDS) that nobody kept in sync -- ERROR was added to the
 // canonical list and silently absent here, so an ERROR node degraded to PASSTHROUGH on every parse.
@@ -63,16 +64,16 @@ function inputError(message, reason = GRAPH_INPUT_REJECTION_REASONS.RESOURCE_LIM
 
 function requireDocumentByteLimit(maxBytes) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
-    throw new TypeError('Graph document byte limit must be a positive safe integer');
+    throw productError("workspace.error.graph.parsers.graph.document.byte.limit.must.be.a.positive.safe.integer", new TypeError('Graph document byte limit must be a positive safe integer'));
   }
   return maxBytes;
 }
 
 function documentTooLarge() {
-  return inputError(
+  return productError("workspace.error.graph.parsers.graphml.input.rejected.document.exceeds.the.configured.byte.limit", inputError(
     'document exceeds the configured byte limit',
     GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
-  );
+  ));
 }
 
 /** Reject content that cannot safely be buffered before format detection. */
@@ -86,7 +87,7 @@ export function assertInputWithinByteLimit(text, maxBytes) {
 export function assertLocalFileWithinByteLimit(file, maxBytes) {
   requireDocumentByteLimit(maxBytes);
   if (!file || !Number.isFinite(file.size)) {
-    throw inputError('file size is unavailable');
+    throw productError("workspace.error.graph.parsers.graphml.input.rejected.file.size.is.unavailable", inputError('file size is unavailable'));
   }
   if (file.size > maxBytes) throw documentTooLarge();
 }
@@ -94,7 +95,7 @@ export function assertLocalFileWithinByteLimit(file, maxBytes) {
 async function readResponseTextWithinByteLimit(response, maxBytes) {
   requireDocumentByteLimit(maxBytes);
   const reader = response.body?.getReader();
-  if (!reader) throw new Error('Unable to read response safely');
+  if (!reader) throw productError("workspace.error.graph.parsers.unable.to.read.response.safely", new Error('Unable to read response safely'));
   const decoder = new TextDecoder();
   let text = '';
   let total = 0;
@@ -125,7 +126,7 @@ async function readResponseTextWithinByteLimit(response, maxBytes) {
 export async function fetchInputTextWithinByteLimit(url, maxBytes, fetchImpl = fetch) {
   requireDocumentByteLimit(maxBytes);
   const response = await fetchImpl(url);
-  if (!response.ok) throw new Error('HTTP ' + response.status);
+  if (!response.ok) throw productError("workspace.error.graph.parsers.http", new Error('HTTP ' + response.status), { value1: response.status });
   const rawContentLength = response.headers.get('content-length');
   if (rawContentLength !== null && /^\s*\d+\s*$/.test(rawContentLength)) {
     const contentLength = Number(rawContentLength);
@@ -160,7 +161,7 @@ export function loadLocalGraphInput(file, maxBytes, handlers) {
     }
   };
   reader.onerror = () => {
-    onError(new Error('Unable to read local graph file'));
+    onError(productError("workspace.error.graph.parsers.unable.to.read.local.graph.file", new Error('Unable to read local graph file')));
     onComplete();
   };
   reader.readAsText(file);
@@ -213,11 +214,11 @@ function isReservedGraphProperty(key) {
 function rejectReservedProperties(elementKind, properties) {
   const reserved = Object.keys(properties).find(isReservedGraphProperty);
   if (reserved !== undefined) {
-    throw new Error(
+    throw productError("workspace.error.graph.parsers.graphml.declares.a.property.in.ravenroot.s.reserved.namespace.the", new Error(
       `GraphML ${elementKind} declares a property in Ravenroot's reserved namespace; the '`
       + `${RESERVED_PROPERTY_PREFIX}' namespace is Ravenroot's own operative state and cannot be `
       + 'set by graph content. Properties outside it are preserved untouched and never interpreted',
-    );
+    ), { value1: elementKind, value2: RESERVED_PROPERTY_PREFIX });
   }
 }
 
@@ -355,11 +356,11 @@ export function assertGraphMLWithinLimits(xmlText) {
     if (!depth) return;
     textLengths[depth - 1] += value.length;
     if (textLengths[depth - 1] > GRAPH_INPUT_LIMITS.maxStringLength) {
-      throw inputError('text value exceeds the string length limit');
+      throw productError("workspace.error.graph.parsers.graphml.input.rejected.text.value.exceeds.the.string.length.limit", inputError('text value exceeds the string length limit'));
     }
   };
   const increment = (kind, current, maximum) => {
-    if (current >= maximum) throw inputError(`${kind} count exceeds the configured limit`);
+    if (current >= maximum) throw productError("workspace.error.graph.parsers.graphml.input.rejected.count.exceeds.the.configured.limit", inputError(`${kind} count exceeds the configured limit`), { value1: kind });
     return current + 1;
   };
 
@@ -386,16 +387,16 @@ export function assertGraphMLWithinLimits(xmlText) {
       continue;
     }
     if (/^<!\s*(?:DOCTYPE|ENTITY)\b/i.test(text.slice(markup, markup + 32))) {
-      throw inputError(
+      throw productError("workspace.error.graph.parsers.graphml.input.rejected.dtd.and.entity.declarations.are.not.allowe", inputError(
         'DTD and entity declarations are not allowed',
         GRAPH_INPUT_REJECTION_REASONS.UNSAFE_XML,
-      );
+      ));
     }
     if (text.startsWith('<?', markup)) {
       const end = text.indexOf('?>', markup + 2);
       if (end === -1) break;
       if (end - markup - 2 > GRAPH_INPUT_LIMITS.maxStringLength) {
-        throw inputError('processing instruction exceeds the string length limit');
+        throw productError("workspace.error.graph.parsers.graphml.input.rejected.processing.instruction.exceeds.the.string", inputError('processing instruction exceeds the string length limit'));
       }
       index = end + 2;
       continue;
@@ -443,7 +444,7 @@ export function assertGraphMLWithinLimits(xmlText) {
     }
     const name = nameMatch[1];
     if (name.length > GRAPH_INPUT_LIMITS.maxStringLength) {
-      throw inputError('element name exceeds the string length limit');
+      throw productError("workspace.error.graph.parsers.graphml.input.rejected.element.name.exceeds.the.string.length.lim", inputError('element name exceeds the string length limit'));
     }
 
     elements = increment('element', elements, GRAPH_INPUT_LIMITS.maxElements);
@@ -494,7 +495,7 @@ export function assertGraphMLWithinLimits(xmlText) {
 
       if (attributeName.length > GRAPH_INPUT_LIMITS.maxStringLength
           || attributeValue.length > GRAPH_INPUT_LIMITS.maxStringLength) {
-        throw inputError('attribute value exceeds the string length limit');
+        throw productError("workspace.error.graph.parsers.graphml.input.rejected.attribute.value.exceeds.the.string.length", inputError('attribute value exceeds the string length limit'));
       }
       if (attributeName === 'xmlns' || attributeName.startsWith('xmlns:')) {
         namespaceDeclarations = increment(
@@ -515,7 +516,7 @@ export function assertGraphMLWithinLimits(xmlText) {
     namespaceScopes.push(declarations);
     textLengths.push(0);
     if (stack.length > GRAPH_INPUT_LIMITS.maxDepth) {
-      throw inputError('XML depth exceeds the configured limit');
+      throw productError("workspace.error.graph.parsers.graphml.input.rejected.xml.depth.exceeds.the.configured.limit", inputError('XML depth exceeds the configured limit'));
     }
     switch (localName(name)) {
       case 'node': nodes = increment('node', nodes, GRAPH_INPUT_LIMITS.maxNodes); break;
@@ -550,45 +551,45 @@ export function parseGraphML(xmlText) {
   // one that fires and flips the observable rejection message back. Keep the two in sync, and
   // update test/graphml-corpus.test.js and test/graph-parsers.test.js together if either changes.
   if (/<!DOCTYPE(?:\s|\[|>)/i.test(xmlText)) {
-    throw new Error('Invalid or unsafe GraphML XML');
+    throw productError("workspace.error.graph.parsers.invalid.or.unsafe.graphml.xml", new Error('Invalid or unsafe GraphML XML'));
   }
 
   const parser = new DOMParser();
   const doc    = parser.parseFromString(xmlText, 'application/xml');
 
-  if (doc.querySelector('parsererror')) throw new Error('XML parse error');
+  if (doc.querySelector('parsererror')) throw productError("workspace.error.graph.parsers.xml.parse.error", new Error('XML parse error'));
   const root = doc.documentElement;
   if (!root || root.localName !== 'graphml' || root.namespaceURI !== GRAPHML_NS) {
-    throw new Error(`GraphML root must be {${GRAPHML_NS}}graphml`);
+    throw productError("workspace.error.graph.parsers.graphml.root.must.be.graphml", new Error(`GraphML root must be {${GRAPHML_NS}}graphml`), { value1: GRAPHML_NS });
   }
   for (const element of root.getElementsByTagName('*')) {
     if (element.namespaceURI !== GRAPHML_NS && INTERPRETED_ELEMENT_NAMES.has(element.localName)) {
-      throw new Error('GraphML extensions cannot redefine interpreted element names');
+      throw productError("workspace.error.graph.parsers.graphml.extensions.cannot.redefine.interpreted.element.names", new Error('GraphML extensions cannot redefine interpreted element names'));
     }
   }
   const graphElements = Array.from(root.children)
     .filter(element => element.localName === 'graph' && element.namespaceURI === GRAPHML_NS);
   if (graphElements.length !== 1) {
-    throw new Error(`GraphML must contain exactly one top-level graph; found ${graphElements.length}`);
+    throw productError("workspace.error.graph.parsers.graphml.must.contain.exactly.one.top.level.graph.found", new Error(`GraphML must contain exactly one top-level graph; found ${graphElements.length}`), { value1: graphElements.length });
   }
   const graphElement = graphElements[0];
   if (graphElement.getAttribute('edgedefault') !== 'directed') {
-    throw new Error(`GraphML graph '${graphElement.id || '<unnamed>'}' must be directed`);
+    throw productError("workspace.error.graph.parsers.graphml.graph.must.be.directed", new Error(`GraphML graph '${graphElement.id || '<unnamed>'}' must be directed`), { value1: graphElement.id || '<unnamed>' });
   }
   let graphSeen = false;
   for (const child of root.children) {
     if (child === graphElement) {
       graphSeen = true;
     } else if (graphSeen && child.localName === 'key' && child.namespaceURI === GRAPHML_NS) {
-      throw new Error('GraphML key declarations must precede the graph');
+      throw productError("workspace.error.graph.parsers.graphml.key.declarations.must.precede.the.graph", new Error('GraphML key declarations must precede the graph'));
     }
   }
   if (doc.getElementsByTagNameNS(GRAPHML_NS, 'graph').length !== 1) {
-    throw new Error('Nested GraphML graphs are not supported');
+    throw productError("workspace.error.graph.parsers.nested.graphml.graphs.are.not.supported", new Error('Nested GraphML graphs are not supported'));
   }
   ['hyperedge', 'port', 'locator'].forEach(localName => {
     if (doc.getElementsByTagNameNS(GRAPHML_NS, localName).length) {
-      throw new Error(`GraphML element '${localName}' is not supported`);
+      throw productError("workspace.error.graph.parsers.graphml.element.is.not.supported", new Error(`GraphML element '${localName}' is not supported`), { value1: localName });
     }
   });
 
@@ -606,11 +607,11 @@ export function parseGraphML(xmlText) {
     .forEach(keyEl => {
     const id = (keyEl.getAttribute('id') || '').trim();
     const attrName = (keyEl.getAttribute('attr.name') || keyEl.getAttribute('attrname') || '').trim();
-    if (!id) throw new Error('GraphML key declaration is missing an id');
-    if (keyDefinitions[id]) throw new Error(`Duplicate GraphML key id '${id}'`);
+    if (!id) throw productError("workspace.error.graph.parsers.graphml.key.declaration.is.missing.an.id", new Error('GraphML key declaration is missing an id'));
+    if (keyDefinitions[id]) throw productError("workspace.error.graph.parsers.duplicate.graphml.key.id", new Error(`Duplicate GraphML key id '${id}'`), { value1: id });
     const type = (keyEl.getAttribute('attr.type') || 'string').trim().toLowerCase();
     if (!GRAPHML_SCALAR_TYPES.has(type)) {
-      throw new Error(`GraphML key '${id}' declares unsupported scalar type '${type}'`);
+      throw productError("workspace.error.graph.parsers.graphml.key.declares.unsupported.scalar.type", new Error(`GraphML key '${id}' declares unsupported scalar type '${type}'`), { value1: id, value2: type });
     }
     const scope = (keyEl.getAttribute('for') || 'all').trim();
     // GraphML permits keys for structural element kinds that Ravenroot does not render yet.
@@ -619,12 +620,12 @@ export function parseGraphML(xmlText) {
     // the source can round-trip, but do not expose them as node/edge properties below. Actual
     // unsupported structural elements are still rejected above.
     if (!['all', 'node', 'edge', 'graph', 'graphml', 'port', 'hyperedge', 'endpoint'].includes(scope)) {
-      throw new Error(`GraphML key '${id}' has unsupported scope '${scope}'`);
+      throw productError("workspace.error.graph.parsers.graphml.key.has.unsupported.scope", new Error(`GraphML key '${id}' has unsupported scope '${scope}'`), { value1: id, value2: scope });
     }
     const defaultElements = Array.from(keyEl.children)
       .filter(child => child.localName === 'default' && child.namespaceURI === GRAPHML_NS);
     if (defaultElements.length > 1) {
-      throw new Error(`GraphML key '${id}' declares more than one default value`);
+      throw productError("workspace.error.graph.parsers.graphml.key.declares.more.than.one.default.value", new Error(`GraphML key '${id}' declares more than one default value`), { value1: id });
     }
     const defaultElement = defaultElements[0];
     const name = attrName || id;
@@ -643,7 +644,7 @@ export function parseGraphML(xmlText) {
       validateScalar(definition, definition.defaultValue, 'default');
     } else if (defaultElement && ['kind', 'behavior', 'outcome'].includes(name.toLowerCase())
         && scope !== 'graph') {
-      throw new Error(`Complex default for executable GraphML property '${name}' is ambiguous`);
+      throw productError("workspace.error.graph.parsers.complex.default.for.executable.graphml.property.is.ambiguous", new Error(`Complex default for executable GraphML property '${name}' is ambiguous`), { value1: name });
     }
     keyDefinitions[id] = definition;
     const targetScopes = scope === 'all' ? ['node', 'edge'] : [scope];
@@ -651,7 +652,7 @@ export function parseGraphML(xmlText) {
       if (!['node', 'edge'].includes(targetScope)) return;
       const lookup = `${targetScope}:${name.toLowerCase()}`;
       if (effectiveNames.has(lookup)) {
-        throw new Error(`Ambiguous GraphML property name '${name}' for ${targetScope}`);
+        throw productError("workspace.error.graph.parsers.ambiguous.graphml.property.name.for", new Error(`Ambiguous GraphML property name '${name}' for ${targetScope}`), { value1: name, value2: targetScope });
       }
       effectiveNames.set(lookup, id);
       keyIdByScopeAndName.set(lookup, id);
@@ -666,9 +667,9 @@ export function parseGraphML(xmlText) {
       && definition && (definition.scope === 'graphml' || definition.scope === 'all');
     if (!isGraphmlResource && (!owner || owner.namespaceURI !== GRAPHML_NS
         || !['graph', 'node', 'edge'].includes(owner.localName))) {
-      throw new Error(
+      throw productError("workspace.error.graph.parsers.graphml.data.key.must.belong.directly.to.a.graph.node.or.edge", new Error(
         `GraphML data key '${keyId}' must belong directly to a graph, node or edge`,
-      );
+      ), { value1: keyId });
     }
   }
 
@@ -723,18 +724,18 @@ export function parseGraphML(xmlText) {
       if (child.localName !== 'data' || child.namespaceURI !== GRAPHML_NS) continue;
       const keyId = child.getAttribute('key') || '';
       const definition = keyDefinitions[keyId];
-      if (!definition) throw new Error(`GraphML data references undeclared key '${keyId}'`);
+      if (!definition) throw productError("workspace.error.graph.parsers.graphml.data.references.undeclared.key", new Error(`GraphML data references undeclared key '${keyId}'`), { value1: keyId });
       if (definition.scope !== 'all' && definition.scope !== el.localName) {
-        throw new Error(`GraphML key '${keyId}' cannot be used on ${el.localName} '${el.id}'`);
+        throw productError("workspace.error.graph.parsers.graphml.key.cannot.be.used.on", new Error(`GraphML key '${keyId}' cannot be used on ${el.localName} '${el.id}'`), { value1: keyId, value2: el.localName, value3: el.id });
       }
       if (el.localName === 'graph' && definition.name === VISUAL_GROUPS_PROPERTY) continue;
-      if (seen.has(keyId)) throw new Error(`Duplicate GraphML data key '${keyId}' on ${el.localName} '${el.id}'`);
+      if (seen.has(keyId)) throw productError("workspace.error.graph.parsers.duplicate.graphml.data.key.on", new Error(`Duplicate GraphML data key '${keyId}' on ${el.localName} '${el.id}'`), { value1: keyId, value2: el.localName, value3: el.id });
       seen.add(keyId);
       // Complex extension XML remains in sourceXml and is deliberately not flattened.
       if (Array.from(child.children).length) {
         if (['node', 'edge'].includes(el.localName)
             && ['kind', 'behavior', 'outcome'].includes(definition.name.toLowerCase())) {
-          throw new Error(`Complex GraphML data key '${keyId}' collides with executable property '${definition.name}'`);
+          throw productError("workspace.error.graph.parsers.complex.graphml.data.key.collides.with.executable.property", new Error(`Complex GraphML data key '${keyId}' collides with executable property '${definition.name}'`), { value1: keyId, value2: definition.name });
         }
         continue;
       }
@@ -783,8 +784,8 @@ export function parseGraphML(xmlText) {
     .filter(element => element.localName === 'node' && element.namespaceURI === GRAPHML_NS);
   nodeElements.forEach(nodeEl => {
     const id = nodeEl.getAttribute('id');
-    if (!id) throw new Error('GraphML node is missing an id');
-    if (nodeMap[id]) throw new Error(`Duplicate GraphML node id '${id}'`);
+    if (!id) throw productError("workspace.error.graph.parsers.graphml.node.is.missing.an.id", new Error('GraphML node is missing an id'));
+    if (nodeMap[id]) throw productError("workspace.error.graph.parsers.duplicate.graphml.node.id", new Error(`Duplicate GraphML node id '${id}'`), { value1: id });
 
     const simple = simpleProperties(nodeEl);
     rejectReservedProperties('node', simple.properties);
@@ -943,13 +944,13 @@ export function parseGraphML(xmlText) {
     assertStableEdgeId(id, syntheticId ? 'Synthesized GraphML edge id' : 'GraphML edge id');
     const source = edgeEl.getAttribute('source');
     const target = edgeEl.getAttribute('target');
-    if (edgeIds.has(id)) throw new Error(`Duplicate GraphML edge id '${id}'`);
+    if (edgeIds.has(id)) throw productError("workspace.error.graph.parsers.duplicate.graphml.edge.id", new Error(`Duplicate GraphML edge id '${id}'`), { value1: id });
     edgeIds.add(id);
     if ((edgeEl.getAttribute('directed') || '').toLowerCase() === 'false') {
-      throw new Error(`GraphML edge '${id}' cannot override directedness`);
+      throw productError("workspace.error.graph.parsers.graphml.edge.cannot.override.directedness", new Error(`GraphML edge '${id}' cannot override directedness`), { value1: id });
     }
     if (!nodeMap[source] || !nodeMap[target]) {
-      throw new Error(`GraphML edge '${id}' references an undeclared endpoint: ${source} -> ${target}`);
+      throw productError("workspace.error.graph.parsers.graphml.edge.references.an.undeclared.endpoint", new Error(`GraphML edge '${id}' references an undeclared endpoint: ${source} -> ${target}`), { value1: id, value2: source, value3: target });
     }
 
     const simple = simpleProperties(edgeEl);
@@ -1041,7 +1042,7 @@ export function parseGraphML(xmlText) {
       valid = value !== '' && Number.isFinite(Number(value));
     }
     if (!valid) {
-      throw new Error(`GraphML key '${definition.id}' on ${owner} expects ${definition.type} but found '${value}'`);
+      throw productError("workspace.error.graph.parsers.graphml.key.on.expects.but.found", new Error(`GraphML key '${definition.id}' on ${owner} expects ${definition.type} but found '${value}'`), { value1: definition.id, value2: owner, value3: definition.type, value4: value });
     }
   }
 
@@ -1083,9 +1084,9 @@ export function detectAndParse(text, filename, maxBytes) {
     const obj = JSON.parse(trimmed);
     if (Array.isArray(obj.nodes) && (Array.isArray(obj.edges) || Array.isArray(obj.links)))
       return parseGraphifyJSON(obj);
-    throw new Error('Unrecognized JSON: expected Graphify format (nodes + edges/links)');
+    throw productError("workspace.error.graph.parsers.unrecognized.json.expected.graphify.format.nodes.edges.links", new Error('Unrecognized JSON: expected Graphify format (nodes + edges/links)'));
   }
-  throw new Error('Unrecognized format: expected XML/GraphML or Graphify JSON');
+  throw productError("workspace.error.graph.parsers.unrecognized.format.expected.xml.graphml.or.graphify.json", new Error('Unrecognized format: expected XML/GraphML or Graphify JSON'));
 }
 
 /**

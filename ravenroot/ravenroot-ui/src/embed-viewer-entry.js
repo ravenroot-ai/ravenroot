@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
@@ -62,7 +63,7 @@ export function validateEmbedLocaleChange(locale, catalog) {
   const normalized = normalizeUiLocale(locale);
   const validated = catalog === null ? null : validateUiCatalog(catalog);
   if (validated !== null && validated.locale !== normalized) {
-    throw new TypeError('Embedded catalog locale must match the requested locale.');
+    throw productError("workspace.error.embed.viewer.entry.embedded.catalog.locale.must.match.the.requested.locale", new TypeError('Embedded catalog locale must match the requested locale.'));
   }
   return Object.freeze({ locale: normalized, catalog: validated });
 }
@@ -113,7 +114,7 @@ function elasticElements(snapshot, palette, width, height) {
 
 function requiredElement(root, selector) {
   const element = root.querySelector(selector);
-  if (element === null) throw new Error('Embed viewer shell unavailable.');
+  if (element === null) throw productError("workspace.error.embed.viewer.entry.embed.viewer.shell.unavailable", new Error('Embed viewer shell unavailable.'));
   return element;
 }
 
@@ -124,7 +125,7 @@ function requiredElement(root, selector) {
 export function createEmbedViewer(container, {
   theme = 'dark', onRunSelected = () => {}, onStartExecution = () => {}, localization = null,
 } = {}) {
-  if (!(container instanceof Element)) throw new TypeError('Embed viewer container is required.');
+  if (!(container instanceof Element)) throw productError("workspace.error.embed.viewer.entry.embed.viewer.container.is.required", new TypeError('Embed viewer container is required.'));
   const viewerTheme = requireEmbedTheme(theme);
   const t = localization?.text || uiText;
   const palette = getRendererPalette(viewerTheme);
@@ -137,7 +138,7 @@ export function createEmbedViewer(container, {
   const elasticOption = mode.querySelector('option[value="elastic"]');
   const semanticModes = mode.querySelector('option[value="design"]') !== null;
   if (!semanticModes && !(elasticOption instanceof HTMLOptionElement)) {
-    throw new Error('Embed viewer mode choices unavailable.');
+    throw productError("workspace.error.embed.viewer.entry.embed.viewer.mode.choices.unavailable", new Error('Embed viewer mode choices unavailable.'));
   }
   const runSelect = container.querySelector('[data-viewer-run]');
   const runEmpty = container.querySelector('[data-viewer-run-empty]');
@@ -148,7 +149,7 @@ export function createEmbedViewer(container, {
   const controls = [...container.querySelectorAll('[data-viewer-command]')];
   const maximizeControl = requiredElement(container, '[data-viewer-maximize]');
   const focusBoundaries = [...container.ownerDocument.querySelectorAll('.embed-focus-sentinel')];
-  if (focusBoundaries.length !== 2) throw new Error('Embed viewer focus boundary unavailable.');
+  if (focusBoundaries.length !== 2) throw productError("workspace.error.embed.viewer.entry.embed.viewer.focus.boundary.unavailable", new Error('Embed viewer focus boundary unavailable.'));
   const lifecycle = createEmbedShellLifecycle({
     root: container,
     status,

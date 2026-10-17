@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 export const FRONTEND_PLUGIN_SCHEMA = 'ravenroot.frontend-plugin/v1';
 export const FRONTEND_PLUGIN_API_VERSION = '1.0';
 export const FRONTEND_PRESENTATION_PROPERTY = 'ravenroot.frontendPresentation.v1';
@@ -19,28 +20,28 @@ function plainObject(value) {
 
 function exactKeys(value, allowed, label) {
   for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw new TypeError(`${label} contains unknown field '${key}'`);
+    if (!allowed.has(key)) throw productError("workspace.error.frontend.plugin.api.contains.unknown.field", new TypeError(`${label} contains unknown field '${key}'`), { value1: label, value2: key });
   }
 }
 
 function requiredString(value, label, pattern = null) {
-  if (typeof value !== 'string' || !value.trim()) throw new TypeError(`${label} must be a non-empty string`);
-  if (pattern && !pattern.test(value)) throw new TypeError(`${label} has an invalid value`);
+  if (typeof value !== 'string' || !value.trim()) throw productError("workspace.error.frontend.plugin.api.must.be.a.non.empty.string", new TypeError(`${label} must be a non-empty string`), { value1: label });
+  if (pattern && !pattern.test(value)) throw productError("workspace.error.frontend.plugin.api.has.an.invalid.value", new TypeError(`${label} has an invalid value`), { value1: label });
   return value;
 }
 
 function provider(value, kind) {
-  if (!plainObject(value)) throw new TypeError(`${kind} provider must be an object`);
+  if (!plainObject(value)) throw productError("workspace.error.frontend.plugin.api.provider.must.be.an.object", new TypeError(`${kind} provider must be an object`), { value1: kind });
   exactKeys(value, new Set(['id', 'name', 'entry', 'capabilities', 'requires']), `${kind} provider`);
   const entry = requiredString(value.entry, `${kind} provider entry`, SAFE_FILE);
   const capabilities = Array.isArray(value.capabilities) ? value.capabilities.map(capability => {
     requiredString(capability, `${kind} capability`);
-    if (!CAPABILITIES.has(capability)) throw new TypeError(`Unsupported ${kind} capability '${capability}'`);
+    if (!CAPABILITIES.has(capability)) throw productError("workspace.error.frontend.plugin.api.unsupported.capability", new TypeError(`Unsupported ${kind} capability '${capability}'`), { value1: kind, value2: capability });
     return capability;
   }) : [];
   const requires = Array.isArray(value.requires) ? value.requires.map(capability => {
     requiredString(capability, `${kind} required capability`);
-    if (!CAPABILITIES.has(capability)) throw new TypeError(`Unsupported ${kind} required capability '${capability}'`);
+    if (!CAPABILITIES.has(capability)) throw productError("workspace.error.frontend.plugin.api.unsupported.required.capability", new TypeError(`Unsupported ${kind} required capability '${capability}'`), { value1: kind, value2: capability });
     return capability;
   }) : [];
   return Object.freeze({
@@ -60,25 +61,25 @@ export function providerCompatibility(layout, renderer) {
 }
 
 export function validateFrontendPluginManifest(input) {
-  if (!plainObject(input)) throw new TypeError('Frontend plugin manifest must be an object');
+  if (!plainObject(input)) throw productError("workspace.error.frontend.plugin.api.frontend.plugin.manifest.must.be.an.object", new TypeError('Frontend plugin manifest must be an object'));
   exactKeys(input, new Set([
     'schema', 'id', 'name', 'version', 'apiVersion', 'description', 'permissions',
     'layouts', 'renderers', 'drawingModels', 'integrity',
   ]), 'Frontend plugin manifest');
-  if (input.schema !== FRONTEND_PLUGIN_SCHEMA) throw new TypeError(`Unsupported frontend plugin schema '${input.schema}'`);
+  if (input.schema !== FRONTEND_PLUGIN_SCHEMA) throw productError("workspace.error.frontend.plugin.api.unsupported.frontend.plugin.schema", new TypeError(`Unsupported frontend plugin schema '${input.schema}'`), { value1: input.schema });
   if (input.apiVersion !== FRONTEND_PLUGIN_API_VERSION) {
-    throw new TypeError(`Frontend plugin API ${input.apiVersion || '(missing)'} is incompatible with ${FRONTEND_PLUGIN_API_VERSION}`);
+    throw productError("workspace.error.frontend.plugin.api.frontend.plugin.api.is.incompatible.with", new TypeError(`Frontend plugin API ${input.apiVersion || '(missing)'} is incompatible with ${FRONTEND_PLUGIN_API_VERSION}`), { value1: input.apiVersion || '(missing)', value2: FRONTEND_PLUGIN_API_VERSION });
   }
   if (!Array.isArray(input.permissions) || input.permissions.length) {
-    throw new TypeError('Frontend plugin v1 accepts only an empty permissions array');
+    throw productError("workspace.error.frontend.plugin.api.frontend.plugin.v1.accepts.only.an.empty.permissions.array", new TypeError('Frontend plugin v1 accepts only an empty permissions array'));
   }
   const layouts = (input.layouts || []).map(item => provider(item, 'layout'));
   const renderers = (input.renderers || []).map(item => provider(item, 'renderer'));
-  if (!layouts.length && !renderers.length) throw new TypeError('Frontend plugin must provide a layout or renderer');
+  if (!layouts.length && !renderers.length) throw productError("workspace.error.frontend.plugin.api.frontend.plugin.must.provide.a.layout.or.renderer", new TypeError('Frontend plugin must provide a layout or renderer'));
   const layoutIds = new Set(layouts.map(item => item.id));
   const rendererIds = new Set(renderers.map(item => item.id));
   const models = (input.drawingModels || []).map(value => {
-    if (!plainObject(value)) throw new TypeError('Drawing model must be an object');
+    if (!plainObject(value)) throw productError("workspace.error.frontend.plugin.api.drawing.model.must.be.an.object", new TypeError('Drawing model must be an object'));
     exactKeys(value, new Set(['id', 'name', 'layout', 'renderer']), 'Drawing model');
     const model = {
       id: requiredString(value.id, 'Drawing model id', PROVIDER_ID),
@@ -86,17 +87,17 @@ export function validateFrontendPluginManifest(input) {
       layout: requiredString(value.layout, 'Drawing model layout id', PROVIDER_ID),
       renderer: requiredString(value.renderer, 'Drawing model renderer id', PROVIDER_ID),
     };
-    if (!layoutIds.has(model.layout)) throw new TypeError(`Drawing model references unknown layout '${model.layout}'`);
-    if (!rendererIds.has(model.renderer)) throw new TypeError(`Drawing model references unknown renderer '${model.renderer}'`);
+    if (!layoutIds.has(model.layout)) throw productError("workspace.error.frontend.plugin.api.drawing.model.references.unknown.layout", new TypeError(`Drawing model references unknown layout '${model.layout}'`), { value1: model.layout });
+    if (!rendererIds.has(model.renderer)) throw productError("workspace.error.frontend.plugin.api.drawing.model.references.unknown.renderer", new TypeError(`Drawing model references unknown renderer '${model.renderer}'`), { value1: model.renderer });
     return Object.freeze(model);
   });
   const integrity = plainObject(input.integrity) ? Object.fromEntries(Object.entries(input.integrity).map(([path, digest]) => {
     requiredString(path, 'Integrity path', SAFE_FILE);
-    if (!/^sha256-[A-Za-z0-9+/]{43}=$/.test(digest)) throw new TypeError(`Integrity digest for '${path}' must be sha256 base64`);
+    if (!/^sha256-[A-Za-z0-9+/]{43}=$/.test(digest)) throw productError("workspace.error.frontend.plugin.api.integrity.digest.for.must.be.sha256.base64", new TypeError(`Integrity digest for '${path}' must be sha256 base64`), { value1: path });
     return [path, digest];
   })) : {};
   const allIds = [...layouts, ...renderers, ...models].map(item => item.id);
-  if (new Set(allIds).size !== allIds.length) throw new TypeError('Provider and drawing model ids must be unique within a package');
+  if (new Set(allIds).size !== allIds.length) throw productError("workspace.error.frontend.plugin.api.provider.and.drawing.model.ids.must.be.unique.within.a.package", new TypeError('Provider and drawing model ids must be unique within a package'));
   return Object.freeze({
     schema: input.schema,
     id: requiredString(input.id, 'Frontend plugin id', PACKAGE_ID),
@@ -111,24 +112,24 @@ export function validateFrontendPluginManifest(input) {
 
 function stringArray(value, label) {
   if (!Array.isArray(value) || !value.length || value.some(item => typeof item !== 'string' || !item)) {
-    throw new TypeError(`${label} must be a non-empty string array`);
+    throw productError("workspace.error.frontend.plugin.api.must.be.a.non.empty.string.array", new TypeError(`${label} must be a non-empty string array`), { value1: label });
   }
   return [...value];
 }
 
 export function validatePresentationMapping(input, graph) {
   if (!plainObject(input) || input.schema !== 'ravenroot.presentation-mapping/v1') {
-    throw new TypeError('Presentation mapping must use ravenroot.presentation-mapping/v1');
+    throw productError("workspace.error.frontend.plugin.api.presentation.mapping.must.use.ravenroot.presentation.mapping.v1", new TypeError('Presentation mapping must use ravenroot.presentation-mapping/v1'));
   }
   exactKeys(input, new Set(['schema', 'states', 'transitions', 'positions']), 'Presentation mapping');
   if (!Array.isArray(input.states) || !Array.isArray(input.transitions)) {
-    throw new TypeError('Presentation mapping needs states and transitions arrays');
+    throw productError("workspace.error.frontend.plugin.api.presentation.mapping.needs.states.and.transitions.arrays", new TypeError('Presentation mapping needs states and transitions arrays'));
   }
   const nodeIds = new Set((graph?.nodes || []).map(node => node.id));
   const edgeIds = new Set((graph?.edges || []).map(edge => edge.id));
   const stateIds = new Set();
   const states = input.states.map(value => {
-    if (!plainObject(value)) throw new TypeError('Mapped state must be an object');
+    if (!plainObject(value)) throw productError("workspace.error.frontend.plugin.api.mapped.state.must.be.an.object", new TypeError('Mapped state must be an object'));
     exactKeys(value, new Set(['id', 'label', 'nodeId', 'initial', 'accepting']), 'Mapped state');
     const state = {
       id: requiredString(value.id, 'Mapped state id', MAPPING_ID),
@@ -136,15 +137,15 @@ export function validatePresentationMapping(input, graph) {
       nodeId: requiredString(value.nodeId, 'Mapped state nodeId'),
       initial: Boolean(value.initial), accepting: Boolean(value.accepting),
     };
-    if (stateIds.has(state.id)) throw new TypeError(`Duplicate mapped state '${state.id}'`);
-    if (!nodeIds.has(state.nodeId)) throw new TypeError(`Mapped state '${state.id}' references unknown node '${state.nodeId}'`);
+    if (stateIds.has(state.id)) throw productError("workspace.error.frontend.plugin.api.duplicate.mapped.state", new TypeError(`Duplicate mapped state '${state.id}'`), { value1: state.id });
+    if (!nodeIds.has(state.nodeId)) throw productError("workspace.error.frontend.plugin.api.mapped.state.references.unknown.node", new TypeError(`Mapped state '${state.id}' references unknown node '${state.nodeId}'`), { value1: state.id, value2: state.nodeId });
     stateIds.add(state.id);
     return Object.freeze(state);
   });
-  if (!states.some(state => state.initial)) throw new TypeError('Presentation mapping needs an initial state');
+  if (!states.some(state => state.initial)) throw productError("workspace.error.frontend.plugin.api.presentation.mapping.needs.an.initial.state", new TypeError('Presentation mapping needs an initial state'));
   const transitionIds = new Set();
   const transitions = input.transitions.map(value => {
-    if (!plainObject(value)) throw new TypeError('Mapped transition must be an object');
+    if (!plainObject(value)) throw productError("workspace.error.frontend.plugin.api.mapped.transition.must.be.an.object", new TypeError('Mapped transition must be an object'));
     exactKeys(value, new Set(['id', 'source', 'target', 'label', 'edgePath']), 'Mapped transition');
     const transition = {
       id: requiredString(value.id, 'Mapped transition id', MAPPING_ID),
@@ -153,24 +154,24 @@ export function validatePresentationMapping(input, graph) {
       label: requiredString(value.label, 'Mapped transition label'),
       edgePath: stringArray(value.edgePath, `Mapped transition '${value.id}' edgePath`),
     };
-    if (transitionIds.has(transition.id)) throw new TypeError(`Duplicate mapped transition '${transition.id}'`);
+    if (transitionIds.has(transition.id)) throw productError("workspace.error.frontend.plugin.api.duplicate.mapped.transition", new TypeError(`Duplicate mapped transition '${transition.id}'`), { value1: transition.id });
     if (!stateIds.has(transition.source) || !stateIds.has(transition.target)) {
-      throw new TypeError(`Mapped transition '${transition.id}' references unknown state`);
+      throw productError("workspace.error.frontend.plugin.api.mapped.transition.references.unknown.state", new TypeError(`Mapped transition '${transition.id}' references unknown state`), { value1: transition.id });
     }
     for (const edgeId of transition.edgePath) {
-      if (!edgeIds.has(edgeId)) throw new TypeError(`Mapped transition '${transition.id}' references unknown edge '${edgeId}'`);
+      if (!edgeIds.has(edgeId)) throw productError("workspace.error.frontend.plugin.api.mapped.transition.references.unknown.edge", new TypeError(`Mapped transition '${transition.id}' references unknown edge '${edgeId}'`), { value1: transition.id, value2: edgeId });
     }
     const first = graph.edges.find(edge => edge.id === transition.edgePath[0]);
     const last = graph.edges.find(edge => edge.id === transition.edgePath.at(-1));
     const sourceNode = states.find(state => state.id === transition.source)?.nodeId;
     const targetNode = states.find(state => state.id === transition.target)?.nodeId;
     if (first?.source !== sourceNode || last?.target !== targetNode) {
-      throw new TypeError(`Mapped transition '${transition.id}' path endpoints do not match its states`);
+      throw productError("workspace.error.frontend.plugin.api.mapped.transition.path.endpoints.do.not.match.its.states", new TypeError(`Mapped transition '${transition.id}' path endpoints do not match its states`), { value1: transition.id });
     }
     for (let index = 1; index < transition.edgePath.length; index += 1) {
       const previous = graph.edges.find(edge => edge.id === transition.edgePath[index - 1]);
       const current = graph.edges.find(edge => edge.id === transition.edgePath[index]);
-      if (previous?.target !== current?.source) throw new TypeError(`Mapped transition '${transition.id}' edgePath is not contiguous`);
+      if (previous?.target !== current?.source) throw productError("workspace.error.frontend.plugin.api.mapped.transition.edgepath.is.not.contiguous", new TypeError(`Mapped transition '${transition.id}' edgePath is not contiguous`), { value1: transition.id });
     }
     transitionIds.add(transition.id);
     return Object.freeze(transition);
@@ -178,7 +179,7 @@ export function validatePresentationMapping(input, graph) {
   const positions = {};
   for (const [id, point] of Object.entries(input.positions || {})) {
     if (!stateIds.has(id) || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
-      throw new TypeError(`Position for '${id}' is invalid`);
+      throw productError("workspace.error.frontend.plugin.api.position.for.is.invalid", new TypeError(`Position for '${id}' is invalid`), { value1: id });
     }
     positions[id] = Object.freeze({ x: point.x, y: point.y });
   }
@@ -216,13 +217,13 @@ export function drawingModelSnapshot(graph, mapping, operational = {}) {
 
 export function validateLayoutResult(input, snapshot) {
   if (!plainObject(input) || input.schema !== 'ravenroot.layout-result/v1' || !plainObject(input.positions)) {
-    throw new TypeError('Layout provider returned an invalid v1 result');
+    throw productError("workspace.error.frontend.plugin.api.layout.provider.returned.an.invalid.v1.result", new TypeError('Layout provider returned an invalid v1 result'));
   }
   const positions = {};
   for (const state of snapshot.states || []) {
     const point = input.positions[state.id];
     if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
-      throw new TypeError(`Layout provider omitted a finite position for '${state.id}'`);
+      throw productError("workspace.error.frontend.plugin.api.layout.provider.omitted.a.finite.position.for", new TypeError(`Layout provider omitted a finite position for '${state.id}'`), { value1: state.id });
     }
     positions[state.id] = Object.freeze({ x: point.x, y: point.y });
   }
@@ -231,32 +232,32 @@ export function validateLayoutResult(input, snapshot) {
 
 export function validateScene(input) {
   if (!plainObject(input) || input.schema !== 'ravenroot.scene/v1' || !Array.isArray(input.elements)) {
-    throw new TypeError('Renderer returned an invalid v1 scene');
+    throw productError("workspace.error.frontend.plugin.api.renderer.returned.an.invalid.v1.scene", new TypeError('Renderer returned an invalid v1 scene'));
   }
-  if (input.elements.length > 5000) throw new TypeError('Renderer scene exceeds the 5000 element limit');
+  if (input.elements.length > 5000) throw productError("workspace.error.frontend.plugin.api.renderer.scene.exceeds.the.5000.element.limit", new TypeError('Renderer scene exceeds the 5000 element limit'));
   const allowedTypes = new Set(['circle', 'path', 'text', 'line']);
   const elements = input.elements.map(element => {
-    if (!plainObject(element) || !allowedTypes.has(element.type)) throw new TypeError('Renderer scene contains an invalid element');
+    if (!plainObject(element) || !allowedTypes.has(element.type)) throw productError("workspace.error.frontend.plugin.api.renderer.scene.contains.an.invalid.element", new TypeError('Renderer scene contains an invalid element'));
     const safe = { type: element.type };
     for (const [key, value] of Object.entries(element)) {
       if (key === 'type') continue;
       if (!['id', 'targetId', 'role', 'label', 'text', 'd', 'className',
         'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r'].includes(key)) {
-        throw new TypeError(`Renderer scene element contains unknown field '${key}'`);
+        throw productError("workspace.error.frontend.plugin.api.renderer.scene.element.contains.unknown.field", new TypeError(`Renderer scene element contains unknown field '${key}'`), { value1: key });
       }
       if (['x', 'y', 'x1', 'y1', 'x2', 'y2', 'r'].includes(key)) {
-        if (!Number.isFinite(value)) throw new TypeError(`Renderer scene field '${key}' must be finite`);
+        if (!Number.isFinite(value)) throw productError("workspace.error.frontend.plugin.api.renderer.scene.field.must.be.finite", new TypeError(`Renderer scene field '${key}' must be finite`), { value1: key });
         safe[key] = value;
-      } else if (typeof value !== 'string') throw new TypeError(`Renderer scene field '${key}' must be a string`);
+      } else if (typeof value !== 'string') throw productError("workspace.error.frontend.plugin.api.renderer.scene.field.must.be.a.string", new TypeError(`Renderer scene field '${key}' must be a string`), { value1: key });
       else {
         if ((key === 'id' || key === 'targetId' || key === 'role') && !/^[A-Za-z0-9._-]+$/.test(value)) {
-          throw new TypeError(`Renderer scene field '${key}' contains unsafe characters`);
+          throw productError("workspace.error.frontend.plugin.api.renderer.scene.field.contains.unsafe.characters", new TypeError(`Renderer scene field '${key}' contains unsafe characters`), { value1: key });
         }
         if (key === 'className' && !/^[A-Za-z0-9 _-]*$/.test(value)) {
-          throw new TypeError('Renderer scene className contains unsafe characters');
+          throw productError("workspace.error.frontend.plugin.api.renderer.scene.classname.contains.unsafe.characters", new TypeError('Renderer scene className contains unsafe characters'));
         }
         if (key === 'd' && !/^[MmLlHhVvCcSsQqTtAaZz0-9., +\-]*$/.test(value)) {
-          throw new TypeError('Renderer scene path contains unsupported data');
+          throw productError("workspace.error.frontend.plugin.api.renderer.scene.path.contains.unsupported.data", new TypeError('Renderer scene path contains unsupported data'));
         }
         safe[key] = value;
       }

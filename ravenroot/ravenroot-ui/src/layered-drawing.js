@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 /**
  * Layered graph drawing for the design editor's additive `Hierarchical (new)` and
  * `Layered (top-down)` arrangements.
@@ -94,7 +95,7 @@ function axisOf(spec) {
 
 export function layeredElkOptions(mode) {
   const spec = LAYERED_MODES[mode];
-  if (!spec) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
+  if (!spec) throw productError("workspace.error.layered.drawing.unknown.layered.drawing.mode", new TypeError(`Unknown layered drawing mode: ${mode}`), { value1: mode });
   return {
     'elk.algorithm': 'layered',
     'elk.direction': spec.direction,
@@ -135,7 +136,7 @@ function labelOf(node) {
 /** The ELK input graph for one drawing mode: node bodies with outside labels on the mode's side. */
 export function buildLayeredElkGraph(inputs, mode) {
   const spec = LAYERED_MODES[mode];
-  if (!spec) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
+  if (!spec) throw productError("workspace.error.layered.drawing.unknown.layered.drawing.mode", new TypeError(`Unknown layered drawing mode: ${mode}`), { value1: mode });
   const children = (inputs?.nodes || []).map(node => {
     const label = labelOf(node);
     const layoutOptions = {
@@ -330,7 +331,7 @@ function boxOfChild(child, label, labelSide) {
  */
 export function layeredDrawingFromResult(result, inputs, mode) {
   const spec = LAYERED_MODES[mode];
-  if (!spec) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
+  if (!spec) throw productError("workspace.error.layered.drawing.unknown.layered.drawing.mode", new TypeError(`Unknown layered drawing mode: ${mode}`), { value1: mode });
   const axis = axisOf(spec);
   const inputById = new Map((inputs?.nodes || []).map(node => [String(node.id), node]));
   const boxes = new Map();

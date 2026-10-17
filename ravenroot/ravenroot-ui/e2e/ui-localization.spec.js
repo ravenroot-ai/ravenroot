@@ -294,3 +294,29 @@ test('localizes native lifecycle prompts after a live change without altering ta
   expect(prompts[0].message).toContain('author-owned-target');
   await expect(page.locator('#deployment-status')).toContainText('⟦IT⟧');
 });
+
+
+test('repaints a retained runner validation error after a live catalog change', async ({ page }) => {
+  await configure(page);
+  await page.route('**/v1/runner-plane/catalog', route => route.fulfill({ contentType: 'application/json', body: '{"items":null}' }));
+  await page.goto('/');
+  await openLanguageDialog(page);
+  await page.locator('.language-dialog button[type="submit"]').click();
+  await page.locator('#menu-run').click();
+  await page.getByRole('menuitem', { name: /Agents and runners/ }).click();
+  await expect(page.locator('#runner-dialog')).toContainText('Unsupported runner catalogue');
+  await page.locator('#language-selection').evaluate(node => { node.value = 'it'; node.dispatchEvent(new Event('change', { bubbles: true })); });
+  await expect(page.locator('#runner-dialog')).toContainText('⟦IT⟧Unsupported runner catalogue⟦IT⟧');
+  await page.locator('#language-selection').evaluate(node => { node.value = 'ar'; node.dispatchEvent(new Event('change', { bubbles: true })); });
+  await expect(page.locator('#runner-dialog')).toContainText('⟦نص واجهة طويل للاختبار⟧Unsupported runner catalogue');
+});
+
+test('repaints a startup URL rejection after a live catalog change', async ({ page }) => {
+  await configure(page);
+  await page.goto('/?file=' + encodeURIComponent('file:///author-owned.graphml'));
+  await expect(page.locator('#startup-import-status')).toHaveText('The graph URL must use HTTP or HTTPS.');
+  await openLanguageDialog(page);
+  await page.locator('#language-selection').selectOption('it');
+  await expect(page.locator('#startup-import-status')).toHaveText('⟦IT⟧The graph URL must use HTTP or HTTPS.⟦IT⟧');
+  await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'failed');
+});

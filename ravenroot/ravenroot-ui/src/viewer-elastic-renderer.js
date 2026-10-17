@@ -1,10 +1,11 @@
+import { productError } from './product-error.js';
 import * as d3 from 'd3';
 import { edgeFlowWidth, formatRuntimeTime } from './monitoring-runtime-state.js';
 import { createElasticVisualGroupRenderer } from './visual-group-elastic-renderer.js';
 import { uiText } from './ui-text.js';
 
 function requiredElement(value, name) {
-  if (!(value instanceof Element)) throw new TypeError(`${name} is required.`);
+  if (!(value instanceof Element)) throw productError("workspace.error.viewer.elastic.renderer.is.required", new TypeError(`${name} is required.`), { value1: name });
   return value;
 }
 
@@ -64,10 +65,10 @@ export function mountD3ElasticRenderer({
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
   if (!Array.isArray(nodes) || !Array.isArray(links)) {
-    throw new TypeError('Elastic nodes and links are required.');
+    throw productError("workspace.error.viewer.elastic.renderer.elastic.nodes.and.links.are.required", new TypeError('Elastic nodes and links are required.'));
   }
   if (typeof isLive !== 'function' || typeof onViewportChange !== 'function') {
-    throw new TypeError('Elastic lifecycle callbacks are required.');
+    throw productError("workspace.error.viewer.elastic.renderer.elastic.lifecycle.callbacks.are.required", new TypeError('Elastic lifecycle callbacks are required.'));
   }
 
   const viewportWidth = Math.max(1, finite(width, 800));

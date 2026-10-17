@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 // Edge authoring gestures and their validation (UI-02).
 //
 // One state machine serves all three input routes — pointer drag, keyboard, and the inspector form
@@ -105,12 +106,12 @@ export function createEdgeGestureSession({
   layoutMode,
   fontSize,
 } = {}) {
-  if (documentId == null) throw new TypeError('An edge gesture session requires a documentId.');
+  if (documentId == null) throw productError("workspace.error.edge.gestures.an.edge.gesture.session.requires.a.documentid", new TypeError('An edge gesture session requires a documentId.'));
   if (!owner || !renderer || !cy || !graph || !history || !ghost) {
-    throw new TypeError('An edge gesture session requires its owner, renderer, graph, history, Cytoscape instance, and ghost.');
+    throw productError("workspace.error.edge.gestures.an.edge.gesture.session.requires.its.owner.renderer.graph.history", new TypeError('An edge gesture session requires its owner, renderer, graph, history, Cytoscape instance, and ghost.'));
   }
   if (!gesture || gesture.mode === 'idle') {
-    throw new TypeError('An edge gesture session requires a non-idle gesture.');
+    throw productError("workspace.error.edge.gestures.an.edge.gesture.session.requires.a.non.idle.gesture", new TypeError('An edge gesture session requires a non-idle gesture.'));
   }
   return {
     documentId: String(documentId),

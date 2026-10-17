@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { validateScene } from './frontend-plugin-api.js';
 
 export function createFrontendPluginSandbox(source, options = {}) {
@@ -47,10 +48,10 @@ export function createFrontendPluginSandbox(source, options = {}) {
     else item.resolve(event.data.result);
   };
   addEventListener('message', onMessage);
-  const bootTimer = setTimeout(() => fail(new Error(`Frontend plugin sandbox did not start within ${timeout} ms`)), timeout);
+  const bootTimer = setTimeout(() => fail(productError("workspace.error.frontend.plugin.sandbox.frontend.plugin.sandbox.did.not.start.within.ms", new Error(`Frontend plugin sandbox did not start within ${timeout} ms`), { value1: timeout })), timeout);
   target.append(iframe);
   const invoke = async (method, input, { signal } = {}) => {
-    if (destroyed) throw new Error('Frontend plugin sandbox was destroyed');
+    if (destroyed) throw productError("workspace.error.frontend.plugin.sandbox.frontend.plugin.sandbox.was.destroyed", new Error('Frontend plugin sandbox was destroyed'));
     await ready;
     if (signal?.aborted) throw new DOMException('Plugin operation was cancelled', 'AbortError');
     const id = ++sequence;
@@ -61,7 +62,7 @@ export function createFrontendPluginSandbox(source, options = {}) {
         pending.delete(id); clearTimeout(item.timer); reject(error);
       };
       const timer = setTimeout(() => {
-        const error = new Error(`Frontend plugin ${method} exceeded ${timeout} ms`);
+        const error = productError("workspace.error.frontend.plugin.sandbox.frontend.plugin.exceeded.ms", new Error(`Frontend plugin ${method} exceeded ${timeout} ms`), { value1: method, value2: timeout });
         retire(error); fail(error);
       }, timeout);
       pending.set(id, { resolve, reject, timer });
@@ -73,7 +74,7 @@ export function createFrontendPluginSandbox(source, options = {}) {
     layout: (input, options_) => invoke('layout', input, options_),
     render: async (input, options_) => validateScene(await invoke('render', input, options_)),
     destroy() {
-      fail(new Error('Frontend plugin sandbox was destroyed'));
+      fail(productError("workspace.error.frontend.plugin.sandbox.frontend.plugin.sandbox.was.destroyed", new Error('Frontend plugin sandbox was destroyed')));
     },
     element: iframe,
   });

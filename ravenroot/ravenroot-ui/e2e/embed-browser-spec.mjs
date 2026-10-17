@@ -58,6 +58,7 @@ test('localizes a real server session and accepts only the authenticated locale 
     canvas._cyreg.cy.getElementById('behavior').data('cardLabel'));
   await expect.poll(() => bypassLabel(viewer)).toBe('behavior⟦B⟧ · bypassed');
   expect(await bypassLabel(otherViewer)).toBe('behavior · bypassed');
+  if (evidencePath('server-embed-isolated-bypass.png')) await viewer.locator('#ravenroot-embed-viewer').screenshot({ path: evidencePath('server-embed-isolated-bypass.png') });
   await expect(otherViewer.locator('html')).toHaveAttribute('lang', 'en-XA');
   await page.evaluate(() => window.postViewerLocale('en-XA', null));
   await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
@@ -292,6 +293,7 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     await viewer.locator('.d3-nodes circle[data-node-id="worker"]').hover();
     await expect(memberTooltip).toContainText('⟦A⟧ID: worker');
     await expect(memberTooltip).toContainText('⟦A⟧Bypassed:');
+    if (evidencePath('server-embed-localized-shared-tooltip.png')) await shell.screenshot({ path: evidencePath('server-embed-localized-shared-tooltip.png') });
     await expect(otherViewer.locator('html')).toHaveAttribute('lang', 'en');
     await expect(otherViewer.locator('[data-viewer-mode] option').first()).toHaveText('Design');
     await page.evaluate(() => window.postViewerLocale('en', null));

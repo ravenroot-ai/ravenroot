@@ -689,7 +689,16 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         Map<String, Object> entry = coordination.row();
         if (!fingerprint.equals(string(entry, "fingerprint"))) throw failure(GraphAuthoringException.Failure.CONFLICT);
         if (!"applied".equals(string(entry, "status"))) throw failure(GraphAuthoringException.Failure.CONFLICT);
+        // Recheck an accepted commit after a restart too: the process may have stopped between
+        // GitLab accepting a POST and the post-write parent/release checks.
+        Map<String, Object> commit = object(json(request("GET", projectApi() + "/repository/commits/"
+                + query(coordination.record().lastCommit()), null, Set.of(200)).body()));
+        Object parents = commit.get("parent_ids");
+        if (!(parents instanceof List<?> list) || list.size() != 1 || !string(entry, "parent").equals(list.getFirst())) {
+            throw failure(GraphAuthoringException.Failure.CONFLICT);
+        }
         State observed = state(actor, documentId);
+        if (observed.draft() != null) requireUniqueGraphId(actor, documentId, observed.summary().graphId());
         if (!string(entry, "release").equals(observed.revision().release())
                 || !string(entry, "publication").equals(observed.revision().publication())) {
             // A successful earlier response and a later publication are indistinguishable after

@@ -147,6 +147,7 @@ class GitlabAuthoringRepositoryTest {
         try (var repository = repository(api)) {
             var first = save(repository, "orders.graphml", "one", EMPTY, "parent-first-key-00001");
             api.beforeCommit = () -> api.external("external.txt", "keep".getBytes(StandardCharsets.UTF_8));
+            api.loseCommit = true;
             assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> save(repository, "orders.graphml", "bad",
                     first.summary().revision(), "parent-second-key-0001"));
             assertArrayEquals(first.graphMl(), repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join().graphMl());

@@ -49,3 +49,9 @@ describe('authoring capability state', () => {
     expect(primaryPersistenceTarget(retried.capability)).toBe('git');
   });
 });
+
+it('enables repository persistence for an advertised GitLab runtime', () => {
+  const capability = authoringCapabilityFromConfiguration({ graphAuthoring: { mode: 'git', provider: 'gitlab' } });
+  expect(primaryPersistenceTarget(capability)).toBe('git');
+  expect(capability.provider).toBe('gitlab');
+});

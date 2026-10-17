@@ -9,7 +9,7 @@ Until the runtime configuration proves whether this workspace is local or reposi
 - **Repository history** lists source commits and can restore one as a new commit.
 - **Discard draft changes** replaces the draft with the reviewed release.
 - **Delete repository draft** removes the draft file while Git retains its history.
-- **Propose release review** opens or reuses a review pull request in the graph repository.
+- **Propose release review** opens or reuses a review pull request (GitHub) or merge request (GitLab) in the graph repository.
 - **Published versions** lists CI-verified immutable versions. Choose a current version to import and register, or an older version to roll back. Registration does not run the graph.
 
 The document heading shows the authored `vN`, short Git revision, draft or released-source state, publication state, and an in-progress or failed save. When a graph has both a newer draft and a reviewed release, **Open from repository** lists both sources. The released source is read-only; **Open repository draft** opens its corresponding editable draft without changing either source.

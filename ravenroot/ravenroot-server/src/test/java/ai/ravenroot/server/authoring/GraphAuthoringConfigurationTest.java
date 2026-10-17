@@ -45,6 +45,32 @@ class GraphAuthoringConfigurationTest {
                 () -> GraphAuthoringConfiguration.fromEnvironment(environment));
     }
 
+    @Test void gitlabSupportsNestedProjectsAndProviderSpecificHttpsApiBases() {
+        var configuration = GitlabAuthoringRepositoryTest.configuration();
+        assertEquals(GraphAuthoringConfiguration.Provider.GITLAB, configuration.provider());
+        assertEquals("platform/nested/graphs", configuration.project());
+        assertEquals("gitlab", configuration.capabilities().get("provider"));
+        assertTrue(configuration.capabilitiesJson().contains("\"provider\":\"gitlab\""));
+        try (var repository = GraphAuthoringRepositories.create(configuration, ignored -> java.util.Optional.empty(),
+                (tenant, graph, version, source, bytes) -> "absent", ignored -> { })) {
+            assertInstanceOf(GitlabAuthoringRepository.class, repository);
+        }
+    }
+
+    @Test void gitlabRefusesAppCredentialsAndOverlappingTenantPaths() {
+        var environment = gitEnvironment();
+        environment.put("RAVENROOT_GRAPH_AUTHORING_PROVIDER", "gitlab");
+        environment.put("RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "42");
+        assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(environment));
+        environment.put("RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "PAT");
+        assertEquals("42", GraphAuthoringConfiguration.fromEnvironment(environment).project());
+        environment.put("RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "draft/customers-a");
+        assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(environment));
+        environment.put("RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "main");
+        environment.put("RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "a=customers,b=customers/other");
+        assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(environment));
+    }
+
     private static Map<String, String> gitEnvironment() {
         var value = new HashMap<String, String>();
         value.put("RAVENROOT_GRAPH_AUTHORING_MODE", "GIT");

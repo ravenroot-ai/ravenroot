@@ -6,6 +6,7 @@ import {
   decodeGraphMl,
   parseAuthoredReleaseVersion,
   repositorySourceStatus,
+  repositoryReviewLabel,
   validateGraphAuthoringCapability,
 } from '../src/graph-authoring-client.js';
 import { parseGraphML } from '../src/graph-parsers.js';
@@ -153,4 +154,13 @@ describe('graph authoring client', () => {
     await expect(client.open('safe.graphml')).rejects.toThrow('CONFLICT');
     expect(fetchImpl.mock.calls[0][0]).toBe('/v1/graph-authoring/safe.graphml?source=draft');
   });
+});
+
+it('accepts GitLab capability with provider-specific review terminology and no provider credentials', () => {
+  const capability = validateGraphAuthoringCapability({ mode: 'git', provider: 'gitlab', operations: ['SAVE', 'RELEASE_PROPOSAL'],
+    repositoryDisplay: 'group/nested/project', credentialReference: 'must-not-copy' });
+  expect(capability.provider).toBe('gitlab');
+  expect(capability).not.toHaveProperty('credentialReference');
+  expect(repositoryReviewLabel(capability.provider)).toBe('Merge request');
+  expect(repositoryReviewLabel('github')).toBe('Pull request');
 });

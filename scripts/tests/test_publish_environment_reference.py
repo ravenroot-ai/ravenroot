@@ -48,6 +48,7 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertIn("defaults to `LOCAL`", section)
         self.assertIn("defaults to `10485760`", section)
         self.assertIn("maximum `120000` milliseconds", section)
+        self.assertIn("eligible GitHub and GitLab `GET` failures", section)
         self.assertIn("mutations are never retried blindly", section)
 
     def test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory(self):

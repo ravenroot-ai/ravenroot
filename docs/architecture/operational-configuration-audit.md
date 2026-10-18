@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 167.
+Checked source reconciliations: 168.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 31740 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 31702 |
-| Unchanged identities | 31651 |
-| Approved identity migrations | 50 |
-| Approved retirements | 1 |
-| Semantically classified additions | 39 |
+| Source inventory candidates | 31740 |
+| Unchanged identities | 31740 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 31740 |
 
 ## Final semantic review
@@ -11968,7 +11968,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-81e4617277e157e72ea1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:169` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
 | `oc-4542affefa0b6127c954` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:170` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
 | `oc-dc8635072d6e1c0a6e06` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:170` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-bcfeda3b1bcbf8bbe8c6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:249` `invalidFrameAncestor` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-bcfeda3b1bcbf8bbe8c6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:264` `invalidFrameAncestor` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
 | `oc-53f5cdb989675a4a074a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:41` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-44922902badbefe727f0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:42` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-36c7d4ae3311e9b8e0d6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:43` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

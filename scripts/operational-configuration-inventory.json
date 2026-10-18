@@ -268387,7 +268387,7 @@
     {
       "id": "oc-bcfeda3b1bcbf8bbe8c6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 249,
+      "line": 264,
       "symbol": "invalidFrameAncestor",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_FRAME_ANCESTORS",
@@ -1154270,6 +1154270,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-575-workbench-framing-parser-parity-v2",
+      "issue": "#575",
+      "sourceRevision": "efcc74eab66417b5f29402bb9324b220c257fe12",
+      "targetRevision": "3c33fef029e6b27581e09aa2479905ff2011f79f",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "d3f6efa2070c74d37395000cafbce18afb64d0036a74dbbf6f4555a436e05c93",
+      "targetCandidateDigest": "754ca1176a7c427eb99b2f12cc1bac2c880df6aaf44fd5f1248eb85d9d01fcf8",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

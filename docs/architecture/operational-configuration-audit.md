@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 31744 |
+| Atomic operational candidates discovered | 31745 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 31744 |
+| Reviewed | 31745 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 350 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2403 |
-| Retained protocol or format invariants | 13624 |
+| Retained protocol or format invariants | 13625 |
 | Retained published contract descriptions | 612 |
 | Retained presentation text | 2935 |
 | Retained derived values | 1156 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 170.
+Checked source reconciliations: 171.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 31744 candidates.
+zero-count or unclassified rows as needed and sums to 31745 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 31744 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 29834 |
+| retained | 29835 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 31744 candidates.
 | derived | 1156 |
 | operator-configurable | 1910 |
 | presentation-text | 2935 |
-| protocol-or-format-invariant | 13624 |
+| protocol-or-format-invariant | 13625 |
 | published-contract-description | 612 |
 | security-ceiling-or-default | 2403 |
 | test-fixture | 9104 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 31744 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8176 |
+| java | 8177 |
 | script | 2881 |
 | test-fixture | 9104 |
 | ui | 8348 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8113 |
-| Retained; no remediation required | 21559 |
+| Retained; no remediation required | 21560 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 31744 |
-| Unchanged identities | 31744 |
-| Approved identity migrations | 0 |
+| Unchanged identities | 31739 |
+| Approved identity migrations | 5 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 31744 |
+| Semantically classified additions | 1 |
+| Current candidates | 31745 |
 
 ## Final semantic review
 
@@ -11942,37 +11942,38 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-351943d622744f1a9b37` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:43` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-d77fdac1407a5380555b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:43` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-cc6581554b75857f554b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:44` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-fa7550c32dc34a7bf18f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:15` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-a5a396a484838e68596f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:16` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-a62366434ea69a94bc83` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:17` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-a0ae8519655267eca1d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:18` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-e29357e3867ba5dd0961` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:41` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-e96e1acb2dcfc949bd8d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:41` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-682c8f5e328baa3db297` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:42` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-6e7809b8a604321a3081` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:42` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-e7eb1837f75a402418d4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:42` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-9d60733cd2e2743a4347` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:49` `getPath` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-1bbf61f21edc3bfb74c9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:53` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-6bcfc92b92b67e77a246` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:53` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-cdc2b6ba0efbdb0e2585` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:53` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-c13bb9dc7b42bc4f5d1c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:56` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-c2a389020ac5f61ce42a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:56` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-ea385422409b7bb1d93a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:56` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-2061f7464fd77f5f950a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:57` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-8a918224bd0060de39a7` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:57` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-c4a3c3fb138f59c43dd8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:57` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-41bb9f37ca3ceed4ea4b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:93` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-fb3f09e66a4e318f7c74` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:93` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-322dca1c8553fde9c083` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:139` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-51083dc0607f39f350b7` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:172` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-81e4617277e157e72ea1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:172` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-4542affefa0b6127c954` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:173` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-dc8635072d6e1c0a6e06` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:173` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
-| `oc-10b8fa14ebb1533564f8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:197` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
-| `oc-d2462b65c2dbc4d0ee4a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:197` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
-| `oc-ee945de5f690356ad6cf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:295` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
-| `oc-39d061c6fadac959b03e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:332` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
-| `oc-bcfeda3b1bcbf8bbe8c6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:391` `invalidFrameAncestor` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-fa7550c32dc34a7bf18f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:14` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-a5a396a484838e68596f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:15` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-a62366434ea69a94bc83` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:16` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-a0ae8519655267eca1d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:17` `SecurityHeadersPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-e29357e3867ba5dd0961` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:40` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-e96e1acb2dcfc949bd8d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:40` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-682c8f5e328baa3db297` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:41` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-6e7809b8a604321a3081` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:41` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-e7eb1837f75a402418d4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:41` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-9d60733cd2e2743a4347` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:48` `getPath` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-1bbf61f21edc3bfb74c9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:52` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-6bcfc92b92b67e77a246` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:52` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-cdc2b6ba0efbdb0e2585` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:52` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-c13bb9dc7b42bc4f5d1c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:55` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-c2a389020ac5f61ce42a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:55` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-ea385422409b7bb1d93a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:55` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-2061f7464fd77f5f950a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:56` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-8a918224bd0060de39a7` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:56` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-c4a3c3fb138f59c43dd8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:56` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-41bb9f37ca3ceed4ea4b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:92` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-fb3f09e66a4e318f7c74` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:92` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-322dca1c8553fde9c083` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:138` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-3b8fe83ab3a5fbcefb1d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:168` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-bfa82cb4cbc5feeb8c9a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:168` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-7057d186e50035a8cab9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:169` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-f7fb577d387c945618d1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:169` `if` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-10b8fa14ebb1533564f8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:193` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
+| `oc-d2462b65c2dbc4d0ee4a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:193` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
+| `oc-ee945de5f690356ad6cf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:250` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
+| `oc-39d061c6fadac959b03e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:287` `if` | java | retained | protocol-or-format-invariant | This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy. |
+| `oc-8aec4277dcb988fa6366` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:346` `invalidFrameAncestor` | java | retained | protocol-or-format-invariant | This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract. |
+| `oc-61728aeda2f6b633d6ff` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java:352` `unsupportedExplicitIpv6FrameAncestor` | java | retained | protocol-or-format-invariant | This startup diagnostic documents the reviewed CSP representation limit for explicit IPv6 frame ancestors; it does not introduce an independent operator setting. |
 | `oc-53f5cdb989675a4a074a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:41` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-44922902badbefe727f0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:42` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-36c7d4ae3311e9b8e0d6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:43` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

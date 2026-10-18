@@ -267929,7 +267929,7 @@
     {
       "id": "oc-fa7550c32dc34a7bf18f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 15,
+      "line": 14,
       "symbol": "SecurityHeadersPolicy",
       "kind": "fixed-declaration",
       "role": "CSP_PREFIX",
@@ -267951,7 +267951,7 @@
     {
       "id": "oc-a5a396a484838e68596f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 16,
+      "line": 15,
       "symbol": "SecurityHeadersPolicy",
       "kind": "fixed-declaration",
       "role": "CSP_PREFIX",
@@ -267966,7 +267966,7 @@
     {
       "id": "oc-a62366434ea69a94bc83",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 17,
+      "line": 16,
       "symbol": "SecurityHeadersPolicy",
       "kind": "fixed-declaration",
       "role": "CSP_SUFFIX",
@@ -267981,7 +267981,7 @@
     {
       "id": "oc-a0ae8519655267eca1d3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 18,
+      "line": 17,
       "symbol": "SecurityHeadersPolicy",
       "kind": "fixed-declaration",
       "role": "CSP_SUFFIX",
@@ -268003,7 +268003,7 @@
     {
       "id": "oc-e29357e3867ba5dd0961",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 41,
+      "line": 40,
       "symbol": "fromEnvironment",
       "kind": "environment-binding",
       "role": "RAVENROOT_TRUSTED_TLS_TERMINATOR",
@@ -268021,7 +268021,7 @@
     {
       "id": "oc-e96e1acb2dcfc949bd8d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 41,
+      "line": 40,
       "symbol": "fromEnvironment",
       "kind": "operational-declaration",
       "role": "trustedTlsTerminator",
@@ -268039,7 +268039,7 @@
     {
       "id": "oc-682c8f5e328baa3db297",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 42,
+      "line": 41,
       "symbol": "fromEnvironment",
       "kind": "environment-binding",
       "role": "RAVENROOT_PUBLIC_ORIGIN",
@@ -268057,7 +268057,7 @@
     {
       "id": "oc-6e7809b8a604321a3081",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 42,
+      "line": 41,
       "symbol": "fromEnvironment",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -268075,7 +268075,7 @@
     {
       "id": "oc-e7eb1837f75a402418d4",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 42,
+      "line": 41,
       "symbol": "fromEnvironment",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -268093,7 +268093,7 @@
     {
       "id": "oc-9d60733cd2e2743a4347",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 49,
+      "line": 48,
       "symbol": "getPath",
       "kind": "environment-binding",
       "role": "RAVENROOT_PUBLIC_ORIGIN",
@@ -268111,7 +268111,7 @@
     {
       "id": "oc-1bbf61f21edc3bfb74c9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 53,
+      "line": 52,
       "symbol": "if",
       "kind": "environment-binding",
       "role": "RAVENROOT_PUBLIC_ORIGIN",
@@ -268129,7 +268129,7 @@
     {
       "id": "oc-6bcfc92b92b67e77a246",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 53,
+      "line": 52,
       "symbol": "if",
       "kind": "environment-binding",
       "role": "RAVENROOT_TRUSTED_TLS_TERMINATOR",
@@ -268147,7 +268147,7 @@
     {
       "id": "oc-cdc2b6ba0efbdb0e2585",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 53,
+      "line": 52,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "RAVENROOT_TRUSTED_TLS_TERMINATOR",
@@ -268165,7 +268165,7 @@
     {
       "id": "oc-c2a389020ac5f61ce42a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 56,
+      "line": 55,
       "symbol": "if",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_CONNECT_ORIGINS",
@@ -268187,7 +268187,7 @@
     {
       "id": "oc-c13bb9dc7b42bc4f5d1c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 56,
+      "line": 55,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -268209,7 +268209,7 @@
     {
       "id": "oc-ea385422409b7bb1d93a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 56,
+      "line": 55,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -268231,7 +268231,7 @@
     {
       "id": "oc-2061f7464fd77f5f950a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 57,
+      "line": 56,
       "symbol": "if",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_FRAME_ANCESTORS",
@@ -268246,7 +268246,7 @@
     {
       "id": "oc-8a918224bd0060de39a7",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 57,
+      "line": 56,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -268261,7 +268261,7 @@
     {
       "id": "oc-c4a3c3fb138f59c43dd8",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 57,
+      "line": 56,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -268276,7 +268276,7 @@
     {
       "id": "oc-41bb9f37ca3ceed4ea4b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 93,
+      "line": 92,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "age",
@@ -268294,7 +268294,7 @@
     {
       "id": "oc-fb3f09e66a4e318f7c74",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 93,
+      "line": 92,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "age",
@@ -268312,7 +268312,7 @@
     {
       "id": "oc-322dca1c8553fde9c083",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 139,
+      "line": 138,
       "symbol": "if",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_FRAME_ANCESTORS",
@@ -268325,69 +268325,85 @@
       "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
     },
     {
-      "id": "oc-81e4617277e157e72ea1",
+      "id": "oc-bfa82cb4cbc5feeb8c9a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 172,
+      "line": 168,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
       "expression": "\"https\"",
       "expressionDigest": "f7fb094b065d000dcf7c9299b1b47ce220914f77f7dc67ea57e415e49c45997f",
-      "evidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+      "evidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
+      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract.",
+      "identityMigration": {
+        "history": "issue-575-workbench-framing-csp-hosts-v4",
+        "fromId": "oc-81e4617277e157e72ea1"
+      }
     },
     {
-      "id": "oc-51083dc0607f39f350b7",
+      "id": "oc-3b8fe83ab3a5fbcefb1d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 172,
+      "line": 168,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
       "expression": "443",
       "expressionDigest": "6d05621ab7cb7b4fb796ca2ffbe1a141e0d4319d3deb6a05322b9de85d69b923",
-      "evidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+      "evidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
+      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract.",
+      "identityMigration": {
+        "history": "issue-575-workbench-framing-csp-hosts-v4",
+        "fromId": "oc-51083dc0607f39f350b7"
+      }
     },
     {
-      "id": "oc-dc8635072d6e1c0a6e06",
+      "id": "oc-f7fb577d387c945618d1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 173,
+      "line": 169,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
       "expression": "\"http\"",
       "expressionDigest": "a321f717224d7f734e098a468af88534a4b8e212f49fd254a9a8475dc3b248f3",
-      "evidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+      "evidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
+      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract.",
+      "identityMigration": {
+        "history": "issue-575-workbench-framing-csp-hosts-v4",
+        "fromId": "oc-dc8635072d6e1c0a6e06"
+      }
     },
     {
-      "id": "oc-4542affefa0b6127c954",
+      "id": "oc-7057d186e50035a8cab9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 173,
+      "line": 169,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
       "expression": "80",
       "expressionDigest": "48449a14a4ff7d79bb7a1b6f3d488eba397c36ef25634c111b49baf362511afc",
-      "evidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+      "evidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
+      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract.",
+      "identityMigration": {
+        "history": "issue-575-workbench-framing-csp-hosts-v4",
+        "fromId": "oc-4542affefa0b6127c954"
+      }
     },
     {
       "id": "oc-d2462b65c2dbc4d0ee4a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 197,
+      "line": 193,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "portText",
@@ -268402,7 +268418,7 @@
     {
       "id": "oc-10b8fa14ebb1533564f8",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 197,
+      "line": 193,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "portText",
@@ -268417,7 +268433,7 @@
     {
       "id": "oc-ee945de5f690356ad6cf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 295,
+      "line": 250,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "delimiter",
@@ -268432,7 +268448,7 @@
     {
       "id": "oc-39d061c6fadac959b03e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 332,
+      "line": 287,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "outputSize",
@@ -268445,19 +268461,38 @@
       "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
     },
     {
-      "id": "oc-bcfeda3b1bcbf8bbe8c6",
+      "id": "oc-8aec4277dcb988fa6366",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 391,
+      "line": 346,
       "symbol": "invalidFrameAncestor",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_FRAME_ANCESTORS",
       "expression": "RAVENROOT_UI_FRAME_ANCESTORS",
       "expressionDigest": "a5c3179857c873717a7ed7d9ab63d3861c40def6b1765a25ed9ce79a00e88af0",
-      "evidenceDigest": "587cf803758e2271a50ce0213f8eca610e2f8e8ac04e85b0a451e3800a287b2a",
+      "evidenceDigest": "149969a4464e75f6a6d342c63e9a92aa13e489b8eb650e031e267d87424b780b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
+      "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract.",
+      "identityMigration": {
+        "history": "issue-575-workbench-framing-csp-hosts-v4",
+        "fromId": "oc-bcfeda3b1bcbf8bbe8c6"
+      }
+    },
+    {
+      "id": "oc-61728aeda2f6b633d6ff",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+      "line": 352,
+      "symbol": "unsupportedExplicitIpv6FrameAncestor",
+      "kind": "environment-binding",
+      "role": "RAVENROOT_UI_FRAME_ANCESTORS",
+      "expression": "RAVENROOT_UI_FRAME_ANCESTORS",
+      "expressionDigest": "a5c3179857c873717a7ed7d9ab63d3861c40def6b1765a25ed9ce79a00e88af0",
+      "evidenceDigest": "e27bbf41078881fedbc5ac9caa922a54bd0604975272da76407ce324264f3e47",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This startup diagnostic documents the reviewed CSP representation limit for explicit IPv6 frame ancestors; it does not introduce an independent operator setting."
     },
     {
       "id": "oc-53f5cdb989675a4a074a",
@@ -650963,6 +650998,7 @@
     "14713f62ea1ca9062ba287e83a29b3a1c3b67c448cedf8d4fbdbf1aab88d22af": "AgentBudgetVector parentReservedCharge = new AgentBudgetVector(0, 0, 0, 0, 0, 0, 0, 0, 1);",
     "148fbcbe1d5180d03127b0b2f38d2ff192ccbcdccad2ed636a28e26e37cc8dd0": "public static final long HARD_MAX_TRAVERSAL_STEPS = 1_000_000L;",
     "14903be943b5d6afc68d16e0bd6a7dd0b250a312baa202d7d7140e905fa81795": "const end = createNode('end', 'End', 'END', { x: 480, y: 220 });",
+    "149969a4464e75f6a6d342c63e9a92aa13e489b8eb650e031e267d87424b780b": "} private static IllegalArgumentException invalidFrameAncestor() { return new IllegalArgumentException( \"RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins \" + \"with CSP-compatible DNS or IPv4 hosts\");",
     "149aaa8225c871f7bf01e94695cc8c8db113bc710c13e7d7c2556d05e3191f37": "duration = {**base, \"id\": \"oc-timeout\", \"expression\": \"500\", \"line\": 3}",
     "149ac0d64aae589625bb092dcdc2d9a7339339abc38e1aa130d4f51efcd44b3e": "\"the command above. There is no `workspace-agent` compatibility alias.\", \"\",",
     "149b05ae7fef807bfba381855b4964104ebcff5cbd9d60978125b8a781be9c28": "const total = Object.values(heights).reduce((sum, height) => sum + height, 0);",
@@ -652019,7 +652055,6 @@
     "2dcc4b801f8745de1a6bf8ad4f616bad1a6013f4622c6e7f2a2ed9c1993484c0": "} private static RequestContext operator(Map<String, String> options) { return new RequestContext(\"cli-\" + UUID.randomUUID(), options.getOrDefault(\"operator\", \"local-cli\"), PrincipalType.USER, \"urn:ravenroot:cli\", required(options, \"tenant\"), Set.of(Role.OPERATOR), Set.of(AuthorizationAction.EMBED_REGISTRATION_ADMIN.requiredScope()));",
     "2dd705dcd6555dd2d18f6891abdb67c1b4ee724f97122fc9cea632562bd4c82b": "public static final String DEFAULT_FILE_NAME = \"ravenroot-execution-store.db\";",
     "2dd84d2e8d75716bb848d0ecf0210b3987e6b2ab05c57c07fd46c6e84f2468e3": "self.run.return_value = self.response({}, code=1, stderr=\"y\" * (fixture.DIAGNOSTIC_BYTES * 2))",
-    "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402": "boolean defaultPort = (\"https\".equals(scheme) && port == 443) || (\"http\".equals(scheme) && port == 80);",
     "2ddbf7a570d92e436477882115181507e2416612d07f2d8c20a1f87dbefd817d": "RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE=25",
     "2de1f5ec07c2411346030ba6c83226f5a5acc86696d85f8fdb25cdce58072ba4": "\"x-ravenroot-environment\": \"RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS\",",
     "2de4007a97a11c0933461c1b72add1881a330d113fdad380fdc8b550040fdba5": "RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT graph.payload.maxValueCount",
@@ -653927,7 +653962,6 @@
     "5862d60644956e02f48e1fd615af9f3878f0d4fc65e1457d39e2017b49ef1727": "const targetScopes = scope === 'all' ? ['node', 'edge'] : [scope];",
     "586a5958b9e976c5d64ab8debe68a591f1075e64b29152661b109b7fb0db3d98": "public record AgentCommand(String name, boolean readOnly, RunnerPolicy policy, Set<String> outcomes) { public static final Set<String> STANDARD_NAMES = Set.of(\"plan\", \"read\", \"research\", \"review\", \"implement\", \"test\", \"remediate\", \"integrate\", \"resume\", \"summarize\", \"handoff\");",
     "586b62c6c6925303b10bed5f629e18d688f89fce628cf3847c0953529285cbde": "public record GraphVersionMetadata(GraphVersionKey key, int schemaVersion, String canonicalHash) { private static final Pattern SHA_256 = Pattern.compile(\"[0-9a-f]{64}\");",
-    "587cf803758e2271a50ce0213f8eca610e2f8e8ac04e85b0a451e3800a287b2a": "} private static IllegalArgumentException invalidFrameAncestor() { return new IllegalArgumentException( \"RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins\");",
     "587dc1c71f72748613c2c385ae61b45feeb01487f468723e41011595caef5643": "try { assertNotNull(reply.get(5, TimeUnit.SECONDS));",
     "587f3780f33aea10e6f02a92420609049fad76516c4f5fe027855278f4623a28": "\"\"\"Minimal stand-in for the subset of `gh` that github_release.py uses.\"\"\"",
     "5880edb84178c34b15477e61705668f9f48356c0be00db61c587e4a1cd0a6bd8": "{\"pointer\":\"/definitions/aiConfiguration/properties/defaultLlmResponseBytes/$ref\",\"reference\":\"#/definitions/aiPositive\",\"required\":true,\"resolutionError\":\"unsupported sibling next to $ref\",\"resolved\":null}",
@@ -658412,6 +658446,7 @@
     "be31018988a41b780f20f9e6eff9b43dba88193f5e594e47ba632c50c21df9ad": "path = Path(directory) / \"sbom.json\"",
     "be36a03fb6c71faba84bcb29bac319ca6e62410f66a88b984f95d7cc463dfa28": "--tmpfs /opt/ravenroot/ocr-tmp:rw,noexec,nosuid,size=64m,mode=1777 \\",
     "be3a74c8ede573ec1900b05cc6b5e45ef7870be0e800ee8e2bb838c81cf30ecc": "const setReducedMotion = () => { tooltipElement.dataset.reducedMotion = media?.matches ? 'true' : 'false';",
+    "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911": "} boolean defaultPort = (\"https\".equals(scheme) && port == 443) || (\"http\".equals(scheme) && port == 80);",
     "be3f2373ac7031097a3bcb6070efa71352e0b6de06310c1324265cf0fd1c5310": "\"$IMAGE\" mvn -B -f ravenroot/pom.xml \\",
     "be52e00c46792d8272ee35e6eed79b8bae34a119ff9ad16a5b2c0de696e7dfdf": "\"\"\"A count that falls behind the matrix leaves whole shards unexecuted and everything green.\"\"\"",
     "be55077904c322c20762f4f4fb56f88d50e10dafe2e7c34310d999df32c46b7e": "public record InMemoryExecutionStorePolicy(Duration maximumLeaseTtl, int maximumPayloadBytes, Duration maximumClockSkew, Duration journalRetention, int maximumInventoryPageSize, Duration terminalRetention, Duration executionResultRetention) { public static final InMemoryExecutionStorePolicy DEFAULTS = new InMemoryExecutionStorePolicy( Duration.ofMinutes(5), 1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7), Duration.ofDays(7));",
@@ -660062,6 +660097,7 @@
     "e271ad432314ddbd13db26fae249617a44b7f91ff037416812426b31ce176954": "value: {{ include \"ravenroot.aiLimitValue\" .Values.ai.maxSkillDescriptionChars }}",
     "e276b49bb9521cb0ce32e0e615ddab115dd8c9769e1e61905187edf759c20ff2": "marker = \"return new RateLimitConfiguration(\"",
     "e27b16b0e298c7600c2d06e1632cab222b2e3e94d186e59562c6e662e8758167": "\"image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8\",",
+    "e27bbf41078881fedbc5ac9caa922a54bd0604975272da76407ce324264f3e47": "} private static IllegalArgumentException unsupportedExplicitIpv6FrameAncestor() { return new IllegalArgumentException( \"RAVENROOT_UI_FRAME_ANCESTORS does not support explicit IPv6 origins because CSP \" + \"cannot represent them; use self for same-origin framing or a DNS hostname\");",
     "e27fc76a1f34994744b441d5445ccddc88d5ed12cb7b6af0b58f99ca81b94c56": "private static final int WORKSPACE_V3 = 0x52524a33;",
     "e282724017f72c19f16d863f611f4c3b957d574cd7b03b4100be572890954a9c": "echo \"ravenroot.jar not found -- run 'mvn -DskipTests package' in ravenroot/ first.\" >&2",
     "e28342a8b7c91341979f24dc25a168c1f89065c19f32f1ed9d77736a8e7f6e9f": "public record ReadinessConfiguration(Duration storeCheckTimeout, Duration drainGracePeriod, Duration httpStopDelay) { private static final Duration DEFAULT_TIMEOUT = Duration.ofMillis(500);",
@@ -1154402,6 +1154438,98 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-575-workbench-framing-csp-hosts-v4",
+      "issue": "#575",
+      "sourceRevision": "1ad70883ae9ce3b223062e6b0251f7ca8b4fcca5",
+      "targetRevision": "58199c2f604bb296ed9f95f45e6887793ccdbfb9",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "97f18c5b4589d1b027b45b9b7fde9b725a6fe0b5924f641bbde5419fc5ad40ac",
+      "targetCandidateDigest": "ad1b7fcfab167890b917c4c56c3edb84d9f03ca954f0c5a912d2f33044995082",
+      "mappings": [
+        {
+          "fromId": "oc-4542affefa0b6127c954",
+          "toId": "oc-7057d186e50035a8cab9",
+          "approved": true,
+          "rationale": "The same reviewed frame-origin source atom moved when the CSP host validation was tightened; its operational meaning and retained protocol classification are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+            "beforeLine": 173,
+            "afterLine": 169,
+            "beforeEvidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+            "afterEvidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911"
+          }
+        },
+        {
+          "fromId": "oc-51083dc0607f39f350b7",
+          "toId": "oc-3b8fe83ab3a5fbcefb1d",
+          "approved": true,
+          "rationale": "The same reviewed frame-origin source atom moved when the CSP host validation was tightened; its operational meaning and retained protocol classification are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+            "beforeLine": 172,
+            "afterLine": 168,
+            "beforeEvidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+            "afterEvidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911"
+          }
+        },
+        {
+          "fromId": "oc-81e4617277e157e72ea1",
+          "toId": "oc-bfa82cb4cbc5feeb8c9a",
+          "approved": true,
+          "rationale": "The same reviewed frame-origin source atom moved when the CSP host validation was tightened; its operational meaning and retained protocol classification are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+            "beforeLine": 172,
+            "afterLine": 168,
+            "beforeEvidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+            "afterEvidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911"
+          }
+        },
+        {
+          "fromId": "oc-bcfeda3b1bcbf8bbe8c6",
+          "toId": "oc-8aec4277dcb988fa6366",
+          "approved": true,
+          "rationale": "The same reviewed frame-origin source atom moved when the CSP host validation was tightened; its operational meaning and retained protocol classification are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+            "beforeLine": 391,
+            "afterLine": 346,
+            "beforeEvidenceDigest": "587cf803758e2271a50ce0213f8eca610e2f8e8ac04e85b0a451e3800a287b2a",
+            "afterEvidenceDigest": "149969a4464e75f6a6d342c63e9a92aa13e489b8eb650e031e267d87424b780b"
+          }
+        },
+        {
+          "fromId": "oc-dc8635072d6e1c0a6e06",
+          "toId": "oc-f7fb577d387c945618d1",
+          "approved": true,
+          "rationale": "The same reviewed frame-origin source atom moved when the CSP host validation was tightened; its operational meaning and retained protocol classification are unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+            "beforeLine": 173,
+            "afterLine": 169,
+            "beforeEvidenceDigest": "2dd90aab688fc600bf613e6ed4ff8059fac445266d85457632489b6f9447e402",
+            "afterEvidenceDigest": "be3eb6fe5fdf12b166ca6fc0caeb9ef7eb33b0804d3ff5e67f45ad8d0f432911"
+          }
+        }
+      ],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-61728aeda2f6b633d6ff",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "This startup diagnostic documents the reviewed CSP representation limit for explicit IPv6 frame ancestors; it does not introduce an independent operator setting."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [

@@ -699,6 +699,8 @@ test('preserves declared versus derived direction through IndexedDB catalog roun
     await page.locator('.language-dialog input[type="file"]').setInputFiles({
       name: 'az.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(catalog)),
     });
+    // The import chooses its base locale after the IndexedDB write completes.
+    await expect(page.locator('.language-status')).toHaveText('Imported az.');
   };
   await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'en', catalogs: [] });
   await page.goto('/');
@@ -763,6 +765,7 @@ test('restores a configured base catalog after removing its imported override', 
   await page.locator('.language-dialog input[type="file"]').setInputFiles({
     name: 'fr.json', mimeType: 'application/json', buffer: output,
   });
+  await expect(page.locator('.language-status')).toHaveText('Imported fr.');
   await page.evaluate(() => localStorage.setItem('ravenroot.ui.locale.v1', 'fr-CA'));
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fr-CA');

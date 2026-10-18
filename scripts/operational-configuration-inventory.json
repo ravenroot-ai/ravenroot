@@ -1114240,7 +1114240,7 @@
       "id": "issue-561-cycle2-attempt6-retained-presentation-v1",
       "issue": "#561",
       "sourceRevision": "c942222b046b035816c75b39b4f3254f552ffcc6",
-      "targetRevision": "c6129382abd4c05ebfe7ce70b3169a00ee80e95e",
+      "targetRevision": "283941480def78c3c76acff7d62c01c9ad34819a",
       "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
       "sourceInventoryDigest": "6cf79025ac8821d52f682d52d4c5c116f97fbd989ab400ad980f731ebe2f17b4",
       "targetCandidateDigest": "3458fc17adc4fd61934341a4f35d2b65b580ee4ea6db19f058d9ecdbad835268",

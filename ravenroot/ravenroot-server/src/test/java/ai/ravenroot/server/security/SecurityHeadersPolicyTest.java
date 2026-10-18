@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -46,7 +47,11 @@ class SecurityHeadersPolicyTest {
                 "https://user@portal.example", "https://portal.example?x=1",
                 "https://portal.example#fragment", "https://portal.example:443",
                 "https://PORTAL.example", "https://portal.example.",
-                "http://127.1", "http://0177.0.0.1", "https://[0:0:0:0:0:0:0:1]",
+                "http://127.1", "http://2130706433", "http://017700000001",
+                "http://0x", "http://0x7f000001", "http://0X7F000001", "http://0x7f.0.0.1",
+                "http://0177.0.0.1", "http://0x7f.01.0x0.1",
+                "https://example.1", "https://example.0x1",
+                "https://[0:0:0:0:0:0:0:1]",
                 "https://portal.example:0", "https://portal.example:65536",
                 "ftp://portal.example", "https://portal.example;frame-ancestors *",
                 "https://portal.example\r\nX-Frame-Options: ALLOWALL")) {
@@ -56,6 +61,17 @@ class SecurityHeadersPolicyTest {
             assertTrue(failure.getMessage().startsWith("RAVENROOT_UI_FRAME_ANCESTORS"));
             assertFalse(failure.getMessage().contains(rejected));
             assertEquals(null, failure.getCause());
+        }
+    }
+
+    @Test
+    void workbenchAncestorsAcceptCanonicalDnsIpAndPortForms() {
+        for (String accepted : List.of(
+                "self", "https://portal.example", "https://1.example",
+                "https://0x7f.example", "https://192.168.1.1",
+                "http://127.0.0.1:8080", "https://[::1]:8443")) {
+            assertDoesNotThrow(() -> SecurityHeadersPolicy.fromEnvironment(Map.of(
+                    "RAVENROOT_UI_FRAME_ANCESTORS", accepted)), accepted);
         }
     }
 

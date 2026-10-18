@@ -229,7 +229,7 @@ public final class SecurityHeadersPolicy {
                     ? String.join(":", before)
                     : String.join(":", before) + "::" + String.join(":", after);
         }
-        if (normalizedHost.matches("[0-9.]+")) {
+        if (endsInWhatwgIpv4Number(normalizedHost)) {
             String[] components = normalizedHost.split("\\.", -1);
             if (components.length != 4) {
                 throw invalidFrameAncestor();
@@ -242,6 +242,21 @@ public final class SecurityHeadersPolicy {
             }
         }
         return normalizedHost;
+    }
+
+    /**
+     * WHATWG URL parsing treats a host as IPv4 when its final label is a number. Besides
+     * decimal digits, an IPv4 number may use a 0x hexadecimal prefix (including bare 0x).
+     * Only canonical dotted-decimal addresses survive the validation above; every alternate
+     * spelling would be normalized by browsers and must therefore be rejected at startup.
+     */
+    private static boolean endsInWhatwgIpv4Number(String host) {
+        String finalLabel = host.substring(host.lastIndexOf('.') + 1);
+        if (finalLabel.matches("[0-9]+")) {
+            return true;
+        }
+        return finalLabel.startsWith("0x")
+                && finalLabel.substring(2).matches("[0-9a-f]*");
     }
 
     private static IllegalArgumentException invalidFrameAncestor() {

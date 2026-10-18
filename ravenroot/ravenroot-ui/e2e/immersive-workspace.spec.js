@@ -174,7 +174,7 @@ test.describe('immersive workspace', () => {
     const before = await surface(page, 'inspector').boundingBox();
     const handle = await grip(page, 'inspector').boundingBox();
     await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning')))).toBe(false);
-    await page.evaluate(() => window.cy.stop());
+    await page.evaluate(() => { window.cy.stop(); });
     const graph = await page.evaluate(() => window.ravenroot.activeDocument().cy.elements().jsons());
     await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
     await page.mouse.down();
@@ -370,7 +370,7 @@ test.describe('immersive workspace', () => {
     await openWorkspace(page);
     expect(await page.evaluate(() => window.cy.nodes().length)).toBeGreaterThan(0);
     await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning')))).toBe(false);
-    await page.evaluate(() => window.cy.stop());
+    await page.evaluate(() => { window.cy.stop(); });
     await page.locator('[data-command-id="view.fit"]:visible').first().click();
     await expect.poll(() => graphPlacement(page)).toMatchObject({ outside: false, overlaps: 0 });
     await page.evaluate(() => {

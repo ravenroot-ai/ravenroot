@@ -58,6 +58,10 @@ spec:
               value: "1"
             - name: RAVENROOT_BIND_ADDRESS
               value: "0.0.0.0"
+            # Blank retains framing denial. An overlay may opt in with self and/or canonical
+            # comma-separated HTTP(S) origins for portals that host the complete Workbench.
+            - name: RAVENROOT_UI_FRAME_ANCESTORS
+              value: ""
             - name: RAVENROOT_ENGINE
               value: pekko
             # Local-file authoring remains the default. An operator overlay may switch this to GIT

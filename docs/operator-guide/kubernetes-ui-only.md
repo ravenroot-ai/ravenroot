@@ -91,6 +91,7 @@ The optional shared backend token below adds only a deployment-injected UI serve
 |---|---|
 | `RAVENROOT_UI_BACKEND_URL` | Unset selects static-only mode (API/backend probes return `503`); operator-owned HTTP(S) URL with optional backend prefix; no credentials/query/fragment |
 | `RAVENROOT_UI_BACKEND_TOKEN` | Optional literal bearer value, nonempty RFC 6750 characters, at most 16,384 characters; requires backend URL; server memory only |
+| `RAVENROOT_UI_FRAME_ANCESTORS` | Blank denies framing; otherwise `self` and/or comma-separated canonical HTTP(S) origins allowed to frame the complete Workbench |
 | `RAVENROOT_UI_PREFIX` | Empty for root; otherwise slash-prefixed segments of letters/digits/underscore/hyphen, no trailing slash |
 | `RAVENROOT_UI_PORT` | `8080`, integer TCP port |
 | `RAVENROOT_UI_ROOT` | `/opt/ravenroot/ui`; absolute/relative operator-owned asset directory |
@@ -145,9 +146,13 @@ kubectl get -n ravenroot-ui pods,httproute
 ```
 
 The Gateway must permit these namespace routes and present the public certificate. Configure HSTS
-at that HTTPS edge. The UI server sends a same-origin CSP, denies framing and restricts browser
-connections to its own origin; cross-origin direct-service connections and external interaction
-frames require a separately reviewed serving policy. Restrict pod
+at that HTTPS edge. The UI server sends a same-origin CSP and denies framing unless
+`RAVENROOT_UI_FRAME_ANCESTORS` explicitly names `self` or canonical portal origins. This opt-in hosts
+the complete authenticated Workbench; it does not widen the separate read-only viewer. The example
+uses `self` because the host application and `/ravenroot/` share `https://application.example.test`.
+For a cross-origin portal, name its exact origin and allow the UI origin in the portal's `frame-src`.
+Cross-origin direct-service connections and external interaction frames require their own serving
+policy. Restrict pod
 network ingress to the Gateway and egress to DNS plus the configured backend. The manifest drops all
 capabilities and disallows privilege escalation, runs as non-root and needs no filesystem writes.
 Do not mount the backend's data PVC into the UI pod. Local `/ready` only means that UI serving is

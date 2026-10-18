@@ -102,6 +102,9 @@ response headers, and explicit trusted TLS-terminator contract for HSTS are docu
 [`identity-browser.md`](../docs/operator-guide/identity-browser.md).
 The independent `RAVENROOT_UI_CONNECT_ORIGINS` list may extend CSP `connect-src` for explicitly
 confirmed external UI service targets; it is never derived from the browser-caller allowlist.
+`RAVENROOT_UI_FRAME_ANCESTORS` is a separate opt-in for hosting the complete authenticated Workbench
+in an iframe. Blank denies framing; `self` and canonical comma-separated HTTP(S) portal origins are
+validated at startup. It does not change authentication, authorization, or embedded-viewer policy.
 
 Standard factories currently cover log, template, CEL transformation/decision, guarded HTTP,
 delay, JSON parse/path, and programmable-artifact nodes. In the current distribution, `llm-prompt` and `agent`

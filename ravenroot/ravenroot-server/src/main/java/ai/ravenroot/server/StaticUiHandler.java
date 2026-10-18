@@ -17,6 +17,8 @@ import java.util.regex.Pattern;
 final class StaticUiHandler implements HttpHandler {
     private static final Pattern FRAME_SRC_DIRECTIVE =
             Pattern.compile("(?i)(^|;\\s*)frame-src\\s+([^;]*)");
+    private static final Pattern FRAME_ANCESTORS_DIRECTIVE =
+            Pattern.compile("(?i)(^|;\\s*)frame-ancestors\\s+([^;]*)");
     private final Path externalDirectory;
     private final ClassLoader classLoader;
 
@@ -81,13 +83,16 @@ final class StaticUiHandler implements HttpHandler {
             }
         } else if ("frontend-plugin-sandbox.html".equals(relativePath)) {
             // This one static document is framed by the same-origin Workbench. The sandbox attribute
-            // still gives it an opaque origin, while its dedicated CSP closes every network and
-            // nesting channel. X-Frame-Options cannot express that same-origin parent relationship
-            // after sandboxing and DENY would prevent the frame from loading altogether.
+            // and the response-level sandbox directive both give it an opaque origin, while its
+            // dedicated CSP closes every network and nesting channel. Every ancestor must satisfy
+            // CSP, so a framed Workbench's validated ancestors are carried through alongside self.
             headers.remove("X-Frame-Options");
+            String ancestorSources = nestedWorkbenchFrameAncestors(
+                    headers.getFirst("Content-Security-Policy"));
             headers.set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; object-src 'none'; "
-                    + "frame-ancestors 'self'; form-action 'none'; script-src 'self' blob:; "
-                    + "style-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; worker-src 'none'");
+                    + "frame-ancestors " + ancestorSources + "; form-action 'none'; "
+                    + "script-src 'self' blob:; style-src 'none'; img-src 'none'; connect-src 'none'; "
+                    + "frame-src 'none'; worker-src 'none'; sandbox allow-scripts");
         }
         headers.set("Content-Type", contentType(relativePath));
         headers.set("Cache-Control", relativePath.startsWith("assets/")
@@ -117,6 +122,21 @@ final class StaticUiHandler implements HttpHandler {
         String effectiveSources = "'none'".equals(sources) ? "'self'" : sources + " 'self'";
         return matcher.replaceFirst(java.util.regex.Matcher.quoteReplacement(
                 matcher.group(1) + "frame-src " + effectiveSources));
+    }
+
+    static String nestedWorkbenchFrameAncestors(String csp) {
+        var sources = new java.util.LinkedHashSet<String>();
+        sources.add("'self'");
+        if (csp == null) {
+            return "'self'";
+        }
+        var matcher = FRAME_ANCESTORS_DIRECTIVE.matcher(csp);
+        if (matcher.find()) {
+            Arrays.stream(matcher.group(2).trim().split("\\s+"))
+                    .filter(source -> !source.isBlank() && !"'none'".equals(source))
+                    .forEach(sources::add);
+        }
+        return String.join(" ", sources);
     }
 
     private String normalize(String requestPath) {

@@ -23,6 +23,7 @@ UI_SETTINGS = {
         "no credentials/query/fragment"
     ),
     "RAVENROOT_UI_BACKEND_TOKEN": "Optional literal bearer value, nonempty RFC 6750 characters, at most 16384 characters; requires backend URL; startup server memory only; missing-Authorization fallback, shared identity",
+    "RAVENROOT_UI_FRAME_ANCESTORS": "Blank denies framing; otherwise `self` and/or comma-separated canonical HTTP(S) portal origins",
     "RAVENROOT_UI_PREFIX": "Empty (root) or public slash-prefixed path without trailing slash",
     "RAVENROOT_UI_PORT": "Integer TCP port, default `8080`",
     "RAVENROOT_UI_ROOT": "Asset directory, default `/opt/ravenroot/ui`",
@@ -442,7 +443,8 @@ def group(name: str) -> str:
     if name.startswith(("RAVENROOT_AUTH_", "RAVENROOT_BROWSER_", "RAVENROOT_TRUSTED_TLS_")) \
             or name in {"RAVENROOT_BIND_ADDRESS", "RAVENROOT_CONTAINER_LOOPBACK_ONLY",
                         "RAVENROOT_LOCAL_HOST_BIND_ADDRESS", "RAVENROOT_PUBLIC_ORIGIN",
-                        "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "RAVENROOT_UI_CONNECT_ORIGINS"}:
+                        "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "RAVENROOT_UI_CONNECT_ORIGINS",
+                        "RAVENROOT_UI_FRAME_ANCESTORS"}:
         return "identity"
     if name in {"RAVENROOT_ENGINE", "RAVENROOT_MAX_ACTIVE_DEPLOYMENTS", "RAVENROOT_PORT",
                 "RAVENROOT_READY_DRAIN_GRACE_MS", "RAVENROOT_READY_STORE_CHECK_TIMEOUT_MS",

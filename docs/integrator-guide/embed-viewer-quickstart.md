@@ -1,10 +1,154 @@
-# Embed the read-only viewer: a quickstart
+# Embed Ravenroot: authenticated Workbench or read-only viewer
 
-This page takes you from nothing to a Ravenroot graph rendered inside a page you control. Follow it
-end to end and you will have a working host page; you do not need to read the source or any other
-document first.
+Ravenroot has two separate iframe surfaces. The complete Workbench is the ordinary authenticated UI
+inside an iframe; it has the same authoring, execution, administration, and plugin features that the
+same user has in a browser tab. The embedded viewer is a different, limited-authority surface for a
+pre-authorized read-only projection. Choose by authority, not by appearance.
 
-## You are embedding the read-only view, not the editor
+## Choose the authority you need
+
+Use the **complete Workbench** when a signed-in Ravenroot user must work inside a portal. This is an
+opt-in framing policy for the ordinary UI. It adds no host-page API, `postMessage` protocol, login
+mechanism, or reduced permission set. The user still authenticates directly to Ravenroot, and every
+API call still passes Ravenroot's normal authentication, tenant, role, and scope checks.
+
+Use the **read-only viewer** when the host must display one projection without giving its reader
+Workbench authority. Its registration, one-use launch, acknowledgement, short-lived credential,
+projection boundary, and message protocol remain separate. Setting
+`RAVENROOT_UI_FRAME_ANCESTORS` does not register a viewer, widen a viewer registration, or convert a
+viewer into an editor.
+
+## Embed the complete authenticated Workbench
+
+Framing is denied by default. Set `RAVENROOT_UI_FRAME_ANCESTORS` at process startup to either:
+
+- `self`, which allows a parent with the exact same scheme, host, and port as Ravenroot; or
+- one or more canonical HTTP(S) origins separated by commas, optionally with `self`, for example
+  `self,https://portal.example.com,https://operations.example.com:8443`.
+
+Origins have no trailing slash, path, credentials, query, fragment, wildcard, default port, or
+trailing-dot hostname. The scheme and host are lowercase. An explicit hostname is either canonical
+IPv4 or dot-separated, nonempty DNS labels containing only ASCII letters, digits, and hyphens;
+underscores and empty labels cannot be represented by CSP and are rejected. Explicit IPv6 origins
+are also rejected because browsers do not represent them as `frame-ancestors` host sources. Use
+`self` when the portal and Ravenroot share an IPv6 origin, or give a cross-origin IPv6 portal a DNS
+hostname and configure that origin. Empty list entries are invalid. Ravenroot refuses startup on an
+invalid nonblank value rather than copying it into CSP. Unset, empty, and
+whitespace-only values retain `Content-Security-Policy: frame-ancestors 'none'` and
+`X-Frame-Options: DENY`. A valid opt-in emits the exact CSP sources and omits X-Frame-Options so CSP
+is the single framing decision.
+
+### Minimal authenticated startup and complete host page
+
+Build the UI first, then start the integrated server on loopback with a caller-generated local token.
+The example host origin is exactly `http://127.0.0.1:8000`:
+
+```sh
+npm --prefix ravenroot/ravenroot-ui ci
+npm --prefix ravenroot/ravenroot-ui run build
+
+export RAVENROOT_AUTH_MODE=local-token
+export RAVENROOT_AUTH_LOCAL_TOKEN="$(openssl rand -hex 32)"
+export RAVENROOT_UI_DIR="$PWD/ravenroot/ravenroot-ui/dist"
+export RAVENROOT_UI_FRAME_ANCESTORS=http://127.0.0.1:8000
+./ravenroot/scripts/server.sh foreground
+```
+
+Keep that terminal running. Save this complete page as `host-page.html` in another directory:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operations portal</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; grid-template-rows: auto 1fr; font: 16px system-ui, sans-serif; }
+    header { padding: 0.75rem 1rem; border-bottom: 1px solid #bbb; }
+    #ravenroot-workbench { width: 100%; height: 100%; min-height: 36rem; border: 0; }
+  </style>
+</head>
+<body>
+  <header>Operations portal</header>
+  <iframe id="ravenroot-workbench"
+          title="Ravenroot Workbench"
+          src="http://127.0.0.1:8080/"
+          allow="fullscreen"
+          referrerpolicy="no-referrer"></iframe>
+</body>
+</html>
+```
+
+Serve that directory from the configured origin:
+
+```sh
+python3 -m http.server 8000 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8000/host-page.html`. In the framed Workbench, keep the same-origin Service
+URL and enter the value of `RAVENROOT_AUTH_LOCAL_TOKEN` in **Service token**. The iframe navigation
+itself is not authentication, and the host page does not receive or relay the token. Production OIDC
+or bearer setup is unchanged from a normal Workbench tab. A user can perform only the operations
+their Ravenroot principal already authorizes.
+
+The iframe's `allow="fullscreen"` grants the framed document permission to request fullscreen. The
+host owns the iframe box, including width, height, border, surrounding layout, and responsive rules.
+CSS in the host cannot style elements inside Ravenroot, and Ravenroot CSS cannot style the host.
+There is no environment setting or host-page API for an internal Workbench theme; user-facing theme
+behavior remains whatever the ordinary Workbench version provides.
+
+### Same-origin and cross-origin deployments
+
+For a same-origin portal, set:
+
+```text
+RAVENROOT_UI_FRAME_ANCESTORS=self
+```
+
+The page containing the iframe and the iframe URL must share the exact scheme, host, and effective
+port. The supported UI-only server can preserve a public base path, for example:
+
+```sh
+RAVENROOT_UI_ROOT="$PWD/ui" \
+RAVENROOT_UI_BACKEND_URL=https://backend.example.com/automation \
+RAVENROOT_UI_PREFIX=/ravenroot \
+RAVENROOT_UI_FRAME_ANCESTORS=self \
+node server.mjs
+```
+
+After an HTTPS reverse proxy exposes both the portal and UI-only server as
+`https://portal.example.com`, use `<iframe src="/ravenroot/" allow="fullscreen">`. Preserve the
+trailing slash. `RAVENROOT_UI_PREFIX` is a verified UI-only-server feature; the integrated Java
+server exposes the Workbench at `/` and the API at `/v1` and does not provide a configurable public
+base path. Any proxy rewrite beyond those documented routes is the proxy operator's contract and
+must be tested with static assets, API requests, and SSE streaming.
+
+For a cross-origin deployment, the Ravenroot process at `https://workbench.example.com` uses:
+
+```text
+RAVENROOT_UI_FRAME_ANCESTORS=https://portal.example.com
+```
+
+The host page uses `src="https://workbench.example.com/"`. If the host sends CSP, it must also allow
+that destination with `frame-src https://workbench.example.com`. The framing setting does not add
+CORS permission: the Workbench calls its own Ravenroot origin from inside the iframe. If an outer
+page nests the portal inside another frame, every ancestor origin must appear in the setting because
+CSP validates the complete ancestor chain.
+
+The UI-only server supports the same framing setting. Its optional
+`RAVENROOT_UI_BACKEND_TOKEN` remains a server-held missing-Authorization fallback and gives eligible
+same-origin browser requests one shared backend identity. Prefer each user's own bearer when the
+portal requires per-user authority and audit identity. Framing never sends a server-held token to
+the host page.
+
+The Workbench's frontend plugin document remains an opaque CSP sandbox when framing is enabled. Its
+network, forms, objects, workers, and nested frames stay disabled; the validated ancestor chain is
+carried through only so the portal → Workbench → plugin nesting can load. The read-only viewer keeps
+its own registered-parent CSP, launch checks, and authority model.
+
+## Embed the read-only viewer
 
 The embedded viewer **displays a graph. It cannot change one.** It holds read-only projection
 authority: it renders a pre-authorized projection and exposes no Modify action, no execution control,
@@ -18,8 +162,8 @@ The same control and **Escape** restore the view, including when fullscreen
 ends outside the viewer. Graph position, zoom, selected nodes, selected run, and live observations remain
 attached throughout the transition.
 
-There is no embeddable editor. If you are here to put the Ravenroot authoring workspace into another
-product, stop: that surface does not exist, and nothing on this page will produce it.
+This viewer flow never becomes the Workbench. Use the framing setting and ordinary Workbench URL
+above when the signed-in user needs authoring or operational controls.
 
 What crosses into your page is a projection of one registered source. A registration can hold an
 immutable snapshot or attach to a live deployment; either way, the graph data itself

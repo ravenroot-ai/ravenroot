@@ -3,6 +3,7 @@ import { defineConfig, configDefaults } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'jsdom',
+    setupFiles: ['test/setup-i18n.js'],
     include: ['test/**/*.test.js'],
     // Fuzz specs (test/**/*.fuzz.test.js) are excluded from the default
     // `npm test` run -- they are new, deliberately not part of every change, and run separately via

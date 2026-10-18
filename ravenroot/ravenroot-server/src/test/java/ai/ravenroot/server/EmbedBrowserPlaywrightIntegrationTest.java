@@ -58,6 +58,8 @@ class EmbedBrowserPlaywrightIntegrationTest {
         Path ui = locateUi();
         assertTrue(Files.isRegularFile(ui.resolve("dist/embed-bootstrap.js")),
                 "the UI build must contain the production embed bootstrap");
+        assertTrue(Files.isRegularFile(ui.resolve("dist/embed-localization.js")),
+                "the UI build must contain the pre-viewer localization entry");
         assertTrue(Files.isRegularFile(ui.resolve("dist/embed-viewer.js")),
                 "the UI build must contain the isolated viewer entry");
         assertTrue(Files.isRegularFile(ui.resolve("dist/embed-viewer.css")),
@@ -160,7 +162,9 @@ class EmbedBrowserPlaywrightIntegrationTest {
         var config = new EmbedBrowserConfiguration(true, new EmbedViewerOrigin(viewer),
                 new AuthorizedEmbedSessionCreation(authorization, registrations), registrations, projections,
                 event -> { }, Clock.systemUTC(), Duration.ofMinutes(1), Duration.ofMinutes(1),
-                Duration.ofMinutes(2), Duration.ofMinutes(1), 16, 16, 32, 1, true);
+                // The suite now opens independently localized viewers alongside the original security
+                // scenarios. Bound its combined signed operations without changing production limits.
+                Duration.ofMinutes(2), Duration.ofMinutes(1), 16, 16, 64, 1, true);
         var environment = BehaviorEnvironment.safeDefaults();
         var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
                 BehaviorRegistry.standard(environment), environment.artifacts(), environment.programRuntime(),
@@ -239,7 +243,7 @@ class EmbedBrowserPlaywrightIntegrationTest {
                         new EmbedGraphProjection.Node("start", "START",
                                 new EmbedGraphProjection.Layout(80, 120, 84, 84)),
                         new EmbedGraphProjection.Node("behavior", "BEHAVIOR",
-                                new EmbedGraphProjection.Layout(260, 120, 120, 56)),
+                                new EmbedGraphProjection.Layout(260, 120, 120, 56), null, null, true),
                         new EmbedGraphProjection.Node("end", "END",
                                 new EmbedGraphProjection.Layout(440, 120, 84, 84))),
                 List.of(new EmbedGraphProjection.Edge("start", "behavior"),

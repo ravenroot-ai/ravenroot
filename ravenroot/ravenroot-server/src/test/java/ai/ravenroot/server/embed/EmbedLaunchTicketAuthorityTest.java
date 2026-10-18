@@ -50,7 +50,8 @@ class EmbedLaunchTicketAuthorityTest {
         var registration = EmbedSessionFixtures.registration(1);
         var registrations = new MutableEmbedRegistrations(registration);
         var authority = new EmbedLaunchTicketAuthority(Clock.systemUTC(), Duration.ofSeconds(30));
-        var issued = authority.issue(registration);
+        var presentation = new EmbedPresentation("it-IT", "{\"schema\":\"ravenroot.ui-catalog/v1\"}");
+        var issued = authority.issue(new EmbedSessionAuthorization.Registered(registration), presentation);
         assertTrue(issued.value().length() >= 43);
         assertFalse(issued.value().contains("reg"));
 
@@ -63,6 +64,7 @@ class EmbedLaunchTicketAuthorityTest {
             var available = first instanceof EmbedLaunchTicketAuthority.Resolution.Available value
                     ? value : (EmbedLaunchTicketAuthority.Resolution.Available) second;
             assertEquals(registration, available.registration());
+            assertEquals(presentation, available.presentation());
         }
         assertInstanceOf(EmbedLaunchTicketAuthority.Resolution.Unavailable.class,
                 authority.consume(issued.value(), registrations));
@@ -258,6 +260,32 @@ class EmbedLaunchTicketAuthorityTest {
         assertTrue(verifier.verifyObservationAndConsume(bearer, 7, nonce, "observation-2", "POST",
                 "/v1/embed/observation", issuedAt, (ECPublicKey) pair.getPublic(), second));
         assertEquals(2, verifier.retainedReplayEntries());
+    }
+
+    @Test
+    void proofReplayCapacityFailsClosedUntilEntriesExpire() throws Exception {
+        var clock = new MutableClock(Instant.parse("2026-08-26T00:00:00Z"));
+        var pair = p256();
+        String bearer = token('b');
+        String nonce = token('n');
+        var verifier = new P256EmbedProofVerifier(clock, Duration.ofSeconds(1), 1);
+        Instant now = clock.instant();
+        byte[] first = sign(pair, bearer, 7, nonce, "first", "POST", "/v1/embed/observation", now);
+        byte[] second = sign(pair, bearer, 7, nonce, "second", "POST", "/v1/embed/observation", now);
+        assertTrue(verifier.verifyObservationAndConsume(bearer, 7, nonce, "first", "POST",
+                "/v1/embed/observation", now, (ECPublicKey) pair.getPublic(), first));
+        assertFalse(verifier.verifyObservationAndConsume(bearer, 7, nonce, "second", "POST",
+                "/v1/embed/observation", now, (ECPublicKey) pair.getPublic(), second),
+                "a fresh, valid signature cannot bypass a full replay cache");
+        assertEquals(1, verifier.retainedReplayEntries());
+        clock.advance(Duration.ofSeconds(1));
+        Instant next = clock.instant();
+        byte[] afterExpiry = sign(pair, bearer, 7, nonce, "second", "POST", "/v1/embed/observation", next);
+        assertTrue(verifier.verifyObservationAndConsume(bearer, 7, nonce, "second", "POST",
+                "/v1/embed/observation", next, (ECPublicKey) pair.getPublic(), afterExpiry));
+        assertFalse(verifier.verifyObservationAndConsume(bearer, 7, nonce, "first", "POST",
+                "/v1/embed/observation", now, (ECPublicKey) pair.getPublic(), first));
+        assertEquals(1, verifier.retainedReplayEntries());
     }
 
     private static void assertRejected(MutableClock clock, String bearer, long revision, String nonce, String jti,

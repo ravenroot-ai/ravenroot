@@ -1,8 +1,11 @@
 import { JSDOM } from 'jsdom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createHumanTaskDecisionDialog, humanTaskActionName,
   renderHumanTaskInspector } from '../src/human-task-ui.js';
+
+import { createUiLocalization, UI_CATALOG_SCHEMA, useUiLocalization } from '../src/ui-text.js';
+afterEach(() => useUiLocalization(createUiLocalization()));
 
 const capability = { commentMaxUtf8Bytes: 4096 };
 const task = { taskId: 'task-secret-safe-id', generation: 7, status: 'ESCALATED',
@@ -275,6 +278,21 @@ describe('Human Task inspector and decision dialog', () => {
       .toContain('not isolated'));
     expect(doc.querySelector('.human-task-presentation-frame')).toBeNull();
     expect(doc.getElementById('d').getAttribute('aria-busy')).toBe('false');
+    doc.querySelector('[data-human-task-comment]').value = 'Authored draft';
+    useUiLocalization(createUiLocalization({ locale: 'fr', catalogs: { fr: {
+      schema: UI_CATALOG_SCHEMA, locale: 'fr', messages: {
+        'workspace.error.human.task.ui.the.registered.presentation.origin.is.not.isolated.from.the.workb': 'Origine non isolée',
+        'workspace.human.task.ui.open.external.presentation': 'Ouvrir la présentation',
+      },
+    } } }));
+    controller.refreshLocale();
+    expect(doc.querySelector('[data-human-task-error]').textContent).toBe('Origine non isolée');
+    expect(doc.querySelector('.human-task-presentation-launch').textContent).toBe('Ouvrir la présentation');
+    expect(doc.querySelector('[data-human-task-comment]').value).toBe('Authored draft');
+    expect(doc.querySelector('.human-task-presentation-frame')).toBeNull();
+    controller.suspend(); controller.refreshLocale();
+    expect(doc.querySelector('[data-human-task-error]').textContent).toBe('');
+
   });
 
   it('suspends stale presentation during reauthentication without clearing the durable locator', () => {

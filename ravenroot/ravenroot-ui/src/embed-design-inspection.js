@@ -1,7 +1,9 @@
 import { runtimeNodeTooltipText } from './viewer-elastic-renderer.js';
+import { uiText } from './ui-text.js';
 
 /** Native keyboard targets over the read-only Design glyphs; runtime belongs to real nodes only. */
-export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, runtime, projection, toggle }) {
+export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, runtime, projection, toggle,
+  t = uiText }) {
   const layer = canvas.ownerDocument.createElement('div');
   layer.className = 'embed-design-inspection';
   canvas.append(layer);
@@ -29,11 +31,16 @@ export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, run
     const entries = [];
     for (const group of projection()?.groups || []) entries.push({
       id: group.collapsed ? group.summaryId : group.headerId, group,
-      label: `${group.collapsed ? 'Expand' : 'Collapse'} visual group ${group.name}, ${group.memberNodeIds.length} members`,
+      label: t('embed.inspect.group', {
+        action: t(group.collapsed ? 'embed.inspect.expand' : 'embed.inspect.collapse'),
+        name: group.name,
+        count: group.memberNodeIds.length,
+      }),
     });
     for (const node of snapshot()?.nodes || []) {
       const element = cy.getElementById(node.id);
-      if (element.nonempty() && element.visible()) entries.push({ id: node.id, label: `Inspect node ${node.label || node.id}` });
+      if (element.nonempty() && element.visible()) entries.push({ id: node.id,
+        label: t('embed.inspect.node', { name: node.label || node.id }) });
     }
     const keep = new Set(entries.map(entry => entry.id));
     for (const [id, button] of buttons) if (!keep.has(id)) { button.remove(); buttons.delete(id); }

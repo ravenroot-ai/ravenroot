@@ -1,21 +1,24 @@
+import { productError } from './product-error.js';
+import { uiText } from './ui-text.js';
 import { applyCommand, compositeCommand, insertEdgesCommand, insertNodesCommand } from './graph-commands.js';
 import { createEdge, createNode } from './graph-document.js';
 
 export const REGISTER_MACHINE_PRESETS = Object.freeze([
-  preset('register-set', 'Set register', 'Set one register from an exact decimal string.'),
-  preset('register-increment', 'Increment register', 'Add one to one initialized register.'),
-  preset('register-zero-test', 'Zero test', 'Compare one initialized register with zero.'),
-  preset('register-decjz', 'DECJZ expansion', 'Insert zero test, decision, and guarded decrement as editable ordinary nodes.'),
+  preset('register-set', 'workspace.preset.register-set.label', 'workspace.preset.register-set.description'),
+  preset('register-increment', 'workspace.preset.register-increment.label', 'workspace.preset.register-increment.description'),
+  preset('register-zero-test', 'workspace.preset.register-zero-test.label', 'workspace.preset.register-zero-test.description'),
+  preset('register-decjz', 'workspace.preset.register-decjz.label', 'workspace.preset.register-decjz.description'),
 ]);
 
-function preset(presetId, displayName, description) {
-  return Object.freeze({ presetId, displayName, description, category: 'Register machine',
+function preset(presetId, labelKey, descriptionKey) {
+  return Object.freeze({ presetId, get displayName() { return uiText(labelKey); },
+    get description() { return uiText(descriptionKey); }, get category() { return uiText('workspace.preset.category'); },
     origin: 'CORE', visualType: 'flow', behavior: 'bigint-op' });
 }
 
 /** Inserts a preset as one undoable gesture. The saved graph contains only ordinary nodes and edges. */
 export function insertRegisterMachinePreset(graph, presetId, configuration, position = {}, history = null) {
-  if (!graph || graph.format !== 'graphml') throw new Error('Register-machine presets require editable GraphML');
+  if (!graph || graph.format !== 'graphml') throw productError('workspace.preset.validation', 'Register-machine presets require editable GraphML');
   const config = normalizedConfiguration(presetId, configuration, graph);
   const x = Number(position.x) || 0;
   const y = Number(position.y) || 0;
@@ -67,7 +70,7 @@ export function insertRegisterMachinePreset(graph, presetId, configuration, posi
     addEdge(decrement.id, config.nonzeroTarget);
     primary = test;
   } else {
-    throw new Error(`Unknown register-machine preset '${presetId}'`);
+    throw productError('workspace.preset.validation', `Unknown register-machine preset '${presetId}'`);
   }
   const commands = [insertNodesCommand(nodeEntries)];
   if (edgeEntries.length) commands.push(insertEdgesCommand(edgeEntries));
@@ -81,8 +84,8 @@ function normalizedConfiguration(presetId, configuration = {}, graph) {
   const register = requiredName(configuration.register, 'register');
   if (presetId === 'register-set') {
     const decimal = String(configuration.decimal ?? '');
-    if (!/^(0|-?[1-9][0-9]*)$/.test(decimal)) throw new Error('Value must be a canonical decimal string');
-    if (decimal.replace('-', '').length > 4096) throw new Error('Value exceeds the 4096-digit ceiling');
+    if (!/^(0|-?[1-9][0-9]*)$/.test(decimal)) throw productError('workspace.preset.validation', 'Value must be a canonical decimal string');
+    if (decimal.replace('-', '').length > 4096) throw productError('workspace.preset.validation', 'Value exceeds the 4096-digit ceiling');
     return { register, decimal };
   }
   if (presetId === 'register-increment') return { register };
@@ -91,13 +94,13 @@ function normalizedConfiguration(presetId, configuration = {}, graph) {
   const known = new Set(graph.nodes.map(node => node.id));
   const zeroTarget = String(configuration.zeroTarget || '');
   const nonzeroTarget = String(configuration.nonzeroTarget || '');
-  if (!known.has(zeroTarget) || !known.has(nonzeroTarget)) throw new Error('DECJZ destinations must name existing nodes');
+  if (!known.has(zeroTarget) || !known.has(nonzeroTarget)) throw productError('workspace.preset.validation', 'DECJZ destinations must name existing nodes');
   return { register, boolean, zeroTarget, nonzeroTarget };
 }
 
 function requiredName(value, label) {
   const name = String(value || '');
-  if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)) throw new Error(`${label} must be a portable top-level field name`);
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)) throw productError('workspace.preset.validation', `${label} must be a portable top-level field name`);
   return name;
 }
 

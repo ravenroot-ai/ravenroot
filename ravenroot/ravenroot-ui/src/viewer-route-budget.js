@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { resolveRendererEdgeRoutes } from './renderer-edge-route.js';
 
 // The detailed obstacle router compares graph elements while finding detours.
@@ -10,7 +11,7 @@ export const VIEWER_ELASTIC_EDGE_LIMIT = 1_000;
 
 function validCount(value, name) {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`Invalid viewer route ${name}.`);
+    throw productError("workspace.error.viewer.route.budget.invalid.viewer.route", new TypeError(`Invalid viewer route ${name}.`), { value1: name });
   }
   return value;
 }
@@ -42,7 +43,7 @@ export function viewerSupportsElastic(nodeCount, edgeCount) {
  */
 export function resolveViewerRoutesWithinBudget({ nodes, edges }) {
   if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-    throw new TypeError('Viewer route elements must be arrays.');
+    throw productError("workspace.error.viewer.route.budget.viewer.route.elements.must.be.arrays", new TypeError('Viewer route elements must be arrays.'));
   }
   const strategy = viewerRouteStrategy(nodes.length, edges.length);
   return Object.freeze({

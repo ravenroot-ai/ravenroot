@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 export const AUTHORING_CAPABILITY_STATE = Object.freeze({
   PENDING: 'pending',
   LOCAL: 'local',
@@ -11,12 +12,12 @@ export function pendingAuthoringCapability() {
 
 export function unavailableAuthoringCapability(error) {
   return Object.freeze({ state: AUTHORING_CAPABILITY_STATE.UNAVAILABLE,
-    error: error instanceof Error ? error : new Error('Graph authoring capabilities are unavailable') });
+    error: error instanceof Error ? error : productError("workspace.error.authoring.capability.graph.authoring.capabilities.are.unavailable", new Error('Graph authoring capabilities are unavailable')) });
 }
 
 export function authoringCapabilityFromConfiguration(configuration) {
   if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration)) {
-    throw new Error('Runtime graph authoring capability is unavailable');
+    throw productError("workspace.error.authoring.capability.runtime.graph.authoring.capability.is.unavailable", new Error('Runtime graph authoring capability is unavailable'));
   }
   const advertised = configuration.graphAuthoring;
   // A successfully validated legacy configuration with no authoring field proves the historical
@@ -27,7 +28,7 @@ export function authoringCapabilityFromConfiguration(configuration) {
   if (advertised.mode === 'git' && ['github', 'gitlab'].includes(advertised.provider)) {
     return Object.freeze({ state: AUTHORING_CAPABILITY_STATE.GIT, provider: advertised.provider, error: null });
   }
-  throw new Error('Runtime graph authoring capability is malformed');
+  throw productError("workspace.error.authoring.capability.runtime.graph.authoring.capability.is.malformed", new Error('Runtime graph authoring capability is malformed'));
 }
 
 export async function loadAuthoringCapability(client) {

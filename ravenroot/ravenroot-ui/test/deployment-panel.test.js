@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  DEPLOYMENT_SCOPE_TEXT,
+  deploymentScopeText,
   createDeploymentsWindow,
   deploymentRowActions,
 } from '../src/deployment-panel.js';
@@ -228,8 +228,8 @@ describe('what the window renders', () => {
   it('says once what this window is and how a deployment outlives the document that started it',
     () => {
       createDeploymentsWindow({ dialog, client: null, pollMs: 0 });
-      expect(field('deployment-scope').textContent).toBe(DEPLOYMENT_SCOPE_TEXT);
-      expect(DEPLOYMENT_SCOPE_TEXT).toMatch(/LOCAL_PROCESS/);
+      expect(field('deployment-scope').textContent).toBe(deploymentScopeText());
+      expect(deploymentScopeText()).toMatch(/LOCAL_PROCESS/);
     });
 
   it('distinguishes "you hold none" from "nobody has asked yet"', async () => {

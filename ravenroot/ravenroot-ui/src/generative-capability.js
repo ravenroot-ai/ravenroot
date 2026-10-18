@@ -1,3 +1,4 @@
+import { ENGLISH_MESSAGES, uiText } from './ui-text.js';
 // Which node types invoke a model, and the one sentence the Inspector adds when one is left
 // unconfigured.
 //
@@ -31,9 +32,7 @@
  * prohibition is measured against the repository rather than remembered.
  */
 export const PROVIDER_CONFIG_POINTER =
-  'This names a model provider the deployment itself composed. It cannot be created from this '
-  + 'editor, and there is no Ravenroot API that accepts one: use the id whoever installed this node '
-  + 'registered it under.';
+  ENGLISH_MESSAGES["workspace.generative.capability.this.names.a.model.provider.the.deployment.itself.composed"];
 
 /**
  * Ports `ai.ravenroot.api.provenance.SyntheticProvenance#GENERATIVE_CAPABILITIES`. The runtime reads

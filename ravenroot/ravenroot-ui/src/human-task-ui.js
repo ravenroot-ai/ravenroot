@@ -1,10 +1,16 @@
+import { productError } from './product-error.js';
+import { uiDateTime, uiErrorReason, uiText } from './ui-text.js';
 import { humanTaskActionDisplayLabel, humanTaskActionLabelKey, utf8Length,
   validateDecisionComment } from './human-task-attention.js';
 
-const ACTION_DISPOSITIONS = Object.freeze({ RESOLVE: 'Resolve', DENY: 'Deny', CANCEL: 'Cancel' });
+const ACTION_DISPOSITION_KEYS = Object.freeze({
+  RESOLVE: 'workspace.humanTask.action.resolve',
+  DENY: 'workspace.humanTask.action.deny',
+  CANCEL: 'workspace.humanTask.action.cancel',
+});
 
 export function humanTaskActionName(action, label) {
-  const disposition = ACTION_DISPOSITIONS[action];
+  const disposition = ACTION_DISPOSITION_KEYS[action] ? uiText(ACTION_DISPOSITION_KEYS[action]) : null;
   const displayLabel = humanTaskActionDisplayLabel(label);
   return !displayLabel || humanTaskActionLabelKey(disposition) === humanTaskActionLabelKey(label)
     ? disposition : `${disposition} — ${displayLabel}`;
@@ -17,7 +23,7 @@ function short(value) {
 
 function time(value) {
   const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleString() : String(value || '');
+  return Number.isFinite(date.getTime()) ? uiDateTime(date, { dateStyle: 'medium', timeStyle: 'short' }) : String(value || '');
 }
 
 function element(doc, name, className = '', text = '') {
@@ -46,7 +52,7 @@ export function renderHumanTaskInspector(host, state, nodeId, {
   section.dataset.humanTaskNodeId = nodeId;
   section.setAttribute('aria-labelledby', 'human-task-inspector-title');
   const heading = element(doc, 'div', 'editor-section-title');
-  const title = element(doc, 'h3', '', 'Human tasks');
+  const title = element(doc, 'h3', '', uiText("workspace.human.task.ui.human.tasks"));
   title.id = 'human-task-inspector-title';
   heading.append(title);
   section.append(heading);
@@ -55,20 +61,20 @@ export function renderHumanTaskInspector(host, state, nodeId, {
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   if (state.kind === 'unavailable') status.textContent = state.message;
-  else if (state.kind === 'loading') status.textContent = 'Loading actionable tasks from the service…';
+  else if (state.kind === 'loading') status.textContent = uiText("workspace.human.task.ui.loading.actionable.tasks.from.the.service");
   else if (state.kind === 'error') status.textContent = state.message;
   else if (state.kind === 'ready') {
     const pending = state.counts?.pending ?? state.items.length;
     const escalated = state.counts?.escalated ?? 0;
     status.textContent = pending
-      ? `${pending} actionable task${pending === 1 ? '' : 's'} for this node`
-        + `${escalated ? ` · ${escalated} escalated` : ''}.`
-      : 'No actionable Human Tasks for this node.';
+      ? uiText("workspace.humanTask.actionable", { count: pending })
+        + (escalated ? uiText("workspace.humanTask.escalatedSuffix", { count: escalated }) : '')
+      : uiText("workspace.human.task.ui.no.actionable.human.tasks.for.this.node");
   }
   section.append(status);
 
   if (state.kind === 'error') {
-    const reconnect = element(doc, 'button', 'btn', 'Reconnect');
+    const reconnect = element(doc, 'button', 'btn', uiText("workspace.human.task.ui.reconnect"));
     reconnect.type = 'button';
     reconnect.addEventListener('click', onRefresh);
     section.append(reconnect);
@@ -76,25 +82,28 @@ export function renderHumanTaskInspector(host, state, nodeId, {
 
   if (state.kind === 'ready' && state.items.length) {
     const list = element(doc, 'ul', 'human-task-list');
-    list.setAttribute('aria-label', `Actionable Human Tasks for node ${nodeId}`);
+    list.setAttribute('aria-label', uiText("workspace.human.task.ui.actionable.human.tasks.for.node", { nodeId: nodeId }));
     for (const item of state.items) {
       const row = element(doc, 'li', `human-task-row${item.status === 'ESCALATED' ? ' is-escalated' : ''}`);
       const button = element(doc, 'button', 'human-task-row-button');
       button.type = 'button';
       button.dataset.humanTaskId = item.taskId;
       button.dataset.humanTaskGeneration = String(item.generation);
-      button.setAttribute('aria-label', `${item.status === 'ESCALATED' ? 'Escalated' : 'Pending'}: `
-        + `${item.presentation.prompt}. Task ${item.taskId}, generation ${item.generation}.`);
+      button.setAttribute('aria-label', `${uiText(item.status === 'ESCALATED'
+        ? 'workspace.humanTask.status.escalated' : 'workspace.humanTask.status.pending')}: `
+        + uiText("workspace.human.task.ui.value1.task.value2.generation.value3", { prompt: item.presentation.prompt, taskId: item.taskId, generation: item.generation }));
       const head = element(doc, 'span', 'human-task-row-head');
       head.append(element(doc, 'strong', 'human-task-row-prompt', item.presentation.prompt),
-        element(doc, 'span', 'human-task-state', item.status === 'ESCALATED' ? '▲ Escalated' : '● Pending'));
+        element(doc, 'span', 'human-task-state', item.status === 'ESCALATED' ? uiText("workspace.human.task.ui.escalated") : uiText("workspace.human.task.ui.pending")));
       const identity = element(doc, 'span', 'human-task-row-identity',
-        `Task ${short(item.taskId)} · process ${short(item.processInstanceId)}`
-        + ` · traversal ${short(item.traversalId)}`
-        + `${item.deploymentId ? ` · deployment ${short(item.deploymentId)}` : ''}`
-        + ` · generation ${item.generation}`);
+        uiText("workspace.human.task.ui.task.value1.process.value2", { taskId: short(item.taskId), processInstanceId: short(item.processInstanceId) })
+        + uiText("workspace.human.task.ui.traversal.value1", { traversalId: short(item.traversalId) })
+        + (item.deploymentId ? uiText("workspace.humanTask.deploymentSuffix", {
+          deploymentId: short(item.deploymentId),
+        }) : '')
+        + uiText("workspace.human.task.ui.generation.value1", { generation: item.generation }));
       const dates = element(doc, 'span', 'human-task-row-time',
-        `Created ${time(item.createdAt)} · expires ${time(item.expiresAt)}`);
+        uiText("workspace.human.task.ui.created.expires", { createdAt: time(item.createdAt), expiresAt: time(item.expiresAt) }));
       button.append(head, identity, dates);
       button.addEventListener('click', () => onSelect(item));
       row.append(button);
@@ -105,14 +114,14 @@ export function renderHumanTaskInspector(host, state, nodeId, {
 
   if (state.kind === 'ready') {
     const controls = element(doc, 'div', 'human-task-pagination');
-    const previous = element(doc, 'button', 'btn', 'Previous');
+    const previous = element(doc, 'button', 'btn', uiText("workspace.human.task.ui.previous"));
     previous.type = 'button'; previous.disabled = !state.hasPrevious;
     previous.addEventListener('click', onPrevious);
-    const page = element(doc, 'span', '', `Page ${state.pageNumber || 1}`);
-    const next = element(doc, 'button', 'btn', 'Next');
+    const page = element(doc, 'span', '', uiText("workspace.human.task.ui.page", { pageNumber: state.pageNumber || 1 }));
+    const next = element(doc, 'button', 'btn', uiText("workspace.human.task.ui.next"));
     next.type = 'button'; next.disabled = !state.nextCursor;
     next.addEventListener('click', onNext);
-    const refresh = element(doc, 'button', 'btn', 'Refresh');
+    const refresh = element(doc, 'button', 'btn', uiText("workspace.human.task.ui.refresh"));
     refresh.type = 'button'; refresh.addEventListener('click', onRefresh);
     controls.append(previous, page, next, refresh);
     section.append(controls);
@@ -141,6 +150,17 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   onLaunch = async () => ({}), onInteractionSubmit = async () => ({}),
   onExternalReconcile = async () => {}, onRevoke = async () => {}, onClose = () => {} } = {}) {
   if (!dialog) return { open() {}, close() {}, suspend() {}, selected: () => null };
+  const textRecipes = new Map();
+  function paintText(node, value) {
+    if (typeof value === 'function') textRecipes.set(node, value); else textRecipes.delete(node);
+    node.textContent = typeof value === 'function' ? value() : value;
+  }
+  function localizedElement(document, tag, className, recipe) {
+    const node = element(document, tag, className);
+    paintText(node, recipe);
+    return node;
+  }
+  let errorRecipe = '';
   const prompt = dialog.querySelector('[data-human-task-prompt]');
   const identity = dialog.querySelector('[data-human-task-identity]');
   const review = dialog.querySelector('[data-human-task-review]');
@@ -159,7 +179,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   const interactionHost = element(dialog.ownerDocument, 'section', 'human-task-interaction-host');
   interactionHost.dataset.humanTaskInteractionHost = '';
   interactionHost.hidden = true;
-  interactionHost.setAttribute('aria-label', 'Registered Human Task presentation');
+  interactionHost.setAttribute('aria-label', uiText("workspace.human.task.ui.registered.human.task.presentation"));
   formHost.parentNode.insertBefore(interactionHost, formHost.nextSibling);
   let task = null;
   let capability = null;
@@ -178,7 +198,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   }
 
   function say(message = '') {
-    error.textContent = message;
+    errorRecipe = message;
+    paintText(error, message);
+    message = error.textContent;
     error.hidden = !message;
     comment.toggleAttribute('aria-invalid', Boolean(message));
   }
@@ -191,9 +213,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
 
   function clearReview() {
     review.hidden = true;
-    reviewStatus.textContent = '';
-    reviewText.textContent = '';
-    reviewDigest.textContent = '';
+    paintText(reviewStatus, '');
+    paintText(reviewText, '');
+    paintText(reviewDigest, '');
   }
 
   function clearInteraction({ revoke = false } = {}) {
@@ -212,11 +234,15 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   }
 
   function identify(value) {
-    prompt.textContent = value.presentation?.prompt || '';
-    identity.textContent = `Task ${value.taskId} · process ${value.processInstanceId || 'pending'}`
-      + `${value.traversalId ? ` · traversal ${value.traversalId}` : ''}`
-      + `${value.deploymentId ? ` · deployment ${value.deploymentId}` : ''}`
-      + ` · generation ${value.generation}`;
+    paintText(prompt, value.presentation?.prompt || '');
+    paintText(identity, () => (uiText("workspace.human.task.ui.task.value1.process.value2", { taskId: value.taskId, processInstanceId: value.processInstanceId || uiText('common.pending') })
+      + (value.traversalId ? uiText("workspace.humanTask.traversalSuffix", {
+        traversalId: value.traversalId,
+      }) : '')
+      + (value.deploymentId ? uiText("workspace.humanTask.deploymentSuffix", {
+        deploymentId: value.deploymentId,
+      }) : '')
+      + uiText("workspace.human.task.ui.generation.value1", { generation: value.generation })));
   }
 
   function close() {
@@ -256,7 +282,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     if (!task || !capability || submitting) return;
     const check = validateDecisionComment(comment.value, task.presentation.commentRequirement,
       task.commentMaxUtf8Bytes);
-    if (!check.ok) { say(check.error); comment.focus(); return; }
+    if (!check.ok) { say(() => validateDecisionComment(comment.value, task.presentation.commentRequirement, task.commentMaxUtf8Bytes).error); comment.focus(); return; }
     const sourceTask = task;
     const token = generation;
     say();
@@ -272,7 +298,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           input.removeAttribute('aria-invalid');
           if (['TEXT', 'MULTILINE_TEXT'].includes(field.type)
               && utf8Length(input.value) > field.maxUtf8Bytes) {
-            const message = `${field.label} must be at most ${field.maxUtf8Bytes} UTF-8 bytes.`;
+            const message = uiText("workspace.human.task.ui.must.be.at.most.utf.8.bytes", { label: field.label, maxUtf8Bytes: field.maxUtf8Bytes });
             input.setCustomValidity(message);
             input.setAttribute('aria-invalid', 'true');
             say(message);
@@ -296,7 +322,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         isCurrent: () => isCurrent(token, sourceTask) });
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
-        say(failure?.message || 'The decision outcome is unknown. Refresh before trying another action.');
+        say(() => ((failure?.message ? uiErrorReason(failure) : null) || uiText("workspace.human.task.ui.the.decision.outcome.is.unknown.refresh.before.trying.another")));
         setBusy(false);
       }
       return;
@@ -318,14 +344,17 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       const launchOrigin = new URL(launch.launchUri).origin;
       if (launchOrigin !== launch.origin
           || (launch.kind === 'EXTERNAL' && launch.origin === view?.location?.origin)) {
-        throw new Error('The registered presentation origin is not isolated from the Workbench.');
+        throw productError("workspace.error.human.task.ui.the.registered.presentation.origin.is.not.isolated.from.the.workb", new Error('The registered presentation origin is not isolated from the Workbench.'));
       }
       interactionLaunch = launch;
       interactionHost.hidden = false;
       interactionHost.replaceChildren();
       const frame = dialog.ownerDocument.createElement('iframe');
       frame.className = 'human-task-presentation-frame';
-      frame.title = `${launch.kind === 'EXTERNAL' ? 'External' : 'Custom'} Human Task presentation`;
+      frame.title = uiText("workspace.human.task.ui.human.task.presentation", {
+        custom: uiText(launch.kind === 'EXTERNAL'
+          ? 'workspace.humanTask.presentation.external' : 'workspace.humanTask.presentation.custom'),
+      });
       // A custom component is deliberately assigned an opaque origin. Combining scripts with
       // allow-same-origin would let a component navigate to the Workbench origin, remove its own
       // sandbox, and reach the parent DOM. External providers retain their registered origin so
@@ -347,15 +376,15 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
             || message.capabilityId !== launch.capabilityId
             || !['complete', 'close', 'failure', 'reconcile'].includes(message.type)) return;
         if (utf8Length(JSON.stringify(message)) > launch.responseSchema.maxBytes + 8_192) {
-          say('The registered presentation returned an oversized message. The task remains available.');
+          say(() => (uiText("workspace.human.task.ui.the.registered.presentation.returned.an.oversized.message.the.task")));
           clearInteraction({ revoke: true });
           setBusy(false);
           return;
         }
         if (message.type === 'close' || message.type === 'failure') {
-          say(message.type === 'failure'
-            ? 'The registered presentation reported a failure. The task remains available.'
-            : 'The registered presentation closed. The task remains available.');
+          say(() => (message.type === 'failure'
+            ? uiText("workspace.human.task.ui.the.registered.presentation.reported.a.failure.the.task.remains")
+            : uiText("workspace.human.task.ui.the.registered.presentation.closed.the.task.remains.available")));
           clearInteraction({ revoke: true }); setBusy(false); return;
         }
         if (launch.kind === 'EXTERNAL') {
@@ -374,7 +403,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           if (isCurrent(token, sourceTask)) { clearInteraction(); setBusy(false); close(); }
         }).catch(failure => {
           if (isCurrent(token, sourceTask)) {
-            say(failure?.message || 'The interaction outcome is unknown. Refresh before retrying.');
+            say(() => ((failure?.message ? uiErrorReason(failure) : null) || uiText("workspace.human.task.ui.the.interaction.outcome.is.unknown.refresh.before.retrying")));
             setBusy(false);
           }
         });
@@ -400,11 +429,11 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       interactionTimer = setTimeout(() => {
         if (!isCurrent(token, sourceTask)) return;
         clearInteraction(); setBusy(false);
-        say('The presentation capability expired. The task remains available and can be reopened.');
+        say(() => (uiText("workspace.human.task.ui.the.presentation.capability.expired.the.task.remains.available.and")));
       }, Math.min(remaining, 2_147_483_647));
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
-        say(failure?.message || 'The registered presentation could not be opened.');
+        say(() => ((failure?.message ? uiErrorReason(failure) : null) || uiText("workspace.human.task.ui.the.registered.presentation.could.not.be.opened")));
         setBusy(false);
       }
     }
@@ -424,10 +453,24 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   dialog.addEventListener('keydown', event => event.stopPropagation());
   comment.addEventListener('input', () => {
     say();
-    commentHint.textContent = `${utf8Length(comment.value)} / ${task?.commentMaxUtf8Bytes || 0} UTF-8 bytes`;
+    paintText(commentHint, () => (uiText("workspace.human.task.ui.utf.8.bytes", { comment: utf8Length(comment.value), commentMaxUtf8Bytes: task?.commentMaxUtf8Bytes || 0 })));
   });
 
   return {
+    refreshLocale() {
+      if (!task) return;
+      for (const [node, recipe] of textRecipes) {
+        if (dialog.contains(node)) node.textContent = recipe(); else textRecipes.delete(node);
+      }
+      interactionHost.setAttribute('aria-label', uiText("workspace.human.task.ui.registered.human.task.presentation"));
+      if (task) for (const button of actions.querySelectorAll('[data-human-task-action]')) {
+        const action = button.dataset.humanTaskAction;
+        const label = humanTaskActionName(action, task.presentation.labels[action]);
+        button.textContent = label;
+        button.setAttribute('aria-label', label);
+      }
+      say(errorRecipe);
+    },
     loading(nextTask, nextCapability, { show = false } = {}) {
       advance();
       submitting = false;
@@ -435,9 +478,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       capability = nextCapability;
       identify(task);
       review.hidden = false;
-      reviewStatus.textContent = 'Loading authorized review content…';
-      reviewText.textContent = '';
-      reviewDigest.textContent = '';
+      paintText(reviewStatus, () => (uiText("workspace.human.task.ui.loading.authorized.review.content")));
+      paintText(reviewText, '');
+      paintText(reviewDigest, '');
       commentField.hidden = true;
       actions.replaceChildren();
       say();
@@ -450,9 +493,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       if (!task) return;
       dialog.removeAttribute('aria-busy');
       review.hidden = false;
-      reviewStatus.textContent = message;
-      reviewText.textContent = '';
-      reviewDigest.textContent = '';
+      paintText(reviewStatus, message);
+      paintText(reviewText, '');
+      paintText(reviewDigest, '');
       say(message);
       if (!dialog.open) {
         dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
@@ -467,19 +510,19 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       clearReview();
       if (task.reviewPresentation) {
         review.hidden = false;
-        reviewStatus.textContent = task.reviewPresentation.text.length
-          ? 'Exact inert text/plain content pinned when this task was created.'
-          : 'This task has an empty plain-text review value.';
-        reviewText.textContent = task.reviewPresentation.text;
-        reviewDigest.textContent = `Content ${task.reviewPresentation.contentDigest}`;
+        paintText(reviewStatus, () => (task.reviewPresentation.text.length
+          ? uiText("workspace.human.task.ui.exact.inert.text.plain.content.pinned.when")
+          : uiText("workspace.human.task.ui.this.task.has.an.empty.plain.text")));
+        paintText(reviewText, task.reviewPresentation.text);
+        paintText(reviewDigest, () => (uiText("workspace.human.task.ui.content", { contentDigest: task.reviewPresentation.contentDigest })));
       }
       const mode = task.presentation.commentRequirement;
       commentField.hidden = mode === 'DISALLOWED';
       comment.required = mode === 'REQUIRED';
       comment.value = '';
-      commentHint.textContent = mode === 'REQUIRED'
-        ? `Required · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`
-        : `Optional · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`;
+      paintText(commentHint, () => (mode === 'REQUIRED'
+        ? uiText("workspace.human.task.ui.required.0.value1.utf.8.bytes", { commentMaxUtf8Bytes: task.commentMaxUtf8Bytes })
+        : uiText("workspace.human.task.ui.optional.0.value1.utf.8.bytes", { commentMaxUtf8Bytes: task.commentMaxUtf8Bytes })));
       const registered = ['CUSTOM', 'EXTERNAL'].includes(task.interactionPresentation?.kind);
       actions.replaceChildren(...task.availableActions.map(action => {
         const actionName = humanTaskActionName(action, task.presentation.labels[action]);
@@ -492,9 +535,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         return button;
       }));
       if (registered) {
-        const launch = element(dialog.ownerDocument, 'button', 'btn human-task-presentation-launch',
-          task.interactionPresentation.kind === 'EXTERNAL'
-            ? 'Open external presentation' : 'Open custom presentation');
+        const launch = localizedElement(dialog.ownerDocument, 'button', 'btn human-task-presentation-launch',
+          () => (task.interactionPresentation.kind === 'EXTERNAL'
+            ? uiText("workspace.human.task.ui.open.external.presentation") : uiText("workspace.human.task.ui.open.custom.presentation")));
         launch.type = 'button';
         launch.addEventListener('click', () => void launchRegisteredPresentation());
         actions.replaceChildren(launch);
@@ -502,7 +545,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       formHost.replaceChildren();
       formHost.hidden = task.interactionPresentation?.kind !== 'FORM';
       if (!formHost.hidden) {
-        formHost.append(element(dialog.ownerDocument, 'legend', '', 'Response'));
+        formHost.append(localizedElement(dialog.ownerDocument, 'legend', '', () => (uiText("workspace.human.task.ui.response"))));
         for (const field of task.interactionPresentation.formSchema.fields) {
           const wrapper = element(dialog.ownerDocument, 'div', 'human-task-form-field');
           const label = element(dialog.ownerDocument, 'label', '', field.label);
@@ -525,7 +568,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           if (field.type === 'ENUM') {
             const addOption = value => {
               const option = dialog.ownerDocument.createElement('option');
-              option.value = value; option.textContent = value; input.append(option);
+              option.value = value; paintText(option, value); input.append(option);
             };
             if (!field.required) addOption('');
             field.allowedValues.forEach(addOption);

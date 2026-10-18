@@ -7,6 +7,7 @@ import {
   parseAuthoredReleaseVersion,
   repositorySourceStatus,
   repositoryReviewLabel,
+  repositoryReviewMessageKey,
   validateGraphAuthoringCapability,
 } from '../src/graph-authoring-client.js';
 import { parseGraphML } from '../src/graph-parsers.js';
@@ -163,4 +164,6 @@ it('accepts GitLab capability with provider-specific review terminology and no p
   expect(capability).not.toHaveProperty('credentialReference');
   expect(repositoryReviewLabel(capability.provider)).toBe('Merge request');
   expect(repositoryReviewLabel('github')).toBe('Pull request');
+  expect(repositoryReviewMessageKey(capability.provider)).toBe('workspace.app.merge.request');
+  expect(repositoryReviewMessageKey('github')).toBe('workspace.app.pull.request');
 });

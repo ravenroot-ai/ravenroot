@@ -119,7 +119,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -176,7 +176,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -232,7 +232,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -290,7 +290,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -350,7 +350,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -410,7 +410,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -470,7 +470,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -530,7 +530,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -590,7 +590,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -650,7 +650,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -710,7 +710,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -770,7 +770,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -830,7 +830,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -890,7 +890,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -950,7 +950,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1010,7 +1010,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1068,7 +1068,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1126,7 +1126,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1186,7 +1186,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1244,7 +1244,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1789,7 +1789,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java",
@@ -5664,7 +5664,7 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 3,
@@ -8379,7 +8379,7 @@
         {
           "path": "scripts/publish_environment_reference.py",
           "digest": "aeef42de111e13a773321a6938cb96d9dcb96dff4c39788b2cacacd3e195b42b",
-          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Attempt 3 corrects the GET retry description to cover both Git providers; binding identities remain unchanged."
+          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -8504,7 +8504,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/monitoring-runtime-state.js",
-          "digest": "6ef4886814fc320fc66ace8561eb91dbaa2b3cb4f5d180858db4e096a442bec1",
+          "digest": "f900705c32fb6499cee9b69d671ce2474f71524a4ce6c26320ec8089d55dbb26",
           "assertion": "Consumer selects the bound by scope and evicts oldest cursors after insertion."
         },
         {
@@ -8533,12 +8533,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f906a12009a5fa341c47cf608ad10adb57f391cbc63cf63777e80b99ebff1ab4",
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
-          "digest": "e829dd80ba416cf6bf28760abe347134470367e1a090a5d83efa7703fe1a9bab",
+          "digest": "4032eff88e6171c8a18bd5fecef39b1dfd405d5e4045935fc747397e4e505a58",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -8669,8 +8669,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "b5e88a64c730fab5a08e721c0dafab5af63672cae91f9f9ac8a26570f46f24fe",
-          "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "digest": "1ec7ae05690e1796a57f0810df40a02058645e276c2f04c793d80617de11aa06",
+          "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         }
       ],
       "candidateCount": 133,
@@ -8824,12 +8824,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "b5e88a64c730fab5a08e721c0dafab5af63672cae91f9f9ac8a26570f46f24fe",
-          "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "digest": "1ec7ae05690e1796a57f0810df40a02058645e276c2f04c793d80617de11aa06",
+          "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f906a12009a5fa341c47cf608ad10adb57f391cbc63cf63777e80b99ebff1ab4",
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
           "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         }
       ],
@@ -8982,12 +8982,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "9300ab52a466bff77bc331f805e99ea697254d4eff7efe3e6482dbbbf1d36cf2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f906a12009a5fa341c47cf608ad10adb57f391cbc63cf63777e80b99ebff1ab4",
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         }
       ],
@@ -9052,7 +9052,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "9300ab52a466bff77bc331f805e99ea697254d4eff7efe3e6482dbbbf1d36cf2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -10766,12 +10766,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f906a12009a5fa341c47cf608ad10adb57f391cbc63cf63777e80b99ebff1ab4",
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
-          "digest": "f441abc77df5d04d81f0affbec17f4078ec7e4044cbc7b699028caa9e3e01f00",
+          "digest": "edb3aa8fcfdd78a3bd86e463fa4f9e0ed740f314e8a67bb5bc6440f889138779",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -10901,7 +10901,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "9300ab52a466bff77bc331f805e99ea697254d4eff7efe3e6482dbbbf1d36cf2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,12 +11429,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "f906a12009a5fa341c47cf608ad10adb57f391cbc63cf63777e80b99ebff1ab4",
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "32aa18811fd68f0ae9a3482c800a33d30b4f51104882b7fecbe20f79cc438ef2",
+          "digest": "f13660588415ec600c4bb987754343c1a583840718e0001497451d586dae7f73",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -11504,7 +11504,7 @@
         {
           "path": "docs/reference/environment-variables.md",
           "digest": "cceeec5eed96fe3bb5a27ae4343103021535c9939608b3f2c408cc02c327b2e5",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         }
       ],
       "candidateCount": 4,
@@ -11578,7 +11578,7 @@
         {
           "path": "docs/reference/environment-variables.md",
           "digest": "cceeec5eed96fe3bb5a27ae4343103021535c9939608b3f2c408cc02c327b2e5",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         }
       ],
       "candidateCount": 1,
@@ -11649,7 +11649,7 @@
         {
           "path": "docs/reference/environment-variables.md",
           "digest": "cceeec5eed96fe3bb5a27ae4343103021535c9939608b3f2c408cc02c327b2e5",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation."
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
         }
       ],
       "candidateCount": 1,

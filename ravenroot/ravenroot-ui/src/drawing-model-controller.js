@@ -1,3 +1,7 @@
+import { uiMessage, uiErrorMessage, renderUiMessage } from './ui-message.js';
+import { uiErrorReason, uiText } from './ui-text.js';
+
+const retainedText = message => () => renderUiMessage(message, uiText);
 import {
   FRONTEND_DRAWING_MODEL_PROPERTY,
   FRONTEND_PRESENTATION_PROPERTY,
@@ -39,7 +43,7 @@ function sceneSvg(document_, scene, onEvidence) {
   svg.classList.add('drawing-model-scene');
   svg.setAttribute('viewBox', `0 0 ${scene.width} ${scene.height}`);
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Plugin drawing model. Highlights are mapped workflow evidence, not a formal acceptance result.');
+  svg.setAttribute('aria-label', uiText("workspace.drawing.model.controller.plugin.drawing.model.highlights.are.mapped.workflow"));
   const defs = document_.createElementNS(SVG, 'defs');
   const marker = document_.createElementNS(SVG, 'marker');
   marker.id = 'drawing-model-arrow';
@@ -160,17 +164,17 @@ export function createDrawingModelController({ document: document_, getContext, 
       rendererProvider = rendererPackage?.manifest.renderers.find(item => item.id === parts[4]);
     }
     if (!layoutProvider || !rendererProvider) {
-      fallback('The selected drawing model is unavailable. Integrated Design remains active.'); return;
+      fallback(retainedText(uiMessage("workspace.drawing.model.controller.the.selected.drawing.model.is.unavailable.integrated.design.remains"))); return;
     }
     const compatibility = providerCompatibility(layoutProvider, rendererProvider);
     if (!compatibility.compatible) {
-      fallback(`The selected layout and renderer are incompatible (${[...compatibility.missingForRenderer,
-        ...compatibility.missingForLayout].join(', ')}).`); return;
+      fallback(retainedText(uiMessage("workspace.drawing.model.controller.the.selected.layout.and.renderer.are.incompatible", { value: [...compatibility.missingForRenderer,
+        ...compatibility.missingForLayout].join(', ') }))); return;
     }
     let mapping;
     try { mapping = readPresentationMapping(current.graph); }
-    catch (cause) { fallback(`Presentation mapping is invalid: ${cause.message}`); return; }
-    if (!mapping) { fallback('This drawing model needs an explicit presentation mapping.'); return; }
+    catch (cause) { fallback(retainedText(uiMessage("workspace.drawing.model.controller.presentation.mapping.is.invalid", { reason: uiErrorMessage(cause) }))); return; }
+    if (!mapping) { fallback(retainedText(uiMessage("workspace.drawing.model.controller.this.drawing.model.needs.an.explicit.presentation.mapping"))); return; }
     abort = new AbortController();
     const layoutSandbox = createFrontendPluginSandbox(layoutPackage.files[layoutProvider.entry], { target: document_.body, timeout: 3000 });
     const rendererSandbox = layoutPackage.id === rendererPackage.id && layoutProvider.entry === rendererProvider.entry
@@ -187,7 +191,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       overlay.className = 'drawing-model-overlay';
       const notice = document_.createElement('p');
       notice.className = 'drawing-model-evidence-note';
-      notice.textContent = snapshot.evidence.description;
+      notice.textContent = uiText("workspace.drawing.evidence");
       overlay.append(sceneSvg(document_, scene, (role, id) => {
         if (currentGeneration === generation) evidence(role, id, mapping, current);
       }), notice);
@@ -197,7 +201,7 @@ export function createDrawingModelController({ document: document_, getContext, 
     } catch (cause) {
       if (cause.name !== 'AbortError' && currentGeneration === generation
           && context()?.documentId === current.documentId) {
-        fallback(`Drawing model failed: ${cause.message}. Integrated Design remains active.`);
+        fallback(retainedText(uiMessage("workspace.drawing.model.controller.drawing.model.failed.integrated.design.remains.active", { reason: uiErrorMessage(cause) })));
       }
     }
   }
@@ -207,12 +211,12 @@ export function createDrawingModelController({ document: document_, getContext, 
     // cannot remain live while the newly active document is still loading its provider catalog.
     stop(); clearOverlays(); fullFlowButton.hidden = true;
     try { packages = await listFrontendPackages(indexedDB); }
-    catch (cause) { packages = []; notify?.(cause.message, 'failed'); }
+    catch (cause) { packages = []; notify?.(retainedText(uiErrorMessage(cause)), 'failed'); }
     const wanted = selectedKey();
-    select.replaceChildren(option(document_, INTEGRATED, 'Integrated Design'));
+    select.replaceChildren(option(document_, INTEGRATED, uiText("workspace.drawing.model.controller.integrated.design")));
     for (const package_ of packages) {
       for (const model of package_.manifest.drawingModels) {
-        const label = `${model.name} — ${package_.manifest.name}${package_.enabled ? '' : ' (disabled)'}`;
+        const label = `${model.name} — ${package_.manifest.name}${package_.enabled ? '' : uiText("workspace.drawing.model.controller.disabled")}`;
         const item = option(document_, modelKey(package_.id, model.id), label);
         item.disabled = !package_.enabled;
         select.append(item);
@@ -237,11 +241,11 @@ export function createDrawingModelController({ document: document_, getContext, 
 
   select.addEventListener('change', () => {
     const value = select.value;
-    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: value }, [], 'Select drawing model');
+    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: value }, [], uiText("workspace.drawing.model.controller.select.drawing.model"), uiMessage("workspace.drawing.model.controller.select.drawing.model"));
     void render();
   });
   fullFlowButton.addEventListener('click', () => {
-    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Show full operational flow');
+    editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], uiText("workspace.drawing.model.controller.show.full.operational.flow"), uiMessage("workspace.drawing.model.controller.show.full.operational.flow"));
     select.value = INTEGRATED; fallback();
   });
   installButton.addEventListener('click', () => installInput.click());
@@ -249,9 +253,9 @@ export function createDrawingModelController({ document: document_, getContext, 
     try {
       const package_ = await packageFromFiles(installInput.files);
       await installFrontendPackage(package_, indexedDB);
-      notify?.(`Installed frontend package ${package_.manifest.name} ${package_.manifest.version}`, 'completed');
+      notify?.(retainedText(uiMessage("workspace.drawing.model.controller.installed.frontend.package", { name: package_.manifest.name, version: package_.manifest.version })), 'completed');
       await reload();
-    } catch (cause) { notify?.(`Frontend package was not installed: ${cause.message}`, 'failed'); }
+    } catch (cause) { notify?.(retainedText(uiMessage("workspace.drawing.model.controller.frontend.package.was.not.installed", { reason: uiErrorMessage(cause) })), 'failed'); }
     finally { installInput.value = ''; }
   });
   const selectedReferencesPackage = packageId => {
@@ -262,29 +266,29 @@ export function createDrawingModelController({ document: document_, getContext, 
   const renderPackageManager = () => {
     packageList.replaceChildren();
     if (!packages.length) {
-      const empty = document_.createElement('p'); empty.textContent = 'No frontend packages are installed.';
+      const empty = document_.createElement('p'); empty.textContent = uiText("workspace.drawing.model.controller.no.frontend.packages.are.installed");
       packageList.append(empty); return;
     }
     for (const package_ of packages) {
       const row = document_.createElement('div'); row.className = 'drawing-model-package-row';
       const description = document_.createElement('span');
-      description.textContent = `${package_.manifest.name} ${package_.manifest.version} — ${package_.enabled ? 'enabled' : 'disabled'}`;
+      description.textContent = uiText("workspace.drawing.model.controller.text", { name: package_.manifest.name, version: package_.manifest.version, disabled: uiText(package_.enabled ? 'common.enabled' : 'common.disabled') });
       const toggle = document_.createElement('button'); toggle.type = 'button'; toggle.className = 'btn';
-      toggle.textContent = package_.enabled ? 'Disable' : 'Enable';
-      toggle.setAttribute('aria-label', `${toggle.textContent} ${package_.manifest.name}`);
+      toggle.textContent = package_.enabled ? uiText("workspace.drawing.model.controller.disable") : uiText("workspace.drawing.model.controller.enable");
+      toggle.setAttribute('aria-label', uiText("workspace.drawing.model.controller.text.2", { textContent: toggle.textContent, name: package_.manifest.name }));
       toggle.addEventListener('click', async () => {
         await setFrontendPackageEnabled(package_.id, !package_.enabled, indexedDB);
         if (package_.enabled && selectedReferencesPackage(package_.id)) {
-          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
+          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], uiText("workspace.drawing.model.controller.use.integrated.drawing.model"), uiMessage("workspace.drawing.model.controller.use.integrated.drawing.model"));
         }
         await reload(); renderPackageManager();
       });
       const remove = document_.createElement('button'); remove.type = 'button'; remove.className = 'btn';
-      remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove ${package_.manifest.name}`);
+      remove.textContent = uiText("workspace.drawing.model.controller.remove"); remove.setAttribute('aria-label', uiText("workspace.drawing.model.controller.remove.2", { name: package_.manifest.name }));
       remove.addEventListener('click', async () => {
         await removeFrontendPackage(package_.id, indexedDB);
         if (selectedReferencesPackage(package_.id)) {
-          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], 'Use integrated drawing model');
+          editGraphProperties?.({ [FRONTEND_DRAWING_MODEL_PROPERTY]: INTEGRATED }, [], uiText("workspace.drawing.model.controller.use.integrated.drawing.model"), uiMessage("workspace.drawing.model.controller.use.integrated.drawing.model"));
         }
         await reload(); renderPackageManager();
       });
@@ -305,9 +309,9 @@ export function createDrawingModelController({ document: document_, getContext, 
     try {
       const current = context();
       const value = presentationMappingValue(JSON.parse(textarea.value), current.graph);
-      editGraphProperties?.({ [FRONTEND_PRESENTATION_PROPERTY]: value }, [], 'Edit drawing model mapping');
+      editGraphProperties?.({ [FRONTEND_PRESENTATION_PROPERTY]: value }, [], uiText("workspace.drawing.model.controller.edit.drawing.model.mapping"), uiMessage("workspace.drawing.model.controller.edit.drawing.model.mapping"));
       error.textContent = ''; dialog.close(); void render();
-    } catch (cause) { error.textContent = cause.message; }
+    } catch (cause) { error.textContent = uiErrorReason(cause); }
   });
   function scheduleRefresh(documentId = context()?.documentId) {
     if (!documentId || context()?.documentId !== documentId) return;
@@ -317,7 +321,7 @@ export function createDrawingModelController({ document: document_, getContext, 
       if (context()?.documentId === documentId) void render();
     });
   }
-  return Object.freeze({ reload, refresh: render, scheduleRefresh, destroy() {
+  return Object.freeze({ reload, refresh: render, refreshLocale() { renderPackageManager(); void reload(); }, scheduleRefresh, destroy() {
     if (refreshFrame != null) cancelAnimationFrame(refreshFrame);
     stop(); clearOverlays();
   } });

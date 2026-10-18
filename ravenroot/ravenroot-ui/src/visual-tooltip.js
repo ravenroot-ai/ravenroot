@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 /**
  * Framework-free visual tooltips for the panel surface.
  *
@@ -161,7 +162,7 @@ export function createVisualTooltip({
   pointerDelay = POINTER_DELAY,
 } = {}) {
   const document = root.nodeType === 9 ? root : root.ownerDocument;
-  if (!document) throw new TypeError('A document-backed root is required for visual tooltips.');
+  if (!document) throw productError("workspace.error.visual.tooltip.a.document.backed.root.is.required.for.visual.tooltips", new TypeError('A document-backed root is required for visual tooltips.'));
   controllerByDocument.get(document)?.destroy();
 
   const scopes = listScopes(scope, document);

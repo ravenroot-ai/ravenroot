@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 const DIALOG_SELECTOR = 'dialog[open], [role="dialog"][aria-modal="true"]';
 
@@ -26,13 +27,13 @@ export function createCommandRegistry(definitions, options = {}) {
   const commands = new Map();
   for (const definition of definitions) {
     validateCommand(definition);
-    if (commands.has(definition.id)) throw new Error(`Duplicate command id '${definition.id}'`);
+    if (commands.has(definition.id)) throw productError("workspace.error.command.registry.duplicate.command.id", new Error(`Duplicate command id '${definition.id}'`), { value1: definition.id });
     commands.set(definition.id, Object.freeze({ ...definition }));
   }
 
   function get(id) {
     const command = commands.get(id);
-    if (!command) throw new Error(`Unknown command '${id}'`);
+    if (!command) throw productError("workspace.error.command.registry.unknown.command", new Error(`Unknown command '${id}'`), { value1: id });
     return command;
   }
 
@@ -90,13 +91,13 @@ export function createCommandRegistry(definitions, options = {}) {
 
 function validateCommand(command) {
   if (!command || typeof command.id !== 'string' || !command.id.includes('.')) {
-    throw new Error('Every command needs a namespaced id');
+    throw productError("workspace.error.command.registry.every.command.needs.a.namespaced.id", new Error('Every command needs a namespaced id'));
   }
   if (typeof command.label !== 'string' || !command.label.trim()) {
-    throw new Error(`Command '${command.id}' needs a label`);
+    throw productError("workspace.error.command.registry.command.needs.a.label", new Error(`Command '${command.id}' needs a label`), { value1: command.id });
   }
   if (typeof command.execute !== 'function') {
-    throw new Error(`Command '${command.id}' needs an execute function`);
+    throw productError("workspace.error.command.registry.command.needs.an.execute.function", new Error(`Command '${command.id}' needs an execute function`), { value1: command.id });
   }
 }
 

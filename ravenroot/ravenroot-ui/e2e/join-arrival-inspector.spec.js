@@ -64,12 +64,36 @@ const STATE_MACHINE_FIXTURE = [
   '</graph></graphml>',
 ].join('');
 
-async function open(page) {
+const RUNTIME_CONFIGURATION = { schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 };
+
+async function open(page, { delayConfiguration = false } = {}) {
+  let releaseConfiguration = () => {};
+  const configurationGate = delayConfiguration
+    ? new Promise(resolve => { releaseConfiguration = resolve; })
+    : Promise.resolve();
+  await page.route('**/v1/configuration', async route => {
+    await configurationGate;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(RUNTIME_CONFIGURATION),
+    });
+  });
   await page.route('**/v1/node-types', route =>
     route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: '[]' }));
   await page.route('**/v1/events', route =>
     route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }));
   await page.goto('/');
+  const awaitConfiguration = () => expect.poll(() => page.evaluate(() => {
+    try {
+      return window.ravenroot.graphDocumentByteLimit();
+    } catch {
+      return null;
+    }
+  }), { message: 'the app should expose the connected service document limit after validation' })
+    .toBe(RUNTIME_CONFIGURATION.graphDocumentMaxBytes);
+  if (!delayConfiguration) await awaitConfiguration();
+  return { releaseConfiguration, awaitConfiguration };
 }
 
 async function loadFixture(page, xml) {
@@ -100,7 +124,7 @@ test.describe('Kind of arrival inspector control', () => {
 
     await selectNode(page, 'a');
     await expect(page.locator('#node-join-kind')).toHaveCount(0);
-    await expect(page.locator('.node-join-fixed')).toContainText('Not a join · 1 incoming edge; 2 required');
+    await expect(page.locator('.node-join-fixed')).toContainText('Not a join · one incoming edge; 2 required.');
   });
 
   test('an undeclared fan-in defaults to "No join" as the selection, but reports the true legacy-inferred effective behaviour', async ({ page }) => {
@@ -438,7 +462,37 @@ test.describe('Migrate Join Semantics action', () => {
   });
 
   test('cancelling the confirmation leaves the document untouched', async ({ page }) => {
-    await open(page);
+    const { releaseConfiguration, awaitConfiguration } = await open(page, { delayConfiguration: true });
+    const beforeConfiguration = await page.evaluate(text => {
+      const before = window.ravenroot.activeDocument();
+      const beforeState = {
+        id: before.id,
+        graphml: window.ravenroot.serializeGraphML(before.graph),
+        revision: before.history.revision(),
+      };
+      let error = null;
+      try {
+        window.ravenroot.replaceActiveDocumentFromText(text, 'premature.graphml');
+      } catch (caught) {
+        error = caught.message;
+      }
+      const after = window.ravenroot.activeDocument();
+      return {
+        error,
+        before: beforeState,
+        after: {
+          id: after.id,
+          graphml: window.ravenroot.serializeGraphML(after.graph),
+          revision: after.history.revision(),
+        },
+      };
+    }, LEGACY_FIXTURE);
+    expect(beforeConfiguration.error).toContain(
+      'Graph document loading is unavailable until the connected service returns valid configuration');
+    expect(beforeConfiguration.after).toEqual(beforeConfiguration.before);
+
+    releaseConfiguration();
+    await awaitConfiguration();
     await loadFixture(page, LEGACY_FIXTURE);
 
     page.once('dialog', dialog => dialog.dismiss());

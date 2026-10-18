@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 const TERMINAL_EXECUTION_STATUSES = new Set(['COMPLETED', 'FAILED']);
 const preflightFlights = new WeakMap();
 
@@ -71,7 +72,7 @@ export function preflightBoundExecutionCommand({ flight, ...callbacks } = {}) {
     unknown: flight.unknown,
     lookup: async () => {
       if (!flight.client || typeof flight.client.execution !== 'function') {
-        throw new Error('The runtime connection that accepted this execution is no longer available');
+        throw productError("workspace.error.execution.reconciliation.the.runtime.connection.that.accepted.this.execution.is.no.longer", new Error('The runtime connection that accepted this execution is no longer available'));
       }
       return flight.client.execution(flight.executionId, { signal: flight.controller.signal });
     },
@@ -202,10 +203,10 @@ export async function reconcileExecution({
   degradedPollDelayMs = DEFAULT_RECONCILIATION_OPTIONS.degradedPollDelayMs,
 } = {}) {
   if (typeof lookup !== 'function' || typeof isCurrent !== 'function') {
-    throw new TypeError('Execution reconciliation requires lookup and isCurrent functions');
+    throw productError("workspace.error.execution.reconciliation.execution.reconciliation.requires.lookup.and.iscurrent.functions", new TypeError('Execution reconciliation requires lookup and isCurrent functions'));
   }
   if (!Number.isInteger(failureThreshold) || failureThreshold < 1) {
-    throw new RangeError('Execution reconciliation failureThreshold must be a positive integer');
+    throw productError("workspace.error.execution.reconciliation.execution.reconciliation.failurethreshold.must.be.a.positive.inte", new RangeError('Execution reconciliation failureThreshold must be a positive integer'));
   }
 
   let consecutiveFailures = 0;

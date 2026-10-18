@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
@@ -15,6 +16,8 @@ import {
   createViewerStylesheet,
   viewerCardImage,
   viewerNodeType,
+  viewerNodeLabel,
+  viewerCardLabel,
 } from './viewer-presentation.js';
 import {
   applyDeploymentViewFrame,
@@ -39,7 +42,9 @@ import {
 import { createEmbedDesignInspection } from './embed-design-inspection.js';
 import { createEmbedMaximizeController } from './embed-maximize.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
-import { edgeFlowSnapshot, FLOW_PULSE_MS } from './monitoring-runtime-state.js';
+import { edgeFlowSnapshot, FLOW_PULSE_MS, formatRuntimeTime } from './monitoring-runtime-state.js';
+import { uiText, uiDateTime } from './ui-text.js';
+export { createEmbedLocalization, validateEmbedLocaleChange } from './embed-localization.js';
 
 export function viewerStylesheet(mode = 'cyto', theme = 'dark') {
   return createViewerStylesheet(requireEmbedTheme(theme), mode);
@@ -87,7 +92,7 @@ function elasticElements(snapshot, palette, width, height) {
 
 function requiredElement(root, selector) {
   const element = root.querySelector(selector);
-  if (element === null) throw new Error('Embed viewer shell unavailable.');
+  if (element === null) throw productError("workspace.error.embed.viewer.entry.embed.viewer.shell.unavailable", new Error('Embed viewer shell unavailable.'));
   return element;
 }
 
@@ -96,10 +101,11 @@ function requiredElement(root, selector) {
  * is passed directly and is never published on window, storage, or the DOM.
  */
 export function createEmbedViewer(container, {
-  theme = 'dark', onRunSelected = () => {}, onStartExecution = () => {},
+  theme = 'dark', onRunSelected = () => {}, onStartExecution = () => {}, localization = null,
 } = {}) {
-  if (!(container instanceof Element)) throw new TypeError('Embed viewer container is required.');
+  if (!(container instanceof Element)) throw productError("workspace.error.embed.viewer.entry.embed.viewer.container.is.required", new TypeError('Embed viewer container is required.'));
   const viewerTheme = requireEmbedTheme(theme);
+  const t = localization?.text || uiText;
   const palette = getRendererPalette(viewerTheme);
   const canvas = requiredElement(container, '[data-viewer-canvas]');
   const status = requiredElement(container, '[data-viewer-status]');
@@ -110,7 +116,7 @@ export function createEmbedViewer(container, {
   const elasticOption = mode.querySelector('option[value="elastic"]');
   const semanticModes = mode.querySelector('option[value="design"]') !== null;
   if (!semanticModes && !(elasticOption instanceof HTMLOptionElement)) {
-    throw new Error('Embed viewer mode choices unavailable.');
+    throw productError("workspace.error.embed.viewer.entry.embed.viewer.mode.choices.unavailable", new Error('Embed viewer mode choices unavailable.'));
   }
   const runSelect = container.querySelector('[data-viewer-run]');
   const runEmpty = container.querySelector('[data-viewer-run-empty]');
@@ -121,13 +127,14 @@ export function createEmbedViewer(container, {
   const controls = [...container.querySelectorAll('[data-viewer-command]')];
   const maximizeControl = requiredElement(container, '[data-viewer-maximize]');
   const focusBoundaries = [...container.ownerDocument.querySelectorAll('.embed-focus-sentinel')];
-  if (focusBoundaries.length !== 2) throw new Error('Embed viewer focus boundary unavailable.');
+  if (focusBoundaries.length !== 2) throw productError("workspace.error.embed.viewer.entry.embed.viewer.focus.boundary.unavailable", new Error('Embed viewer focus boundary unavailable.'));
   const lifecycle = createEmbedShellLifecycle({
     root: container,
     status,
     alternative,
     before: focusBoundaries[0],
     after: focusBoundaries[1],
+    t,
   });
   const instance = cytoscape({
     container: canvas,
@@ -141,6 +148,7 @@ export function createEmbedViewer(container, {
     wheelSensitivity: 0.25,
   });
   const maximizeController = createEmbedMaximizeController(container, maximizeControl, {
+    t,
     onResize: () => {
       instance.resize();
       elasticMount?.resize?.(canvas.clientWidth || 800, canvas.clientHeight || 500);
@@ -191,7 +199,7 @@ export function createEmbedViewer(container, {
   };
   const designInspection = createEmbedDesignInspection({ canvas, cy: instance, tooltip: runtimeTooltip,
     snapshot: () => currentSnapshot, runtime: () => deploymentState,
-    projection: () => visualGroupsRenderer?.projection, toggle: toggleGroup });
+    projection: () => visualGroupsRenderer?.projection, toggle: toggleGroup, t });
   const applyGroupedRuntime = () => {
     if (!deploymentState) return;
     const projection = isMonitoring() ? elasticMount?.visualGroupProjection : visualGroupsRenderer?.projection;
@@ -366,7 +374,7 @@ export function createEmbedViewer(container, {
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       cytoscapeAdapter.destroy();
     },
-  }));
+  }), undefined, t);
 
   const activeRenderer = () => isMonitoring() && elasticMount !== null ? elasticMount : core;
   const runCommand = command => {
@@ -383,7 +391,9 @@ export function createEmbedViewer(container, {
         });
         layout.run();
       }
-      status.textContent = `${isMonitoring() ? 'Monitoring' : 'Design'} view rendered.`;
+      status.textContent = t('embed.view.rendered', {
+        mode: t(isMonitoring() ? 'embed.mode.monitoring' : 'embed.mode.design'),
+      });
     } else if (command === 'fit') activeRenderer().fit(60);
     else if (command === 'zoom-in') activeRenderer().zoomBy(1.2);
     else if (command === 'zoom-out') activeRenderer().zoomBy(1 / 1.2);
@@ -415,6 +425,8 @@ export function createEmbedViewer(container, {
       palette,
       tooltip: runtimeTooltip,
       markerKey: 'embed',
+      t,
+      formatTime: value => formatRuntimeTime(value, localization?.dateTime || uiDateTime),
       isLive: () => !destroyed && isMonitoring(),
       onViewportChange: scheduleMinimap,
       initialTransform: saved?.transform || null,
@@ -475,7 +487,7 @@ export function createEmbedViewer(container, {
       else if (designStyle() === 'cyto') applyViewerDesignRoutes(instance, null);
       if (currentSnapshot?.groups?.length) {
         visualGroupsRenderer ||= createVisualGroupRenderer({ cy: instance,
-          isCurrent: () => !destroyed && !isMonitoring() });
+          isCurrent: () => !destroyed && !isMonitoring(), t });
         visualGroupsRenderer.setGroups(groupOptions());
       }
     }
@@ -484,7 +496,9 @@ export function createEmbedViewer(container, {
     designInspection.setEnabled(!isMonitoring());
     container.dataset.viewerRenderer = mode.value;
     scheduleMinimap();
-    if (announce) status.textContent = `${mode.options[mode.selectedIndex].text} view ready.`;
+    if (announce) status.textContent = t('embed.view.ready', {
+      mode: mode.options[mode.selectedIndex].text,
+    });
   };
   const click = event => runCommand(event.currentTarget.dataset.viewerCommand);
   controls.forEach(control => control.addEventListener('click', click));
@@ -510,7 +524,7 @@ export function createEmbedViewer(container, {
       resetRuntimePresentation();
     }
     onRunSelected(runSelect.value || null, runGeneration);
-    status.textContent = runSelect.value ? 'Connecting to selected run.' : 'No authorized runs.';
+    status.textContent = t(runSelect.value ? 'embed.runs.connecting' : 'embed.runs.noneAuthorized');
   };
   const startClick = () => onStartExecution();
   runSelect?.addEventListener('change', runChange);
@@ -537,9 +551,8 @@ export function createEmbedViewer(container, {
   canvas.addEventListener('keydown', keydown);
   instance.on('select unselect', 'node', () => {
     const selected = instance.nodes(':selected');
-    status.textContent = selected.length === 0
-      ? 'Graph ready.'
-      : `${selected.length} node${selected.length === 1 ? '' : 's'} selected.`;
+    status.textContent = selected.length === 0 ? t('embed.state.ready')
+      : t('embed.selection', { count: selected.length });
   });
   instance.on('pan zoom position', scheduleMinimap);
 
@@ -602,7 +615,7 @@ export function createEmbedViewer(container, {
     metadata.textContent = '';
     lifecycle.destroy({ preserveState });
     core.destroy();
-    if (!preserveState) status.textContent = 'Viewer closed.';
+    if (!preserveState) status.textContent = t('embed.state.destroyed');
   };
 
   return Object.freeze({
@@ -672,7 +685,7 @@ export function createEmbedViewer(container, {
           if (monitoringOption) monitoringOption.disabled = !elasticAvailable;
           container.dataset.viewerElasticPolicy = elasticAvailable ? 'available' : 'size-limited';
           if (elasticOption) elasticOption.title = elasticAvailable
-            ? '' : 'Elastic view is unavailable for large graphs.';
+            ? '' : t('embed.view.elasticUnavailable');
           if (rendered.nodes.length > 0) {
             applyMode(false);
             if (signal.aborted) throw signal.reason;
@@ -681,7 +694,7 @@ export function createEmbedViewer(container, {
           }
           return rendered;
         }, { signal });
-        metadata.textContent = `Version ${snapshot.graphVersionId}`;
+        metadata.textContent = t('embed.metadata.version', { version: snapshot.graphVersionId });
         if (lifecycle.state === 'ready') {
           mode.disabled = false;
           activeRenderer().fit(60);
@@ -734,12 +747,12 @@ export function createEmbedViewer(container, {
       container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
       if (result.terminal || deploymentState.continuity !== 'LIVE') {
         status.textContent = deploymentState.continuity === 'GAP'
-          ? 'Live observation has a gap. Reattach to reconcile the deployment.'
+          ? t('embed.observation.gap')
           : deploymentState.continuity === 'VERSION_MISMATCH'
-            ? 'The deployment version changed. This view is no longer live.'
+            ? t('embed.observation.versionMismatch')
             : deploymentState.gap === 'AUTHORITY_CHANGED'
-              ? 'Live observation authorization ended.'
-              : `Deployment ${deploymentState.lifecycle.toLowerCase()}.`;
+              ? t('embed.observation.authorizationEnded')
+              : t('embed.observation.deployment', { state: deploymentState.lifecycle.toLowerCase() });
       }
       scheduleMinimap();
       return result;
@@ -752,7 +765,7 @@ export function createEmbedViewer(container, {
       if (authorized.length > 1) {
         const prompt = document.createElement('option');
         prompt.value = '';
-        prompt.textContent = 'Choose a run';
+        prompt.textContent = t('embed.runs.choose');
         runSelect.append(prompt);
       }
       authorized.forEach(run => {
@@ -770,7 +783,7 @@ export function createEmbedViewer(container, {
       if (selected !== previous) runChange();
       return selected;
     },
-    clearRuntime(reason = 'Run is no longer authorized.') {
+    clearRuntime(reason = t('embed.runs.noLongerAuthorized')) {
       runGeneration += 1;
       if (deploymentState) {
         resetDeploymentViewRuntime(deploymentState, 'DETACHED', reason);
@@ -780,6 +793,22 @@ export function createEmbedViewer(container, {
         container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
       }
       status.textContent = reason;
+    },
+    refreshLocale() {
+      lifecycle.refreshLocale();
+      maximizeController.refreshLocale();
+      designInspection.refresh();
+      visualGroupsRenderer?.refreshLocale();
+      elasticMount?.refreshLocale();
+      if (currentSnapshot) instance.batch(() => currentSnapshot.nodes.forEach(node => {
+        const rendered = instance.getElementById(node.id);
+        rendered.data('label', viewerNodeLabel(node, t));
+        rendered.data('cardLabel', viewerCardLabel(node, t));
+      }));
+      if (currentSnapshot) metadata.textContent = t('embed.metadata.version', {
+        version: currentSnapshot.graphVersionId,
+      });
+      if (elasticOption?.disabled) elasticOption.title = t('embed.view.elasticUnavailable');
     },
     destroy({ preserveState = false } = {}) { teardown(preserveState); },
   });

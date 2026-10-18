@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
 const ENTRY = resolve(ROOT, 'embed-viewer-entry.js');
+const LOCALIZATION_ENTRY = resolve(ROOT, 'embed-localization.js');
 const BOOTSTRAP = resolve(ROOT, '../public/embed-bootstrap.js');
 const FORBIDDEN = new Set([
   'app.js',
@@ -38,11 +39,26 @@ async function localImportGraph(entry) {
 describe('embed viewer import boundary', () => {
   it('cannot reach editor, runtime, import/export, execution, or monitoring modules', async () => {
     const graph = await localImportGraph(ENTRY);
+    const localizationGraph = await localImportGraph(LOCALIZATION_ENTRY);
 
     expect(graph).toContain('viewer-core.js');
     expect(graph).toContain('viewer-renderer-adapter.js');
     expect(graph).toContain('viewer-presentation.js');
     expect(graph.filter(file => FORBIDDEN.has(file))).toEqual([]);
+    expect(localizationGraph).toEqual(expect.arrayContaining([
+      'embed-localization.js', 'ui-localization.js', 'ui-text.js',
+    ]));
+    expect(localizationGraph.filter(file => FORBIDDEN.has(file))).toEqual([]);
+  });
+
+  it('validates and applies presentation before importing the viewer implementation', async () => {
+    const source = await readFile(BOOTSTRAP, 'utf8');
+    expect(source.indexOf("import('/embed-localization.js')"))
+      .toBeLessThan(source.indexOf("import('/embed-viewer.js')"));
+    expect(source.indexOf('validateEmbedLocaleChange(bootstrap.locale, candidate)'))
+      .toBeLessThan(source.indexOf("import('/embed-viewer.js')"));
+    expect(source.indexOf("history.replaceState(null, '', '/v1/embed/launch')"))
+      .toBeLessThan(source.indexOf("import('/embed-localization.js')"));
   });
 
   it('delegates graph styling to the same presentation factory as the editor', async () => {

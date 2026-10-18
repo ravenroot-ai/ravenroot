@@ -29,8 +29,28 @@ execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
   '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
 const tls = { key: readFileSync(keyPath), cert: readFileSync(certificatePath) };
 
-const createSession = registrationId => new Promise((resolve, reject) => {
-  const creationBody = JSON.stringify({ registrationId });
+const localizedCatalog = {
+  schema: 'ravenroot.ui-catalog/v1', locale: 'en-XA', direction: 'ltr', messages: {
+    'embed.title': '⟦Embedded graph⟧',
+    'embed.controls.view': '⟦View⟧',
+    'embed.mode.cyto': '⟦Graph⟧',
+    'embed.mode.design': '⟦Design⟧',
+    'embed.mode.monitoring': '⟦Monitoring⟧',
+    'embed.controls.fit': '⟦Fit⟧',
+    'embed.controls.maximize': '⟦Maximize embedded graph⟧',
+    'embed.controls.restore': '⟦Restore embedded graph⟧',
+    'embed.state.loading': '⟦Loading graph…⟧',
+    'embed.state.ready': '⟦Graph ready.⟧',
+  },
+};
+const regionalCatalog = {
+  schema: 'ravenroot.ui-catalog/v1', locale: 'az', direction: 'rtl', messages: {
+    'embed.controls.fit': 'Sığdır', 'embed.state.loading': 'Yüklənir…',
+  },
+};
+
+const createSession = (registrationId, presentation = null) => new Promise((resolve, reject) => {
+  const creationBody = JSON.stringify({ registrationId, ...(presentation || {}) });
   const request = httpRequest({
     hostname: backend.hostname,
     port: backend.port,
@@ -154,6 +174,7 @@ src=${JSON.stringify(viewerLaunchUrl)}></iframe>
   'use strict';
   const viewer = document.getElementById('viewer');
   const expectedKeys = ['channelId', 'correlationId', 'direction', 'protocolVersion', 'type'];
+  const localeChangedKeys = [...expectedKeys, 'locale'].sort();
   const helloKeys = ['acknowledgementId', ...expectedKeys].sort();
   window.embedMessages = [];
   window.embedHello = null;
@@ -171,10 +192,11 @@ src=${JSON.stringify(viewerLaunchUrl)}></iframe>
       window.embedHello = message;
       return;
     }
-    if (keys.join(',') !== expectedKeys.join(',')
+    const localeChanged = message.type === 'LOCALE_CHANGED';
+    if (keys.join(',') !== (localeChanged ? localeChangedKeys : expectedKeys).join(',')
         || message.protocolVersion !== 'ravenroot.embed/1'
         || message.direction !== 'viewer-to-parent'
-        || !['READY', 'FAILED', 'PONG'].includes(message.type)
+        || !['READY', 'FAILED', 'PONG', 'LOCALE_CHANGED'].includes(message.type)
         || typeof message.channelId !== 'string' || typeof message.correlationId !== 'string') return;
     window.embedMessages.push(message);
   });
@@ -202,6 +224,24 @@ src=${JSON.stringify(viewerLaunchUrl)}></iframe>
       type: 'ACK',
       ...overrides,
     }, ${JSON.stringify(viewerOrigin.origin)});
+  };
+  window.postViewerLocale = (locale, catalog, overrides = {}) => {
+    const hello = window.embedHello;
+    if (hello === null) throw new Error('HELLO unavailable');
+    viewer.contentWindow.postMessage({
+      protocolVersion: hello.protocolVersion,
+      channelId: hello.channelId,
+      correlationId: 'locale-' + Math.random().toString(36).slice(2),
+      direction: 'parent-to-viewer', type: 'SET_LOCALE', locale, catalog, ...overrides,
+    }, ${JSON.stringify(viewerOrigin.origin)});
+  };
+  window.relayViewerLocale = (frameName, locale, catalog, overrides = {}) => {
+    const hello = window.embedHello;
+    frames[frameName].postMessage({ command: 'CONTACT_VIEWER', message: {
+      protocolVersion: hello.protocolVersion, channelId: hello.channelId,
+      correlationId: 'refused-' + frameName, direction: 'parent-to-viewer',
+      type: 'SET_LOCALE', locale, catalog, ...overrides,
+    } }, location.origin);
   };
 })();
 </script></body></html>`;
@@ -360,10 +400,15 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
     ['/theme-light', 'theme-light'], ['/theme-dark', 'theme-dark'],
     ['/theme-auto-light', 'theme-auto-light'], ['/theme-auto-dark', 'theme-auto-dark'],
     ['/theme-invalid', 'theme-invalid'], ['/deployment', 'live-registration'],
-    ['/deployment-stale', 'live-stale-registration'],
+    ['/deployment-stale', 'live-stale-registration'], ['/localized', 'browser-registration'],
+    ['/localized-regional', 'browser-registration'],
   ]).get(request.url) ?? 'browser-registration';
   try {
-    const freshLaunchUrl = await createSession(registration);
+    const presentation = request.url === '/localized'
+      ? { locale: 'en-XA', catalog: JSON.stringify(localizedCatalog) }
+      : request.url === '/localized-regional'
+        ? { locale: 'az-IR', catalog: JSON.stringify(regionalCatalog) } : null;
+    const freshLaunchUrl = await createSession(registration, presentation);
     if (registration === 'theme-invalid') {
       const invalid = new URL(freshLaunchUrl);
       invalidLaunchPaths.add(invalid.pathname + invalid.search);

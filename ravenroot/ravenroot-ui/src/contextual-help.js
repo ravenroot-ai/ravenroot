@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 const controllerByDocument = new WeakMap();
 const VIEWPORT_MARGIN = 8;
 const POPOVER_GAP = 8;
@@ -92,15 +93,15 @@ export function createContextualHelp({
   window: suppliedWindow = root.defaultView || globalThis.window,
 } = {}) {
   const document = root.nodeType === 9 ? root : root.ownerDocument;
-  if (!document) throw new TypeError('A document-backed root is required for contextual help.');
+  if (!document) throw productError("workspace.error.contextual.help.a.document.backed.root.is.required.for.contextual.help", new TypeError('A document-backed root is required for contextual help.'));
   controllerByDocument.get(document)?.destroy();
 
   const surface = popover || document.getElementById('contextual-help-popover');
-  if (!surface) throw new TypeError('The contextual help popover is required.');
+  if (!surface) throw productError("workspace.error.contextual.help.the.contextual.help.popover.is.required", new TypeError('The contextual help popover is required.'));
   const heading = surface.querySelector('[data-contextual-help-heading]');
   const body = surface.querySelector('[data-contextual-help-body]');
   const close = surface.querySelector('[data-contextual-help-close]');
-  if (!heading || !body || !close) throw new TypeError('The contextual help popover is incomplete.');
+  if (!heading || !body || !close) throw productError("workspace.error.contextual.help.the.contextual.help.popover.is.incomplete", new TypeError('The contextual help popover is incomplete.'));
 
   let opener = null;
   let keyboardOwnedFocus = false;

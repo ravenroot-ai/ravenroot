@@ -1,3 +1,6 @@
+import { uiMessage, renderUiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
+import { uiText } from './ui-text.js';
+import { productError } from './product-error.js';
 // Command model over the canonical graph document (UI-01).
 //
 // Every edit is a reversible command applied to the document that parseGraphML produced and
@@ -28,24 +31,24 @@ const SAVE_POINT_UNREACHABLE = Symbol('ravenroot.save-point-unreachable');
 // COMMAND CONSTRUCTORS
 // ═══════════════════════════════════════════════════════════════
 
-export function insertNodesCommand(entries, label = 'Insert nodes') {
-  return { type: 'insert-nodes', label, entries: normalizeEntries(entries, 'node') };
+export function insertNodesCommand(entries, label = uiMessage('workspace.history.insert.nodes')) {
+  return withUiMessage({ type: 'insert-nodes', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, entries: normalizeEntries(entries, 'node') }, label);
 }
 
-export function removeNodesCommand(nodeIds, label = 'Remove nodes') {
-  return { type: 'remove-nodes', label, nodeIds: [...nodeIds] };
+export function removeNodesCommand(nodeIds, label = uiMessage('workspace.history.remove.nodes')) {
+  return withUiMessage({ type: 'remove-nodes', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, nodeIds: [...nodeIds] }, label);
 }
 
-export function insertEdgesCommand(entries, label = 'Insert edges') {
-  return { type: 'insert-edges', label, entries: normalizeEntries(entries, 'edge') };
+export function insertEdgesCommand(entries, label = uiMessage('workspace.history.insert.edges')) {
+  return withUiMessage({ type: 'insert-edges', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, entries: normalizeEntries(entries, 'edge') }, label);
 }
 
-export function removeEdgesCommand(edgeIds, label = 'Remove edges') {
-  return { type: 'remove-edges', label, edgeIds: [...edgeIds] };
+export function removeEdgesCommand(edgeIds, label = uiMessage('workspace.history.remove.edges')) {
+  return withUiMessage({ type: 'remove-edges', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, edgeIds: [...edgeIds] }, label);
 }
 
-export function updateNodeCommand(id, patch, label = `Edit node ${id}`, unset = []) {
-  return { type: 'update-node', label, id, patch: { ...patch }, unset: [...unset] };
+export function updateNodeCommand(id, patch, label = uiMessage('workspace.history.edit.node', { id }), unset = []) {
+  return withUiMessage({ type: 'update-node', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, id, patch: { ...patch }, unset: [...unset] }, label);
 }
 
 // Graph-level properties (currently only `join.semantics`, the marker) get their own
@@ -53,43 +56,43 @@ export function updateNodeCommand(id, patch, label = `Edit node ${id}`, unset = 
 // itself, not one element inside `graph.nodes`/`graph.edges`. Routing the migration action through
 // this -- instead of assigning into `graphProperties` directly -- is what makes stamping the marker an
 // undo step like every other edit, and what makes the document report itself dirty for it.
-export function updateGraphPropertiesCommand(patch, label = 'Edit graph properties', unset = []) {
-  return { type: 'update-graph-properties', label, patch: { ...patch }, unset: [...unset] };
+export function updateGraphPropertiesCommand(patch, label = uiMessage('workspace.history.edit.graph.properties'), unset = []) {
+  return withUiMessage({ type: 'update-graph-properties', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, patch: { ...patch }, unset: [...unset] }, label);
 }
 
-export function updateEdgeCommand(id, patch, label = `Edit edge ${id}`, unset = []) {
-  return { type: 'update-edge', label, id, patch: { ...patch }, unset: [...unset] };
+export function updateEdgeCommand(id, patch, label = uiMessage('workspace.history.edit.edge', { id }), unset = []) {
+  return withUiMessage({ type: 'update-edge', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, id, patch: { ...patch }, unset: [...unset] }, label);
 }
 
-export function batchUpdateNodePropertiesCommand(entries, label = 'Edit selected node properties') {
-  return {
+export function batchUpdateNodePropertiesCommand(entries, label = uiMessage('workspace.history.edit.selected.node.properties')) {
+  return withUiMessage({
     type: 'batch-update-node-properties',
-    label,
+    get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); },
     entries: entries.map(entry => ({
       id: entry.id,
       properties: normalizeMapPatch(entry.properties),
       propertyTypes: normalizeMapPatch(entry.propertyTypes),
     })),
-  };
+  }, label);
 }
 
-export function moveNodesCommand(entries, label = 'Move nodes') {
-  return {
+export function moveNodesCommand(entries, label = uiMessage('workspace.history.move.nodes')) {
+  return withUiMessage({
     type: 'move-nodes',
-    label,
+    get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); },
     entries: entries.map(entry => {
       const moved = { id: entry.id, ox: Number(entry.ox), oy: Number(entry.oy) };
       if (Object.hasOwn(entry, 'positionIsCenter')) moved.positionIsCenter = entry.positionIsCenter;
       return moved;
     }),
-  };
+  }, label);
 }
 
 // One user gesture, one undo step. Multi-node drag, delete-with-incident-edges and paste-like
 // batches are all a composite: applying it collects each inverse and returns them reversed, so the
 // whole batch undoes atomically and can never be unwound in pieces.
-export function compositeCommand(commands, label = 'Composite edit') {
-  return { type: 'composite', label, commands: [...commands] };
+export function compositeCommand(commands, label = uiMessage('workspace.history.composite.edit')) {
+  return withUiMessage({ type: 'composite', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, commands: [...commands] }, label);
 }
 
 function normalizeEntries(entries, key) {
@@ -109,10 +112,10 @@ function normalizeMapPatch(patch = {}) {
 // miss cascades, and computing it afterwards would have nothing left to read.
 export function applyCommand(graph, command) {
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    throw new Error('A graph command needs a canonical document with nodes and edges');
+    throw productError("workspace.error.graph.commands.a.graph.command.needs.a.canonical.document.with.nodes.and.edges", new Error('A graph command needs a canonical document with nodes and edges'));
   }
   const handler = HANDLERS[command?.type];
-  if (!handler) throw new Error(`Unknown graph command type '${command?.type}'`);
+  if (!handler) throw productError("workspace.error.graph.commands.unknown.graph.command.type", new Error(`Unknown graph command type '${command?.type}'`), { value1: command?.type });
   return handler(graph, command);
 }
 
@@ -123,14 +126,14 @@ const HANDLERS = {
     // Preflight the whole batch: a duplicate in a later entry must not leave the valid prefix
     // inserted when this command is used on its own or as one composite child.
     for (const entry of entries) {
-      if (used.has(entry.node.id)) throw new Error(`Node '${entry.node.id}' already exists`);
+      if (used.has(entry.node.id)) throw productError("workspace.error.graph.commands.node.already.exists", new Error(`Node '${entry.node.id}' already exists`), { value1: entry.node.id });
       used.add(entry.node.id);
     }
     for (const entry of entries) {
       graph.nodes.splice(clampIndex(entry.index, graph.nodes.length), 0, entry.node);
     }
     reindexNodes(graph);
-    return removeNodesCommand(entries.map(entry => entry.node.id), command.label);
+    return removeNodesCommand(entries.map(entry => entry.node.id), uiMessageOf(command, command.label));
   },
 
   'remove-nodes': (graph, command) => {
@@ -139,7 +142,7 @@ const HANDLERS = {
     const wanted = new Set(command.nodeIds);
     for (const id of wanted) {
       if (!graph.nodes.some(node => node.id === id)) {
-        throw new Error(`Cannot remove unknown node '${id}'`);
+        throw productError("workspace.error.graph.commands.cannot.remove.unknown.node", new Error(`Cannot remove unknown node '${id}'`), { value1: id });
       }
     }
     const entries = [];
@@ -150,10 +153,10 @@ const HANDLERS = {
     reindexNodes(graph);
     // Ascending capture order matters: re-inserting removed indices in ascending order into the
     // reduced array reproduces the original array exactly.
-    const restoreNodes = insertNodesCommand(entries, command.label);
+    const restoreNodes = insertNodesCommand(entries, uiMessageOf(command, command.label));
     if (grouping.status === 'valid' && grouping.groups.some(group => group.memberNodeIds.some(id => wanted.has(id)))) {
       graph.graphProperties[VISUAL_GROUPS_PROPERTY] = visualGroupsValue(groupsAfterNodeRemoval(grouping.groups, wanted), graph);
-      return compositeCommand([restoreNodes, updateGraphPropertiesCommand({ [VISUAL_GROUPS_PROPERTY]: priorGroups })], command.label);
+      return compositeCommand([restoreNodes, updateGraphPropertiesCommand({ [VISUAL_GROUPS_PROPERTY]: priorGroups })], uiMessageOf(command, command.label));
     }
     return restoreNodes;
   },
@@ -162,20 +165,20 @@ const HANDLERS = {
     const entries = [...command.entries].sort((left, right) => left.index - right.index);
     const used = new Set(graph.edges.map(edge => edge.id));
     for (const entry of entries) {
-      if (used.has(entry.edge.id)) throw new Error(`Edge '${entry.edge.id}' already exists`);
+      if (used.has(entry.edge.id)) throw productError("workspace.error.graph.commands.edge.already.exists", new Error(`Edge '${entry.edge.id}' already exists`), { value1: entry.edge.id });
       used.add(entry.edge.id);
     }
     for (const entry of entries) {
       graph.edges.splice(clampIndex(entry.index, graph.edges.length), 0, entry.edge);
     }
-    return removeEdgesCommand(entries.map(entry => entry.edge.id), command.label);
+    return removeEdgesCommand(entries.map(entry => entry.edge.id), uiMessageOf(command, command.label));
   },
 
   'remove-edges': (graph, command) => {
     const wanted = new Set(command.edgeIds);
     for (const id of wanted) {
       if (!graph.edges.some(edge => edge.id === id)) {
-        throw new Error(`Cannot remove unknown edge '${id}'`);
+        throw productError("workspace.error.graph.commands.cannot.remove.unknown.edge", new Error(`Cannot remove unknown edge '${id}'`), { value1: id });
       }
     }
     const entries = [];
@@ -183,19 +186,19 @@ const HANDLERS = {
       if (wanted.has(edge.id)) entries.push({ edge, index });
     });
     graph.edges = graph.edges.filter(edge => !wanted.has(edge.id));
-    return insertEdgesCommand(entries, command.label);
+    return insertEdgesCommand(entries, uiMessageOf(command, command.label));
   },
 
   'update-node': (graph, command) => {
     const node = graph.nodeMap?.[command.id] || graph.nodes.find(candidate => candidate.id === command.id);
-    if (!node) throw new Error(`Cannot update unknown node '${command.id}'`);
+    if (!node) throw productError("workspace.error.graph.commands.cannot.update.unknown.node", new Error(`Cannot update unknown node '${command.id}'`), { value1: command.id });
     // The id is the nodeMap key, the Cytoscape element id and the GraphML <node id>. Renaming it
     // through a patch would desynchronize all three, so an id change is a delete plus an insert.
-    if (Object.hasOwn(command.patch, 'id')) throw new Error('A node id cannot be patched');
+    if (Object.hasOwn(command.patch, 'id')) throw productError("workspace.error.graph.commands.a.node.id.cannot.be.patched", new Error('A node id cannot be patched'));
     const inverse = invertPatch(node, command);
     applyPatch(node, command);
     reindexNodes(graph);
-    return updateNodeCommand(command.id, inverse.patch, command.label, inverse.unset);
+    return updateNodeCommand(command.id, inverse.patch, uiMessageOf(command, command.label), inverse.unset);
   },
 
   'update-graph-properties': (graph, command) => {
@@ -208,17 +211,18 @@ const HANDLERS = {
       if (command.visualGroupsMetadata) graph._visualGroupsMetadata = command.visualGroupsMetadata;
       else delete graph._visualGroupsMetadata;
     }
-    return { ...updateGraphPropertiesCommand(inverse.patch, command.label, inverse.unset),
-      ...(ownsGrouping ? { visualGroupsMetadata: priorMetadata || null } : {}) };
+    const result = updateGraphPropertiesCommand(inverse.patch, uiMessageOf(command, command.label), inverse.unset);
+    if (ownsGrouping) result.visualGroupsMetadata = priorMetadata || null;
+    return result;
   },
 
   'update-edge': (graph, command) => {
     const edge = graph.edges.find(candidate => candidate.id === command.id);
-    if (!edge) throw new Error(`Cannot update unknown edge '${command.id}'`);
-    if (Object.hasOwn(command.patch, 'id')) throw new Error('An edge id cannot be patched');
+    if (!edge) throw productError("workspace.error.graph.commands.cannot.update.unknown.edge", new Error(`Cannot update unknown edge '${command.id}'`), { value1: command.id });
+    if (Object.hasOwn(command.patch, 'id')) throw productError("workspace.error.graph.commands.an.edge.id.cannot.be.patched", new Error('An edge id cannot be patched'));
     const inverse = invertPatch(edge, command);
     applyPatch(edge, command);
-    return updateEdgeCommand(command.id, inverse.patch, command.label, inverse.unset);
+    return updateEdgeCommand(command.id, inverse.patch, uiMessageOf(command, command.label), inverse.unset);
   },
 
   'batch-update-node-properties': (graph, command) => {
@@ -235,13 +239,13 @@ const HANDLERS = {
       node.properties = applyMapPatch(node.properties, entry.properties);
       node.propertyTypes = applyMapPatch(node.propertyTypes, entry.propertyTypes);
     }
-    return batchUpdateNodePropertiesCommand(inverseEntries, command.label);
+    return batchUpdateNodePropertiesCommand(inverseEntries, uiMessageOf(command, command.label));
   },
 
   'move-nodes': (graph, command) => {
     const planned = command.entries.map(entry => {
       const node = graph.nodeMap?.[entry.id] || graph.nodes.find(candidate => candidate.id === entry.id);
-      if (!node) throw new Error(`Cannot move unknown node '${entry.id}'`);
+      if (!node) throw productError("workspace.error.graph.commands.cannot.move.unknown.node", new Error(`Cannot move unknown node '${entry.id}'`), { value1: entry.id });
       return { node, entry };
     });
     const restored = planned.map(({ node }) => ({
@@ -252,7 +256,7 @@ const HANDLERS = {
       node.oy = entry.oy;
       node._positionIsCenter = Object.hasOwn(entry, 'positionIsCenter') ? entry.positionIsCenter : true;
     }
-    return moveNodesCommand(restored, command.label);
+    return moveNodesCommand(restored, uiMessageOf(command, command.label));
   },
 
   composite: (graph, command) => {
@@ -265,7 +269,7 @@ const HANDLERS = {
       for (const inverse of inverses.reverse()) applyCommand(graph, inverse);
       throw error;
     }
-    return compositeCommand(inverses.reverse(), command.label);
+    return compositeCommand(inverses.reverse(), uiMessageOf(command, command.label));
   },
 };
 
@@ -289,21 +293,21 @@ function invertPatch(element, command) {
 
 function preflightNodePropertyBatch(graph, command) {
   if (!Array.isArray(command.entries) || command.entries.length === 0) {
-    throw new Error('A node property batch needs at least one entry');
+    throw productError("workspace.error.graph.commands.a.node.property.batch.needs.at.least.one.entry", new Error('A node property batch needs at least one entry'));
   }
   const seen = new Set();
   return command.entries.map(entry => {
     if (!entry || typeof entry.id !== 'string' || entry.id === '') {
-      throw new Error('A node property batch entry needs a node id');
+      throw productError("workspace.error.graph.commands.a.node.property.batch.entry.needs.a.node.id", new Error('A node property batch entry needs a node id'));
     }
-    if (seen.has(entry.id)) throw new Error(`Node '${entry.id}' occurs twice in the property batch`);
+    if (seen.has(entry.id)) throw productError("workspace.error.graph.commands.node.occurs.twice.in.the.property.batch", new Error(`Node '${entry.id}' occurs twice in the property batch`), { value1: entry.id });
     seen.add(entry.id);
     const node = graph.nodeMap?.[entry.id] || graph.nodes.find(candidate => candidate.id === entry.id);
-    if (!node) throw new Error(`Cannot update unknown node '${entry.id}'`);
+    if (!node) throw productError("workspace.error.graph.commands.cannot.update.unknown.node", new Error(`Cannot update unknown node '${entry.id}'`), { value1: entry.id });
     validateMapPatch(entry.properties, 'properties', entry.id);
     validateMapPatch(entry.propertyTypes, 'propertyTypes', entry.id);
     if (!isPlainMap(node.properties) || !isPlainMap(node.propertyTypes)) {
-      throw new Error(`Node '${entry.id}' has invalid property maps`);
+      throw productError("workspace.error.graph.commands.node.has.invalid.property.maps", new Error(`Node '${entry.id}' has invalid property maps`), { value1: entry.id });
     }
     return { node, entry };
   });
@@ -311,20 +315,20 @@ function preflightNodePropertyBatch(graph, command) {
 
 function validateMapPatch(patch, mapName, id) {
   if (!patch || !isPlainMap(patch.set) || !Array.isArray(patch.unset)) {
-    throw new Error(`Node '${id}' has an invalid ${mapName} patch`);
+    throw productError("workspace.error.graph.commands.node.has.an.invalid.patch", new Error(`Node '${id}' has an invalid ${mapName} patch`), { value1: id, value2: mapName });
   }
   const setNames = new Set(Object.keys(patch.set));
   for (const name of [...setNames, ...patch.unset]) {
-    if (!name || typeof name !== 'string') throw new Error(`Node '${id}' has an invalid property name`);
+    if (!name || typeof name !== 'string') throw productError("workspace.error.graph.commands.node.has.an.invalid.property.name", new Error(`Node '${id}' has an invalid property name`), { value1: id });
   }
   if (new Set(patch.unset).size !== patch.unset.length) {
-    throw new Error(`Node '${id}' has duplicate ${mapName} removals`);
+    throw productError("workspace.error.graph.commands.node.has.duplicate.removals", new Error(`Node '${id}' has duplicate ${mapName} removals`), { value1: id, value2: mapName });
   }
   for (const name of patch.unset) {
-    if (setNames.has(name)) throw new Error(`Node '${id}' both sets and removes '${name}'`);
+    if (setNames.has(name)) throw productError("workspace.error.graph.commands.node.both.sets.and.removes", new Error(`Node '${id}' both sets and removes '${name}'`), { value1: id, value2: name });
   }
   for (const value of Object.values(patch.set)) {
-    if (typeof value !== 'string') throw new Error(`Node '${id}' ${mapName} values must be strings`);
+    if (typeof value !== 'string') throw productError("workspace.error.graph.commands.node.values.must.be.strings", new Error(`Node '${id}' ${mapName} values must be strings`), { value1: id, value2: mapName });
   }
 }
 
@@ -519,8 +523,9 @@ export function createCommandHistory(options = {}) {
 // ═══════════════════════════════════════════════════════════════
 
 export function discardChangesMessage(documentName) {
-  return `${documentName || 'This workflow'} has unsaved changes.\n\n`
-    + 'OK discards them. Cancel keeps the current workflow so you can save it as GraphML first.';
+  return uiText('workspace.document.discardChanges', {
+    name: documentName || uiText('workspace.document.thisWorkflow'),
+  });
 }
 
 // Browsers ignore any custom text on beforeunload and only honour the fact that a handler asked to

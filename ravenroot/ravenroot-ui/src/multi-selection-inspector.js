@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import { adapterIdOf, catalogPropertyHasDeclaredDefault } from './adapter-binding.js';
 import { isPropertyRequiredNow, isPropertyVisible } from './property-condition.js';
 
@@ -151,13 +152,13 @@ export function multiPropertyState(nodes, property) {
 export function propertyStateLabel(property) {
   const state = property.state?.kind;
   if (property.type === 'SECRET_REFERENCE') {
-    if (state === MULTI_PROPERTY_STATE.SAME) return 'Configured on every selected node';
-    if (state === MULTI_PROPERTY_STATE.MIXED) return 'Configuration differs across selected nodes';
-    return 'Not configured on any selected node';
+    if (state === MULTI_PROPERTY_STATE.SAME) return uiText("workspace.multi.selection.inspector.configured.on.every.selected.node");
+    if (state === MULTI_PROPERTY_STATE.MIXED) return uiText("workspace.multi.selection.inspector.configuration.differs.across.selected.nodes");
+    return uiText("workspace.multi.selection.inspector.not.configured.on.any.selected.node");
   }
-  if (state === MULTI_PROPERTY_STATE.SAME) return 'Same value on every selected node';
-  if (state === MULTI_PROPERTY_STATE.MIXED) return 'Mixed values';
-  return 'Not declared on any selected node';
+  if (state === MULTI_PROPERTY_STATE.SAME) return uiText("workspace.multi.selection.inspector.same.value.on.every.selected.node");
+  if (state === MULTI_PROPERTY_STATE.MIXED) return uiText("workspace.multi.selection.inspector.mixed.values");
+  return uiText("workspace.multi.selection.inspector.not.declared.on.any.selected.node");
 }
 
 export function validateMultiPropertyValue(property, rawValue) {
@@ -170,51 +171,51 @@ export function validateMultiPropertyValue(property, rawValue) {
   if (property.maximumItems > 0 || property.maximumItemUtf8Bytes > 0) {
     const items = value.split(',');
     if (property.maximumItems > 0 && items.length > property.maximumItems) {
-      return `${property.displayName || property.name} contains more than ${property.maximumItems} items`;
+      return uiText("workspace.multi.selection.inspector.contains.more.than.items", { value: property.displayName || property.name, maximumItems: property.maximumItems });
     }
     if (property.maximumItemUtf8Bytes > 0
         && items.some(item => bytes(item.trim()) > property.maximumItemUtf8Bytes)) {
-      return `${property.displayName || property.name} contains an item above ${property.maximumItemUtf8Bytes} UTF-8 bytes`;
+      return uiText("workspace.multi.selection.inspector.contains.an.item.above.utf.8.bytes", { value: property.displayName || property.name, maximumItemUtf8Bytes: property.maximumItemUtf8Bytes });
     }
   }
   if (property.allowedValues?.length && !property.allowedValues.includes(value)) {
-    return `${property.displayName || property.name} must be one of its catalog choices`;
+    return uiText("workspace.multi.selection.inspector.must.be.one.of.its.catalog.choices", { value: property.displayName || property.name });
   }
   switch (property.type) {
     case 'BOOLEAN':
       return value === 'true' || value === 'false'
-        ? '' : `${property.displayName || property.name} must be true or false`;
+        ? '' : uiText("workspace.multi.selection.inspector.must.be.true.or.false", { value: property.displayName || property.name });
     case 'INTEGER':
-      if (!/^[+-]?\d+$/.test(value)) return `${property.displayName || property.name} must be an integer`;
+      if (!/^[+-]?\d+$/.test(value)) return uiText("workspace.multi.selection.inspector.must.be.an.integer", { value: property.displayName || property.name });
       try {
         const parsed = BigInt(value);
         if (parsed < -9223372036854775808n || parsed > 9223372036854775807n) {
-          return `${property.displayName || property.name} must fit a 64-bit integer`;
+          return uiText("workspace.multi.selection.inspector.must.fit.a.64.bit.integer", { value: property.displayName || property.name });
         }
         if (property.minimumValue != null && property.minimumValue !== ''
             && parsed < BigInt(property.minimumValue)) {
-          return `${property.displayName || property.name} must be at least ${property.minimumValue}`;
+          return uiText("workspace.multi.selection.inspector.must.be.at.least", { value: property.displayName || property.name, minimumValue: property.minimumValue });
         }
         if (property.maximumValue != null && property.maximumValue !== ''
             && parsed > BigInt(property.maximumValue)) {
-          return `${property.displayName || property.name} must be at most ${property.maximumValue}`;
+          return uiText("workspace.multi.selection.inspector.must.be.at.most", { value: property.displayName || property.name, maximumValue: property.maximumValue });
         }
         return '';
       } catch {
-        return `${property.displayName || property.name} must be an integer`;
+        return uiText("workspace.multi.selection.inspector.must.be.an.integer", { value: property.displayName || property.name });
       }
     case 'DECIMAL':
       if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) {
-        return `${property.displayName || property.name} must be a decimal number`;
+        return uiText("workspace.multi.selection.inspector.must.be.a.decimal.number", { value: property.displayName || property.name });
       }
       return '';
     case 'URI': {
       return javaUriSyntaxIsAbsolute(value)
-        ? '' : `${property.displayName || property.name} must be an absolute URI`;
+        ? '' : uiText("workspace.multi.selection.inspector.must.be.an.absolute.uri", { value: property.displayName || property.name });
     }
     case 'SECRET_REFERENCE':
       return /[\s\u0000-\u001f\u007f]/u.test(value)
-        ? `${property.displayName || property.name} must be a secret reference without whitespace`
+        ? uiText("workspace.multi.selection.inspector.must.be.a.secret.reference.without.whitespace", { value: property.displayName || property.name })
         : '';
     default:
       return '';
@@ -349,7 +350,7 @@ export function planMultiPropertyUpdate(nodes, commonProperties, changes, catalo
   for (const change of touched) {
     const property = commonByName.get(change.name);
     if (!property) {
-      errors.push(`Property ${change.name || '(unnamed)'} is not common to every selected node`);
+      errors.push(uiText("workspace.multi.selection.inspector.property.is.not.common.to.every.selected.node", { value: change.name || '(unnamed)' }));
       continue;
     }
     const validation = validateMultiPropertyValue(property, change.value);
@@ -362,7 +363,7 @@ export function planMultiPropertyUpdate(nodes, commonProperties, changes, catalo
   const entries = nodes.map(node => {
     const descriptor = descriptorByBehavior.get(node.behavior);
     if (!descriptor) {
-      errors.push(`No trusted catalog schema is available for ${node.name || node.id}`);
+      errors.push(uiText("workspace.multi.selection.inspector.no.trusted.catalog.schema.is.available.for", { value: node.name || node.id }));
       return null;
     }
     const nextProperties = { ...(node.properties || {}) };
@@ -370,7 +371,7 @@ export function planMultiPropertyUpdate(nodes, commonProperties, changes, catalo
       const declared = (descriptor.properties || []).find(property => property.name === change.name);
       const common = commonByName.get(change.name);
       if (!declared || propertyCompatibilitySignature(declared) !== propertyCompatibilitySignature(common)) {
-        errors.push(`Property ${change.name} is no longer compatible for ${node.name || node.id}`);
+        errors.push(uiText("workspace.multi.selection.inspector.property.is.no.longer.compatible.for", { name: change.name, value: node.name || node.id }));
         continue;
       }
       if (change.value === '') delete nextProperties[change.name];
@@ -389,11 +390,11 @@ export function planMultiPropertyUpdate(nodes, commonProperties, changes, catalo
         ? String(nextProperties[declared.name] ?? '') : '';
       const blank = adapterIdOf(raw) === '';
       if (!visible && touched.some(change => change.name === declared.name)) {
-        errors.push(`${declared.displayName || declared.name} is not visible for ${node.name || node.id}`);
+        errors.push(uiText("workspace.multi.selection.inspector.is.not.visible.for", { value: declared.displayName || declared.name, value2: node.name || node.id }));
       }
       if (blank) {
         if (isPropertyRequiredNow(declared, effectiveValues) && !unconfigured) {
-          errors.push(`${declared.displayName || declared.name} is required for ${node.name || node.id}`);
+          errors.push(uiText("workspace.multi.selection.inspector.is.required.for", { value: declared.displayName || declared.name, value2: node.name || node.id }));
         }
         continue;
       }

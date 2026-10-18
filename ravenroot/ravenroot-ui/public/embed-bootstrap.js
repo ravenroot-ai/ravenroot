@@ -10,12 +10,7 @@
   const MAX_STREAM_FRAME_BYTES = 64 * 1024;
   const MAX_OBSERVATION_RETRIES = 5;
   const encoder = new TextEncoder();
-  const FAILURE_COPY = Object.freeze({
-    error: 'The graph could not be displayed.',
-    expired: 'This viewing session has expired.',
-    offline: 'The graph service is unavailable.',
-    incompatible: 'This graph requires a newer viewer.',
-  });
+  const FAILURE_STATES = Object.freeze(['error', 'expired', 'offline', 'incompatible']);
   const THEMES = Object.freeze(['dark', 'light']);
 
   class EmbedRequestFailure extends Error {
@@ -230,7 +225,7 @@
     return { cursor, terminal: true };
   };
 
-  const readBootstrap = () => {
+  const readBootstrap = ({ requireFresh = true } = {}) => {
     const node = document.getElementById('ravenroot-embed-bootstrap');
     if (node === null) throw new Error('bootstrap unavailable');
     const value = JSON.parse(node.textContent);
@@ -239,8 +234,11 @@
     const v2Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt',
       'grantRevision', 'parentOrigin', 'showStartExecution', 'theme', 'viewerOrigin',
       'viewerSourceVersion'];
+    const localizedKeys = keys => [...keys, 'catalog', 'locale'].sort();
     const v2 = value?.viewerSourceVersion === '2';
-    if (!exactKeys(value, v2 ? v2Keys : v1Keys)
+    const expected = v2 ? v2Keys : v1Keys;
+    const localized = Object.hasOwn(value || {}, 'locale') || Object.hasOwn(value || {}, 'catalog');
+    if (!exactKeys(value, localized ? localizedKeys(expected) : expected)
         || !boundedString(value.exchangeId)
         || !boundedString(value.challenge)
         || !boundedString(value.channelId)
@@ -250,15 +248,19 @@
         || !boundedString(value.viewerOrigin, 2048)
         || !boundedString(value.parentOrigin, 2048)
         || (value.theme !== null && !THEMES.includes(value.theme))
+        || (localized && (!boundedString(value.locale, 64)
+          || typeof value.catalog !== 'string' || value.catalog.length > 49_152))
         || (v2 && typeof value.showStartExecution !== 'boolean')
         || location.origin !== value.viewerOrigin
         || window.parent === window) {
       throw new Error('bootstrap invalid');
     }
-    if (Date.parse(value.expiresAt) <= Date.now()) throw new EmbedRequestFailure('expired');
+    if (requireFresh && Date.parse(value.expiresAt) <= Date.now()) {
+      throw new EmbedRequestFailure('expired');
+    }
     const revision = BigInt(value.grantRevision);
     if (revision > 9223372036854775807n) throw new Error('bootstrap invalid');
-    return { ...value, revision };
+    return { ...value, locale: value.locale || 'en', catalog: value.catalog || '', revision };
   };
 
   const correlationId = () => crypto.randomUUID();
@@ -269,50 +271,76 @@
     return media ? (media.matches ? 'dark' : 'light') : 'dark';
   };
 
+  let localization = null;
   const showFailure = kind => {
-    const state = Object.hasOwn(FAILURE_COPY, kind) ? kind : 'error';
+    const state = FAILURE_STATES.includes(kind) ? kind : 'error';
     const root = document.getElementById('ravenroot-embed-viewer');
     const status = root?.querySelector('[data-viewer-status]');
     if (root === null || status === null) return;
     root.dataset.viewerState = state;
-    status.textContent = FAILURE_COPY[state];
+    const key = `embed.state.${state}`;
+    if (localization) status.textContent = localization.text(key);
+    else status.textContent = status.dataset[`i18n${state[0].toUpperCase()}${state.slice(1)}`] || '';
   };
 
   let viewer = null;
   let observation = null;
   const run = async () => {
-    const bootstrap = readBootstrap();
+    const bootstrap = readBootstrap({ requireFresh: false });
+    // Scrub the one-use credential before either same-origin module request can carry it as a
+    // referrer. Presentation metadata remains bounded and does not grant exchange authority.
+    history.replaceState(null, '', '/v1/embed/launch');
+    const localizationModule = await import('/embed-localization.js');
+    const candidate = bootstrap.catalog ? JSON.parse(bootstrap.catalog) : null;
+    const validated = localizationModule.validateEmbedLocaleChange(bootstrap.locale, candidate);
+    localization = localizationModule.createEmbedLocalization({ locale: validated.locale,
+      catalog: validated.catalog, document });
+    if (Date.parse(bootstrap.expiresAt) <= Date.now()) throw new EmbedRequestFailure('expired');
+    const viewerModule = await import('/embed-viewer.js');
     const theme = initialTheme(bootstrap.theme);
     if (document.documentElement.dataset.theme !== theme) {
       document.documentElement.dataset.theme = theme;
     }
     document.documentElement.style.colorScheme = theme;
-    // The one-use launch ticket has served its purpose. Remove it before any network request, history
-    // entry, referrer or parent-visible steady state can retain the credential-bearing query string.
-    history.replaceState(null, '', '/v1/embed/launch');
-    const sendToParent = (type, correlation) => window.parent.postMessage({
+    const sendToParent = (type, correlation, extra = {}) => window.parent.postMessage({
       protocolVersion: PROTOCOL_VERSION,
       channelId: bootstrap.channelId,
       correlationId: correlation,
       direction: 'viewer-to-parent',
       type,
+      ...extra,
     }, bootstrap.parentOrigin);
 
     let protocolReady = false;
     addEventListener('message', (event) => {
       const message = event.data;
-      const keys = ['channelId', 'correlationId', 'direction', 'protocolVersion', 'type'];
+      const pingKeys = ['channelId', 'correlationId', 'direction', 'protocolVersion', 'type'];
+      const localeKeys = [...pingKeys, 'catalog', 'locale'].sort();
+      const setLocale = message?.type === 'SET_LOCALE';
       if (event.source !== window.parent
           || event.origin !== bootstrap.parentOrigin
           || event.ports.length !== 0
-          || !exactKeys(message, keys)
+          || !exactKeys(message, setLocale ? localeKeys : pingKeys)
           || message.protocolVersion !== PROTOCOL_VERSION
           || message.channelId !== bootstrap.channelId
           || message.direction !== 'parent-to-viewer'
           || !protocolReady
-          || message.type !== 'PING'
+          || !['PING', 'SET_LOCALE'].includes(message.type)
           || !boundedString(message.correlationId)) return;
-      sendToParent('PONG', message.correlationId);
+      if (message.type === 'PING') {
+        sendToParent('PONG', message.correlationId);
+        return;
+      }
+      try {
+        if (!boundedString(message.locale, 64)
+            || (message.catalog !== null && (typeof message.catalog !== 'object'
+              || Array.isArray(message.catalog)))) return;
+        const validated = viewerModule.validateEmbedLocaleChange(message.locale, message.catalog);
+        if (validated.catalog !== null) localization.registerCatalog(validated.catalog);
+        localization.setLocale(validated.locale);
+        viewer?.refreshLocale();
+        sendToParent('LOCALE_CHANGED', message.correlationId, { locale: localization.locale });
+      } catch { /* Invalid presentation input cannot affect the viewer or its protocol state. */ }
     });
 
     const ackCorrelationId = await new Promise((resolve, reject) => {
@@ -395,7 +423,7 @@
 
     // This direct module call is the only projection handoff. The value remains in the viewer realm
     // and this closure: it is never published on window, storage, the URL, or postMessage.
-    const { createEmbedViewer } = await import('/embed-viewer.js');
+    const { createEmbedViewer } = viewerModule;
     let selectedProcess = null;
     let selectedGeneration = 0;
     let refreshTimer = null;
@@ -448,7 +476,7 @@
       }
       const next = viewer.updateRuns(envelope, selectedProcess);
       if (selectedProcess && !next) {
-        viewer.clearRuntime('The selected run is no longer authorized.');
+        viewer.clearRuntime(localization.text('embed.runs.noLongerAuthorized'));
         observation?.abort();
       }
       selectedProcess = next;
@@ -467,7 +495,7 @@
       await refreshRuns();
     };
     viewer = createEmbedViewer(document.getElementById('ravenroot-embed-viewer'), {
-      theme, onRunSelected: selectRun, onStartExecution: () => {
+      theme, localization, onRunSelected: selectRun, onStartExecution: () => {
         void startExecution().catch(failure => showFailure(failure?.kind ?? 'error'));
       },
     });
@@ -479,7 +507,8 @@
           clearInterval(refreshTimer);
           observation?.abort();
           viewer.clearRuntime(failure?.kind === 'expired'
-            ? 'Live observation authorization ended.' : 'Run list is temporarily unavailable.');
+            ? localization.text('embed.observation.authorizationEnded')
+            : localization.text('embed.runs.unavailable'));
         });
       }, 2_000);
       addEventListener('pagehide', () => {

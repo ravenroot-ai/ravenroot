@@ -4333,7 +4333,12 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         committed_entry = next((item for item in committed.get("entries", [])
                                 if isinstance(item, dict) and item.get("id") == identifier), None) \
             if isinstance(committed, dict) else None
-        if expected_metadata[identifier] != review["beforeMetadata"] \
+        remapped_before_holder: dict[str, object] = {
+            "entries": [copy.deepcopy(review["beforeMetadata"])],
+        }
+        remap_declared_candidate_references(remapped_before_holder, reference_replacements)
+        remapped_before = remapped_before_holder["entries"][0]
+        if expected_metadata[identifier] != remapped_before \
                 or committed_entry is None \
                 or candidate_semantic_payload(committed_entry) != review["beforeMetadata"]:
             errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
@@ -8086,7 +8091,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'javascript',
   '',
   'validateRuntimeConfiguration',
-  'e62c6375e9e2872f9ff0608d00eeaa95409eb2cca502443f74ce09f494d4edc3',
+  '5b5000e1952333c8a0762fbc586004c4fc2fe1933447fc5463a28584960680f0',
   1),
  ('ravenroot/ravenroot-ui/src/runtime-client.js',
   'javascript',
@@ -8104,13 +8109,13 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'javascript',
   '',
   'currentProgramAuthoringLimits',
-  'c0b47a04f8c03a63bce2ffcce426ed59fbd9b71c3ece50a6c100e2c02e215a9a',
+  '17e971de9251733b98a49e577f5120f09f23f1be1600ef6d8718e0a4c4368bb9',
   1),
  ('ravenroot/ravenroot-ui/src/app.js',
   'javascript',
   '',
   'ensureProgramGraphReady',
-  'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
+  '9ebcb027de55f8e7acb92f1c5543e9925719d55d953832a3493eae345f57ed34',
   1),
  ('compose.yaml', 'file', '', '', '3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57', 1),
  ('deploy/dev/sandbox-supervisor.sh',
@@ -8393,7 +8398,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'f720412a03658001b4c75fa1170814fd5b210b0a33a1b9208373cabc3b7df9bd',
+  '616f66c6c74cb0bc8444180d63de21e62feb98233854ff9a994f15cd88aea0d0',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -11048,7 +11053,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                         'status': 'retained',
                         'rationale': 'The token is a DOM selector, field name, status, or editor protocol '
                                      'atom.',
-                        'candidateIds': ['oc-012d1725fb9a2daeadfd',
+                        'candidateIds': ['oc-3b0ac554de32088b63c0', 'oc-012d1725fb9a2daeadfd',
                                          'oc-cf3bbb71996b48c0f46e',
                                          'oc-82a8e52250a56ec2c985',
                                          'oc-0672ac3c8e380ee0ec5f',
@@ -11059,7 +11064,6 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                          'oc-9f6632280bd5f9ba3096',
                                          'oc-7e6b45de3e179c7b3d85',
                                          'oc-5b73e4544bd834e64749',
-                                         'oc-c02bef0da48669d41646',
                                          'oc-351a2899d8713a810f5b',
                                          'oc-488bafb5cb7c8dbdc3b1',
                                          'oc-7531d78311d9fedec439',
@@ -11081,7 +11085,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
  'ui.editor-normalization': {'classification': 'derived',
                              'status': 'retained',
                              'rationale': 'The empty/zero value is local editor state normalization.',
-                             'candidateIds': ['oc-92a2477d557d100ff89b',
+                             'candidateIds': ['oc-5f403d81c5a84e919c95', 'oc-92a2477d557d100ff89b',
                                               'oc-da728b9d83ab6a52f4d4',
                                               'oc-f89271d05e6bb645ce56',
                                               'oc-f1a019d154a95a20c5b4',
@@ -11089,20 +11093,16 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                               'oc-8a33ce581e8b14da45ff',
                                               'oc-9410c36f41ade558606f',
                                               'oc-d48c087c63462af36bdb',
-                                              'oc-7f63e0e2bf3a57350f71',
                                               'oc-fa94bd615dba8166dac1',
                                               'oc-c92e68d85bedd9861d58',
                                               'oc-f9b827e4d78f2ce932e4',
                                               'oc-8d961996b7f86aa35383',
                                               'oc-c2dbd66896624f918487',
                                               'oc-520badde56933a3624f8']},
- 'ui.program-authoring-text': {'classification': 'presentation-text',
-                               'status': 'retained',
-                               'rationale': 'The literal is user-facing program-authoring status/help text.',
-                               'candidateIds': ['oc-42aa86187035ff50bd36',
-                                                'oc-b6a8afcabdd51ce9a1e3',
-                                                'oc-ebd242dd7cb634e7c45e',
-                                                'oc-fab56ab5f23eea7791d8']},
+ 'ui.program-authoring-catalog-key': {'classification': 'protocol-or-format-invariant',
+                                      'status': 'retained',
+                                      'rationale': 'The stable catalog key selects the configurable program-authoring limit message; it does not change the enforced batch limit.',
+                                      'candidateIds': ['oc-b728581b17ec448ff1ae']},
  'ui.program-language-selection': {'classification': 'presentation-text',
                                    'status': 'retained',
                                    'rationale': 'The token renders selected-state presentation for a program '
@@ -14756,11 +14756,12 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphProgramDependency.java"):
         "02ca6b2a286e62a9cd18c213bf2c1e628d2c6f686b44fee922ec48bbc59db2b4",
     GRAPH_AUTHORING_CLIENT_PATH:
-        "d3ad3be071629c1c2daab0b2409e7cdd6c0f08b0007989609334dccd29d5a3bf",
+        "fab6a44f0461e127f0f01fb69c2c986f8b6ca59ed922ea4d5564f4d8429626e9",
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
-        "b89d76d3694d4d1a0279473954d64cd64fa29197d6ae3c11c930d79028785fc6",
+        "8a5a2334231db4dbf2b9aa2209b66311b7ee7d64c34e34c238473e5553ade7c1",
+
     GRAPH_AUTHORING_STARTUP_IMPORT_PATH:
-        "fe40703b1b5dbb37dabba0015c1624b8e9110bc743cef56c18dfb67264543a70",
+        "db25d5fe4f9560ef350bb332f7cc9c0b394105c1b136f1d47318ebe7d7c29b3c",
     GRAPH_AUTHORING_PUBLISHER_PATH:
         "d0419b38a9b27141904f35c58e589e88ed924fd6e746f088a57f86fd81511dc8",
 }
@@ -14768,7 +14769,7 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 # unrelated candidates retain their existing semantic authorities rather than being claimed by
 # graph authoring as a whole file.
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
-    Path("ravenroot/ravenroot-ui/src/credential-request.js"): "4e01a17b2b5e2d0b6259f7ba4831ad66e58d8773fddac7a7a55606a80f349c62",
+    Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
         "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
@@ -14799,11 +14800,11 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationLocalDeploymentTest.java"):
         "440f5e358571d6fa36a786913aa9e447de0017deb0f82f20f4f5e3ffb679b26e",
     Path("ravenroot/ravenroot-ui/test/graph-authoring-client.test.js"):
-        "fbd73aacd5e369c25e8ed4d21ae3ce52ff0598492cce0923eaa4e328a77e92d7",
+        "c66eb2f94d97691475d63e3617b37c83ee729ab6cf7e42846bf5b5b783b41321",
     Path("ravenroot/ravenroot-ui/test/authoring-capability.test.js"):
         "d6e2dc02e534f903d71bc3042f5d1f551e8a0bad09cedc90627fee4d38873ac0",
     Path("ravenroot/ravenroot-ui/test/startup-import.test.js"):
-        "ae01fbd27d8bcbe3cf6a34471e3081f2e5b6e453f174dc6f2b0d043e5f9c2197",
+        "3dfc9e4581725122c654745c388bb298aeaf4725236f92c7544c4c9375017ddd",
     Path("ravenroot/ravenroot-ui/e2e/startup-import-redirects.spec.js"):
         "98be53710364e17721a2dbeca5a02b88ed400ffdeb5d6352b3ed4216d6d70e65",
     Path("scripts/test_publish_graph_artifacts.py"):
@@ -14831,44 +14832,45 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
 }
 GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",
-    "primaryPersistenceUnavailable": "eafe8e454b04629988c9872c068c74bce85257e23272a54193eb45f523feb360",
+    "primaryPersistenceUnavailable": "342b4fa699e42b1d46930147387078f5799ff3380ef58baa3c39c92ae3d51a48",
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
     "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
-    "openRepositoryGraph": "3a4d4f1aa89d27b33f2d1f3c97a66b96ed862b03b676e120d0bb948c0ec22f02",
-    "saveRepositoryGraph": "0489bca68694899ee22bce723e7db7e92f6af8d7125f93dd66147780d40d0499",
-    "repositoryHistory": "455dba6b85e8b9e2d202aa851c0e9c073b740eee02ec45bc8c6233aff5b19dcb",
-    "repositoryDiscard": "5048fc18dfcc587d53b40a41b759de139d5f0b178323a9bab81eee12025b2fc0",
-    "repositoryDelete": "954a18af00d54b9aabaa5731898bf33cdd740f14831a382546ff15870d2049d7",
-    "repositoryRelease": "584140f4b88f1ac4e046a1988c707159ed67b316c9fbf108f2a4f0c76824fd53",
-    "publishedArtifacts": "1c482b902b5dc8ec5ab654d5c7e886c3cff091856baa8ad1c4cb8ea298eb2908",
-    "connectRuntime": "409ba299be0186b8b5ee42f8aef09f0f0649a380bbef43d9f15a747de4e2cba2",
-    "createStartupImportPlaceholder": "8629a76a81d1669525f458040a9c14e4d2d886bba2b890a9b7974ca377e5211d",
+    "openRepositoryGraph": "ffc3c696d048e466efdbf3d7f6ada247479439ef81b88aaa7c67cacc28572483",
+    "saveRepositoryGraph": "04f9ff81ddd65d5880a221e558b786d1a05f024b1fc2ae1c41fb73784575e4c5",
+    "repositoryHistory": "d9e000b1797bcee8c49aafd346a98614ee4ddcdcb82c4e2e379fb09c6e7ab2d0",
+    "repositoryDiscard": "be75ee53c19a19b4bca346023b085d0d1db797bdedd9dc5822bdf5f6b6371186",
+    "repositoryDelete": "9536467e9e5975d388388ecac8fdcce7df2f03fb69647ba17a582dbb1acd800f",
+    "repositoryRelease": "6769678ca585cfb40e137f6ff24b986bc89e8fac92e2db5b4f053f51a4559bda",
+    "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
+    "connectRuntime": "4ba61ed61c46924c6802d3fa2899c91f8d195d67e6416306738c06bdded5125d",
+    "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
+
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
     "startupImportBindingIsCurrent": "5b79d5f6babdfab051815044c3733970c2bb9cd701915b6ac68c098e7df150d4",
     "startupImportPlaceholderIsUntouched": "c7250f2af0a9444f5a61fd6a92dfdcd77d960a2cf8b682effa17287487c4e176",
-    "startupImportFailure": "081e9af5a6a425f33f74d165d70f1537af97bb75e3d73d347b17691b0df7beaf",
-    "parsePreparedGraph": "bf35edb6a58f448772bc3436a73f545345837ca12a31b175fb4fe5095a00c7e9",
-    "runStartupImport": "ea1e0c6687de24f7da54a115df92593ff8d39695c022d64ec0dabe3cfa168c23",
+    "startupImportFailure": "eb094a0cdd4b14433d541bfb5c5af540a97729ca40565d4225b34edc59fcb90e",
+    "parsePreparedGraph": "adedc817150cc3d2e1544f66d507bfb8aca8273ba302e835a85f9a253f1a3db4",
+    "runStartupImport": "c4ac77bde44b11c3693bf5f511406f7076b10fdaa9bea6ca07423f15e5d2bb7d",
     "renderStartupImport": "d68694e197928c9bc52a5b2d9060d24a8d0aac2e0bb3fd8488604333b72e7104",
-    "initializeStartupImport": "a06fe540103b1e659e771465ad4d4000939c324e5bd8bfc56208494641ed7758",
+    "initializeStartupImport": "01a25bf69f2e9bd19ae2f64dbcb8d27897b570c959e238dd60dd9b64d522e756",
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
-        "16b610ebfeb286315828985a1b15c8ca884ae03c879a1d50b8784f84b7bb7f08",
+        "413ae14ef232086fb9a1c0ec233892efc5829de3ebe6e9416a378468fcefbc5d",
     (Path("ravenroot/ravenroot-ui/src/workspace.js"), "createDocumentRecord"):
-        "1f8b17e9993198666b5110ee681dc30f3260cef271569525b8449d28b9ba0609",
+        "dce4ad56c2a0f50c9f6c91e45c510bb8f0f9d74267f4f5923d5ea99120e60dda",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):
-        "19379383672efec4863430ab57099e9d66fee3995c35775804cb57b6db68e34f",
+        "6dbd06006ad07b134568f3e0674a8c2426651892260f418eda13a23bae270eed",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "createEmptyWorkflowDocument"):
         "97767dbd5de84c28e58797c2e3c29c385ebeabaf9f537947014c350366e3bc03",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "isEmptyWorkflowDocument"):
         "b177d59c4954cb96984f9a6fae71ad693a127bb9a21d363c422a58c913281054",
     (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "fetchInputTextWithinByteLimit"):
-        "fbd7b5689ea65c82a2052c1ce3c98da84d5bdb266751053bc935ead5079fda26",
+        "33911b68dbf505e8bbc31bd8a22c16e769293e44fe33e2588668eeab584bea94",
     (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "readResponseTextWithinByteLimit"):
-        "70bcc2174e27bfe6fc474c4394b365cd7c0a4524ea09c313f553491a176dc05d",
+        "2fcf455388b0fb109877bb625d063319bad1453d967fff91e56677c975cf725a",
     (GRAPH_AUTHORING_GRAPH_PARSERS_PATH, "requireDocumentByteLimit"):
-        "33dae37154ff2b7db6a20132b41427155524b195e228b6dc0987973ed7d04156",
+        "0096e4f2b0e93e9273bfd60bb937d45a567708fefa6a9d79379b52d67208d1c2",
 }
 GRAPH_AUTHORING_SETTINGS = (
     ("graph.authoring.mode", "mode", "RAVENROOT_GRAPH_AUTHORING_MODE", "LOCAL", "LOCAL or GIT."),
@@ -15097,7 +15099,7 @@ def graph_authoring_authority_from_source(
         (ui, "fetchInputTextWithinByteLimit(target.url, maxBytes"),
         (ui, "await fetch(input, { signal, redirect: 'manual' })"),
         (ui, "if (response.type === 'opaqueredirect') {\n"
-             "        throw new StartupImportError('redirect-not-allowed',"),
+             '        throw productError("workspace.startup.failure.redirect-not-allowed", new StartupImportError(\'redirect-not-allowed\','),
         (ui, "parsePreparedGraph(text, target.filename, { automatic: true, maxBytes })"),
         (ui, "workspaceAuthority.state === 'ready'"),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "authoring-capability.js")],

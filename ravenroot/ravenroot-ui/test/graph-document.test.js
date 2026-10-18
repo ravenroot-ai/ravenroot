@@ -22,6 +22,8 @@ import {
   serializeGraphML,
   setGraphPresentation,
   validateWorkflow,
+  validateWorkflowFindings,
+  workflowFindingText,
   wouldSaveStampEachJoinPolicy,
 } from '../src/graph-document.js';
 
@@ -159,6 +161,29 @@ describe('editable GraphML documents', () => {
     graph.nodes.push(createNode('error-2', 'Error 2', 'ERROR', { x: 300, y: 500 }));
 
     expect(validateWorkflow(graph)).toContain('The graph must contain at most one ERROR node');
+  });
+
+  it('keeps legacy English validation exact while exposing typed findings for localized presentation', () => {
+    const graph = createWorkflowDocument();
+    graph.nodes = graph.nodes.filter(node => node.kind !== 'START');
+    graph.edges[0].id = ' ';
+    const findings = validateWorkflowFindings(graph);
+
+    expect(findings).toEqual(expect.arrayContaining([
+      { key: 'workspace.workflow.validation.oneStart', params: {} },
+      { key: 'workspace.workflow.validation.edgeId', params: {
+        edgeIdFinding: { kind: 'nonblank', params: {} },
+      } },
+    ]));
+    expect(validateWorkflow(graph)).toEqual(expect.arrayContaining([
+      'The graph must contain exactly one START node', 'Edge id must be a nonblank string',
+    ]));
+    const text = (key, params = {}) => key === 'workspace.edge.validation.stableId.nonblank'
+      ? 'IDENTITÀ OBBLIGATORIA' : `${key}:${params.reason || ''}`;
+    expect(findings.map(finding => workflowFindingText(finding, text))).toEqual(expect.arrayContaining([
+      'workspace.workflow.validation.oneStart:',
+      'workspace.workflow.validation.edgeId:IDENTITÀ OBBLIGATORIA',
+    ]));
   });
 
   // The default document still ships with an error terminal as a recommendation, even though the

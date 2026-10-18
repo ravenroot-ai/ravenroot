@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 const DISCLOSURE_KEY = 'ravenroot.ui.node-palettes.open.v1';
 
 function readOpen() {
@@ -16,9 +17,17 @@ export function renderNodePalettes(container, state, callbacks) {
   const fragment = document.createDocumentFragment();
   const create = document.createElement('form');
   create.className = 'palette-create';
-  create.innerHTML = '<label>New palette <input name="name" maxlength="120" required '
-    + 'data-tooltip="Name new personal palette"></label>'
-    + '<button type="submit" data-tooltip="Create personal palette">Create</button>';
+  const createLabel = document.createElement('label');
+  createLabel.append(uiText('workspace.node.palette.create.label') + ' ');
+  const createInput = document.createElement('input');
+  createInput.name = 'name'; createInput.maxLength = 120; createInput.required = true;
+  createInput.dataset.tooltip = uiText('workspace.node.palette.create.nameHelp');
+  createLabel.append(createInput);
+  const createButton = document.createElement('button');
+  createButton.type = 'submit';
+  createButton.dataset.tooltip = uiText('workspace.node.palette.create.submitHelp');
+  createButton.textContent = uiText('workspace.node.palette.create.submit');
+  create.append(createLabel, createButton);
   create.addEventListener('submit', event => {
     event.preventDefault();
     const name = String(new FormData(create).get('name') || '').trim();
@@ -29,7 +38,7 @@ export function renderNodePalettes(container, state, callbacks) {
   if (state.pending) {
     const status = document.createElement('p');
     status.className = 'catalog-empty';
-    status.textContent = 'Loading personal palettes…';
+    status.textContent = uiText("workspace.node.palette.view.loading.personal.palettes");
     fragment.append(status);
   } else if (state.error) {
     const status = document.createElement('p');
@@ -39,7 +48,7 @@ export function renderNodePalettes(container, state, callbacks) {
   } else if (!state.palettes.length) {
     const status = document.createElement('p');
     status.className = 'catalog-empty';
-    status.textContent = 'Create a palette to save reusable configured nodes.';
+    status.textContent = uiText("workspace.node.palette.view.create.a.palette.to.save.reusable.configured");
     fragment.append(status);
   }
 
@@ -55,15 +64,20 @@ export function renderNodePalettes(container, state, callbacks) {
     });
     const summary = document.createElement('summary');
     summary.textContent = palette.name;
-    summary.setAttribute('aria-label', `${palette.name} personal palette`);
+    summary.setAttribute('aria-label', uiText("workspace.node.palette.view.personal.palette", { name: palette.name }));
     details.append(summary);
 
     const actions = document.createElement('div');
     actions.className = 'palette-actions';
-    for (const [label, action] of [['Save selected node', 'save'], ['Rename', 'rename'], ['Delete', 'delete']]) {
+    for (const [labelKey, action] of [
+      ['workspace.node.palette.action.saveSelected', 'save'],
+      ['workspace.node.palette.view.rename', 'rename'],
+      ['workspace.node.palette.view.delete', 'delete'],
+    ]) {
+      const label = uiText(labelKey);
       const button = document.createElement('button');
       button.type = 'button'; button.textContent = label;
-      button.dataset.tooltip = `${label} in ${palette.name}`;
+      button.dataset.tooltip = uiText("workspace.node.palette.view.in", { label, palette: palette.name });
       button.addEventListener('click', () => callbacks[`on${action[0].toUpperCase()}${action.slice(1)}`](palette));
       actions.append(button);
     }
@@ -77,13 +91,13 @@ export function renderNodePalettes(container, state, callbacks) {
       insert.type = 'button'; insert.draggable = true;
       insert.className = 'node-template-insert';
       insert.textContent = template.name;
-      insert.setAttribute('aria-label', `Insert saved node ${template.name}`);
-      insert.dataset.tooltip = `Insert saved node ${template.name}`;
+      insert.setAttribute('aria-label', uiText("workspace.node.palette.view.insert.saved.node", { name: template.name }));
+      insert.dataset.tooltip = uiText("workspace.node.palette.view.insert.saved.node.2", { name: template.name });
       insert.addEventListener('click', () => callbacks.onInsert(template, null));
       insert.addEventListener('dragstart', event => callbacks.onDragStart(event, template));
       const destination = document.createElement('select');
-      destination.setAttribute('aria-label', `Move saved node ${template.name} to palette`);
-      destination.dataset.tooltip = `Move saved node ${template.name} to palette`;
+      destination.setAttribute('aria-label', uiText("workspace.node.palette.view.move.saved.node.to.palette", { name: template.name }));
+      destination.dataset.tooltip = uiText("workspace.node.palette.view.move.saved.node.to.palette.2", { name: template.name });
       for (const candidate of state.palettes) {
         const option = document.createElement('option');
         option.value = candidate.id;
@@ -93,14 +107,14 @@ export function renderNodePalettes(container, state, callbacks) {
       }
       destination.addEventListener('change', () => callbacks.onMoveTemplate(template, destination.value));
       const rename = document.createElement('button');
-      rename.type = 'button'; rename.textContent = 'Rename';
-      rename.setAttribute('aria-label', `Rename saved node ${template.name}`);
-      rename.dataset.tooltip = `Rename saved node ${template.name}`;
+      rename.type = 'button'; rename.textContent = uiText("workspace.node.palette.view.rename");
+      rename.setAttribute('aria-label', uiText("workspace.node.palette.view.rename.saved.node", { name: template.name }));
+      rename.dataset.tooltip = uiText("workspace.node.palette.view.rename.saved.node.2", { name: template.name });
       rename.addEventListener('click', () => callbacks.onRenameTemplate(template));
       const remove = document.createElement('button');
-      remove.type = 'button'; remove.textContent = 'Delete';
-      remove.setAttribute('aria-label', `Delete saved node ${template.name}`);
-      remove.dataset.tooltip = `Delete saved node ${template.name}`;
+      remove.type = 'button'; remove.textContent = uiText("workspace.node.palette.view.delete");
+      remove.setAttribute('aria-label', uiText("workspace.node.palette.view.delete.saved.node", { name: template.name }));
+      remove.dataset.tooltip = uiText("workspace.node.palette.view.delete.saved.node.2", { name: template.name });
       remove.addEventListener('click', () => callbacks.onDeleteTemplate(template));
       row.append(insert, destination, rename, remove);
       details.append(row);

@@ -23,7 +23,9 @@ standard image and must be installed and enabled under the operator's extension 
 GraphML contains an opaque `brokerProfile` and optional values that can only narrow or select within
 that profile. The operator profile owns the broker host and port, TLS requirement, virtual host,
 username, opaque credential reference, exact exchange/routing/header/reply-to authority and every
-resource ceiling. Graph content cannot supply an endpoint, username, credential reference, password,
+resource ceiling. Topic exchanges are a separate exact allow-list: including one is the operator's
+assertion that the already-existing broker exchange has type `topic`. The extension never declares
+or changes an exchange. Graph content cannot supply an endpoint, username, credential reference, password,
 TLS downgrade or topology declaration. Plaintext profiles require either the legacy exact-loopback
 case or an exact administrator trusted-network rule for the protocol, port, tenant/profile, host,
 and complete resolved address set.
@@ -39,11 +41,14 @@ Its semicolon-delimited value has exactly these fields:
 ```text
 host;port;tls;vhost;username;credentialRef;defaultExchange;additionalExchanges;
 defaultRoutingKey;additionalRoutingKeys;approvedHeaders;approvedReplyTo;allowPersistent;
-maxPriority;maxExpirationMs;maxConcurrency;maxPerSecond;timeoutMs;maxBodyBytes;retries
+maxPriority;maxExpirationMs;maxConcurrency;maxPerSecond;timeoutMs;maxBodyBytes;retries;
+topicExchanges
 ```
 
-The displayed line breaks are explanatory; the environment value itself is one line. Comma separates
-the exact allow-list fields. Wildcards are not supported. Booleans are exactly `true` or `false`.
+The displayed line breaks are explanatory; the environment value itself is one line. The final
+`topicExchanges` field is optional for compatibility with queue and legacy Producer profiles. Comma
+separates the exact allow-list fields. Wildcards are not supported in exchange or publish routing-key
+authority. Booleans are exactly `true` or `false`.
 Conservative hard maxima are 16 concurrent publications per profile, 100 admissions per second,
 30 seconds for the one total deadline, 1 MiB per body, priority 9, expiration 24 hours and three
 pre-publish retries.
@@ -66,8 +71,8 @@ boundary, consistent with the SDK's `SecretValue` contract.
 
 | Node | Required string properties | Optional properties and defaults |
 |---|---|---|
-| `amqp.publish` | `brokerProfile` | strings `exchange`, `routingKey`, `contentType`, `contentEncoding`, `messageId`, `correlationId`, `replyTo`, `type`, `appId`; text `headers`; integers `priority`, `expirationMs`, `confirmTimeoutMs`, `maxConcurrency`, `retries`; Boolean `mandatory=true`, `persistent=false`; `recovery.repeatable` has no default |
-| `amqp.consume` | `brokerProfile` | string `queue`; integers `prefetch`, `maxInFlight`, `retryBackoffMs`, `maxRetryBackoffMs`, `drainTimeoutMs`, `poisonAttempts`; `poisonPolicy=profile` (`profile` or `dead-letter`); conditional `deadLetterMode=broker-dlx`; `checkpointPolicy=require-durable`; `resourceMode=shared` (`shared`, `exclusive`) |
+| `amqp.publish` | `brokerProfile` | `mode=Producer` (`Producer`, `Publisher`); conditional string `queue` for Producer; strings `exchange`, `routingKey`, `contentType`, `contentEncoding`, `messageId`, `correlationId`, `replyTo`, `type`, `appId`; text `headers`; integers `priority`, `expirationMs`, `confirmTimeoutMs`, `maxConcurrency`, `retries`; Boolean `mandatory=true`, `persistent=false`; `recovery.repeatable` has no default |
+| `amqp.consume` | `brokerProfile` | `mode=Consumer` (`Consumer`, `Subscriber`); conditional `queue` and `resourceMode=shared` for Consumer; required conditional `exchange` and `bindingPattern` for Subscriber; integers `prefetch`, `maxInFlight`, `retryBackoffMs`, `maxRetryBackoffMs`, `drainTimeoutMs`, `poisonAttempts`; `poisonPolicy=profile` (`profile` or `dead-letter`); conditional `deadLetterMode=broker-dlx`; `checkpointPolicy=require-durable` |
 
 Blank optional numeric or string fields use the operator profile. Every numeric value can only
 tighten its profile rule, except the consumer reconnect fields whose direction is stated below.
@@ -76,7 +81,15 @@ recovery-repeatability field because durable delivery custody and acknowledgemen
 
 ## Inspector and payload
 
-The inspector exposes `brokerProfile`; authorized exchange and routing defaults; mandatory publication;
+The inspector starts with simple Producer/Publisher and Consumer/Subscriber selectors and removes
+inactive conditional fields from authored configuration when a mode changes. Producer can either set
+`queue`, which publishes through the default exchange, or continue to edit an existing legacy
+exchange/routing destination. Queue and exchange/routing destinations are mutually exclusive.
+Publisher requires a nonempty exchange from `topicExchanges` and an exact authorized routing key.
+Payload overrides remain within those same Publisher constraints; topic wildcards belong to Subscriber
+binding patterns and are not expanded during publication.
+
+The inspector also exposes `brokerProfile`; authorized exchange and routing defaults; mandatory publication;
 content type/encoding; persistence, priority and expiration; message, correlation, reply-to, type and
 application identifiers; approved headers; and timeout, concurrency and retry tightening. `mandatory`
 must remain `true`. Numeric graph values can only lower the profile ceiling.
@@ -151,20 +164,32 @@ Its semicolon-delimited value has exactly these fields:
 
 ```text
 queue;prefetch;approvedHeaders;identityHeader;maxBodyBytes;maxHeaderBytes;
-retryBackoffMs;maxRetryBackoffMs;poisonAttempts;poisonPolicy;drainTimeoutMs
+retryBackoffMs;maxRetryBackoffMs;poisonAttempts;poisonPolicy;drainTimeoutMs;
+topicExchanges;bindingPatterns;maxEphemeralSubscriptions
 ```
 
-The displayed break is explanatory; the value is one line. Queue, QoS, header projection, optional
+The displayed break is explanatory; the value is one line. The legacy 11-field queue-only form remains
+valid. The extended 14-field form may leave `queue` empty for a subscriber-only profile. Queue, QoS, header projection, optional
 identity-header fallback, reject/dead-letter poison policy and all retry/drain ceilings are operator-owned. GraphML can carry only the
-opaque profile, an exact queue confirmation and numeric tightening. `poisonPolicy=dead-letter`
-requires `deadLetterMode=broker-dlx`; the extension never declares, binds or modifies broker topology.
-The queue must already have the operator's intended dead-letter configuration.
+opaque profile, the Consumer or Subscriber mode, an exact authorized queue or topic exchange and
+binding pattern selection, and numeric tightening. `poisonPolicy=dead-letter`
+requires `deadLetterMode=broker-dlx`; Consumer queues must already have the operator's intended
+dead-letter configuration. Subscriber mode declares only its own server-named ephemeral queue and
+binding, never an exchange or durable/shared queue. `topicExchanges` and
+`bindingPatterns` are exact allow-lists and `maxEphemeralSubscriptions` is a per-profile ceiling from
+1 to 16 when either list is present. The operator must predeclare each listed exchange as type `topic`;
+the wire protocol can prove that an exchange exists when binding, but passive inspection cannot prove
+its type without a topology declaration. A missing exchange or refused bind fails startup cleanly.
 
 `resourceMode=shared` is the default and allows independent deployed sources in this process to
 consume the same authorized queue. RabbitMQ distributes messages among those consumers; it does not
-copy every message to every graph. Topic-style fan-out still requires a distinct predeclared bound
-queue for each subscriber. `resourceMode=exclusive` reserves the tenant/profile/queue tuple for one
-source in this process. An exclusive holder conflicts with both shared and exclusive acquisition,
+copy every message to every graph. In Subscriber mode Ravenroot asks the broker for a server-named,
+non-durable, exclusive, auto-delete queue, binds it to the authorized topic exchange and pattern, and
+waits for `consume-ok` before readiness. Each active source therefore receives its own copy. No queue
+name is authored or serialized. The process also caps active subscriptions at 32 globally, 16 per
+tenant and the smaller operator profile ceiling. `resourceMode=exclusive` reserves the
+tenant/profile/queue tuple for one Consumer source in this process. An exclusive holder conflicts with
+both shared and exclusive acquisition,
 regardless of startup order. This setting does not create a broker-exclusive consumer and does not
 coordinate separate Ravenroot processes. See the [first-party source multiplicity inventory](../source-multiplicity.md)
 for the boundary used by other source bundles.
@@ -180,7 +205,14 @@ never below the enforced 100 ms minimum and never above `maxRetryBackoffMs`, who
 be below one second. A
 durably accepted and broker-acknowledged delivery resets that streak. A new `consume-ok` alone does
 not reset it. Stop, rollback and shutdown interrupt the wait, revoke the generation before cleanup,
-release that source's queue lease and close all resources. A late traversal completion from an old generation
+release that source's lease and close all resources. Subscriber cleanup cancels consumption, deletes
+the owned queue when the channel remains available and closes the connection; exclusive auto-delete
+is the broker-side fallback. Stop always performs bounded local cleanup and explicitly deletes the
+queue when the broker remains reachable. The client requests a 30-second heartbeat; after an
+undetected network partition, the negotiated heartbeat and broker transport-failure detection bound
+when the broker can observe the lost connection and delete the exclusive auto-delete queue. Every
+Subscriber reconnect creates a fresh queue and binding, so
+messages published while it is offline are intentionally lost. A late traversal completion from an old generation
 cannot acknowledge.
 
 Each delivery becomes a bounded immutable `amqp.delivery.v1` event. It contains safe exchange/routing,
@@ -189,7 +221,11 @@ correlation and source provenance. Client objects, channels and delivery tags ne
 traversal. Durable identity must be supplied by the producer's AMQP `message_id`, or by the explicitly
 authorized identity header, and producers should keep that identifier unique for one logical message.
 The durable key binds that selected identity to a domain-versioned SHA-256 digest over unambiguous
-length-prefixed profile, queue, identity, exchange, routing key and original body bytes. Thus a true
+length-prefixed profile, stable destination scope, identity, exchange, routing key and original body
+bytes. Subscriber scope uses an unambiguous encoded exchange and binding pattern, never its generated
+queue name, so a redelivery across fresh queue generations retains its key while distinct topic
+destinations cannot collide. Durable ingress additionally scopes receipts to the deployment and source
+node, so two graphs subscribing to the same topic remain independent. Thus a true
 redelivery produces the same key, while accidental producer reuse of one ID for different immutable
 content cannot be mistaken for `Duplicate`. The digest is a collision guard, never a replacement for
 producer identity; correlation id, delivery tag and redelivery state are not identity inputs.
@@ -204,6 +240,8 @@ cross-replica exactly-once delivery, and Ravenroot does not replay a traversal i
 downstream effects must remain idempotent.
 
 The deterministic suite uses an injected protocol seam for lifecycle, reconnect, generation fencing,
-ack/nack, redelivery, poison, backpressure and stop races. This optional module does not bundle a live
-RabbitMQ/container fixture; operators should additionally verify their TLS, credentials, queue ACL,
+ack/nack, redelivery, poison, backpressure, authorization, resource ceilings and stop races. A pinned,
+disposable RabbitMQ integration verifies competing Consumers, independent topic Subscribers, routing
+filters, explicit cleanup, offline loss, fresh reconnect queues, missing-exchange failure and both
+Producer and Publisher wire paths. Operators should still verify their TLS, credentials, ACL, heartbeat,
 QoS and DLX policy against their broker environment.

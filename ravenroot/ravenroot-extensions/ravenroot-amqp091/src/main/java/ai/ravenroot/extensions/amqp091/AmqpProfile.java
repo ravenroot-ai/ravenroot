@@ -27,6 +27,7 @@ public record AmqpProfile(
         int timeoutMs,
         int maxBodyBytes,
         int retries,
+        Set<String> topicExchanges,
         PlaintextAuthorization plaintextAuthorization) {
 
     public AmqpProfile(
@@ -37,17 +38,37 @@ public record AmqpProfile(
             int maxPerSecond, int timeoutMs, int maxBodyBytes, int retries) {
         this(tenant, name, host, port, tls, vhost, username, credentialRef, defaultExchange, exchanges,
                 defaultRoutingKey, routingKeys, headers, replyTo, allowPersistent, maxPriority,
-                maxExpirationMs, maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries, null);
+                maxExpirationMs, maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries, Set.of(), null);
+    }
+
+    public AmqpProfile(
+            String tenant, String name, String host, int port, boolean tls, String vhost,
+            String username, String credentialRef, String defaultExchange, Set<String> exchanges,
+            String defaultRoutingKey, Set<String> routingKeys, Set<String> headers, Set<String> replyTo,
+            boolean allowPersistent, int maxPriority, long maxExpirationMs, int maxConcurrency,
+            int maxPerSecond, int timeoutMs, int maxBodyBytes, int retries, Set<String> topicExchanges) {
+        this(tenant, name, host, port, tls, vhost, username, credentialRef, defaultExchange, exchanges,
+                defaultRoutingKey, routingKeys, headers, replyTo, allowPersistent, maxPriority,
+                maxExpirationMs, maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries,
+                topicExchanges, null);
     }
 
     public AmqpProfile {
         exchanges = copy(exchanges);
         routingKeys = copy(routingKeys);
+        topicExchanges = copy(topicExchanges);
         headers = copy(headers);
         replyTo = copy(replyTo);
         requireValidShape(tenant, name, host, port, vhost, username, credentialRef,
                 defaultExchange, exchanges, defaultRoutingKey, routingKeys, headers, replyTo,
                 maxPriority, maxExpirationMs, maxConcurrency, maxPerSecond, timeoutMs, maxBodyBytes, retries);
+        boolean invalidTopicExchange = !validNames(topicExchanges, 255, false);
+        for (String value : topicExchanges) {
+            if (!value.equals(defaultExchange) && !exchanges.contains(value)) invalidTopicExchange = true;
+        }
+        if (invalidTopicExchange) {
+            throw new IllegalArgumentException("invalid AMQP operator profile");
+        }
         if (!tls && !loopback(host) && (plaintextAuthorization == null
                 || !plaintextAuthorization.matches("amqp091", tenant + "/" + name, host, port))) {
             throw new IllegalArgumentException("invalid AMQP operator profile");
@@ -84,6 +105,10 @@ public record AmqpProfile(
 
     boolean allowsRoutingKey(String routingKey) {
         return defaultRoutingKey.equals(routingKey) || routingKeys.contains(routingKey);
+    }
+
+    boolean allowsTopicExchange(String exchange) {
+        return !exchange.isEmpty() && topicExchanges.contains(exchange) && allowsExchange(exchange);
     }
 
     boolean allowsHeader(String header) {

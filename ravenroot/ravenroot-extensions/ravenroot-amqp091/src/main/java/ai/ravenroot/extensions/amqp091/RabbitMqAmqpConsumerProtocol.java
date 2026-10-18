@@ -20,6 +20,7 @@ import java.util.function.Supplier;
 
 /** Official RabbitMQ adapter with a single channel-owning source thread. */
 final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol {
+    static final int REQUESTED_HEARTBEAT_SECONDS = 30;
     private final Supplier<ConnectionFactory> factories;
 
     RabbitMqAmqpConsumerProtocol() { this(ConnectionFactory::new); }
@@ -29,24 +30,40 @@ final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol {
 
     @Override public Owner open(AmqpProfile profile, AmqpConsumerPolicy policy, char[] password,
                                 int prefetch) throws Failure {
+        return open(profile, policy, password, prefetch, Destination.consumer(policy.queue()));
+    }
+
+    @Override public Owner open(AmqpProfile profile, AmqpConsumerPolicy policy, char[] password,
+                                int prefetch, Destination destination) throws Failure {
         Connection connection = null;
         Channel channel = null;
+        String ownedQueue = null;
         try {
             ConnectionFactory factory = Objects.requireNonNull(factories.get());
             factory.setHost(profile.host()); factory.setPort(profile.port()); factory.setVirtualHost(profile.vhost());
             factory.setUsername(profile.username()); factory.setPassword(new String(password));
             factory.setConnectionTimeout(profile.timeoutMs()); factory.setHandshakeTimeout(profile.timeoutMs());
             factory.setChannelRpcTimeout(profile.timeoutMs()); factory.setShutdownTimeout(profile.timeoutMs());
+            factory.setRequestedHeartbeat(REQUESTED_HEARTBEAT_SECONDS);
             factory.setAutomaticRecoveryEnabled(false); factory.setTopologyRecoveryEnabled(false);
             if (profile.tls()) { factory.useSslProtocol(); factory.enableHostnameVerification(); }
             connection = factory.newConnection("ravenroot-amqp091-consumer");
             channel = connection.createChannel();
             if (channel == null) throw new java.io.IOException("channel unavailable");
             channel.basicQos(prefetch);
-            RabbitOwner owner = new RabbitOwner(connection, channel, prefetch, policy);
-            owner.subscribe(policy.queue());
+            String queue = destination.queue();
+            if (destination.mode() == Destination.Mode.SUBSCRIBER) {
+                queue = channel.queueDeclare("", false, true, true, null).getQueue();
+                ownedQueue = queue;
+                channel.queueBind(queue, destination.exchange(), destination.bindingPattern());
+            }
+            RabbitOwner owner = new RabbitOwner(connection, channel, prefetch, policy, ownedQueue);
+            owner.subscribe(queue);
             return owner;
         } catch (Exception failure) {
+            if (ownedQueue != null && channel != null) {
+                try { if (channel.isOpen()) channel.queueDelete(ownedQueue); } catch (Exception ignored) { }
+            }
             if (channel != null) try { channel.abort(); } catch (Exception ignored) { }
             if (connection != null) try { connection.abort(); } catch (Exception ignored) { }
             throw new Failure(permanent(failure), permanent(failure)
@@ -60,12 +77,15 @@ final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol {
         private final Channel channel;
         private final ArrayBlockingQueue<Object> events;
         private final AmqpConsumerPolicy policy;
+        private final String ownedQueue;
         private final AtomicBoolean closed = new AtomicBoolean();
         private String consumerTag;
 
-        RabbitOwner(Connection connection, Channel channel, int prefetch, AmqpConsumerPolicy policy) {
+        RabbitOwner(Connection connection, Channel channel, int prefetch, AmqpConsumerPolicy policy,
+                    String ownedQueue) {
             this.connection = connection; this.channel = channel;
             this.policy = policy;
+            this.ownedQueue = ownedQueue;
             events = new ArrayBlockingQueue<>(prefetch + 8);
             connection.addShutdownListener(signal -> offer(new Disconnected("amqp-connection-lost")));
             channel.addShutdownListener(signal -> offer(new Disconnected("amqp-channel-lost")));
@@ -91,6 +111,8 @@ final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol {
                 }
             }, tag -> offer(new Disconnected("amqp-consumer-cancelled")));
         }
+
+        @Override public String resourceName() { return ownedQueue == null ? "" : ownedQueue; }
 
         @Override public Event poll(Duration timeout) throws Failure {
             try {
@@ -129,6 +151,8 @@ final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol {
                 if (!finished.get()) try { connection.abort(); } catch (Exception ignored) { }
             });
             try { if (channel.isOpen() && consumerTag != null) channel.basicCancel(consumerTag); }
+            catch (Exception ignored) { }
+            try { if (channel.isOpen() && ownedQueue != null) channel.queueDelete(ownedQueue); }
             catch (Exception ignored) { }
             try { if (channel.isOpen()) channel.close(); } catch (Exception ignored) { }
             try {

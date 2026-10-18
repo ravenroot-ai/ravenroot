@@ -23,12 +23,15 @@ final class EnvironmentAmqpConsumerPolicyResolver implements AmqpConsumerPolicyR
         String raw = environment.get(key);
         if (raw == null) return Optional.empty();
         String[] p = raw.split(";", -1);
-        if (p.length != 11) return Optional.empty();
+        if (p.length != 11 && p.length != 14) return Optional.empty();
         try {
             return Optional.of(new AmqpConsumerPolicy(tenant, profile, p[0], Integer.parseInt(p[1]),
                     p[2].isEmpty() ? Set.of() : Set.of(p[2].split(",", -1)), p[3],
                     Integer.parseInt(p[4]), Integer.parseInt(p[5]), Integer.parseInt(p[6]),
-                    Integer.parseInt(p[7]), Integer.parseInt(p[8]), p[9], Integer.parseInt(p[10])));
+                    Integer.parseInt(p[7]), Integer.parseInt(p[8]), p[9], Integer.parseInt(p[10]),
+                    p.length == 11 || p[11].isEmpty() ? Set.of() : Set.of(p[11].split(",", -1)),
+                    p.length == 11 || p[12].isEmpty() ? Set.of() : Set.of(p[12].split(",", -1)),
+                    p.length == 11 ? 0 : Integer.parseInt(p[13])));
         } catch (RuntimeException invalid) { return Optional.empty(); }
     }
 

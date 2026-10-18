@@ -103,6 +103,35 @@ describe('multi-selection inspector projection', () => {
     ], catalog).map(candidate => candidate.name)).toEqual(['safe']);
   });
 
+  it('leaves AMQP destination mode transitions to the single-node Inspector', () => {
+    const consumeProperties = [
+      property('mode', 'STRING', { allowedValues: ['Consumer', 'Subscriber'] }),
+      property('connection', 'SECRET_REFERENCE'),
+    ];
+    const publishProperties = [
+      property('mode', 'STRING', { allowedValues: ['Producer', 'Publisher'] }),
+      property('queue'),
+      property('connection', 'SECRET_REFERENCE'),
+    ];
+    const catalog = [
+      descriptor('amqp.consume', consumeProperties),
+      descriptor('amqp.publish', publishProperties),
+      descriptor('ordinary', publishProperties),
+    ];
+    expect(commonMultiSelectionProperties([
+      node('one', 'amqp.consume', { mode: 'Consumer', connection: 'secret://one' }),
+      node('two', 'amqp.consume', { mode: 'Consumer', connection: 'secret://two' }),
+    ], catalog).map(candidate => candidate.name)).toEqual(['connection']);
+    expect(commonMultiSelectionProperties([
+      node('one', 'amqp.publish', { mode: 'Producer', queue: '', connection: 'secret://one' }),
+      node('two', 'amqp.publish', { mode: 'Producer', queue: '', connection: 'secret://two' }),
+    ], catalog).map(candidate => candidate.name)).toEqual(['connection']);
+    expect(commonMultiSelectionProperties([
+      node('one', 'ordinary', { mode: 'Producer', queue: '', connection: 'secret://one' }),
+      node('two', 'ordinary', { mode: 'Producer', queue: '', connection: 'secret://two' }),
+    ], catalog).map(candidate => candidate.name)).toEqual(['mode', 'queue', 'connection']);
+  });
+
   // `NodeBypassProperty.validateShape` refuses any descriptor that declares `execution.bypass`,
   // so a catalog reaching here with it is already broken -- which is exactly why the guard is here
   // and not assumed from the server. A batch editor is the worst place for a platform-owned key to

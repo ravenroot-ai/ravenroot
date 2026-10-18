@@ -98,7 +98,7 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 |---|---|
 | Display name | Consume AMQP deliveries |
 | Category | AMQP 0-9-1 |
-| Description | Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements. |
+| Description | Consumes an authorized queue or ephemeral topic subscription with bounded QoS and durable acknowledgements. |
 | Visual type | actor |
 | Agentic | false |
 | Capabilities | credential-reference,inbound-source,network |
@@ -111,7 +111,10 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `brokerProfile` | Broker profile | Opaque tenant-scoped profile; endpoint, credentials, queue authority and DLX stay operator-owned. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `queue` | Queue | Optional confirmation of the exact operator-authorized queue. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `mode` | Mode | Consumer shares an existing queue; Subscriber owns an online-only ephemeral topic subscription. | `STRING` | false | Consumer | Consumer,Subscriber | false | Not declared | Not declared | Not declared |
+| `queue` | Queue | Optional confirmation of the exact operator-authorized queue. | `STRING` | false | Not declared | Not declared | false | mode:EQUALS:Consumer | Not declared | Not declared |
+| `exchange` | Topic exchange | Existing operator-authorized topic exchange. | `STRING` | false | Not declared | Not declared | false | mode:EQUALS:Subscriber | mode:EQUALS:Subscriber | Not declared |
+| `bindingPattern` | Binding pattern | Operator-authorized topic binding pattern; wildcards apply only to subscriptions. | `STRING` | false | Not declared | Not declared | false | mode:EQUALS:Subscriber | mode:EQUALS:Subscriber | Not declared |
 | `prefetch` | Prefetch | Positive tightening of the operator QoS ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxInFlight` | Maximum in-flight | Positive tightening of bounded delivery admission. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retryBackoffMs` | Retry backoff (ms) | Positive tightening of initial retry backoff. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
@@ -121,7 +124,7 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `poisonPolicy` | Poison policy | Not declared | `STRING` | false | profile | profile,dead-letter | false | Not declared | Not declared | Not declared |
 | `deadLetterMode` | Dead-letter mode | Confirms broker DLX rejection; topology remains operator-owned. | `STRING` | false | Not declared | broker-dlx | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
 | `checkpointPolicy` | Checkpoint policy | Not declared | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
-| `resourceMode` | Resource mode | Shared allows independent sources to consume the authorized queue. Exclusive permits only one process-local source for the tenant, profile and queue. | `STRING` | false | shared | shared,exclusive | false | Not declared | Not declared | Not declared |
+| `resourceMode` | Resource mode | Shared allows independent sources to consume the authorized queue. Exclusive permits only one process-local source for the tenant, profile and queue. | `STRING` | false | shared | shared,exclusive | false | mode:EQUALS:Consumer | Not declared | Not declared |
 
 ## `amqp.publish` {#node-amqp-publish}
 
@@ -145,8 +148,10 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `brokerProfile` | Broker profile | Opaque tenant-scoped operator profile; endpoints and credentials never come from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `exchange` | Exchange | Authorized profile default override. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `routingKey` | Routing key | Authorized profile default override. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `mode` | Mode | Producer sends to a queue or an existing configured destination; Publisher sends to an existing topic exchange. | `STRING` | false | Producer | Producer,Publisher | false | Not declared | Not declared | Not declared |
+| `queue` | Queue | Authorized queue sent through the AMQP default exchange. | `STRING` | false | Not declared | Not declared | false | mode:EQUALS:Producer | Not declared | Not declared |
+| `exchange` | Exchange | Authorized profile default override; required for Publisher. | `STRING` | false | Not declared | Not declared | false | queue:BLANK: | Not declared | Not declared |
+| `routingKey` | Routing key | Authorized profile default override; required for Publisher. | `STRING` | false | Not declared | Not declared | false | queue:BLANK: | Not declared | Not declared |
 | `mandatory` | Mandatory | Must remain true so unroutable publications are observed. | `BOOLEAN` | false | true | Not declared | false | Not declared | Not declared | Not declared |
 | `contentType` | Content type | Default AMQP content type. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `contentEncoding` | Content encoding | Default AMQP content encoding. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |

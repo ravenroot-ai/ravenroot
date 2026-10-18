@@ -42,6 +42,31 @@ async function expectReachable(locator, page) {
   })).toBe(true);
 }
 
+// Read coordinates from the live renderer, then select with the same real mouse path as a user.
+async function selectVisibleGraphNode(page) {
+  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning')))).toBe(false);
+  await page.locator('#zoom-ctrl [data-command-id="view.fit"]').click();
+  await page.locator('.doc-pane--active').focus();
+  const target = await page.evaluate(() => {
+    const cy = window.cy, canvas = cy.container().getBoundingClientRect();
+    const obstacles = [...document.querySelectorAll('[data-surface-id], #zoom-ctrl, #minimap, .workspace-controls, .workspace-shelf')]
+      .filter(element => !element.inert && !element.hidden && getComputedStyle(element).display !== 'none'
+        && getComputedStyle(element).visibility !== 'hidden').map(element => element.getBoundingClientRect());
+    for (const node of cy.nodes(':visible')) {
+      const position = node.renderedPosition(), x = canvas.left + position.x, y = canvas.top + position.y;
+      if (x < canvas.left || x > canvas.right || y < canvas.top || y > canvas.bottom) continue;
+      if (obstacles.some(box => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) continue;
+      return { id: node.id(), name: node.data('name'), x, y };
+    }
+    return null;
+  });
+  expect(target).not.toBeNull();
+  await page.mouse.click(target.x, target.y);
+  await expect.poll(() => page.evaluate(id => window.cy.getElementById(id).selected(), target.id)).toBe(true);
+  await expect(page.locator('#info-title')).toHaveText(target.name);
+  return target;
+}
+
 const graphPlacement = (page, selectedOnly = false) => page.evaluate(selected => {
   const cy = window.ravenroot.activeDocument().cy;
   const canvas = cy.container().getBoundingClientRect();
@@ -256,6 +281,64 @@ test.describe('immersive workspace', () => {
     await expectReachable(grip(page, 'catalog'), page);
     await expectReachable(page.locator('#zoom-ctrl [data-command-id="view.fit"]'), page);
     await expect(page.locator('[data-workspace-action="focus"]')).toHaveAccessibleName('Focus mode');
+  });
+
+  test('reveals the narrow Inspector on a real node selection without stealing graph focus or saving responsive geometry', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openWorkspace(page);
+    await expect(surface(page, 'inspector')).toBeHidden();
+    const desktopLayout = await saved(page);
+    expect(desktopLayout.surfaces.inspector.minimized).toBe(false);
+    await selectVisibleGraphNode(page);
+    await expectReachable(grip(page, 'inspector'), page);
+    expect(await surface(page, 'inspector').evaluate(element => element.inert)).toBe(false);
+    await expect(page.locator('.doc-pane--active')).toBeFocused();
+    expect(await saved(page)).toEqual(desktopLayout);
+    await capture(page, testInfo, 'immersive-narrow-selection-inspector');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(surface(page, 'inspector')).toHaveAttribute('data-responsive', 'false');
+    await expect(surface(page, 'inspector')).toHaveAttribute('data-dock', desktopLayout.surfaces.inspector.dock);
+    await expectReachable(grip(page, 'inspector'), page);
+    expect(await saved(page)).toEqual(desktopLayout);
+  });
+
+  test('keeps deliberate Focus mode during automatic selection reveal and opens it through an explicit panel action', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openWorkspace(page);
+    await page.locator('[data-workspace-action="focus"]').click();
+    const desktopLayout = await saved(page);
+    await selectVisibleGraphNode(page);
+    await expect(surface(page, 'inspector')).toBeHidden();
+    await expect(page.locator('[data-workspace-action="focus"]')).toHaveAccessibleName('Exit Focus mode');
+    await expect(page.locator('.doc-pane--active')).toBeFocused();
+    expect(await saved(page)).toEqual(desktopLayout);
+    await page.locator('[data-workspace-action="index"]').click();
+    await page.locator('[data-surface-show="inspector"]').click();
+    await expectReachable(grip(page, 'inspector'), page);
+    await expect(page.locator('[data-workspace-action="focus"]')).toHaveAccessibleName('Focus mode');
+  });
+
+  test('reveals Activity through the existing panel index on narrow screens while retaining its desktop layout', async ({ page }) => {
+    await openWorkspace(page);
+    await dock(page, 'activity').selectOption('floating');
+    await grip(page, 'activity').focus();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    const desktopLayout = await saved(page);
+    const desktopRect = await surface(page, 'activity').boundingBox();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(surface(page, 'activity')).toBeHidden();
+    await page.locator('#menu-view').click();
+    await page.locator('#application-menu [data-command-id="view.panels"]').click();
+    await page.locator('[data-index-panel="activity"]').click();
+    await expectReachable(grip(page, 'activity'), page);
+    expect(await surface(page, 'activity').evaluate(element => element.inert)).toBe(false);
+    expect(await saved(page)).toEqual(desktopLayout);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(surface(page, 'activity')).toHaveAttribute('data-responsive', 'false');
+    const restored = await surface(page, 'activity').boundingBox();
+    for (const dimension of ['x', 'y', 'width', 'height']) expect(restored[dimension]).toBeCloseTo(desktopRect[dimension], 1);
+    expect(await saved(page)).toEqual(desktopLayout);
   });
 
   test('preserves document and renderer instances through panel transitions', async ({ page }) => {

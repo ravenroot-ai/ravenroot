@@ -205,6 +205,14 @@ export function createImmersiveWorkspace({ root, surfaces, legacyLayout, onChang
     const prior = previousFocus.get(id);
     (prior?.isConnected && surfaces[id].contains(prior) ? prior : gripOf(id)).focus({ preventScroll: true });
   }
+  // Selection-driven reveal opens the responsive drawer without changing desktop geometry or
+  // taking keyboard focus. Focus mode remains deliberate; explicit show() is the exit route.
+  function reveal(id) {
+    if (!state.surfaces[id]) return;
+    narrowActive = id;
+    if (state.surfaces[id].minimized) change(() => { state.surfaces[id].minimized = false; });
+    else refresh();
+  }
   function minimize(id) {
     previousFocus.set(id, doc.activeElement?.matches('[data-surface-minimize]') ? gripOf(id) : surfaces[id].contains(doc.activeElement) ? doc.activeElement : gripOf(id));
     change(() => { state.surfaces[id].minimized = true; if (narrowActive === id) narrowActive = null; });
@@ -298,7 +306,7 @@ export function createImmersiveWorkspace({ root, surfaces, legacyLayout, onChang
   doc.addEventListener('pointerdown', event => { if (!index.hidden && !index.contains(event.target) && event.target !== indexButton) closeIndex(); });
   new ResizeObserver(() => { if (transaction) cancel(); refresh(); }).observe(root);
   persist(); refresh();
-  return { getState: () => clone(state), isVisible: id => !surfaces[id].inert, show, minimize, dock, reveal(id) { if (state.surfaces[id]?.minimized) change(() => { state.surfaces[id].minimized = false; }); }, setFocus, reset, refresh,
+  return { getState: () => clone(state), isVisible: id => !surfaces[id].inert, show, minimize, dock, reveal, setFocus, reset, refresh,
     usableRect(element) { const bounds = element.getBoundingClientRect(); const obstacles = [...IDS.map(id => surfaces[id]), controls, shelf, doc.getElementById('zoom-ctrl'), doc.getElementById('minimap')].filter(el => el && !el.hidden && !el.inert && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden').map(el => { const box = el.getBoundingClientRect(); return { x: box.left, y: box.top, width: box.width, height: box.height }; }); const rect = usableGraphRect({ x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }, obstacles); return { x: rect.x - bounds.left, y: rect.y - bounds.top, width: rect.width, height: rect.height }; },
   };
 }

@@ -1,3 +1,4 @@
+import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
 import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
@@ -365,7 +366,7 @@ import {
   beginPointerEdgeGesture,
   beginReconnectGesture,
   createEdgeGestureSession,
-  describeEdge,
+  describeEdge, describeEdgeMessage,
   describeEdgeGesture,
   edgeGestureCandidate,
   edgeGestureSessionOwns,
@@ -397,7 +398,7 @@ import {
   syncGraphPositionsFromCy,
 } from './graph-view-state.js';
 import { createCommandRegistry } from './command-registry.js';
-import { requestExecutionLifecycle, UNAVAILABLE_LIFECYCLE_REASONS } from './graph-lifecycle.js';
+import { requestExecutionLifecycle } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { initializeUiLocalization } from './ui-localization.js';
 import { scheduleApplicationBoot } from './application-boot.js';
@@ -1951,7 +1952,7 @@ function refreshVisualGroups(owner = workspace.active, { animate = false, select
   }
   if (metadata.warning && owner.visualGroupWarning !== metadata.warning) {
     owner.visualGroupWarning = metadata.warning;
-    addActivityMessage(uiMessage("workspace.notice.editor"), metadata.warning, 'failed');
+    addActivityMessage(uiMessage("workspace.notice.editor"), uiMessageOf(metadata, metadata.warning), 'failed');
   }
   if (owner === workspace.active) { updateStats(); refreshCommands(); }
 }
@@ -2049,7 +2050,7 @@ function manageVisualGroup(action, suppliedGroup = null) {
       else groups = groups.map(item => item.id !== group.id ? item : action === 'rename' ? { ...item, name }
         : { ...item, memberNodeIds: selected, anchorNodeId: selected.includes(item.anchorNodeId)
           ? item.anchorNodeId : [...selected].sort()[0] });
-      editVisualGroups(graphData, groups, editHistory, action === 'ungroup' ? `Ungroup ${group.name}` : uiText("workspace.app.visual.group", { value: action === 'rename' ? 'Rename' : action === 'replace' ? 'Replace members of' : 'Remove metadata for' }));
+      editVisualGroups(graphData, groups, editHistory, uiMessage(action === 'ungroup' ? 'workspace.history.ungroup' : action === 'rename' ? 'workspace.history.renameGroup' : action === 'replace' ? 'workspace.history.replaceGroup' : 'workspace.history.removeGroupMetadata', { name: group.name }));
       refreshVisualGroups(); updateHistoryUi();
       if (action === 'ungroup' || action === 'repair') { owner.selectedVisualGroupId = null; closeInfo(); }
       else showVisualGroupInfo(groups.find(item => item.id === group.id));
@@ -2309,8 +2310,8 @@ function deleteNodeFromActionOverlay(owner, instance, nodeId, { skipDraftGuard =
   refreshCommands();
   addActivityMessage(uiMessage("workspace.notice.editor.2"),
     uiMessage("workspace.notice.deleted.graphElements", {
-      nodeSummary: uiText("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
-      edgeSummary: uiText("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
+      nodeSummary: uiMessage("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
+      edgeSummary: uiMessage("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
     }), 'completed');
   return true;
 }
@@ -6108,7 +6109,7 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
     keepPositions: name === 'keep',
     recordPositions: !arrangement.preservePositions,
     fitAfterLayout: !arrangement.preservePositions,
-    commandLabel: commandRegistry.get(`layout.arrange.${name}`)?.label || uiText("workspace.app.arrange.graph"),
+    commandLabel: uiMessage(`commands.layout.arrange.${name}.label`),
   });
   scheduleWorkspacePersistence();
   return true;
@@ -6133,8 +6134,8 @@ function renderActiveMode({ skipDraftGuard = false } = {}) {
     recordPositions: !arrangement?.preservePositions,
     fitAfterLayout: !arrangement?.preservePositions,
     commandLabel: designArrangement
-      ? commandRegistry.get(`layout.arrange.${designArrangement}`)?.label || uiText("workspace.app.render.graph")
-      : uiText("workspace.app.render.graph"),
+      ? uiMessage(`commands.layout.arrange.${designArrangement}.label`)
+      : uiMessage("workspace.app.render.graph"),
   });
   return true;
 }
@@ -8654,7 +8655,8 @@ function applyProgramServerResult(owner, node, result) {
   if ((result.phase === 'FAILED' || result.phase === 'RETIRED') && owner === workspace.active
       && (previous?.phase !== result.phase || previous?.diagnostic !== result.diagnostic)) {
     addActivityMessage(uiMessage("workspace.notice.program.build", { id: node.id }),
-      `${result.phase}: ${result.diagnostic || uiText("workspace.program.noDiagnostic")}`, 'failed');
+      uiMessage("workspace.notice.program.diagnostic", { phase: result.phase,
+        diagnostic: result.diagnostic || uiMessage("workspace.program.noDiagnostic") }), 'failed');
   }
 }
 
@@ -8725,7 +8727,7 @@ async function approveProgramGraph(owner) {
   state.settledGeneration = 0;
   return startProgramReadinessFlight(owner, plan, generation, {
     automatic: true,
-    activity: 'program batch approval',
+    activity: uiMessage('workspace.notice.program.batchApproval'),
     start: async client => {
       await client.approveProgramArtifactBatch(
         artifactIds, 'Graph-level approval in Ravenroot UI',
@@ -8736,7 +8738,7 @@ async function approveProgramGraph(owner) {
 }
 
 function startProgramReadinessFlight(owner, plan, generation, {
-  automatic = false, activity = 'program batch build', start,
+  automatic = false, activity = uiMessage('workspace.notice.program.batchBuild'), start,
 } = {}) {
   const state = programReadiness(owner);
   if (automatic) showProgramReadinessOverlay(owner);
@@ -8760,7 +8762,7 @@ function startProgramReadinessFlight(owner, plan, generation, {
       diagnostic: uiErrorReason(error), detail: uiText("workspace.program.readinessFailure", { reason: uiErrorReason(error) }),
     }));
     state.settledGeneration = generation;
-    addActivityMessage(activity, uiErrorReason(error), 'failed');
+    addActivityMessage(activity, uiErrorMessage(error), 'failed');
     return false;
   }).finally(() => {
     if (state.inFlight?.generation === generation) state.inFlight = null;
@@ -8911,7 +8913,7 @@ function bindProgramWorkspace(form, model) {
     const build = panel.querySelector('[data-program-operation="build"]');
     if (build) build.disabled = false;
     panel.querySelector('.program-status').textContent = uiErrorReason(error);
-    addActivityMessage(uiMessage("workspace.notice.program.artifact"), uiErrorReason(error), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.program.artifact"), uiErrorMessage(error), 'failed');
   };
 
   // The language selector is populated from the runtime's own declared catalog -- never
@@ -8995,7 +8997,7 @@ function bindProgramWorkspace(form, model) {
   if (!runtimeClient) connectRuntime();
   runtimeClient.programLanguages().then(applyLanguageCatalog).catch(error => {
     languageStatus.textContent = uiText("workspace.app.could.not.load.the.languages.this.runtime", { reason: uiErrorReason(error) });
-    addActivityMessage(uiMessage("workspace.notice.program.artifact.2"), uiErrorReason(error), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.program.artifact.2"), uiErrorMessage(error), 'failed');
   });
 
   panel.querySelector('[data-program-operation="build"]').addEventListener('click', async () => {
@@ -9801,7 +9803,7 @@ async function paletteMutation(operation) {
     await loadPersonalPalettes(runtimeClient);
   } catch (error) {
     showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.personal.palette.update.failed"));
-    addActivityMessage(uiMessage("workspace.notice.palette"), uiErrorReason(error) || uiMessage("workspace.notice.personal.palette.update.failed.2"), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.palette"), uiErrorMessage(error) || uiMessage("workspace.notice.personal.palette.update.failed.2"), 'failed');
   }
 }
 
@@ -9843,7 +9845,7 @@ async function insertSavedTemplate(template, position = null, { skipDraftGuard =
     await client.validateNodeTemplate(template.id);
   } catch (error) {
     showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.saved.node.is.no.longer.valid.for.this"));
-    addActivityMessage(uiMessage("workspace.notice.palette.2"), uiErrorReason(error) || uiMessage("workspace.notice.saved.node.validation.failed"), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.palette.2"), uiErrorMessage(error) || uiMessage("workspace.notice.saved.node.validation.failed"), 'failed');
     return null;
   }
   if (runtimeClient !== client || workspace.active !== owner || graphData !== graph
@@ -10459,14 +10461,14 @@ function undoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canUndo()
       || !finalizeInspectorBeforeHistory()) return;
   suspendVisualGroups(workspace.active);
-  applyHistoryStep(editHistory.undo(graphData), uiText("workspace.app.undo"));
+  applyHistoryStep(editHistory.undo(graphData), "workspace.app.undo");
 }
 
 function redoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canRedo()
       || !finalizeInspectorBeforeHistory()) return;
   suspendVisualGroups(workspace.active);
-  applyHistoryStep(editHistory.redo(graphData), uiText("workspace.app.redo"));
+  applyHistoryStep(editHistory.redo(graphData), "workspace.app.redo");
 }
 
 function finalizeInspectorBeforeHistory() {
@@ -10487,7 +10489,7 @@ function finalizeInspectorBeforeHistory() {
   return false;
 }
 
-function applyHistoryStep(command, verb) {
+function applyHistoryStep(command, verbKey) {
   if (!command) return;
   retireInspectorDraft();
   dragSnapshot = null;
@@ -10504,7 +10506,10 @@ function applyHistoryStep(command, verb) {
   selectCommandTargets(command);
   refreshVisualGroups();
   updateHistoryUi();
-  addActivityMessage(uiMessage("workspace.notice.editor.9"), `${verb}: ${command.label}`, 'completed');
+  const label = uiMessageOf(command, command.label);
+  addActivityMessage(uiMessage("workspace.notice.editor.9"), uiMessage("workspace.notice.history", {
+    verb: uiMessage(verbKey), label,
+  }), 'completed');
 }
 
 // Undo restores the document; the renderer follows. Selecting whatever the step touched — when it
@@ -10938,9 +10943,9 @@ function commitEdgeGestureAt(candidateId, { skipDraftGuard = false } = {}) {
   const candidate = edgeGestureCandidate(session.gesture, session.graph, candidateId);
   if (!candidate.ok) {
     // A refused drop keeps the gesture open so the user can aim somewhere else, and says why.
-    const refusal = uiText('workspace.edge.cannotConnect', { reason: candidate.reason });
-    showInspectorMessage(refusal);
-    announceGraph(refusal);
+    const refusal = uiMessage('workspace.edge.cannotConnect', { reason: uiMessageOf(candidate, candidate.reason) });
+    showInspectorMessage(activityMessageText(refusal));
+    announceGraph(activityMessageText(refusal));
     addActivityMessage(uiMessage("workspace.notice.editor.10"), refusal, 'failed');
     return false;
   }
@@ -10980,11 +10985,11 @@ function commitEdgeGestureAt(candidateId, { skipDraftGuard = false } = {}) {
   const edge = session.graph.edges.find(candidate2 => candidate2.id === edgeId);
   showEdgeInfo(session.owner.cy.getElementById(edgeId));
   setGraphCursor(edge ? edge.target : candidateId);
-  const done = uiText(gesture.mode === 'connect'
+  const done = uiMessage(gesture.mode === 'connect'
     ? "workspace.edge.connected" : "workspace.edge.reconnected", {
-    edge: describeEdge(edge, session.graph),
+    edge: describeEdgeMessage(edge, session.graph),
   });
-  announceGraph(done);
+  announceGraph(activityMessageText(done));
   addActivityMessage(uiMessage("workspace.notice.editor.11"), done, 'completed');
   return true;
 }
@@ -11710,9 +11715,9 @@ function createNodeFromStage(position, behavior = selectedCatalogBehavior, sourc
     ? addConnectedNodeAt(graphData, position, sourceId, editHistory, { descriptor })
     : null;
   if (connected && !connected.node) {
-    const refusal = uiText('workspace.edge.cannotAddConnected', { reason: connected.reason });
-    showInspectorMessage(refusal);
-    announceGraph(refusal);
+    const refusal = uiMessage('workspace.edge.cannotAddConnected', { reason: uiMessageOf(connected, connected.reason) });
+    showInspectorMessage(activityMessageText(refusal));
+    announceGraph(activityMessageText(refusal));
     addActivityMessage(uiMessage("workspace.notice.editor.12"), refusal, 'failed');
     return null;
   }
@@ -11756,8 +11761,8 @@ function deleteCurrentSelection({ skipDraftGuard = false } = {}) {
   updateHistoryUi();
   addActivityMessage(uiMessage("workspace.notice.editor.14"),
     uiMessage("workspace.notice.deleted.graphElements", {
-      nodeSummary: uiText("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
-      edgeSummary: uiText("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
+      nodeSummary: uiMessage("workspace.notice.deleted.nodes", { count: removed.nodeIds.length }),
+      edgeSummary: uiMessage("workspace.notice.deleted.edges", { count: removed.edgeIds.length }),
     }), 'completed');
   return true;
 }
@@ -12009,7 +12014,7 @@ async function connectRuntime(atBoot = false) {
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
       renderNodeCatalog();
-      addActivityMessage(uiMessage("workspace.notice.catalog"), catalogEmptyState(error, []).message, 'failed');
+      addActivityMessage(uiMessage("workspace.notice.catalog"), uiMessageOf(catalogEmptyState(error, [])), 'failed');
     });
   } catch (error) {
     graphAuthoringCapability = unavailableAuthoringCapability(error);
@@ -12018,7 +12023,7 @@ async function connectRuntime(atBoot = false) {
     nodeCatalogPending = false;
     renderNodeCatalog();
     setRuntimeConnectionState('error', () => (uiErrorReason(error)));
-    addActivityMessage(uiMessage("workspace.notice.connection"), uiErrorReason(error), 'failed');
+    addActivityMessage(uiMessage("workspace.notice.connection"), uiErrorMessage(error), 'failed');
     const outcome = { kind: 'error', code: 'connection-failed',
       get message() { return uiText("workspace.import.connectionFailed"); } };
     startupImportController?.updateRuntime(outcome);
@@ -12176,7 +12181,7 @@ function stopCurrentSourceSession() {
 }
 
 function showUnavailableLifecycle(reason) {
-  showInspectorMessage(reason);
+  showInspectorMessage(activityMessageText(reason));
   addActivityMessage(uiMessage("workspace.notice.lifecycle.control.unavailable"), reason, 'failed');
   return false;
 }
@@ -12199,7 +12204,7 @@ async function executionLifecycleCommand(action) {
     && executionCommandIsCurrent(flight);
   if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
   refreshCommands();
-  addActivityMessage(uiMessage(`workspace.execution.action.${action}`), uiMessage("workspace.notice.requested.for.execution", { detail1: uiText(`workspace.execution.action.${action}`), detail2: '', shortId: shortId(flight.executionId) }));
+  addActivityMessage(uiMessage(`workspace.execution.action.${action}`), uiMessage("workspace.notice.requested.for.execution", { detail1: uiMessage(`workspace.execution.action.${action}`), detail2: '', shortId: shortId(flight.executionId) }));
   try {
     const result = await requestExecutionLifecycle(action, {
       client: flight.client,
@@ -12211,9 +12216,9 @@ async function executionLifecycleCommand(action) {
     if (result.status === 'unknown') {
       setExecutionReconciliationState(owner, 'unknown');
       if (workspace.activeId === owner.id) {
-        const reason = (result.observationError ? uiErrorReason(result.observationError) : null) || (result.commandError ? uiErrorReason(result.commandError) : null)
-          || uiText("workspace.app.the.runtime.returned.no.readable.reason");
-        addActivityMessage(uiMessage("workspace.notice.status.unknown", { action: uiText(`workspace.execution.action.${action}`) }),
+        const reason = uiErrorMessage(result.observationError) || uiErrorMessage(result.commandError)
+          || uiMessage("workspace.app.the.runtime.returned.no.readable.reason");
+        addActivityMessage(uiMessage("workspace.notice.status.unknown", { action: uiMessage(`workspace.execution.action.${action}`) }),
           uiMessage("workspace.notice.execution.could.not.be.authoritatively.read.after.the.command", { shortId: shortId(flight.executionId), reason: reason }), 'failed');
         syncExecutionReconciliationChrome(true);
       }
@@ -12227,14 +12232,14 @@ async function executionLifecycleCommand(action) {
       settleReconciledExecution(owner, flight.executionId, flight.client, flight.generation, outcome, false);
     }
     if (workspace.activeId === owner.id) {
-      const commandOutcome = result.command?.outcome || uiText("workspace.app.transport.outcome.unavailable");
+      const commandOutcome = result.command?.outcome || uiMessage("workspace.app.transport.outcome.unavailable");
       const status = String(outcome?.status || 'active').toLowerCase();
-      const paused = outcome?.paused ? uiText("workspace.app.paused") : uiText("workspace.app.not.paused");
+      const paused = uiMessage(outcome?.paused ? "workspace.app.paused" : "workspace.app.not.paused");
       addActivityMessage(uiMessage(`workspace.execution.action.${action}`),
         uiMessage("workspace.notice.authoritative.state.execution", { commandOutcome: commandOutcome, status: status, paused: paused, shortId: shortId(flight.executionId) }),
         result.commandError ? 'failed' : 'completed');
-      if (result.commandError) addActivityMessage(uiMessage("workspace.notice.request.response.unavailable", { action: uiText(`workspace.execution.action.${action}`) }),
-        uiMessage("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: uiErrorReason(result.commandError) }),
+      if (result.commandError) addActivityMessage(uiMessage("workspace.notice.request.response.unavailable", { action: uiMessage(`workspace.execution.action.${action}`) }),
+        uiMessage("workspace.notice.the.displayed.lifecycle.state.comes.from.the.authoritative.execution", { message: uiErrorMessage(result.commandError) }),
         'failed');
       document.getElementById('activity-summary').textContent =
         uiText("workspace.app.execution", { action: uiText(`workspace.execution.action.${action}`), action2: '', status: status, executionId: shortId(flight.executionId) });
@@ -12296,9 +12301,9 @@ function updateSourceSession(owner, status, token = null,
     if (status.state === 'FAILED' && status.failure
         && session.lastFailureIncident !== status.failure.incidentId) {
       session.lastFailureIncident = status.failure.incidentId;
-      void presentRuntimeRefusal(owner, status.failure, uiText('workspace.refusal.sourceSession'));
+      void presentRuntimeRefusal(owner, status.failure, uiMessage('workspace.refusal.sourceSession'));
     } else if (changed && !silentActivity) {
-      const detail = status.diagnostic || uiText('workspace.sourceSession.localOnly', { count: status.sourceCount });
+      const detail = status.diagnostic || uiMessage('workspace.sourceSession.localOnly', { count: status.sourceCount });
       addActivityMessage(uiMessage("workspace.notice.source.session", { detail1: status.state.toLowerCase() }), detail,
         status.state === 'FAILED' || status.state === 'DEGRADED' || status.state === 'UNKNOWN'
           ? 'failed' : 'completed');
@@ -12393,7 +12398,7 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
       failure: error?.finding || null,
     }, token, { observationUnavailable: !explicitFailure, silentActivity: explicitFailure });
     if (owner === workspace.active && !error?.finding) addActivityMessage(uiMessage("workspace.notice.source.session.request.failed"),
-      explicitFailure ? uiMessage("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? uiText("workspace.app.incident", { incidentId: error.incidentId }) : '' }) : uiMessage("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
+      explicitFailure ? uiMessage("workspace.notice.the.server.rejected.the.local.listener.start", { detail1: error?.incidentId ? uiMessage("workspace.app.incident", { incidentId: error.incidentId }) : '' }) : uiMessage("workspace.notice.the.start.response.was.lost.the.editor.will.observe"), 'failed');
     if (!explicitFailure && !session.stopRequested) void observeSourceSession(owner, token);
     return false;
   } finally {
@@ -12536,7 +12541,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
       onUnknown: ({ error, failureCount }) => {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
-        const reason = uiErrorReason(error) || uiText("workspace.app.the.runtime.returned.no.readable.reason");
+        const reason = uiErrorMessage(error) || uiMessage("workspace.app.the.runtime.returned.no.readable.reason");
         addActivityMessage(uiMessage("workspace.notice.execution.status.unknown"),
           uiMessage("workspace.notice.execution.could.not.be.reconciled.after.checks.test.and", { shortId: shortId(executionId), failureCount: failureCount, reason: reason }),
           'failed');
@@ -12589,7 +12594,7 @@ async function preflightUnknownExecution(owner, flight) {
     onUnavailable: error => {
       if (executionCommandIsCurrent(flight) && workspace.activeId === owner.id) {
         addActivityMessage(uiMessage("workspace.notice.execution.status.still.unknown"),
-          uiMessage("workspace.notice.execution.could.not.be.checked.no.new.execution.was", { shortId: shortId(executionId), message: uiErrorReason(error) }), 'failed');
+          uiMessage("workspace.notice.execution.could.not.be.checked.no.new.execution.was", { shortId: shortId(executionId), message: uiErrorMessage(error) }), 'failed');
       }
     },
   });
@@ -12641,22 +12646,19 @@ const REFUSAL_REMEDIATION = Object.freeze({
   STARTUP_FAILED: 'workspace.refusal.startupFailed',
 });
 
-async function presentRuntimeRefusal(owner, finding, title = uiText('workspace.refusal.start')) {
+async function presentRuntimeRefusal(owner, finding, title = uiMessage('workspace.refusal.start')) {
   if (!finding || owner !== workspace.active) return;
-  const locationText = [finding.nodeId && uiText('workspace.refusal.node', { id: finding.nodeId }),
-    finding.propertyName && uiText('workspace.refusal.property', { name: finding.propertyName })]
-    .filter(Boolean).join(' · ');
-  const location = locationText ? ` · ${locationText}` : '';
-  const remediationKey = REFUSAL_REMEDIATION[finding.reason];
-  const remediation = remediationKey ? uiText(remediationKey)
-    : (String(finding.reason || '').includes('-')
-      ? uiText("workspace.execution.correctDeclaredReason")
-      : uiText("workspace.execution.correctAdmission"));
-  const handle = finding.incidentId ? uiText('workspace.refusal.incident', { id: finding.incidentId }) : '';
+  const { phase, reason, nodeId, propertyName, incidentId } = finding;
+  const locations = [nodeId && uiMessage('workspace.refusal.node', { id: nodeId }),
+    propertyName && uiMessage('workspace.refusal.property', { name: propertyName })].filter(Boolean);
+  const location = locations.length
+    ? uiComputed(() => ` · ${locations.map(activityMessageText).join(' · ')}`) : '';
+  const remediation = uiMessage(REFUSAL_REMEDIATION[reason]
+    || (String(reason || '').includes('-')
+      ? "workspace.execution.correctDeclaredReason" : "workspace.execution.correctAdmission"));
+  const incident = incidentId ? uiMessage('workspace.refusal.incident', { id: incidentId }) : '';
   addActivityMessage(title,
-    uiText('workspace.refusal.detail', { phase: finding.phase, reason: finding.reason,
-      location, remediation, incident: handle }),
-    'failed');
+    uiMessage('workspace.refusal.detail', { phase, reason, location, remediation, incident }), 'failed');
   await focusRuntimeFinding(owner, finding);
 }
 
@@ -12702,7 +12704,7 @@ async function playGraph(mode = 'test') {
   renderWorkflowValidationAdvisory(ownerGraph, owner);
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
-    const message = uiText(nodeCatalogFailure ? 'workspace.run.catalogUnavailable' : 'workspace.run.catalogLoading');
+    const message = uiMessage(nodeCatalogFailure ? 'workspace.run.catalogUnavailable' : 'workspace.run.catalogLoading');
     addActivityMessage(uiMessage("workspace.notice.run.unavailable"), message, 'failed');
     return;
   }
@@ -12714,7 +12716,7 @@ async function playGraph(mode = 'test') {
       sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
     if (!inspection.valid && inspection.findings[0]) {
       releaseExecutionCommand(flight);
-      await presentRuntimeRefusal(owner, inspection.findings[0], uiText('workspace.refusal.graphAdmission'));
+      await presentRuntimeRefusal(owner, inspection.findings[0], uiMessage('workspace.refusal.graphAdmission'));
       return;
     }
   } catch (error) {
@@ -12724,7 +12726,7 @@ async function playGraph(mode = 'test') {
     // exact bytes and returns the same safe finding when it actually refuses them.
     if (error?.finding) {
       releaseExecutionCommand(flight);
-      await presentRuntimeRefusal(owner, error.finding, uiText('workspace.refusal.graphAdmission'));
+      await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.refusal.graphAdmission'));
       return;
     }
   }
@@ -12804,7 +12806,7 @@ async function playGraph(mode = 'test') {
     void reconcileTestCompletion(owner, submission.executionId, executionClient);
     if (workspace.activeId !== owner.id) return;
     addActivityMessage(uiMessage("workspace.notice.accepted"),
-      uiMessage("workspace.notice.execution.graph", { detail1: submission.executionPolicy || uiText("workspace.app.policy.unreported"), shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
+      uiMessage("workspace.notice.execution.graph", { detail1: submission.executionPolicy || uiMessage("workspace.app.policy.unreported"), shortId: shortId(submission.executionId), shortId2: shortId(submission.graphVersion) }),
       'completed');
     if (owner.execution.finished.has(submission.executionId)) refreshCommands();
     scheduleWorkspacePersistence();
@@ -12814,9 +12816,9 @@ async function playGraph(mode = 'test') {
     setDocumentExecution(owner, null, null);
     if (workspace.activeId !== owner.id) return;
     refreshCommands();
-    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiText("workspace.app.execution.refused"));
+    if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage("workspace.app.execution.refused"));
     else {
-      addActivityMessage(uiMessage("workspace.notice.request.failed"), uiErrorReason(error), 'failed');
+      addActivityMessage(uiMessage("workspace.notice.request.failed"), uiErrorMessage(error), 'failed');
       showInspectorMessage(uiErrorReason(error));
     }
   }
@@ -13333,9 +13335,14 @@ function appendActivityEvent(event) {
   });
   const diagnosticFlags = projection => [projection.redacted ? uiText('activity.flag.redacted') : '',
     projection.truncated ? uiText('activity.flag.truncated') : ''].filter(Boolean).join(', ');
-  const detail = uiComputed(() => publicExecutionDescription(event.description, type, event.publicReason)
-    + (event.nodeId ? uiText('activity.event.counts', {
-      instances: Number(event.activeInstances) || 0, inFlight: Number(event.inFlightArrivals) || 0,
+  const description = typeof event.description === 'string' ? event.description : '';
+  const publicReason = typeof event.publicReason === 'string' ? event.publicReason : '';
+  const hasNode = Boolean(event.nodeId);
+  const instances = Number(event.activeInstances) || 0;
+  const inFlight = Number(event.inFlightArrivals) || 0;
+  const detail = uiComputed(() => publicExecutionDescription(description, type, publicReason)
+    + (hasNode ? uiText('activity.event.counts', {
+      instances, inFlight,
     }) : '')
     + (message.value ? uiText('activity.event.diagnostic', {
       value: message.value, flags: diagnosticFlags(message) ? ` (${diagnosticFlags(message)})` : '',
@@ -13377,25 +13384,13 @@ function addActivityMessage(title, detail, css = '') {
 // Synthetic activity stays semantic until it reaches the row. This lets a locale change repaint
 // notices that are already mounted without replaying events, losing scroll position, or attempting
 // to recover keys by comparing translated English text.
-function uiMessage(key, params = {}) {
-  return Object.freeze({ key, params: Object.freeze({ ...params }) });
-}
-
-function uiComputed(render) {
-  return Object.freeze({ render });
-}
-
 function activityMessageText(value) {
-  if (value && typeof value === 'object' && typeof value.render === 'function') return value.render();
-  return value && typeof value === 'object' && typeof value.key === 'string'
-    ? uiText(value.key, value.params)
-    : String(value || '');
+  return renderUiMessage(value, uiText);
 }
 
 function bindActivityMessage(element, value) {
   element.textContent = activityMessageText(value);
-  if (value && typeof value === 'object'
-      && (typeof value.key === 'string' || typeof value.render === 'function')) {
+  if (isUiMessage(value)) {
     element.__ravenrootUiMessage = value;
   }
 }
@@ -15801,10 +15796,11 @@ async function repositoryDelete() {
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
   if (!gitAuthoringEnabled() || !id) return false;
+  const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
-    const reviewType = uiText(repositoryReviewMessageKey(graphAuthoringCapability.provider));
+    const reviewType = uiMessage(reviewKey);
     addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
-      detail1: result.reused ? uiText("workspace.app.existing") : uiText("workspace.app.new"),
+      detail1: uiMessage(result.reused ? "workspace.app.existing" : "workspace.app.new"),
       reviewType,
       url: result.url,
     }), 'completed'); return true;
@@ -15945,8 +15941,8 @@ const commandActions = {
   resume: () => executionLifecycleCommand('resume'),
   cancel: () => executionLifecycleCommand('cancel'),
   stop: () => stopCurrentSourceSession(),
-  stopDeployment: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.deploymentStop),
-  shutdown: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.shutdown),
+  stopDeployment: () => showUnavailableLifecycle(uiMessage('commands.run.stopDeployment.help')),
+  shutdown: () => showUnavailableLifecycle(uiMessage('commands.run.shutdown.help')),
   authenticate: () => authenticateRuntime(),
   forgetToken: () => revokeRuntimeAccess(),
   openCredentials: () => credentialsWindow?.open(),
@@ -16950,9 +16946,9 @@ const drawingModelController = createDrawingModelController({
       },
     } : null;
   },
-  editGraphProperties: (patch, unset, label) => {
+  editGraphProperties: (patch, unset, label, presentation) => {
     if (!graphData || graphData.format !== 'graphml' || !documentIsEditable(workspace.active)) return false;
-    editHistory.execute(graphData, updateGraphPropertiesCommand(patch, label, unset));
+    editHistory.execute(graphData, updateGraphPropertiesCommand(patch, presentation || label, unset));
     updateHistoryUi();
     return true;
   },

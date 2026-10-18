@@ -1,3 +1,4 @@
+import { uiMessage, withUiMessage, uiErrorMessage, renderUiMessage } from './ui-message.js';
 import { uiErrorReason, uiText } from './ui-text.js';
 import { productError } from './product-error.js';
 
@@ -116,6 +117,11 @@ export class RuntimeRequestError extends Error {
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({ reason: uiReasonKey ? uiText(uiReasonKey) : reason, where,
       hint: status == null ? uiText('workspace.runtime.request.networkHint')
         : status === 404 ? uiText('workspace.runtime.request.routeHint') : '' }) });
+    withUiMessage(this, uiMessage('workspace.runtime.request.failure', {
+      reason: uiReasonKey ? uiMessage(uiReasonKey) : reason, where,
+      hint: status == null ? uiMessage('workspace.runtime.request.networkHint')
+        : status === 404 ? uiMessage('workspace.runtime.request.routeHint') : '',
+    }));
     this.status = status;
     this.method = method;
     this.path = path;
@@ -221,6 +227,9 @@ export class ProgramSourceRejectedError extends Error {
     Object.defineProperty(this, 'uiMessageKey', { value: 'workspace.runtime.program.rejected', enumerable: false });
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({
       diagnostic: diagnostic || uiText('workspace.runtime.program.noReason') }) });
+    withUiMessage(this, uiMessage('workspace.runtime.program.rejected', {
+      diagnostic: diagnostic || uiMessage('workspace.runtime.program.noReason'),
+    }));
     this.diagnostic = diagnostic;
     this.line = line;
     this.column = column;
@@ -532,21 +541,24 @@ export class RavenrootRuntimeClient {
         await this.sleep(reconnectDelay);
       } catch (error) {
         if (signal.aborted) return;
+        const retainedReason = uiErrorMessage(error);
         if (error instanceof RuntimeAuthorizationError) {
-          onConnectionChange(error.status === 403 ? 'revoked' : 'authentication-required', error.message, () => uiErrorReason(error));
+          onConnectionChange(error.status === 403 ? 'revoked' : 'authentication-required', error.message, () => renderUiMessage(retainedReason, uiText));
           return;
         }
         failures += 1;
         if (failures > this.maxRetries) {
-          onConnectionChange('error', `Live events stopped after ${this.maxRetries} retries: ${error.message}`, () => uiText("workspace.runtime.events.failed", { count: this.maxRetries, reason: uiErrorReason(error) }));
+          const retries = this.maxRetries;
+          onConnectionChange('error', `Live events stopped after ${retries} retries: ${error.message}`, () => uiText("workspace.runtime.events.failed", { count: retries, reason: renderUiMessage(retainedReason, uiText) }));
           return;
         }
-        onConnectionChange('reconnecting', error.message, () => uiErrorReason(error));
+        onConnectionChange('reconnecting', error.message, () => renderUiMessage(retainedReason, uiText));
         await this.sleep(this.retryDelayMs);
       }
     }
     if (!signal.aborted) {
-      onConnectionChange('error', `Live events stopped after ${this.maxRetries} retries`, () => uiText("workspace.runtime.events.stopped", { count: this.maxRetries }));
+      const retries = this.maxRetries;
+      onConnectionChange('error', `Live events stopped after ${retries} retries`, () => uiText("workspace.runtime.events.stopped", { count: retries }));
     }
   }
 
@@ -768,16 +780,17 @@ export class RavenrootRuntimeClient {
         await this.sleep(read.retryDelay);
       } catch (error) {
         if (signal.aborted) return;
+        const retainedReason = uiErrorMessage(error);
         if (error instanceof RuntimeAuthorizationError) {
-          onConnectionChange('revoked', error.message, () => uiErrorReason(error));
+          onConnectionChange('revoked', error.message, () => renderUiMessage(retainedReason, uiText));
           return;
         }
         failures += 1;
         if (failures > this.maxRetries) {
-          onConnectionChange('error', `Deployment observation stopped: ${error.message}`, () => uiText("workspace.runtime.deployment.stopped", { reason: uiErrorReason(error) }));
+          onConnectionChange('error', `Deployment observation stopped: ${error.message}`, () => uiText("workspace.runtime.deployment.stopped", { reason: renderUiMessage(retainedReason, uiText) }));
           return;
         }
-        onConnectionChange('reconnecting', error.message, () => uiErrorReason(error));
+        onConnectionChange('reconnecting', error.message, () => renderUiMessage(retainedReason, uiText));
         await this.sleep(this.retryDelayMs);
       }
     }

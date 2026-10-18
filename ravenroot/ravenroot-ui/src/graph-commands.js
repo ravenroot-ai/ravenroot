@@ -1,3 +1,4 @@
+import { uiMessage, renderUiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
 import { uiText } from './ui-text.js';
 import { productError } from './product-error.js';
 // Command model over the canonical graph document (UI-01).
@@ -30,24 +31,24 @@ const SAVE_POINT_UNREACHABLE = Symbol('ravenroot.save-point-unreachable');
 // COMMAND CONSTRUCTORS
 // ═══════════════════════════════════════════════════════════════
 
-export function insertNodesCommand(entries, label = () => uiText('workspace.history.insert.nodes')) {
-  return { type: 'insert-nodes', get label() { return typeof label === 'function' ? label() : label; }, entries: normalizeEntries(entries, 'node') };
+export function insertNodesCommand(entries, label = uiMessage('workspace.history.insert.nodes')) {
+  return withUiMessage({ type: 'insert-nodes', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, entries: normalizeEntries(entries, 'node') }, label);
 }
 
-export function removeNodesCommand(nodeIds, label = () => uiText('workspace.history.remove.nodes')) {
-  return { type: 'remove-nodes', get label() { return typeof label === 'function' ? label() : label; }, nodeIds: [...nodeIds] };
+export function removeNodesCommand(nodeIds, label = uiMessage('workspace.history.remove.nodes')) {
+  return withUiMessage({ type: 'remove-nodes', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, nodeIds: [...nodeIds] }, label);
 }
 
-export function insertEdgesCommand(entries, label = () => uiText('workspace.history.insert.edges')) {
-  return { type: 'insert-edges', get label() { return typeof label === 'function' ? label() : label; }, entries: normalizeEntries(entries, 'edge') };
+export function insertEdgesCommand(entries, label = uiMessage('workspace.history.insert.edges')) {
+  return withUiMessage({ type: 'insert-edges', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, entries: normalizeEntries(entries, 'edge') }, label);
 }
 
-export function removeEdgesCommand(edgeIds, label = () => uiText('workspace.history.remove.edges')) {
-  return { type: 'remove-edges', get label() { return typeof label === 'function' ? label() : label; }, edgeIds: [...edgeIds] };
+export function removeEdgesCommand(edgeIds, label = uiMessage('workspace.history.remove.edges')) {
+  return withUiMessage({ type: 'remove-edges', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, edgeIds: [...edgeIds] }, label);
 }
 
-export function updateNodeCommand(id, patch, label = () => uiText('workspace.history.edit.node', { id }), unset = []) {
-  return { type: 'update-node', get label() { return typeof label === 'function' ? label() : label; }, id, patch: { ...patch }, unset: [...unset] };
+export function updateNodeCommand(id, patch, label = uiMessage('workspace.history.edit.node', { id }), unset = []) {
+  return withUiMessage({ type: 'update-node', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, id, patch: { ...patch }, unset: [...unset] }, label);
 }
 
 // Graph-level properties (currently only `join.semantics`, the marker) get their own
@@ -55,43 +56,43 @@ export function updateNodeCommand(id, patch, label = () => uiText('workspace.his
 // itself, not one element inside `graph.nodes`/`graph.edges`. Routing the migration action through
 // this -- instead of assigning into `graphProperties` directly -- is what makes stamping the marker an
 // undo step like every other edit, and what makes the document report itself dirty for it.
-export function updateGraphPropertiesCommand(patch, label = () => uiText('workspace.history.edit.graph.properties'), unset = []) {
-  return { type: 'update-graph-properties', get label() { return typeof label === 'function' ? label() : label; }, patch: { ...patch }, unset: [...unset] };
+export function updateGraphPropertiesCommand(patch, label = uiMessage('workspace.history.edit.graph.properties'), unset = []) {
+  return withUiMessage({ type: 'update-graph-properties', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, patch: { ...patch }, unset: [...unset] }, label);
 }
 
-export function updateEdgeCommand(id, patch, label = () => uiText('workspace.history.edit.edge', { id }), unset = []) {
-  return { type: 'update-edge', get label() { return typeof label === 'function' ? label() : label; }, id, patch: { ...patch }, unset: [...unset] };
+export function updateEdgeCommand(id, patch, label = uiMessage('workspace.history.edit.edge', { id }), unset = []) {
+  return withUiMessage({ type: 'update-edge', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, id, patch: { ...patch }, unset: [...unset] }, label);
 }
 
-export function batchUpdateNodePropertiesCommand(entries, label = () => uiText('workspace.history.edit.selected.node.properties')) {
-  return {
+export function batchUpdateNodePropertiesCommand(entries, label = uiMessage('workspace.history.edit.selected.node.properties')) {
+  return withUiMessage({
     type: 'batch-update-node-properties',
-    get label() { return typeof label === 'function' ? label() : label; },
+    get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); },
     entries: entries.map(entry => ({
       id: entry.id,
       properties: normalizeMapPatch(entry.properties),
       propertyTypes: normalizeMapPatch(entry.propertyTypes),
     })),
-  };
+  }, label);
 }
 
-export function moveNodesCommand(entries, label = () => uiText('workspace.history.move.nodes')) {
-  return {
+export function moveNodesCommand(entries, label = uiMessage('workspace.history.move.nodes')) {
+  return withUiMessage({
     type: 'move-nodes',
-    get label() { return typeof label === 'function' ? label() : label; },
+    get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); },
     entries: entries.map(entry => {
       const moved = { id: entry.id, ox: Number(entry.ox), oy: Number(entry.oy) };
       if (Object.hasOwn(entry, 'positionIsCenter')) moved.positionIsCenter = entry.positionIsCenter;
       return moved;
     }),
-  };
+  }, label);
 }
 
 // One user gesture, one undo step. Multi-node drag, delete-with-incident-edges and paste-like
 // batches are all a composite: applying it collects each inverse and returns them reversed, so the
 // whole batch undoes atomically and can never be unwound in pieces.
-export function compositeCommand(commands, label = () => uiText('workspace.history.composite.edit')) {
-  return { type: 'composite', get label() { return typeof label === 'function' ? label() : label; }, commands: [...commands] };
+export function compositeCommand(commands, label = uiMessage('workspace.history.composite.edit')) {
+  return withUiMessage({ type: 'composite', get label() { return renderUiMessage(typeof label === 'function' ? label() : label, uiText); }, commands: [...commands] }, label);
 }
 
 function normalizeEntries(entries, key) {
@@ -132,7 +133,7 @@ const HANDLERS = {
       graph.nodes.splice(clampIndex(entry.index, graph.nodes.length), 0, entry.node);
     }
     reindexNodes(graph);
-    return removeNodesCommand(entries.map(entry => entry.node.id), command.label);
+    return removeNodesCommand(entries.map(entry => entry.node.id), uiMessageOf(command, command.label));
   },
 
   'remove-nodes': (graph, command) => {
@@ -152,10 +153,10 @@ const HANDLERS = {
     reindexNodes(graph);
     // Ascending capture order matters: re-inserting removed indices in ascending order into the
     // reduced array reproduces the original array exactly.
-    const restoreNodes = insertNodesCommand(entries, command.label);
+    const restoreNodes = insertNodesCommand(entries, uiMessageOf(command, command.label));
     if (grouping.status === 'valid' && grouping.groups.some(group => group.memberNodeIds.some(id => wanted.has(id)))) {
       graph.graphProperties[VISUAL_GROUPS_PROPERTY] = visualGroupsValue(groupsAfterNodeRemoval(grouping.groups, wanted), graph);
-      return compositeCommand([restoreNodes, updateGraphPropertiesCommand({ [VISUAL_GROUPS_PROPERTY]: priorGroups })], command.label);
+      return compositeCommand([restoreNodes, updateGraphPropertiesCommand({ [VISUAL_GROUPS_PROPERTY]: priorGroups })], uiMessageOf(command, command.label));
     }
     return restoreNodes;
   },
@@ -170,7 +171,7 @@ const HANDLERS = {
     for (const entry of entries) {
       graph.edges.splice(clampIndex(entry.index, graph.edges.length), 0, entry.edge);
     }
-    return removeEdgesCommand(entries.map(entry => entry.edge.id), command.label);
+    return removeEdgesCommand(entries.map(entry => entry.edge.id), uiMessageOf(command, command.label));
   },
 
   'remove-edges': (graph, command) => {
@@ -185,7 +186,7 @@ const HANDLERS = {
       if (wanted.has(edge.id)) entries.push({ edge, index });
     });
     graph.edges = graph.edges.filter(edge => !wanted.has(edge.id));
-    return insertEdgesCommand(entries, command.label);
+    return insertEdgesCommand(entries, uiMessageOf(command, command.label));
   },
 
   'update-node': (graph, command) => {
@@ -197,7 +198,7 @@ const HANDLERS = {
     const inverse = invertPatch(node, command);
     applyPatch(node, command);
     reindexNodes(graph);
-    return updateNodeCommand(command.id, inverse.patch, command.label, inverse.unset);
+    return updateNodeCommand(command.id, inverse.patch, uiMessageOf(command, command.label), inverse.unset);
   },
 
   'update-graph-properties': (graph, command) => {
@@ -210,8 +211,9 @@ const HANDLERS = {
       if (command.visualGroupsMetadata) graph._visualGroupsMetadata = command.visualGroupsMetadata;
       else delete graph._visualGroupsMetadata;
     }
-    return { ...updateGraphPropertiesCommand(inverse.patch, command.label, inverse.unset),
-      ...(ownsGrouping ? { visualGroupsMetadata: priorMetadata || null } : {}) };
+    const result = updateGraphPropertiesCommand(inverse.patch, uiMessageOf(command, command.label), inverse.unset);
+    if (ownsGrouping) result.visualGroupsMetadata = priorMetadata || null;
+    return result;
   },
 
   'update-edge': (graph, command) => {
@@ -220,7 +222,7 @@ const HANDLERS = {
     if (Object.hasOwn(command.patch, 'id')) throw productError("workspace.error.graph.commands.an.edge.id.cannot.be.patched", new Error('An edge id cannot be patched'));
     const inverse = invertPatch(edge, command);
     applyPatch(edge, command);
-    return updateEdgeCommand(command.id, inverse.patch, command.label, inverse.unset);
+    return updateEdgeCommand(command.id, inverse.patch, uiMessageOf(command, command.label), inverse.unset);
   },
 
   'batch-update-node-properties': (graph, command) => {
@@ -237,7 +239,7 @@ const HANDLERS = {
       node.properties = applyMapPatch(node.properties, entry.properties);
       node.propertyTypes = applyMapPatch(node.propertyTypes, entry.propertyTypes);
     }
-    return batchUpdateNodePropertiesCommand(inverseEntries, command.label);
+    return batchUpdateNodePropertiesCommand(inverseEntries, uiMessageOf(command, command.label));
   },
 
   'move-nodes': (graph, command) => {
@@ -254,7 +256,7 @@ const HANDLERS = {
       node.oy = entry.oy;
       node._positionIsCenter = Object.hasOwn(entry, 'positionIsCenter') ? entry.positionIsCenter : true;
     }
-    return moveNodesCommand(restored, command.label);
+    return moveNodesCommand(restored, uiMessageOf(command, command.label));
   },
 
   composite: (graph, command) => {
@@ -267,7 +269,7 @@ const HANDLERS = {
       for (const inverse of inverses.reverse()) applyCommand(graph, inverse);
       throw error;
     }
-    return compositeCommand(inverses.reverse(), command.label);
+    return compositeCommand(inverses.reverse(), uiMessageOf(command, command.label));
   },
 };
 

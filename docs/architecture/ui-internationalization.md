@@ -53,6 +53,21 @@ complete requested locale, including any script subtag. The optional field remai
 catalog is validated or persisted. Applying a locale updates the document `lang` and `dir`
 attributes.
 
+## Retained notices
+
+Activity rows retain explicit message recipes, including nested product labels, alongside captured
+opaque event data. A language switch repaints the same rows; it does not repeat the request,
+validation, graph edit, or authorization decision. Provider kind, review state, identifiers, authored
+names, URLs, diagnostics, and numeric inputs are captured when the event occurs. Later workspace or
+provider changes cannot rewrite that event's meaning.
+
+The private `ui-message.js` handles preserve existing string APIs and stay outside serialized graph,
+error, and protocol records. Only explicitly registered recipes can render; arbitrary objects and
+unknown diagnostics remain literal data. Error parameter factories are sampled once, and command
+inverses retain the original semantic label. The source checker rejects eager translation entering
+retained activity recipes, with production CLI fixtures covering both refusals and safe deferred or
+authored inputs.
+
 ## Workspace deployment and selection
 
 The browser optionally loads `/ui-locales.json` from the same origin and UI deployment root as

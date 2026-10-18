@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   findCrossModulePresentationSinkViolations,
   findPresentationSinkViolations,
+  findRetainedMessageViolations,
 } from '../scripts/check-ui-i18n.mjs';
 
 describe('UI localization source audit fixtures', () => {
@@ -190,4 +191,31 @@ describe('UI localization source audit fixtures', () => {
     })).toEqual(['producer.js:1']);
   });
 
+});
+
+
+describe('retained activity localization audit', () => {
+  it.each([
+    `addActivityMessage(uiMessage('title'), uiText('detail'));`,
+    `uiMessage('outer', { nested: uiText('inner') });`,
+    `const label = uiText('state'); uiMessage('outer', { label });`,
+    `const label = flag ? uiText('one') : uiText('other'); addActivityMessage('authored', label);`,
+    `const reason = uiErrorReason(error); addActivityMessage(uiMessage('title'), reason);`,
+    `const params = { reason: uiErrorReason(error) }; uiMessage('outer', params);`,
+  ])('rejects eager retained translation: %s', source => {
+    expect(findRetainedMessageViolations(source)).toEqual([1]);
+  });
+  it('accepts explicit nested semantics, deferred rendering and opaque authored text', () => {
+    expect(findRetainedMessageViolations(`
+      const authored = response.url;
+      const nested = uiMessage('inner', { count: 5 });
+      addActivityMessage(uiMessage('title'), uiMessage('outer', { nested, authored }));
+      addActivityMessage(uiMessage('title'), uiComputed(() => uiText('outer', { authored })));
+      addActivityMessage(uiMessage('title'), uiErrorMessage(error));
+      addActivityMessage(user.title, user.content);
+    `)).toEqual([]);
+  });
+  it('keeps unrelated immediate rendering legal', () => {
+    expect(findRetainedMessageViolations(`node.textContent = uiText('instant');`)).toEqual([]);
+  });
 });

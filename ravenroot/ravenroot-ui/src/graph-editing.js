@@ -1,3 +1,4 @@
+import { uiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import {
   applyCommand,
@@ -25,7 +26,7 @@ import { catalogPropertyHasDeclaredDefault } from './adapter-binding.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups, visualGroupsValue } from './visual-groups.js';
 import { uiText } from './ui-text.js';
 
-export function editVisualGroups(graph, groups, history = null, label = 'Edit visual groups') {
+export function editVisualGroups(graph, groups, history = null, label = uiMessage('workspace.history.editVisualGroups')) {
   if (!canModifyGraph(graph)) return null;
   return run(graph, updateGraphPropertiesCommand({
     [VISUAL_GROUPS_PROPERTY]: visualGroupsValue(groups, graph),
@@ -37,7 +38,7 @@ export function createVisualGroup(graph, memberNodeIds, name, anchorNodeId, hist
   if (!['valid', 'none'].includes(metadata.status)) throw productError("workspace.error.graph.editing.remove.unsupported.visual.group.metadata.before.creating.groups", new Error('Remove unsupported visual group metadata before creating groups'));
   const group = { id: uniqueElementId('group', metadata.groups), name,
     memberNodeIds: [...new Set(memberNodeIds)], anchorNodeId, collapsed: true };
-  editVisualGroups(graph, [...metadata.groups, group], history, `Create visual group ${name}`);
+  editVisualGroups(graph, [...metadata.groups, group], history, uiMessage('workspace.history.createVisualGroup', { name }));
   return group;
 }
 
@@ -79,7 +80,7 @@ function run(graph, command, history, options = {}) {
 export function addNodeAt(graph, position, history = null, options = {}) {
   if (!canModifyGraph(graph)) return null;
   const node = createNodeForInsertion(graph, position, options);
-  run(graph, insertNodesCommand([{ node, index: graph.nodes.length }], `Add node ${node.id}`), history);
+  run(graph, insertNodesCommand([{ node, index: graph.nodes.length }], uiMessage('workspace.history.addNode', { id: node.id })), history);
   return node;
 }
 
@@ -112,7 +113,7 @@ export function duplicateNode(graph, sourceId, history = null, options = {}) {
     _positionIsCenter: true,
   });
   run(graph, insertNodesCommand([{ node, index: graph.nodes.length }],
-    `Duplicate ${source.id} as ${node.id}`), history);
+    uiMessage('workspace.history.duplicate', { source: source.id, id: node.id })), history);
   return node;
 }
 
@@ -177,7 +178,7 @@ export function addTemplateNodeAt(graph, position, template, history = null) {
     _positionIsCenter: true,
   });
   run(graph, insertNodesCommand([{ node, index: graph.nodes.length }],
-    `Insert saved node ${template.name || node.name}`), history);
+    uiMessage('workspace.history.savedNode', { name: template.name || node.name })), history);
   return { node, reason: '' };
 }
 
@@ -186,7 +187,9 @@ export function addTemplateNodeAt(graph, position, template, history = null) {
 // then one history entry: an invalid source cannot strand a node, while undo/redo always moves the
 // valid pair together.
 export function addConnectedNodeAt(graph, position, source, history = null, options = {}) {
-  if (!canModifyGraph(graph)) return { node: null, edge: null, reason: uiText('workspace.graphEditing.notEditable') };
+  if (!canModifyGraph(graph)) return withUiMessage(
+    { node: null, edge: null, reason: uiText('workspace.graphEditing.notEditable') },
+    uiMessage('workspace.graphEditing.notEditable'));
   const node = createNodeForInsertion(graph, position, options);
   const proposal = {
     ...graph,
@@ -194,16 +197,16 @@ export function addConnectedNodeAt(graph, position, source, history = null, opti
     nodeMap: { ...graph.nodeMap, [node.id]: node },
   };
   const connection = validateEdgeConnection(proposal, { source, target: node.id });
-  if (!connection.ok) return { node: null, edge: null, reason: connection.reason };
+  if (!connection.ok) return withUiMessage({ node: null, edge: null, reason: connection.reason }, uiMessageOf(connection));
 
   const edgeId = options.edgeId || uniqueElementId('edge', graph.edges);
   const edgeIdResult = validateEdgeId(graph, edgeId);
-  if (!edgeIdResult.ok) return { node: null, edge: null, reason: edgeIdResult.reason };
+  if (!edgeIdResult.ok) return withUiMessage({ node: null, edge: null, reason: edgeIdResult.reason }, uiMessageOf(edgeIdResult));
   const edge = createEdge(edgeId, source, node.id, options.outcome);
   const command = compositeCommand([
     insertNodesCommand([{ node, index: graph.nodes.length }]),
     insertEdgesCommand([{ edge, index: graph.edges.length }]),
-  ], `Add node ${node.id} and connect ${source} → ${node.id}`);
+  ], uiMessage('workspace.history.connectedNode', { id: node.id, source }));
   run(graph, command, history);
   return { node, edge, reason: '' };
 }
@@ -225,7 +228,7 @@ export function connectNodes(graph, source, target, history = null, options = {}
   const id = options.id || uniqueElementId('edge', graph.edges);
   if (!validateEdgeId(graph, id).ok) return null;
   const edge = createEdge(id, source, target, options.outcome);
-  run(graph, insertEdgesCommand([{ edge, index: graph.edges.length }], `Connect ${source} → ${target}`), history);
+  run(graph, insertEdgesCommand([{ edge, index: graph.edges.length }], uiMessage('workspace.history.connect', { source, target })), history);
   return edge;
 }
 
@@ -243,12 +246,12 @@ export function reconnectEdge(graph, edgeId, endpoint, nodeId, history = null) {
   if (!validateEdgeConnection(graph, { ...proposal, edgeId }).ok) return null;
   if (edge[endpoint] === nodeId) return null;
   return run(graph, updateEdgeCommand(edgeId, { [endpoint]: nodeId },
-    `Reconnect ${edgeId} ${endpoint} to ${nodeId}`), history);
+    uiMessage('workspace.history.reconnect', { id: edgeId, endpoint: uiMessage(endpoint === 'source' ? 'workspace.edge.role.source' : 'workspace.edge.role.target'), nodeId })), history);
 }
 
 export function insertNodeElement(graph, node, history = null) {
   if (!canModifyGraph(graph) || !node || graph.nodeMap[node.id]) return null;
-  run(graph, insertNodesCommand([{ node, index: graph.nodes.length }], `Add node ${node.id}`), history);
+  run(graph, insertNodesCommand([{ node, index: graph.nodes.length }], uiMessage('workspace.history.addNode', { id: node.id })), history);
   return node;
 }
 
@@ -256,13 +259,13 @@ export function insertEdgeElement(graph, edge, history = null) {
   if (!canModifyGraph(graph) || !edge) return null;
   if (!validateEdgeId(graph, edge.id).ok) return null;
   if (!validateEdgeConnection(graph, { source: edge.source, target: edge.target }).ok) return null;
-  run(graph, insertEdgesCommand([{ edge, index: graph.edges.length }], `Add edge ${edge.id}`), history);
+  run(graph, insertEdgesCommand([{ edge, index: graph.edges.length }], uiMessage('workspace.history.addEdge', { id: edge.id })), history);
   return edge;
 }
 
 export function updateNodeFields(graph, id, patch, history = null, options = {}) {
   if (!canModifyGraph(graph) || !graph.nodeMap[id]) return null;
-  return run(graph, updateNodeCommand(id, patch, `Edit node ${id}`), history, options);
+  return run(graph, updateNodeCommand(id, patch, uiMessage('workspace.history.edit.node', { id })), history, options);
 }
 
 // An explicit authored action, never something save or open does on the reader's behalf (see
@@ -276,16 +279,16 @@ export function migrateJoinSemantics(graph, history = null) {
   if (plan.alreadyDeclared) return null;
   const steps = plan.changes.map(change => updateNodeCommand(change.nodeId,
     { properties: { ...graph.nodeMap[change.nodeId].properties, [change.property]: change.value } },
-    `Set ${change.property}=${change.value} on ${change.nodeId}`));
+    uiMessage('workspace.history.setProperty', { property: change.property, value: change.value, id: change.nodeId })));
   steps.push(updateGraphPropertiesCommand(
-    { [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED }, 'Declare join semantics'));
-  return run(graph, compositeCommand(steps, 'Migrate join semantics'), history);
+    { [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED }, uiMessage('workspace.history.declareJoin')));
+  return run(graph, compositeCommand(steps, uiMessage('workspace.history.migrateJoin')), history);
 }
 
 export function updateNodePropertiesBatch(graph, entries, history = null) {
   if (!canModifyGraph(graph) || !Array.isArray(entries) || entries.length === 0) return null;
   return run(graph, batchUpdateNodePropertiesCommand(entries,
-    `Edit properties on ${entries.length} selected nodes`), history);
+    uiMessage('workspace.history.editProperties', { count: entries.length })), history);
 }
 
 export function updateEdgeFields(graph, id, patch, history = null, options = {}) {
@@ -303,7 +306,7 @@ export function updateEdgeFields(graph, id, patch, history = null, options = {})
     };
     if (!validateEdgeConnection(graph, proposal).ok) return null;
   }
-  return run(graph, updateEdgeCommand(id, patch, `Edit edge ${id}`), history, options);
+  return run(graph, updateEdgeCommand(id, patch, uiMessage('workspace.history.edit.edge', { id })), history, options);
 }
 
 // One drag gesture is one undo step, however many nodes moved. Entries whose coordinates did not
@@ -317,7 +320,7 @@ export function moveNodesTo(graph, positions = [], history = null, commandLabel 
   });
   if (!moved.length) return null;
   const label = commandLabel
-    || (moved.length === 1 ? `Move ${moved[0].id}` : `Move ${moved.length} nodes`);
+    || (moved.length === 1 ? uiMessage('workspace.history.moveNode', { id: moved[0].id }) : uiMessage('workspace.history.moveNodes', { count: moved.length }));
   return run(graph, moveNodesCommand(moved, label), history);
 }
 
@@ -335,17 +338,17 @@ export function deleteElements(graph, selectedNodeIds = [], selectedEdgeIds = []
   if (!nodeIds.length && !edgeIds.length) return { nodeIds: [], edgeIds: [] };
 
   const steps = [];
-  if (edgeIds.length) steps.push(removeEdgesCommand(edgeIds, 'Delete edges'));
-  if (nodeIds.length) steps.push(removeNodesCommand(nodeIds, 'Delete nodes'));
+  if (edgeIds.length) steps.push(removeEdgesCommand(edgeIds, uiMessage('workspace.history.deleteEdges')));
+  if (nodeIds.length) steps.push(removeNodesCommand(nodeIds, uiMessage('workspace.history.deleteNodes')));
   run(graph, compositeCommand(steps, deleteLabel(nodeIds.length, edgeIds.length)), history);
 
   return { nodeIds, edgeIds };
 }
 
 function deleteLabel(nodeCount, edgeCount) {
-  if (nodeCount && edgeCount) return `Delete ${nodeCount} node(s) and ${edgeCount} edge(s)`;
-  if (nodeCount) return `Delete ${nodeCount} node(s)`;
-  return `Delete ${edgeCount} edge(s)`;
+  if (nodeCount && edgeCount) return uiMessage('workspace.history.deleteBoth', { nodeCount, edgeCount });
+  if (nodeCount) return uiMessage('workspace.history.deleteNodeCount', { count: nodeCount });
+  return uiMessage('workspace.history.deleteEdgeCount', { count: edgeCount });
 }
 
 export function isEditableTarget(target) {

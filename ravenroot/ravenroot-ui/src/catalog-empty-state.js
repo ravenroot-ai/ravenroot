@@ -1,3 +1,4 @@
+import { uiMessage, uiErrorMessage, renderUiMessage, withUiMessage } from './ui-message.js';
 // Why the node palette is empty, in the user's words.
 //
 // An empty palette has several causes and they are not interchangeable: a service that answered
@@ -12,6 +13,11 @@
 
 import { uiText } from './ui-text.js';
 
+function state(kind, key, params, t) {
+  const message = uiMessage(key, params);
+  return withUiMessage({ kind, message: renderUiMessage(message, t) }, message);
+}
+
 export function catalogEmptyState(error, catalog, pending = false, t = uiText) {
   if (error) return failureState(error, t);
   if (catalog === null || catalog === undefined) {
@@ -19,12 +25,12 @@ export function catalogEmptyState(error, catalog, pending = false, t = uiText) {
     // instruction the user can neither act on nor decline, so while the request is in flight the
     // palette says what is happening instead of asking for something that is already under way.
     if (pending) {
-      return { kind: 'connecting', message: t('catalog.empty.connecting') };
+      return state('connecting', 'catalog.empty.connecting', {}, t);
     }
-    return { kind: 'disconnected', message: t('catalog.empty.disconnected') };
+    return state('disconnected', 'catalog.empty.disconnected', {}, t);
   }
   if (!catalog.length) {
-    return { kind: 'empty', message: t('catalog.empty.available') };
+    return state('empty', 'catalog.empty.available', {}, t);
   }
   return { kind: 'available', message: '' };
 }
@@ -32,16 +38,10 @@ export function catalogEmptyState(error, catalog, pending = false, t = uiText) {
 function failureState(error, t) {
   const status = Number(error?.status) || 0;
   if (status === 401) {
-    return {
-      kind: 'authentication-required',
-      message: t('catalog.empty.authenticationRequired'),
-    };
+    return state('authentication-required', 'catalog.empty.authenticationRequired', {}, t);
   }
   if (status === 403) {
-    return {
-      kind: 'access-revoked',
-      message: t('catalog.empty.accessRevoked'),
-    };
+    return state('access-revoked', 'catalog.empty.accessRevoked', {}, t);
   }
   // Do not add "The service did not answer" for a
   // status-less error (`error.status` null/undefined -- the fetch promise itself rejected) and drop
@@ -55,13 +55,8 @@ function failureState(error, t) {
   // service did or did not do -- only `reason(error)`, which is already the client's own observation
   // (and, for the status-less case, already enumerates the possibilities via `runtime-client.js`'s
   // hint) -- so there is nothing left to add here, and both cases share one sentence.
-  return {
-    kind: 'unreachable',
-    message: t('catalog.empty.unreachable', { reason: reason(error, t) }),
-  };
-}
-
-function reason(error, t) {
-  const message = String(error?.message || '').trim();
-  return message || t('catalog.empty.requestFailed');
+  return state('unreachable', 'catalog.empty.unreachable', {
+    reason: error?.uiMessageKey ? uiErrorMessage(error)
+      : String(error?.message || '').trim() || uiMessage('catalog.empty.requestFailed'),
+  }, t);
 }

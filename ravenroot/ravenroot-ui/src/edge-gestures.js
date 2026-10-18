@@ -1,3 +1,4 @@
+import { uiMessage, renderUiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 // Edge authoring gestures and their validation (UI-02).
 //
@@ -35,11 +36,11 @@ export const EDGE_POINTER_HOLD_MS = 300;
 export function validateEdgeId(graph, candidate, { existingId = null } = {}) {
   const id = candidate;
   const finding = stableEdgeIdFinding(id);
-  if (finding) return refuse(uiText('workspace.edge.validation.id', {
-    reason: uiText(`workspace.edge.validation.stableId.${finding.kind}`, finding.params),
+  if (finding) return refuse(uiMessage('workspace.edge.validation.id', {
+    reason: uiMessage(`workspace.edge.validation.stableId.${finding.kind}`, finding.params),
   }));
   const clash = (graph?.edges || []).some(edge => edge.id === id && edge.id !== existingId);
-  if (clash) return refuse(uiText('workspace.edge.validation.idExists', { id }));
+  if (clash) return refuse(uiMessage('workspace.edge.validation.idExists', { id }));
   return { ok: true, reason: '' };
 }
 
@@ -53,14 +54,14 @@ export function validateEdgeId(graph, candidate, { existingId = null } = {}) {
 export function validateEdgeConnection(graph, { source, target, edgeId = null } = {}) {
   const sourceNode = lookupNode(graph, source);
   const targetNode = lookupNode(graph, target);
-  if (!source) return refuse(uiText('workspace.edge.validation.chooseSource'));
-  if (!target) return refuse(uiText('workspace.edge.validation.chooseTarget'));
-  if (!sourceNode) return refuse(uiText('workspace.edge.validation.unknownSource', { source }));
-  if (!targetNode) return refuse(uiText('workspace.edge.validation.unknownTarget', { target }));
-  if (targetNode.kind === 'START') return refuse(uiText('workspace.edge.validation.startIncoming', { node: nodeLabel(targetNode) }));
-  if (sourceNode.kind === 'END') return refuse(uiText('workspace.edge.validation.endOutgoing', { node: nodeLabel(sourceNode) }));
+  if (!source) return refuse(uiMessage('workspace.edge.validation.chooseSource'));
+  if (!target) return refuse(uiMessage('workspace.edge.validation.chooseTarget'));
+  if (!sourceNode) return refuse(uiMessage('workspace.edge.validation.unknownSource', { source }));
+  if (!targetNode) return refuse(uiMessage('workspace.edge.validation.unknownTarget', { target }));
+  if (targetNode.kind === 'START') return refuse(uiMessage('workspace.edge.validation.startIncoming', { node: nodeLabel(targetNode) }));
+  if (sourceNode.kind === 'END') return refuse(uiMessage('workspace.edge.validation.endOutgoing', { node: nodeLabel(sourceNode) }));
   if (edgeId !== null && !(graph?.edges || []).some(edge => edge.id === edgeId)) {
-    return refuse(uiText('workspace.edge.validation.unknownEdge', { id: edgeId }));
+    return refuse(uiMessage('workspace.edge.validation.unknownEdge', { id: edgeId }));
   }
   return { ok: true, reason: '' };
 }
@@ -84,8 +85,8 @@ function edgeRole(role) {
   return uiText(role === 'source' ? 'workspace.edge.role.source' : 'workspace.edge.role.target');
 }
 
-function refuse(reason) {
-  return { ok: false, reason };
+function refuse(message) {
+  return withUiMessage({ ok: false, reason: renderUiMessage(message, uiText) }, message);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -244,20 +245,25 @@ export function beginReconnectGesture(graph, edgeId, endpoint) {
 // What the gesture would produce if it were completed on `candidateId`, and why it may not be.
 // The renderer asks this on every hover and every cursor move, so it must stay side-effect free.
 export function edgeGestureCandidate(state, graph, candidateId) {
-  if (!state || state.mode === 'idle') return { ok: false, reason: uiText('workspace.edge.gesture.none') };
+  if (!state || state.mode === 'idle') return refuse(uiMessage('workspace.edge.gesture.none'));
   if (state.mode === 'connect') {
     const proposal = { source: state.sourceId, target: candidateId };
-    return { ...validateEdgeConnection(graph, proposal), ...proposal };
+    const result = validateEdgeConnection(graph, proposal);
+    return withUiMessage({ ...result, ...proposal }, uiMessageOf(result));
   }
   const edge = (graph?.edges || []).find(candidate => candidate.id === state.edgeId);
-  if (!edge) return { ok: false, reason: uiText('workspace.edge.validation.unknownEdge', { id: state.edgeId }) };
+  if (!edge) return refuse(uiMessage('workspace.edge.validation.unknownEdge', { id: state.edgeId }));
   const proposal = state.endpoint === 'source'
     ? { source: candidateId, target: edge.target }
     : { source: edge.source, target: candidateId };
   if (candidateId === edge[state.endpoint]) {
-    return { ...proposal, ok: false, reason: uiText('workspace.edge.gesture.alreadyEndpoint', { endpoint: edgeRole(state.endpoint), id: edge.id }) };
+    const result = refuse(uiMessage('workspace.edge.gesture.alreadyEndpoint', {
+      endpoint: uiMessage(state.endpoint === 'source' ? 'workspace.edge.role.source' : 'workspace.edge.role.target'), id: edge.id,
+    }));
+    return withUiMessage({ ...proposal, ...result }, uiMessageOf(result));
   }
-  return { ...validateEdgeConnection(graph, { ...proposal, edgeId: state.edgeId }), ...proposal };
+  const result = validateEdgeConnection(graph, { ...proposal, edgeId: state.edgeId });
+  return withUiMessage({ ...result, ...proposal }, uiMessageOf(result));
 }
 
 // The endpoint a pointer grabbed, decided by which end of the edge it started nearer to. Grabbing
@@ -306,11 +312,15 @@ function describeCandidate(state, graph, candidateId, role) {
 }
 
 export function describeEdge(edge, graph) {
+  return renderUiMessage(describeEdgeMessage(edge, graph), uiText);
+}
+
+export function describeEdgeMessage(edge, graph) {
   if (!edge) return '';
   const source = lookupNode(graph, edge.source);
   const target = lookupNode(graph, edge.target);
   const outcome = edge.outcome || 'continue';
-  return uiText('workspace.edge.description', {
+  return uiMessage('workspace.edge.description', {
     id: edge.id, source: nodeLabel(source), target: nodeLabel(target), outcome,
   });
 }

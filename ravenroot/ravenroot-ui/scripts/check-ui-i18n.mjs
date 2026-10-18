@@ -614,6 +614,43 @@ export function findIndirectPresentationLiterals(source) {
   return [...found.values()];
 }
 
+// Catalog coverage alone cannot prove that a retained notice will repaint. Trace eager
+// translation into activity recipes separately, retaining the ordinary authored-data boundary.
+export function findRetainedMessageViolations(source) {
+  const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
+  const bindings = createBindingResolver(ast);
+  const found = new Set();
+  const eager = (node, seen = new Set()) => {
+    if (!node || seen.has(node)) return;
+    seen = new Set(seen).add(node);
+    if (['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)) return;
+    if (node.type === 'Identifier') { eager(bindings(node), seen); return; }
+    if (node.type === 'CallExpression') {
+      const name = node.callee.type === 'MemberExpression' ? node.callee.property.name : node.callee.name;
+      if (name === 'uiComputed') return;
+      if (['uiText', 'uiErrorReason', 't'].includes(name) || name === 'text') {
+        found.add(node.loc.start.line); return;
+      }
+      node.arguments.forEach(argument => eager(argument, seen));
+      return;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'loc') continue;
+      if (Array.isArray(value)) value.forEach(child => child?.type && eager(child, seen));
+      else if (value?.type) eager(value, seen);
+    }
+  };
+  walk.ancestor(ast, {
+    CallExpression(node, ancestors) {
+      if (ancestors.some(parent => parent !== node && parent.type === 'CallExpression'
+          && parent.callee.name === 'uiComputed')) return;
+      if (node.callee.name === 'uiMessage') eager(node.arguments[1]);
+      if (node.callee.name === 'addActivityMessage') node.arguments.slice(0, 2).forEach(argument => eager(argument));
+    },
+  });
+  return [...found].sort((a, b) => a - b);
+}
+
 export function findPresentationSinkViolations(source, { sourceType = 'module' } = {}) {
   const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType, locations: true });
   const bindings = createBindingResolver(ast);
@@ -1078,6 +1115,11 @@ function auditJavascript() {
   }
   const moduleSources = Object.fromEntries(sources.filter(entry => entry.sourceType === 'module')
     .map(entry => [entry.file, fs.readFileSync(path.join(root, entry.file), 'utf8')]));
+  for (const [file, source] of Object.entries(moduleSources)) {
+    for (const line of findRetainedMessageViolations(source)) {
+      fail(file, line, 'eager translation loses retained activity message semantics');
+    }
+  }
   for (const finding of findCrossModulePresentationSinkViolations(moduleSources)) {
     const separator = finding.lastIndexOf(':');
     const file = finding.slice(0, separator);

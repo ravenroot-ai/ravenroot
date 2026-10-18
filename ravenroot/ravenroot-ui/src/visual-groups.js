@@ -1,4 +1,5 @@
-import { uiText, uiErrorReason } from './ui-text.js';
+import { uiMessage, uiErrorMessage, renderUiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
+import { uiText } from './ui-text.js';
 import { productError } from './product-error.js';
 // Visual definitions describe membership only. Real graph elements and renderer coordinates remain
 // owned by the canonical graph and the document presentation respectively.
@@ -34,18 +35,21 @@ export function validateVisualGroups(value, graph) {
 export function readVisualGroups(graph) {
   const raw = graph?.graphProperties?.[VISUAL_GROUPS_PROPERTY];
   const issue = graph?._visualGroupsMetadata;
-  const warning = message => uiText('workspace.visualGroups.warning', { message });
-  if (issue?.invalid && issue.raw === raw) return { status: 'invalid', groups: [], warning: warning(issue.invalid) };
+  const warning = (status, reason) => {
+    const message = uiMessage('workspace.visualGroups.warning', { message: reason });
+    return withUiMessage({ status, groups: [], warning: renderUiMessage(message, uiText) }, message);
+  };
+  if (issue?.invalid && issue.raw === raw) return warning('invalid', uiMessageOf(issue, issue.invalid));
   if (raw == null) return { status: 'none', groups: [], warning: '' };
   try {
     if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > VISUAL_GROUP_LIMITS.bytes) throw productError("workspace.error.visual.groups.visual.group.metadata.exceeds.the.supported.size", new Error('Visual group metadata exceeds the supported size'));
     const value = JSON.parse(raw);
     if (Number.isInteger(value?.version) && value.version > 1) {
-      return { status: 'future', groups: [], warning: warning(uiText('workspace.visualGroups.newerVersion')) };
+      return warning('future', uiMessage('workspace.visualGroups.newerVersion'));
     }
     return { status: 'valid', groups: validateVisualGroups(value, graph), warning: '' };
   } catch (error) {
-    return { status: 'invalid', groups: [], warning: warning(uiErrorReason(error)) };
+    return warning('invalid', uiErrorMessage(error));
   }
 }
 
@@ -98,9 +102,13 @@ export function readVisualGroupMetadataElement(graphElement, keyDefinitions, nam
   const defaults = definitions.filter(key => key.defaultValue !== null);
   if (!values.length && !defaults.length && !definitions.some(key => key.defaultComplex)) return null;
   const raw = values[0]?.textContent ?? defaults[0]?.defaultValue ?? '';
-  const invalid = definitions.length !== 1 || values.length > 1 ? 'Ambiguous visual group metadata'
-    : definitions[0].scope !== 'graph' || definitions[0].type !== 'string' ? 'Visual group metadata needs a graph string key'
+  const key = definitions.length !== 1 || values.length > 1 ? 'workspace.visualGroups.ambiguous'
+    : definitions[0].scope !== 'graph' || definitions[0].type !== 'string' ? 'workspace.visualGroups.graphString'
       : values.some(value => value.children.length) || definitions.some(key => key.defaultComplex)
-        ? 'Visual group metadata must be scalar text' : '';
-  return { raw, invalid };
+        ? 'workspace.visualGroups.scalar' : null;
+  // Keep the parser's original diagnostic field and attach presentation outside the wire shape.
+  const invalid = key === 'workspace.visualGroups.ambiguous' ? 'Ambiguous visual group metadata'
+    : key === 'workspace.visualGroups.graphString' ? 'Visual group metadata needs a graph string key'
+      : key ? 'Visual group metadata must be scalar text' : '';
+  return withUiMessage({ raw, invalid }, key ? uiMessage(key) : null);
 }

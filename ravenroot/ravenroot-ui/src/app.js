@@ -1,4 +1,4 @@
-import { createImmersiveWorkspace } from './immersive-workspace.js';
+import { createImmersiveWorkspace, graphFitViewport } from './immersive-workspace.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
@@ -6169,11 +6169,12 @@ function fitInUsableGraphArea(target, elements = target.elements(), padding = 60
   if (!area || !elements?.length) { target.fit(elements, padding); return; }
   const box = elements.boundingBox({ includeLabels: true, includeOverlays: false });
   if (!Number.isFinite(box.x1) || !Number.isFinite(box.y1)) return;
-  const zoom = centerOnly ? target.zoom() : Math.min(target.maxZoom(), Math.max(target.minZoom(),
-    Math.min(Math.max(1, area.width - padding * 2) / Math.max(1, box.w),
-      Math.max(1, area.height - padding * 2) / Math.max(1, box.h))));
-  target.viewport({ zoom, pan: { x: area.x + area.width / 2 - (box.x1 + box.x2) / 2 * zoom,
-    y: area.y + area.height / 2 - (box.y1 + box.y2) / 2 * zoom } });
+  const viewport = graphFitViewport(area, box, padding, centerOnly ? target.zoom() : target.maxZoom());
+  const minimum = target.minZoom();
+  // Explicit framing may need a scale below the manual navigation floor on a compact viewport.
+  // Restore that navigation preference after applying the exact fit; never clip the fitted bounds.
+  if (viewport.zoom < minimum) target.minZoom(viewport.zoom);
+  try { target.viewport(viewport); } finally { target.minZoom(minimum); }
 }
 
 function fitGraph({ selection = false } = {}) {
@@ -6191,13 +6192,19 @@ function fitGraph({ selection = false } = {}) {
     });
     if (minX === Infinity) return;
     const area = immersiveWorkspace?.usableRect(svgEl) || { x: 0, y: 0, width: svgEl.clientWidth || 800, height: svgEl.clientHeight || 600 };
-    const W = area.width; const H = area.height;
-    const pad = 60;
-    const bw  = maxX - minX + pad * 2;
-    const bh  = maxY - minY + pad * 2;
-    const sc  = Math.min(W / bw, H / bh, 4);
-    const tx  = area.x + (W - sc * (minX + maxX)) / 2;
-    const ty  = area.y + (H - sc * (minY + maxY)) / 2;
+    const painted = selection
+      ? [...svgEl.querySelectorAll('.d3-nodes circle, .d3-node-labels text')]
+        .filter(element => cy?.getElementById(element.__data__?.id).selected())
+      : [svgEl.querySelector('.d3-zoom-group')];
+    for (const element of painted) {
+      const box = element?.getBBox?.();
+      if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.y)) continue;
+      minX = Math.min(minX, box.x); minY = Math.min(minY, box.y);
+      maxX = Math.max(maxX, box.x + box.width); maxY = Math.max(maxY, box.y + box.height);
+    }
+    const viewport = graphFitViewport(area,
+      { x1: minX, y1: minY, x2: maxX, y2: maxY, w: maxX - minX, h: maxY - minY }, 60, 4);
+    const sc = viewport.zoom, tx = viewport.pan.x, ty = viewport.pan.y;
     const svgSelection = d3.select(svgEl);
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       svgSelection.call(renderer.zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(sc));
@@ -16659,6 +16666,10 @@ document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter =
   splitter.addEventListener('keydown', onLayoutSplitterKeydown);
   splitter.addEventListener('pointerdown', onLayoutSplitterPointerDown);
 });
+
+const activityLogRegion = document.getElementById('activity-log');
+activityLogRegion.tabIndex = 0;
+activityLogRegion.setAttribute('aria-labelledby', 'panel-activity-t');
 
 const selectionFitControl = document.createElement('button');
 selectionFitControl.type = 'button'; selectionFitControl.className = 'zbtn'; selectionFitControl.textContent = '◎';

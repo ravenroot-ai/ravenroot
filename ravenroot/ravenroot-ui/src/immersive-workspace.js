@@ -57,10 +57,19 @@ export function surfaceRect(surface, bounds, id = '') {
   if (surface.dock === 'top') { x = (W - width) / 2; y = tools ? (W < 900 ? 92 : 12) : 104; }
   if (surface.dock === 'bottom') { x = (W - width) / 2; y = H - height - gap - 42; }
   if (W < 900 && !tools) {
-    width = W - gap * 2; height = Math.min(height, H * .52);
+    width = W - gap * 2; height = Math.min(height, H * .4);
     x = gap; y = H - height - 54;
   }
   return { x: clamp(x, gap, W - width - gap), y: clamp(y, gap, H - height - gap), width, height };
+}
+
+// Padding is measured on screen, so a compact clear area cannot be consumed by fixed margins.
+export function graphFitViewport(area, box, padding = 60, maxZoom = 5) {
+  const inset = Math.max(0, Math.min(padding, area.width / 6, area.height / 6));
+  const zoom = Math.min(maxZoom, Math.max(1, area.width - inset * 2) / Math.max(1, box.w),
+    Math.max(1, area.height - inset * 2) / Math.max(1, box.h));
+  return { zoom, pan: { x: area.x + area.width / 2 - (box.x1 + box.x2) / 2 * zoom,
+    y: area.y + area.height / 2 - (box.y1 + box.y2) / 2 * zoom } };
 }
 
 // The largest unobscured rectangle also handles floating surfaces in the middle of a pane.

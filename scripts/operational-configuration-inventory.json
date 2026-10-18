@@ -268327,7 +268327,7 @@
     {
       "id": "oc-81e4617277e157e72ea1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 169,
+      "line": 172,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
@@ -268342,7 +268342,7 @@
     {
       "id": "oc-51083dc0607f39f350b7",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 169,
+      "line": 172,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
@@ -268357,7 +268357,7 @@
     {
       "id": "oc-dc8635072d6e1c0a6e06",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 170,
+      "line": 173,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
@@ -268372,7 +268372,7 @@
     {
       "id": "oc-4542affefa0b6127c954",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 170,
+      "line": 173,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "defaultPort",
@@ -268385,9 +268385,69 @@
       "rationale": "This atom is part of the reviewed Workbench framing binding, CSP grammar, canonical-origin parser, or deployment carrier contract."
     },
     {
+      "id": "oc-d2462b65c2dbc4d0ee4a",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+      "line": 197,
+      "symbol": "if",
+      "kind": "operational-declaration",
+      "role": "portText",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "06378eec604f78519926d2ed851b909398003ceba1dc859156bff7a1004d8af7",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+    },
+    {
+      "id": "oc-10b8fa14ebb1533564f8",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+      "line": 197,
+      "symbol": "if",
+      "kind": "operational-declaration",
+      "role": "portText",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "06378eec604f78519926d2ed851b909398003ceba1dc859156bff7a1004d8af7",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+    },
+    {
+      "id": "oc-ee945de5f690356ad6cf",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+      "line": 295,
+      "symbol": "if",
+      "kind": "operational-declaration",
+      "role": "delimiter",
+      "expression": "'-'",
+      "expressionDigest": "01f86083c0c7d2b1fdd3d4e93cc502990ce51bada47b4da56d987d4efbad6d98",
+      "evidenceDigest": "a6bd85a7e0538e30bb6dd090bc4c33d3f4f00c1b76b6218ebc25fdafae68262a",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+    },
+    {
+      "id": "oc-39d061c6fadac959b03e",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
+      "line": 332,
+      "symbol": "if",
+      "kind": "operational-declaration",
+      "role": "outputSize",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "7cc36117498eee800435bd54266dd3f1b23be128f7027600847c28e4bfcd5603",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+    },
+    {
       "id": "oc-bcfeda3b1bcbf8bbe8c6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/SecurityHeadersPolicy.java",
-      "line": 264,
+      "line": 391,
       "symbol": "invalidFrameAncestor",
       "kind": "environment-binding",
       "role": "RAVENROOT_UI_FRAME_ANCESTORS",
@@ -650288,6 +650348,7 @@
     "062465a3e9cd0251695fd94791a7eec71b2785af742f2bbdf7e40521d32a7b78": "values_source = (root / audit.ACTIVITY_CAPTURE_CARRIER_PATHS[1]).read_text()",
     "062682f2401ec4771df027284c273102a710f44e9b25feee0257ab904a538af5": "const file = event.target.files[0];",
     "0635977f36afbd130c8b835b47f9025dc19d9382e9ccd424e24628eb0a4f7878": "\"RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE\": (",
+    "06378eec604f78519926d2ed851b909398003ceba1dc859156bff7a1004d8af7": "String portText = separator == -1 ? null : rawAuthority.substring(separator + 1);",
     "063bea50afec17cdf93aa910f23626a117127b3a8018ba6834d9b8f37c37b8c0": "(self.root / path).write_text(self.git(\"show\", self.parent + \":\" + path) + \"\\n\")",
     "064472bf6bf6952ed233710bbc0613b569a02fe5c71d89dd92e71cce458523ee": "const LAYER_TOLERANCE = 2;",
     "0645e9d52b83f0f59e61cb4032024d5a5d775d2ba7ac618fbdd45da01e944605": "public record PublicationCandidate(String contract, PublicationDestination destination, List<PublicationResource> resources, PublicationProvenance provenance) { public static final String CONTRACT = \"ravenroot.publication-candidate/1\";",
@@ -655437,6 +655498,7 @@
     "7cadef3ca51cebec0aad9dcd3390fbcf418a18ddb2213844cf826ed366f27d53": "( cd \"$PROJECT_DIR/ravenroot\" && mvn -B --no-transfer-progress install -pl \"$REACTOR_MODULES\" -am )",
     "7cae37adb0f21023667b4a2ffd2eb0c8b94b5490b2b2fa33f6e0de3b0cf18f92": "const left = document.getElementById('sidebar');",
     "7cb67eaa0dcc130b1e754fb3603d0bd62702d6f8f7c212a1f5a0ab959eb9fd9c": "(audit.EMBED_CONFIGURATION_PATH, 'case \"true\" -> true;',",
+    "7cc36117498eee800435bd54266dd3f1b23be128f7027600847c28e4bfcd5603": "} int outputSize = decoded.size() + 1;",
     "7cc43a74e6030323d5aac51cdd5043a360d74bebd4b5c407bf97db5673c2bf36": "echo 'program timeout Helm contract passed.'",
     "7cc8da1d64a2da9e49eacf9b7daef144b1512fc0e862c35bfb6dee7184a1f5b8": "} } } private List<Candidate> lockClaimable(Connection connection, String tenantId, String workerId, Instant now, int limit, boolean includeNonTimerWork) throws SQLException { String attemptArm = \"EXISTS (SELECT 1 FROM attempt a \" + \"WHERE a.tenant_id = p.tenant_id AND a.process_instance_id = p.process_instance_id \" + \"AND \" + claimableAttemptPredicate(\"a\") + \")\";",
     "7cccb53a93d35b4f7fe9579391f51389a754c79bbb3878a17cc41acf75d158b6": "EXAMPLES = ROOT / \"docs\" / \"reference\" / \"bundle-node-examples.md\"",
@@ -657328,6 +657390,7 @@
     "a6b1220418ae6e429ea9b313d30c6289f620579e2f411cf8e2c7c3ac6f2b6037": "stored = state_path.parent / f\"uploaded-{local.name}\"",
     "a6b3b6eb0a543901d86856dc5c565b8dd1b7a101490d886351d69911143de42c": "assertEquals(List.of(fixture.key()), await(bundle().executionStore().managedClaimCandidates( tenant, \"worker-1\", 10, java.time.Duration.ofSeconds(5), false, Optional.empty())).keys(), \"the human-created retry is a new scheduled attempt and must enter discovery immediately\");",
     "a6bc407fa79fd91411f48855f5444cdb854de80ba18af6ab3a2b0b3527a69c7d": "INVALID_DIR=\"$TEMP_DIR/install-invalid\"",
+    "a6bd85a7e0538e30bb6dd090bc4c33d3f4f00c1b76b6218ebc25fdafae68262a": "int delimiter = encoded.lastIndexOf('-');",
     "a6bde9b7c363af99460a8301f8c73647223a5bc809aa998317516999eaeeadea": "\"persistentVolumeReclaimPolicy\": \"Retain\", \"storageClassName\": \"ravenroot-fixed-ext4\",",
     "a6caac57f2f7927d419264d0c8645092479a015cb950e65e5f0d25063830950a": "\"\"\"Require at least one path and keep the allowlist deliberately narrow.\"\"\"",
     "a6cb1a56fe3c12e04857ccc6038314774a68c379415dc912ab10e4f7914225e6": "\"default\": \"3 attempts\", \"defaultEvidence\": expected[\"defaultAuthority\"][\"candidateIds\"],",
@@ -1154282,6 +1154345,51 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-575-workbench-framing-parser-parity-v3",
+      "issue": "#575",
+      "sourceRevision": "6535e27afbfeec1659cabc4393eb82f394caa679",
+      "targetRevision": "4879306f2e47c2fc31a93d11a2938eac4f9f38ff",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "c0893d27daa5d49a51e158216dcf90e0e846e92a0e2c5ad231a41bd1b94fd09e",
+      "targetCandidateDigest": "16aaa13c3e680d41faf5ffece94f74299e10ae7813870cba0fc021638b20f9ef",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-10b8fa14ebb1533564f8",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+          }
+        },
+        {
+          "id": "oc-39d061c6fadac959b03e",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+          }
+        },
+        {
+          "id": "oc-d2462b65c2dbc4d0ee4a",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+          }
+        },
+        {
+          "id": "oc-ee945de5f690356ad6cf",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "This atom belongs to the reviewed canonical frame-origin parser and changes compatibility rather than operating policy."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [

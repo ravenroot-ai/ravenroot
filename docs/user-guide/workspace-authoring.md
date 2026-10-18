@@ -32,7 +32,8 @@ and live monitoring state.
 ## Arrange the workspace tools
 
 The graph fills the workspace behind the tool palette, Catalog/Search, Inspector, and Activity
-surfaces. Inspector starts on the right and Activity below the graph. Drag a surface by its grip
+surfaces. A new layout starts with Catalog minimized, Inspector on the right, and Activity below
+the graph. Restore Catalog from its icon or the **Panels** index. Drag a surface by its grip
 to float it; drag near an edge to preview docking, or choose **Top**, **Right**, **Bottom**, or
 **Left** from its dock selector. The tool palette changes orientation at the side edges. Drag the
 resize control to change a surface's size. **Escape** cancels an unfinished move or resize.

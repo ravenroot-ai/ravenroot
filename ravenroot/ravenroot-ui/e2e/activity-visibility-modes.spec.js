@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
@@ -132,7 +133,7 @@ async function connectAndBind(page) {
   await page.locator('#service-url').fill(SERVICE_ORIGIN);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-play').click();
   await expect.poll(() => pushEvent !== null, { timeout: 10_000 }).toBe(true);
   await expect(page.locator('#activity-log')).toContainText('accepted');

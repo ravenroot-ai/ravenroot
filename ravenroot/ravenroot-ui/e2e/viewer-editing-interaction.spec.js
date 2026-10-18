@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
@@ -303,9 +304,9 @@ for (const renderer of [{ name: 'Design', selector: '#btn-design' }]) {
     expect(afterSingle.depth).toBe(beforeSingle.depth + 1);
     await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Move start/);
 
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(async () => (await snapshot()).positions).toEqual(beforeSingle.positions);
-    await page.locator('#btn-redo').click();
+    await clickCommand(page, 'edit.redo');
     await expect.poll(async () => (await snapshot()).positions.start).toEqual(afterSingle.positions.start);
 
     // Click B transfers selection; Ctrl/Cmd-click A makes A+B one atomic move command.
@@ -333,9 +334,9 @@ for (const renderer of [{ name: 'Design', selector: '#btn-design' }]) {
     expect(afterGroup.edges).toBe(beforeGroup.edges);
     expect(afterGroup.depth).toBe(beforeGroup.depth + 1);
     await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Move 2 nodes/);
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(async () => (await snapshot()).positions).toEqual(beforeGroup.positions);
-    await page.locator('#btn-redo').click();
+    await clickCommand(page, 'edit.redo');
     await expect.poll(async () => (await snapshot()).positions.start).toEqual(afterGroup.positions.start);
 
     // Escape while moving restores both selected nodes and writes no command.
@@ -493,7 +494,7 @@ for (const renderer of [{ name: 'Design', selector: '#btn-design' }]) {
 
     // Armed Connect follows the same rule: the selected source is refused, while an unselected
     // source can open and commit through the established two-click route.
-    await page.locator('#btn-connect').click();
+    await clickCommand(page, 'edit.connect');
     await page.mouse.click(start.x, start.y);
     await expect(page.locator('#cy-wrap')).toHaveAttribute('data-edge-gesture-state', 'idle');
     await expect(page.locator('#graph-live')).toContainText(/selected.*unselected node/i);
@@ -621,17 +622,17 @@ test('toolbox source drop is atomic across undo, redo and GraphML round-trip', a
     .toEqual(droppedCounts);
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Add node .* and connect start/);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => page.evaluate(() => ({ nodes: window.cy.nodes().length, edges: window.cy.edges().length })))
     .toEqual(baseCounts);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect.poll(() => page.evaluate(() => ({ nodes: window.cy.nodes().length, edges: window.cy.edges().length })))
     .toEqual(droppedCounts);
   const authoredPosition = await page.evaluate(() => window.cy.nodes('[behavior="template"]').first().position());
 
   const [download] = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('#btn-export').click(),
+    clickCommand(page, 'file.save'),
   ]);
   const xml = await readFile(await download.path(), 'utf8');
   const roundTrip = await page.evaluate(source => {

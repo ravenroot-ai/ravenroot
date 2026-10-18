@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // The editor half of `execution.bypass` has to prove two things no unit test can:
@@ -371,7 +372,7 @@ test.describe('the flag reaches the document through autosave, not only through 
   test('Autosave OFF Cancel restores a node checkbox draft, selection, and exact focus', async ({ page }) => {
     await open(page);
     await loadFixture(page, BASE_FIXTURE);
-    await page.locator('#btn-autosave').click();
+    await clickCommand(page, 'edit.autosave');
     await selectNode(page, 'a');
     const bypass = page.locator('#node-bypass-flag');
 

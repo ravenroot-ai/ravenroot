@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -52,14 +53,14 @@ const openAssistant = async page => {
 
 // A graph, so the context classes have something real to attach.
 const withGraph = async page => {
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.waitForTimeout(300);
 };
 
 const serializedGraphMl = async page => {
   const [download] = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('#btn-export').click(),
+    clickCommand(page, 'file.save'),
   ]);
   return readFile(await download.path(), 'utf8');
 };
@@ -406,11 +407,11 @@ test.describe('controlled graph proposals', () => {
     await expect(page.locator('#b-edges')).toHaveText('4');
     await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Assistant proposal/);
 
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect(page.locator('#b-nodes')).toHaveText('4');
     await expect(page.locator('#b-edges')).toHaveText('3');
 
-    await page.locator('#btn-redo').click();
+    await clickCommand(page, 'edit.redo');
     await expect(page.locator('#b-nodes')).toHaveText('6');
     await expect(page.locator('#b-edges')).toHaveText('4');
     await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Assistant proposal/);
@@ -481,7 +482,7 @@ test.describe('controlled graph proposals', () => {
       depth: 2,
     });
 
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => page.evaluate(() => {
       const graph = window.ravenroot.activeDocument().graph;
       const node = graph.nodeMap['assistant-a'];
@@ -498,7 +499,7 @@ test.describe('controlled graph proposals', () => {
       edgeTarget: 'assistant-b', restoredEdge: true, depth: 1,
     });
 
-    await page.locator('#btn-redo').click();
+    await clickCommand(page, 'edit.redo');
     await expect.poll(() => page.evaluate(() => ({
       movedX: window.ravenroot.activeDocument().graph.nodeMap['assistant-a'].ox,
       deletedNode: !window.ravenroot.activeDocument().graph.nodeMap['assistant-b'],
@@ -564,19 +565,19 @@ test.describe('controlled graph proposals', () => {
 
     const afterEdit = await askForProposal(page, 'stale after edit', 'browser-stale-1');
     await page.locator('#btn-modify').click();
-    await page.locator('#btn-add-node').click();
+    await clickCommand(page, 'edit.addNode');
     await page.locator('#node-editor input[name="name"]').fill('Manual revision');
     await page.locator('#node-editor button[type="submit"]').click();
     await afterEdit.getByRole('button', { name: 'Apply proposal' }).evaluate(button => button.click());
     await expect(afterEdit.locator('.assistant-proposal-status')).toContainText('stale because the document changed');
 
     const afterUndo = await askForProposal(page, 'stale after undo', 'browser-stale-2');
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await afterUndo.getByRole('button', { name: 'Apply proposal' }).evaluate(button => button.click());
     await expect(afterUndo.locator('.assistant-proposal-status')).toContainText('stale because the document changed');
 
     const afterRedo = await askForProposal(page, 'stale after redo', 'browser-stale-3');
-    await page.locator('#btn-redo').click();
+    await clickCommand(page, 'edit.redo');
     await afterRedo.getByRole('button', { name: 'Apply proposal' }).evaluate(button => button.click());
     await expect(afterRedo.locator('.assistant-proposal-status')).toContainText('stale because the document changed');
 
@@ -805,7 +806,7 @@ test.describe('the event tail belongs to its document', () => {
       .not.toContain('alpha detail');
 
     // Now a second document, which is what File → New gives the author.
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await page.waitForTimeout(600);
 
     // The chip must stop claiming an event stream that describes a different graph...

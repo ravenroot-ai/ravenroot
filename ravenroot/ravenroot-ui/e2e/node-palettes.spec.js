@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
@@ -155,7 +156,7 @@ test('saves and manages a real selected node, then inserts by click and drop wit
     nodes: expect.arrayContaining(beforeClick.nodes), depth: beforeClick.depth + 1,
   });
   expect((await graphState(page)).nodes).toHaveLength(beforeClick.nodes.length + 1);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toEqual(beforeClick);
 
   await archive.getByRole('button', { name: 'Insert saved node Saved behavior' }).evaluate(button => {
@@ -168,7 +169,7 @@ test('saves and manages a real selected node, then inserts by click and drop wit
   });
   await expect.poll(() => graphState(page)).toMatchObject({ depth: beforeClick.depth + 1 });
   expect((await graphState(page)).nodes).toHaveLength(beforeClick.nodes.length + 1);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toEqual(beforeClick);
 });
 

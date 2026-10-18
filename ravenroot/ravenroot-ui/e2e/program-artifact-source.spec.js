@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
@@ -373,7 +374,7 @@ async function connectAndModify(page) {
   await page.locator('#service-url').fill(SERVICE_ORIGIN);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
 }
 
@@ -547,7 +548,7 @@ test('byte fidelity survives save, export, reimport and re-create -- leading new
     .toContain('byte-fidelity-node');
 
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const download = await downloadPromise;
   const exportedGraphml = readFileSync(await download.path(), 'utf8');
   // If THIS fails, the corruption is on the write side (graph-document.js#setData), not the read

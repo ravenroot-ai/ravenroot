@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 const BASE_NODES = ['dosomething', 'end', 'error', 'start'];
@@ -108,7 +109,7 @@ for (const { type, id, key } of [
       nodes: BASE_NODES, edges: ['edge-dosomething-end', 'edge-dosomething-error'], selected: [],
       historyDepth: before.historyDepth + 1,
     });
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
   });
 }
@@ -124,7 +125,7 @@ test('natural additive node selection routes immediate Backspace as one command'
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: ['end', 'start'], edges: [], selected: [], historyDepth: before.historyDepth + 1,
   });
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
 });
 
@@ -140,13 +141,13 @@ test('natural additive mixed selection routes immediate Delete as one command', 
     nodes: ['dosomething', 'end', 'error'], edges: ['edge-dosomething-error'], selected: [],
     historyDepth: before.historyDepth + 1,
   });
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
 });
 
 test('natural Delete waits for the dirty Inspector decision and Cancel preserves selection', async ({ page }) => {
   await open(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await expect(page.locator('#btn-autosave')).toHaveAttribute('aria-pressed', 'false');
   await clickElementNaturally(page, 'node', 'dosomething');
   const name = page.locator('#node-editor input[name="name"]');
@@ -240,7 +241,7 @@ test('a completed edge click routes Delete and Backspace after pointer release',
     });
     await expect(page.locator('#info-title')).toHaveText('Inspector');
     await expect(page.locator('#info-body')).toContainText('Select a node or edge');
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
     await pinGraph(page);
   }
@@ -285,7 +286,7 @@ test('Delete and macOS-like Backspace remove the current mixed selection regardl
   });
 
   // Nodes, the explicitly selected edge and the incident edge are one reversible delete command.
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
 
   await selectElements(page, ['end', 'edge-dosomething-error']);
@@ -304,7 +305,7 @@ test('Delete and macOS-like Backspace remove the current mixed selection regardl
   await page.mouse.up();
   await expect.poll(() => graphState(page)).toMatchObject({ selected: ['start'] });
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
 });
 

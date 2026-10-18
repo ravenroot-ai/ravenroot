@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // ── THE EDGE INSPECTOR PROPOSES OUTCOMES THE SOURCE NODE CAN PRODUCE ───────────────────────────
@@ -90,7 +91,7 @@ test('proposes the source node\'s own outcome names in the edge inspector', asyn
   await configureSource(page, 'outcome.decision',
     { trueOutcome: 'approved', falseOutcome: 'rejected' });
 
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor select[name="source"]').selectOption('start');
 
   await expect.poll(() => suggestedOutcomes(page)).toEqual(['approved', 'rejected']);
@@ -101,7 +102,7 @@ test('falls back to the declared defaults when the source configures neither pro
   await open(page);
   await configureSource(page, 'outcome.decision', {});
 
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor select[name="source"]').selectOption('start');
 
   await expect.poll(() => suggestedOutcomes(page)).toEqual(['true', 'false']);
@@ -117,7 +118,7 @@ test('rebuilds the suggestions when the edge is pointed at a different source', 
     node.properties = {};
   });
 
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor select[name="source"]').selectOption('start');
   await expect.poll(() => suggestedOutcomes(page)).toEqual(['approved', 'rejected']);
 
@@ -131,7 +132,7 @@ test('leaves the Outcome field free text, so a value absent from the list still 
   await open(page);
   await configureSource(page, 'outcome.decision', { trueOutcome: 'approved', falseOutcome: 'rejected' });
 
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor input[name="id"]').fill('edge-freetext');
   await page.locator('#edge-editor select[name="source"]').selectOption('start');
   await page.locator('#edge-editor select[name="target"]').selectOption('end');

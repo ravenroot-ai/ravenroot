@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 
@@ -269,7 +270,7 @@ test('work started while configuration loads is kept in its own document when im
   await expect(page.locator('#startup-import')).toHaveAttribute('data-phase', 'waiting-runtime');
 
   await page.locator('#btn-modify').click();
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill('Local work before import');
   await page.locator('#node-editor button[type="submit"]').click();
   releaseConfiguration();
@@ -522,7 +523,7 @@ test('an edit made during slow workspace restoration remains open and the stored
   await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().restoring)).toBe(true);
 
   await page.locator('#btn-modify').click();
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill('Work started during restore');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.active.history.isDirty())).toBe(true);
@@ -881,7 +882,7 @@ test('Git authoring keeps a URL import unbound while repository Open and Save re
     expect(dialog.message()).toContain('Repository filename');
     await dialog.accept('chosen-destination.graphml');
   });
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   await expect.poll(() => graphAuthoringRequests.some(request => request.method === 'PUT'
     && request.pathname.endsWith('/chosen-destination.graphml'))).toBe(true);
   await expect.poll(() => page.evaluate(() => ({

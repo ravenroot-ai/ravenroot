@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
@@ -27,7 +28,7 @@ async function makeActiveDirty(page, name = 'Review step') {
   if (await page.locator('#btn-modify').getAttribute('aria-pressed') !== 'true') {
     await page.locator('#btn-modify').click();
   }
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill(name);
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
@@ -47,10 +48,12 @@ test.describe('multi-document lifecycle', () => {
 
   test('New preserves dirty work and the switcher reaches hidden documents by keyboard', async ({ page }) => {
     await page.goto('/');
+    // Keep this a hidden-document navigation test when the immersive stage can fit both panes.
+    await page.evaluate(() => window.ravenroot.setWorkspaceLayout('single'));
     await makeActiveDirty(page);
     const [first] = await records(page);
 
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await expect.poll(() => records(page)).toEqual([
       expect.objectContaining({ id: first.id, displayName: 'untitled.graphml', dirty: true, active: false }),
       expect.objectContaining({ displayName: 'untitled-2.graphml', dirty: false, active: true }),
@@ -75,7 +78,7 @@ test.describe('multi-document lifecycle', () => {
 
   test('application and command bars keep the switcher, runtime fields, and Play reachable', async ({ page }) => {
     await page.goto('/');
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
 
     await expect.poll(() => page.evaluate(() => {
       const geometry = id => {
@@ -187,7 +190,7 @@ test.describe('multi-document lifecycle', () => {
     await page.goto('/');
     await makeActiveDirty(page, 'First edit');
     const [first] = await records(page);
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await makeActiveDirty(page, 'Second edit');
     const second = (await records(page))[1];
 
@@ -205,11 +208,11 @@ test.describe('multi-document lifecycle', () => {
     await page.locator('[data-unsaved-action="save"]').click();
     expect((await downloadPromise).suggestedFilename()).toBe('untitled-2.graphml');
     await expect.poll(() => records(page)).toEqual([]);
-    await expect(page.locator('#btn-new')).toBeFocused();
+    await expect(page.locator('#menu-file')).toBeFocused();
     await expect(page.locator('#document-switcher')).toBeDisabled();
     await expect(page.locator('#graph-title')).toHaveText('No graph loaded');
 
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await expect.poll(async () => (await records(page)).at(-1)?.displayName).toBe('untitled-3.graphml');
   });
 

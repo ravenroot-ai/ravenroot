@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 import { createAppCommands } from '../src/app-commands.js';
@@ -136,7 +137,7 @@ test.describe('application command menus', () => {
     await page.keyboard.press('Escape');
 
     await page.locator('#btn-modify').click();
-    await page.locator('#btn-add-node').click();
+    await clickCommand(page, 'edit.addNode');
     await page.locator('#node-editor button[type="submit"]').click();
     await openMenu(page, 'file');
     await page.getByRole('menuitem', { name: 'Close Document' }).click();

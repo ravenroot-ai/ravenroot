@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
@@ -181,7 +182,7 @@ test.describe('multidocument edge gesture ownership', () => {
     // Merely activating doc 1 cannot inherit doc 2's undo. Returning to doc 2 and undoing removes
     // only its edge; doc 1 retains both its bytes and its own independent undo step.
     await page.evaluate(id => window.ravenroot.activateDocument(id), second);
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     expect((await snapshot(page, second)).edges).toEqual(beforeSecond.edges);
     expect((await snapshot(page, second)).depth).toBe(beforeSecond.depth);
     expect((await snapshot(page, first)).graphBytes).toBe(afterFirst.graphBytes);

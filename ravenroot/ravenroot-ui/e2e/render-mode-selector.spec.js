@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 async function stubService(page) {
@@ -374,7 +375,7 @@ test('repeated Design requests keep one latest owner through final routing and r
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth()))
     .toBe(beforeMove.depth + 1);
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Move start/);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => page.evaluate(expected => {
     const owner = window.ravenroot.activeDocument();
     const renderer = owner.cy.getElementById('start').position();
@@ -404,7 +405,7 @@ test('a background Design owner cannot move or block the active Design document'
   await expect(secondPane).not.toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#btn-add-node')).toBeEnabled();
 
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   const nodeId = await page.locator('#node-editor input[name="id"]').inputValue();
   await page.locator('#node-editor input[name="name"]').fill('Background-safe edit');
   await page.locator('#node-editor button[type="submit"]').click();

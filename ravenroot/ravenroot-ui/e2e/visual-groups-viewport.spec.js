@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { visualGroupFixtureGraphML } from '../test/fixtures/visual-groups.js';
@@ -166,7 +167,7 @@ test('rapid toggles preserve user wheel zoom and export finishes canonical geome
   expect(await page.evaluate(() => window.cy.zoom())).toBeGreaterThan(before.zoom);
   const downloadPromise = page.waitForEvent('download');
   await page.locator('#info-body').getByRole('button', { name: 'Collapse', exact: true }).click();
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const download = await downloadPromise;
   const stream = await download.createReadStream();
   let xml = ''; for await (const chunk of stream) xml += chunk.toString();

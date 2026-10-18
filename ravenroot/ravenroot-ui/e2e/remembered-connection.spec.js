@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { readFile } from 'node:fs/promises';
@@ -46,7 +47,7 @@ test('opt-in is accessible, bound, survives reopening, and Forget keeps only ser
   await expect(page.locator('#access-token')).toHaveValue(''); await expect(page.locator('#access-token')).toHaveAttribute('placeholder', 'saved in this browser');
   await assertStorageBoundary(page);
   const downloadPending = page.waitForEvent('download');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const download = await downloadPending;
   expect(await readFile(await download.path(), 'utf8')).not.toContain(TOKEN);
   expect(await page.evaluate(() => JSON.stringify(window.ravenroot.workspacePersistence()))).not.toContain(TOKEN);

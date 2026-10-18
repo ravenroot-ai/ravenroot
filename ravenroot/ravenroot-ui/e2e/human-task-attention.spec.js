@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';
@@ -156,7 +157,7 @@ async function connectAndCreate(page) {
   await page.locator('#service-url').fill(SERVICE_ORIGIN);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await addHumanTaskNode(page);
 }
 
@@ -332,7 +333,7 @@ test('a catalog that cannot admit new confirmations omits authoring while runtim
   await page.locator('#service-url').fill(SERVICE_ORIGIN);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
   await page.locator('#node-catalog [data-catalog-add="human-task"]').click();
   await expect(page.locator('[data-catalog-property^="confirmation"]')).toHaveCount(0);
@@ -454,7 +455,7 @@ test('a failed switch to a document sharing the node id clears the previous halo
     .getElementById('human-confirmation').data('humanTaskPending'))).toBe(2);
   const documentA = await page.evaluate(() => window.ravenroot.activeDocument().id);
 
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await addHumanTaskNode(page);
   executionContext = { processInstanceId: 'process-b', graphVersion: 'graph-b' };
   attentionMode = 'empty-graph-b';

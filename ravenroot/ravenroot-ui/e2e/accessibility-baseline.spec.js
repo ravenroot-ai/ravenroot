@@ -1,3 +1,4 @@
+import { clickCommand, commandMenuItem } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 import { logSummary, scanForViolations, summarizeViolations } from './accessibility-helpers.mjs';
@@ -90,7 +91,8 @@ test.describe('accessibility baseline (WCAG 2.1 AA, axe-core, report-only)', () 
   // a gate.
   test('focus: keyboard-focused controls — visible-property change at each target (report-only)', async ({ page }, testInfo) => {
     await page.goto('/');
-    const targets = ['#menu-file', '#btn-new', '#service-url', '#search-inp', '#btn-play'];
+    await page.locator('[data-surface-restore="catalog"]').click();
+    const targets = ['#menu-file', '#application-menu [data-command-id="file.new"]', '#service-url', '#search-inp', '#btn-play'];
     const snapshot = el => {
       const style = getComputedStyle(el);
       return {
@@ -104,7 +106,10 @@ test.describe('accessibility baseline (WCAG 2.1 AA, axe-core, report-only)', () 
     };
     const perTarget = [];
     for (const selector of targets) {
-      const locator = page.locator(selector);
+      const locator = selector.includes('data-command-id')
+        ? await commandMenuItem(page, 'file.new') : page.locator(selector);
+      // Opening the menu focuses its first item. Remove that focus before the baseline snapshot.
+      await locator.evaluate(element => element.blur());
       // eslint-disable-next-line no-await-in-loop
       const blurred = await locator.evaluate(snapshot);
       // eslint-disable-next-line no-await-in-loop
@@ -123,6 +128,7 @@ test.describe('accessibility baseline (WCAG 2.1 AA, axe-core, report-only)', () 
       const focused = await locator.evaluate(snapshot);
       const changedProperties = Object.keys(blurred).filter(key => blurred[key] !== focused[key]);
       perTarget.push({ selector, changedProperties, blurred, focused });
+      if (selector.includes('data-command-id')) await page.keyboard.press('Escape');
     }
     const summary = {
       totalTargets: perTarget.length,
@@ -179,9 +185,9 @@ test.describe('accessibility baseline (WCAG 2.1 AA, axe-core, report-only)', () 
   // still isolated for the attached summary by filtering on the violation's DOM target.
   test('axe: node editor in the inspector — WCAG 2.1 AA (report-only)', async ({ page }, testInfo) => {
     await page.goto('/');
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await page.locator('#btn-modify').click();
-    await page.locator('#btn-add-node').click();
+    await clickCommand(page, 'edit.addNode');
     await expect(page.locator('#node-editor')).toBeVisible();
     const results = await scanForViolations(page);
     const summary = summarizeViolations(results);

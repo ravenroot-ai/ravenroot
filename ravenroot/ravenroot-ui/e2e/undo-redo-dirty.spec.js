@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // Browser coverage for UI-01: the main editing paths driven through the real toolbar,
@@ -46,7 +47,7 @@ test('adds a node, undoes it and redoes it from the toolbar', async ({ page }) =
   await startEditableWorkflow(page);
   await expect(page.locator('#btn-undo')).toBeDisabled();
 
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill('Review step');
   await page.locator('#node-editor button[type="submit"]').click();
 
@@ -55,13 +56,13 @@ test('adds a node, undoes it and redoes it from the toolbar', async ({ page }) =
   await expect(page.locator('#btn-undo')).toBeEnabled();
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', 'Undo Add node node-1');
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => elementIds(page, 'node')).toEqual(BASE_NODES);
   // Undoing back to the load point is the save point again, so the document is clean.
   await expect(page.locator('#dirty-state')).toHaveText(SAVED);
   await expect(page.locator('#btn-undo')).toBeDisabled();
 
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect.poll(() => elementIds(page, 'node')).toEqual([...BASE_NODES, 'node-1'].sort());
   await expect(page.locator('#dirty-state')).toHaveText(DIRTY);
   await expect(page.evaluate(() => window.cy.getElementById('node-1').data('name')))
@@ -70,9 +71,9 @@ test('adds a node, undoes it and redoes it from the toolbar', async ({ page }) =
 
 test('undoes a delete that took incident edges with it as a single step', async ({ page }) => {
   await startEditableWorkflow(page);
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor button[type="submit"]').click();
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor select[name="source"]').selectOption('start');
   await page.locator('#edge-editor select[name="target"]').selectOption('node-1');
   await page.locator('#edge-editor button[type="submit"]').click();
@@ -91,7 +92,7 @@ test('undoes a delete that took incident edges with it as a single step', async 
   await expect.poll(() => elementIds(page, 'edge')).toEqual(['edge-dosomething-end', 'edge-dosomething-error']);
 
   // One gesture removed one node and two edges; one undo must bring all three back.
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => elementIds(page, 'node')).toEqual([...BASE_NODES, 'node-1'].sort());
   await expect.poll(() => elementIds(page, 'edge')).toEqual([...BASE_EDGES, 'edge-1'].sort());
   await expect(page.evaluate(() => window.cy.getElementById('edge-1').data('source'))).resolves.toBe('start');
@@ -100,15 +101,15 @@ test('undoes a delete that took incident edges with it as a single step', async 
 test('structural add and delete history retain live positions and viewport of surviving nodes', async ({ page }) => {
   await startEditableWorkflow(page);
 
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor button[type="submit"]').click();
   const insertedPosition = await page.evaluate(() => window.cy.getElementById('node-1').position());
   const authored = await setDivergentLiveCanvas(page);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect((await liveCanvas(page)).viewport).toEqual(authored.viewport);
   expect(await page.evaluate(() => window.cy.getElementById('end').position()))
     .toEqual(authored.positions.end);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   expect((await liveCanvas(page)).viewport).toEqual(authored.viewport);
   expect(await page.evaluate(() => window.cy.getElementById('end').position()))
     .toEqual(authored.positions.end);
@@ -122,13 +123,13 @@ test('structural add and delete history retain live positions and viewport of su
   const restoredPosition = await page.evaluate(() => window.cy.getElementById('start').position());
   await page.locator('body').press('Delete');
   const afterDelete = await setDivergentLiveCanvas(page);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect((await liveCanvas(page)).viewport).toEqual(afterDelete.viewport);
   expect(await page.evaluate(() => window.cy.getElementById('end').position()))
     .toEqual(afterDelete.positions.end);
   expect(await page.evaluate(() => window.cy.getElementById('start').position()))
     .toEqual(restoredPosition);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   expect(await liveCanvas(page)).toEqual(afterDelete);
 });
 
@@ -177,7 +178,7 @@ test('undoes a multi-node drag as a single step and restores both positions', as
   await expect(page.locator('#dirty-state')).toHaveText(DIRTY);
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', 'Undo Move 2 nodes');
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect(await settledPositions(page)).toEqual(before);
   await expect(page.locator('#btn-undo')).toBeDisabled();
 });
@@ -196,11 +197,11 @@ test('move history restores command positions without moving an unrelated live-p
   expect(moved).not.toEqual(before.start);
   const live = await setDivergentLiveCanvas(page);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect(await page.evaluate(() => window.cy.getElementById('start').position())).toEqual(before.start);
   expect(await page.evaluate(() => window.cy.getElementById('end').position())).toEqual(live.positions.end);
   expect((await liveCanvas(page)).viewport).toEqual(live.viewport);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   expect(await page.evaluate(() => window.cy.getElementById('start').position())).toEqual(moved);
   expect(await page.evaluate(() => window.cy.getElementById('end').position())).toEqual(live.positions.end);
   expect((await liveCanvas(page)).viewport).toEqual(live.viewport);
@@ -208,7 +209,7 @@ test('move history restores command positions without moving an unrelated live-p
 
 test('drives undo, redo and save from the keyboard and clears the dirty state on save', async ({ page }) => {
   await startEditableWorkflow(page);
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText(DIRTY);
 
@@ -225,20 +226,20 @@ test('drives undo, redo and save from the keyboard and clears the dirty state on
   await expect(page.locator('#dirty-state')).toHaveText(SAVED);
 
   // A further edit is unsaved work again, and undoing back to the save point is clean again.
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText(DIRTY);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect(page.locator('#dirty-state')).toHaveText(SAVED);
 });
 
 test('New preserves unsaved work in its original document and activates a clean document', async ({ page }) => {
   await startEditableWorkflow(page);
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText(DIRTY);
 
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await expect.poll(() => elementIds(page, 'node')).toEqual(BASE_NODES);
   await expect(page.locator('#dirty-state')).toHaveText(SAVED);
   await expect(page.locator('#btn-undo')).toBeDisabled();
@@ -256,7 +257,7 @@ test('a clean document neither prompts on New nor warns on unload', async ({ pag
   let dialogs = 0;
   page.on('dialog', dialog => { dialogs += 1; return dialog.dismiss(); });
 
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await expect.poll(() => elementIds(page, 'node')).toEqual(BASE_NODES);
   expect(dialogs).toBe(0);
 
@@ -266,7 +267,7 @@ test('a clean document neither prompts on New nor warns on unload', async ({ pag
 
 test('a dirty document raises the browser leave-site confirmation on unload', async ({ page }) => {
   await startEditableWorkflow(page);
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText(DIRTY);
 

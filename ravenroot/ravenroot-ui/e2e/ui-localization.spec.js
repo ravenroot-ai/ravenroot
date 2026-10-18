@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
@@ -72,9 +73,9 @@ async function openLanguageDialog(page, locale = 'en') {
 }
 
 async function createDirtyDraft(page) {
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill('Saved before locale switch');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
@@ -94,7 +95,7 @@ test('keeps every localized palette action usable inside a 360px panel in LTR an
   await configure(page, { schema: 'ravenroot.ui-locales/v1', defaultLocale: 'de',
     catalogs: [german, arabic] });
   await page.goto('/');
-  await page.locator('#btn-new').evaluate(button => button.click());
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').evaluate(button => button.click());
   await page.evaluate(() => {
     window.cy.nodes().first().select();
@@ -560,13 +561,13 @@ test('repaints extension framing, deployment statuses, runner controls, form err
   const errors = []; page.on('pageerror', error => errors.push(error.stack));
   await configure(page);
   await page.goto('/');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#drawing-model-package-input').setInputFiles(
     new URL('../public/examples/frontend-plugins/textbook-automata/', import.meta.url).pathname);
   await expect(page.locator('#drawing-model-select')).toContainText('Textbook DFA/NFA');
   await expect(page.locator('#activity-log')).toContainText('Installed frontend package');
   await page.locator('#btn-modify').click();
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   const form = page.locator('#node-editor');
   const duplicate = await page.evaluate(() => window.cy.nodes()[0].id());
   await form.locator('[name="id"]').fill(duplicate);

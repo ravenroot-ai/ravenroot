@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
@@ -74,7 +75,7 @@ async function connectAndModify(page) {
   await page.locator('#service-url').fill(SERVICE_ORIGIN);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
 }
 
@@ -157,7 +158,7 @@ test('the declared choice survives a save and reopening the Inspector — round-
   await expect(page.locator('.node-nature [data-nature-state]')).toHaveText('Declared on this node.');
 
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const download = await downloadPromise;
   const exportedGraphml = readFileSync(await download.path(), 'utf8');
   expect(exportedGraphml).toContain('attr.name="runtime.nature"');
@@ -274,7 +275,7 @@ test('AUTHORITY and KEYED are declarable and save successfully — the Inspector
 
 test('a node that cannot declare a nature at all shows the fixed effective value with no control', async ({ page }) => {
   await connectAndModify(page);
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="id"]').fill('plain-node-1');
   await page.locator('#node-editor select[name="kind"]').selectOption('START');
 
@@ -284,7 +285,7 @@ test('a node that cannot declare a nature at all shows the fixed effective value
 
 test('an unknown/custom behavior name (no catalog descriptor) also shows the fixed WORKER readout, never a reachable control', async ({ page }) => {
   await connectAndModify(page);
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="id"]').fill('custom-behavior-1');
   await page.locator('#node-editor select[name="kind"]').selectOption('BEHAVIOR');
   await page.locator('#node-editor input[name="behavior"]').fill('nobody.registered.this');

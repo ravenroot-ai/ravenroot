@@ -1,3 +1,4 @@
+import { clickCommand } from '../command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 const baseNodes = ['dosomething', 'end', 'error', 'start'];
@@ -37,7 +38,7 @@ async function deleteAndUndo(page, ids, key, expected) {
   await selectByReleasedPointer(page, ids);
   await page.keyboard.press(key);
   await expect.poll(() => state(page)).toMatchObject(expected);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => state(page)).toMatchObject({ nodes: baseNodes, edges: baseEdges });
 }
 
@@ -69,7 +70,7 @@ test('stable selection shortcuts are identical through the packaged launch profi
   await expect.poll(() => page.evaluate(() => JSON.parse(
     window.ravenroot.activeDocument().graph.graphProperties['ravenroot.ui.visualGroups'],
   ).groups.length)).toBe(0);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => page.evaluate(() => JSON.parse(
     window.ravenroot.activeDocument().graph.graphProperties['ravenroot.ui.visualGroups'],
   ).groups.length)).toBe(1);
@@ -80,7 +81,7 @@ test('stable selection shortcuts are identical through the packaged launch profi
   await name.press('Backspace');
   await expect.poll(() => state(page)).toMatchObject({ nodes: baseNodes, selected: ['start'] });
 
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await name.fill('Unsaved launch-profile draft');
   await page.locator('#cy-wrap').focus();
   await page.keyboard.press('Delete');

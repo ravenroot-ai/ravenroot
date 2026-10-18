@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -27,7 +28,7 @@ const edgeState = page => page.evaluate(edgeId => {
 async function downloadGraphML(page) {
   const [download] = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('#btn-export').click(),
+    clickCommand(page, 'file.save'),
   ]);
   return readFile(await download.path(), 'utf8');
 }
@@ -75,10 +76,10 @@ test('existing edge text autosaves as one focus-session undo and manual Save is 
   await page.getByRole('button', { name: 'Save edge' }).click();
   expect((await edgeState(page)).depth).toBe(before.depth + 1);
   expect(await downloadGraphML(page)).toBe(autosavedGraphML);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(async () => (await edgeState(page)).edge.description).toBe(before.edge.description);
   await expect(page.locator('#edge-editor textarea[name="description"]')).toHaveValue(before.edge.description);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect.poll(async () => (await edgeState(page)).edge.description)
     .toBe('Autosaved edge description');
 });
@@ -107,7 +108,7 @@ test('Save GraphML keeps an Autosave OFF edge draft through Save, Cancel, and in
   if ((await page.locator('#btn-modify').getAttribute('aria-pressed')) !== 'true') {
     await page.locator('#btn-modify').click();
   }
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, EDGE_ID);
   const form = page.locator('#edge-editor');
   const description = form.locator('textarea[name="description"]');
@@ -116,7 +117,7 @@ test('Save GraphML keeps an Autosave OFF edge draft through Save, Cancel, and in
   await page.evaluate(() => { window.__manualEdgeSaveRenderer = window.cy; });
 
   await description.fill('Pending manual edge draft');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const dialog = page.locator('#inspector-unsaved-dialog');
   await expect(dialog).toBeVisible();
   expect((await edgeState(page)).edge.description).toBe(before.edge.description);
@@ -126,7 +127,7 @@ test('Save GraphML keeps an Autosave OFF edge draft through Save, Cancel, and in
   await expect(description).toHaveValue('Pending manual edge draft');
   await expect(description).toBeFocused();
 
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   await expect(dialog).toBeVisible();
   const [download] = await Promise.all([
     page.waitForEvent('download'),
@@ -148,14 +149,14 @@ test('Save GraphML keeps an Autosave OFF edge draft through Save, Cancel, and in
     control.value = '';
     control.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('#inspector-unsaved-description')).toContainText('invalid Inspector changes');
   await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
   await expect(source).toHaveValue('');
   expect((await edgeState(page)).edge.source).toBe(before.edge.source);
 
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const [discardedDownload] = await Promise.all([
     page.waitForEvent('download'),
     dialog.locator('[data-inspector-unsaved-action="discard"]').click(),
@@ -236,7 +237,7 @@ test('edge autosave preserves endpoints, routing, ordinary fields, and custom ty
 
 test('Autosave OFF and invalid edge drafts use the accessible transition decision without losing state', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, EDGE_ID);
   const description = page.locator('#edge-editor textarea[name="description"]');
   const before = await edgeState(page);
@@ -260,7 +261,7 @@ test('Autosave OFF and invalid edge drafts use the accessible transition decisio
   await expect.poll(async () => (await edgeState(page)).edge.description).toBe('Pending edge draft');
 
   await selectOnly(page, EDGE_ID);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await page.locator('#edge-editor select[name="source"]').evaluate(control => {
     control.value = '';
     control.dispatchEvent(new Event('change', { bubbles: true }));
@@ -274,7 +275,7 @@ test('Autosave OFF and invalid edge drafts use the accessible transition decisio
 
 test('Autosave OFF Cancel restores an edge checkbox draft, selection, and exact focus', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, EDGE_ID);
   const parallel = page.locator('#edge-editor input[name="parallel"]');
   await expect(parallel).not.toBeChecked();
@@ -318,7 +319,7 @@ test('document switching flushes only the owning edge draft and new-edge creatio
 
   const before = await page.evaluate(() => window.ravenroot.activeDocument().graph.edges.length);
   await expect(page.locator('.doc-pane--layout-busy')).toHaveCount(0);
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await expect(page.locator('#edge-editor')).toBeVisible();
   await page.waitForTimeout(250);
   expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.edges.length)).toBe(before);

@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 async function stubService(page) {
@@ -66,7 +67,7 @@ test('explicit Design Render relayouts, routes, and records authoritative geomet
   });
   expect(after.positions).not.toEqual(scrambled);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(async () => (await state(page)).positions).toEqual(before.positions);
   expect(await state(page)).toMatchObject({
     modelPositions: before.modelPositions,

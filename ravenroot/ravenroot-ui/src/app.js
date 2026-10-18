@@ -1,3 +1,4 @@
+import { createImmersiveWorkspace, graphFitViewport } from './immersive-workspace.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
@@ -1046,6 +1047,7 @@ async function switchWorkspacePersistence(configuration, client) {
     }
   }
 }
+let immersiveWorkspace = null;
 const layoutSessions = createLayoutSessions();
 const rendererSessions = createRendererSessions();
 const themePreference = createThemePreferenceController({
@@ -3476,7 +3478,7 @@ function syncPaneRenderer(document_) {
   if (consumePendingRefit) {
     document_.layoutPendingRefit = false;
     cy.scratch('_rrRefitAfterLayout', false);
-    cy.fit(undefined, PANE_REFIT_PADDING);
+    fitInUsableGraphArea(cy, cy.elements(), PANE_REFIT_PADDING);
     clampAutomaticFitZoom(document_);
     return;
   }
@@ -3490,7 +3492,7 @@ function syncPaneRenderer(document_) {
   // per-document property to preserve, not to recompute.
   if (Math.abs(width - last.width) / last.width > PANE_REFIT_THRESHOLD
       || Math.abs(height - last.height) / last.height > PANE_REFIT_THRESHOLD) {
-    cy.fit(undefined, PANE_REFIT_PADDING);
+    fitInUsableGraphArea(cy, cy.elements(), PANE_REFIT_PADDING);
     clampAutomaticFitZoom(document_);
     // AND AGAIN AFTER ANY LAYOUT STILL IN FLIGHT. An animated layout ends with a fit of its own,
     // computed from the dimensions it started with, so a pane that changes size DURING a layout gets
@@ -5590,7 +5592,7 @@ function applyInitialLayoutFallback(job) {
   })));
   applyProjectedGroupMoves(job);
   job.target.resize();
-  job.target.fit(undefined, 65);
+  fitInUsableGraphArea(job.target, job.target.elements(), 65);
   clampAutomaticFitZoom(job.owner);
 }
 
@@ -5637,7 +5639,7 @@ function completeOwnedLayout(job) {
     if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
     else {
       job.target.resize();
-      job.target.fit(undefined, 65);
+      fitInUsableGraphArea(job.target, job.target.elements(), 65);
       clampAutomaticFitZoom(owner);
     }
   }
@@ -5709,7 +5711,7 @@ function finishOwnedLayout(token) {
       else {
         target.scratch('_rrRefitAfterLayout', false);
         target.resize();
-        target.fit(undefined, PANE_REFIT_PADDING);
+        fitInUsableGraphArea(target, target.elements(), PANE_REFIT_PADDING);
         clampAutomaticFitZoom(owner);
       }
     }
@@ -5801,7 +5803,7 @@ function runOwnedLayout(token) {
         const node = target.getElementById(position.id);
         if (node.nonempty()) node.position({ x: position.x, y: position.y });
       }));
-      target.fit(60);
+      fitInUsableGraphArea(target);
       clampAutomaticFitZoom(owner);
       settleOwnedLayout(token);
     });
@@ -5828,7 +5830,7 @@ function runOwnedLayout(token) {
     if (owner.visualStyle === 'cyto') scheduleCytoEdgeCurves(owner, target, token);
     if (token.mode === 'preset') target.nodes().forEach(
       node => node.position({ x: node.data('px'), y: node.data('py') }));
-    target.fit(60);
+    fitInUsableGraphArea(target);
     clampAutomaticFitZoom(owner);
     settleOwnedLayout(token);
     return;
@@ -5870,7 +5872,7 @@ function runOwnedLayout(token) {
     });
     else if (token.mode === 'preset') {
       target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
-      target.fit(60);
+      fitInUsableGraphArea(target);
       settleOwnedLayout(token);
       return;
     }
@@ -6162,37 +6164,60 @@ function reconcileActiveRenderModeRenderer() {
   }
 }
 
-function fitGraph() {
+function fitInUsableGraphArea(target, elements = target.elements(), padding = 60, { centerOnly = false } = {}) {
+  const area = immersiveWorkspace?.usableRect(target.container());
+  if (!area || !elements?.length) { target.fit(elements, padding); return; }
+  const box = elements.boundingBox({ includeLabels: true, includeOverlays: false });
+  if (!Number.isFinite(box.x1) || !Number.isFinite(box.y1)) return;
+  const viewport = graphFitViewport(area, box, padding, centerOnly ? target.zoom() : target.maxZoom());
+  const minimum = target.minZoom();
+  // Explicit framing may need a scale below the manual navigation floor on a compact viewport.
+  // Restore that navigation preference after applying the exact fit; never clip the fitted bounds.
+  if (viewport.zoom < minimum) target.minZoom(viewport.zoom);
+  try { target.viewport(viewport); } finally { target.minZoom(minimum); }
+}
+
+function fitGraph({ selection = false } = {}) {
   if (edgeGestureSession || (cy && !cy.userZoomingEnabled())) return;
   const renderer = elasticRendererFor(workspace.active);
   if (layoutMode === 'elastic' && renderer?.nodes?.length && renderer.zoom) {
     const svgEl = renderer.svg;
     if (!svgEl) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    renderer.nodes.forEach(d => {
+    const nodesToFit = selection ? renderer.nodes.filter(node => cy?.getElementById(node.id).selected()) : renderer.nodes;
+    nodesToFit.forEach(d => {
       if (!Number.isFinite(d.x) || !Number.isFinite(d.y)) return;
       minX = Math.min(minX, d.x - d.r); minY = Math.min(minY, d.y - d.r - 20);
       maxX = Math.max(maxX, d.x + d.r); maxY = Math.max(maxY, d.y + d.r + 24);
     });
     if (minX === Infinity) return;
-    const W   = svgEl.clientWidth  || 800;
-    const H   = svgEl.clientHeight || 600;
-    const pad = 60;
-    const bw  = maxX - minX + pad * 2;
-    const bh  = maxY - minY + pad * 2;
-    const sc  = Math.min(W / bw, H / bh, 4);
-    const tx  = (W - sc * (minX + maxX)) / 2;
-    const ty  = (H - sc * (minY + maxY)) / 2;
-    const selection = d3.select(svgEl);
+    const area = immersiveWorkspace?.usableRect(svgEl) || { x: 0, y: 0, width: svgEl.clientWidth || 800, height: svgEl.clientHeight || 600 };
+    const painted = selection
+      ? [...svgEl.querySelectorAll('.d3-nodes circle, .d3-node-labels text')]
+        .filter(element => cy?.getElementById(element.__data__?.id).selected())
+      : [svgEl.querySelector('.d3-zoom-group')];
+    for (const element of painted) {
+      const box = element?.getBBox?.();
+      if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.y)) continue;
+      minX = Math.min(minX, box.x); minY = Math.min(minY, box.y);
+      maxX = Math.max(maxX, box.x + box.width); maxY = Math.max(maxY, box.y + box.height);
+    }
+    const viewport = graphFitViewport(area,
+      { x1: minX, y1: minY, x2: maxX, y2: maxY, w: maxX - minX, h: maxY - minY }, 60, 4);
+    const sc = viewport.zoom, tx = viewport.pan.x, ty = viewport.pan.y;
+    const svgSelection = d3.select(svgEl);
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      selection.call(renderer.zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(sc));
+      svgSelection.call(renderer.zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(sc));
     } else {
-      selection.transition().duration(400)
+      svgSelection.transition().duration(400)
         .call(renderer.zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(sc));
     }
     return;
   }
-  if (cy) createCytoscapeReadOnlyRendererAdapter(cy).fit(60);
+  if (cy) {
+    const elements = selection ? cy.elements(':selected') : cy.elements();
+    if (elements.length) fitInUsableGraphArea(cy, elements);
+  }
 }
 function zoomBy(f) {
   if (edgeGestureSession || (cy && !cy.userZoomingEnabled())) return;
@@ -9663,7 +9688,7 @@ function onSearch(q) {
   hit.connectedEdges().removeClass('dim');
   if (hit.length === 1) {
     revealVisualGroupMember(hit.first().id());
-    cy.animate({ center: { eles: hit } }, { duration: 240 });
+    fitInUsableGraphArea(cy, hit, 60, { centerOnly: true });
   } else {
     const projection = groupProjection();
     hit.forEach(node => cy.getElementById(projection?.representativeByNodeId.get(node.id()) || node.id()).removeClass('dim').addClass('hi'));
@@ -14826,6 +14851,7 @@ function mainAvailableWidth() {
 }
 
 function applyZoneGeometry() {
+  if (immersiveWorkspace) { immersiveWorkspace.refresh(); return; }
   const stage = document.getElementById('stage');
   const left = document.getElementById('sidebar');
   const right = document.getElementById('info');
@@ -15107,6 +15133,7 @@ function renderRailPanels() {
 // a panel reappearing, so selecting reopens it — and expands its column if that is what is hiding
 // it.
 function revealInspector() {
+  immersiveWorkspace?.reveal('inspector');
   const entry = panelLayout.panels.find(panel => panel.id === 'inspector');
   if (!entry) return;
   let next = panelLayout;
@@ -15396,7 +15423,7 @@ function completeCloseDocument(id) {
   closeDocumentSwitcher();
   syncDocumentSwitcher();
   const trigger = document.getElementById('document-switcher');
-  (trigger.disabled ? document.getElementById('btn-new') : trigger).focus();
+  (trigger.disabled ? menuTrigger('file') : trigger).focus();
   return true;
 }
 
@@ -15955,9 +15982,9 @@ const commandActions = {
   openDocumentSwitcher: () => openDocumentSwitcher(),
   closeAllDocuments: (_context, invocation) => requestCloseAllDocuments(
     invocation.control?.closest('#application-menu') ? menuTrigger('view') : invocation.control),
-  openPanels: () => openPanelsIndex(document.querySelector('.rail-index')),
-  toggleLeftPanels: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'left', !panelLayout.zones.left.collapsed)),
-  toggleRightInspector: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'right', !panelLayout.zones.right.collapsed)),
+  openPanels: () => openPanelsIndex(document.querySelector('[data-workspace-action="index"]') || document.querySelector('.rail-index')),
+  toggleLeftPanels: () => immersiveWorkspace.isVisible('catalog') ? immersiveWorkspace.minimize('catalog') : immersiveWorkspace.show('catalog'),
+  toggleRightInspector: () => immersiveWorkspace.isVisible('inspector') ? immersiveWorkspace.minimize('inspector') : immersiveWorkspace.show('inspector'),
   setTheme: theme => themePreference.select(theme),
   openLanguage: () => languageDialog.open(),
   toggleHelp: (_context, invocation) => toggleHelp(
@@ -16051,8 +16078,8 @@ function commandContext() {
     sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise),
     executionUnknown: activeExecutionReconciliation === 'unknown',
     hasToken: hasRuntimeToken,
-    leftCollapsed: Boolean(panelLayout.zones.left.collapsed),
-    rightCollapsed: Boolean(panelLayout.zones.right.collapsed),
+    leftCollapsed: immersiveWorkspace ? !immersiveWorkspace.isVisible('catalog') : Boolean(panelLayout.zones.left.collapsed),
+    rightCollapsed: immersiveWorkspace ? !immersiveWorkspace.isVisible('inspector') : Boolean(panelLayout.zones.right.collapsed),
     applicationTheme,
   };
 }
@@ -16079,6 +16106,12 @@ function commandDisplayDescription(command, state, context) {
 }
 
 function refreshCommands({ menu = true } = {}) {
+  const selectionFit = document.querySelector('[data-workspace-action="fit-selection"]');
+  if (selectionFit) {
+    selectionFit.disabled = !cy || layoutBusy || Boolean(edgeGestureSession) || !cy.elements(':selected').length;
+    selectionFit.setAttribute('aria-label', uiText('workspace.overlay.fitSelection'));
+    selectionFit.title = uiText('workspace.overlay.fitSelection');
+  }
   const context = commandContext();
   const focusedMenuCommand = document.activeElement?.closest('#application-menu [data-command-id]')?.dataset.commandId;
   document.querySelectorAll('[data-command-id]').forEach(control => {
@@ -16345,6 +16378,7 @@ function openPanelsIndex(anchor) {
 // it — being closed, or living in a collapsed column. Reopening a panel into a column the user
 // cannot see would be a route back that does not arrive.
 function revealPanel(id) {
+  immersiveWorkspace?.reveal(id === 'activity' ? 'activity' : ['inspector', 'assistant'].includes(id) ? 'inspector' : 'catalog');
   const entry = panelLayout.panels.find(panel => panel.id === id);
   if (!entry) return;
   let next = setPanelClosed(panelLayout, id, false);
@@ -16631,6 +16665,40 @@ syncActivityModeChrome();
 document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter => {
   splitter.addEventListener('keydown', onLayoutSplitterKeydown);
   splitter.addEventListener('pointerdown', onLayoutSplitterPointerDown);
+});
+
+const activityLogRegion = document.getElementById('activity-log');
+activityLogRegion.tabIndex = 0;
+activityLogRegion.setAttribute('aria-labelledby', 'panel-activity-t');
+
+const selectionFitControl = document.createElement('button');
+selectionFitControl.type = 'button'; selectionFitControl.className = 'zbtn'; selectionFitControl.textContent = '◎';
+selectionFitControl.dataset.workspaceAction = 'fit-selection'; selectionFitControl.disabled = true;
+selectionFitControl.setAttribute('aria-label', uiText('workspace.overlay.fitSelection'));
+selectionFitControl.title = uiText('workspace.overlay.fitSelection');
+selectionFitControl.addEventListener('click', () => fitGraph({ selection: true }));
+document.getElementById('zoom-ctrl').append(selectionFitControl);
+
+immersiveWorkspace = createImmersiveWorkspace({
+  root: document.getElementById('main'),
+  surfaces: { catalog: document.getElementById('sidebar'), inspector: document.getElementById('info'),
+    activity: document.getElementById('dock'), tools: document.querySelector('.graph-interaction-tools') },
+  legacyLayout: (() => { try { return globalThis.localStorage?.getItem(LAYOUT_STORAGE_KEY) ? panelLayout : undefined; } catch { return undefined; } })(),
+  text: uiText,
+  onReset: () => { panelLayout = defaultLayout(); applyPanelLayout(); persistPanelLayout(); },
+  onShow: id => {
+    const ids = id === 'activity' ? ['activity'] : id === 'inspector' ? ['inspector']
+      : id === 'catalog' ? ['search', 'node-catalog'] : [];
+    for (const panelId of ids) {
+      const entry = panelLayout.panels.find(panel => panel.id === panelId);
+      if (entry) {
+        panelLayout = setPanelClosed(panelLayout, panelId, false);
+        panelLayout = setZoneCollapsed(panelLayout, entry.zone, false);
+      }
+    }
+    applyPanelLayout();
+    persistPanelLayout();
+  },
 });
 
 // Render the stored layout before anything measures the viewport: a column that expands one frame
@@ -17048,6 +17116,7 @@ uiLocalization.subscribe(() => {
   updateStats();
   buildLegend();
   renderRailPanels();
+  immersiveWorkspace?.refresh();
   renderNodeCatalog();
   renderPersonalPalettes();
   refreshLocalizedProgramPanels();

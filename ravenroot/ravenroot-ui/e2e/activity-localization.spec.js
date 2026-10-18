@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { UI_ORIGIN } from './ports.mjs';
 
@@ -86,7 +87,7 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
       return other;
     });
     await page.locator('#btn-modify').click();
-    await page.locator('#btn-add-node').click();
+    await clickCommand(page, 'edit.addNode');
     await page.locator('#node-editor input[name="name"]').fill(authoredName);
     await page.locator('#node-editor button[type="submit"]').click();
     await page.evaluate(() => { window.cy.nodes().last().select(); });
@@ -109,8 +110,8 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
       expect(await page.evaluate(() => globalThis.__executed)).toBeUndefined();
     }
     // A real second activity family: undo/redo retains command meaning and authored node data.
-    await page.locator('#btn-undo').click();
-    await page.locator('#btn-redo').click();
+    await clickCommand(page, 'edit.undo');
+    await clickCommand(page, 'edit.redo');
     const history = page.locator('#activity-log .activity-detail').last();
     await history.evaluate(element => { element.dataset.retainedHistory = 'same'; });
     const retainedHistory = page.locator('[data-retained-history="same"]');

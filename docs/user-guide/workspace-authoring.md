@@ -29,6 +29,29 @@ The other documents and workspace chrome are hidden until you restore with the s
 Restoring returns focus to the invoking control and retains the document's size, viewport, selection, run,
 and live monitoring state.
 
+## Arrange the workspace tools
+
+The graph fills the workspace behind the tool palette, Catalog/Search, Inspector, and Activity
+surfaces. Inspector starts on the right and Activity below the graph. Drag a surface by its grip
+to float it; drag near an edge to preview docking, or choose **Top**, **Right**, **Bottom**, or
+**Left** from its dock selector. The tool palette changes orientation at the side edges. Drag the
+resize control to change a surface's size. **Escape** cancels an unfinished move or resize.
+
+With a move grip focused, use the arrow keys to move, **Alt + Arrow** to dock at that edge, and
+**Shift + Arrow** to resize. The resize control also supports arrow keys. Press **Enter** to finish
+or **Escape** to restore the starting layout. Moving tools does not edit the graph.
+
+Minimize a surface to its restore control, then activate that control to return to its previous
+position. **Panels** lists every surface, including minimized ones. **Focus mode** hides the workspace
+tools temporarily; **Exit Focus mode** brings them back. **Reset layout** restores the initial arrangement.
+These workspace controls are separate from maximizing an individual document.
+
+The browser saves a versioned tool layout independently of graph documents. Existing panel layouts
+migrate to the overlay arrangement, and surface headers are kept inside the available workspace
+after a resize. If browser storage is unavailable, the controls still work for the current session.
+Layout changes preserve graph viewports and live renderer instances. Explicit **Fit** and search
+focus use the graph area available between the visible overlays.
+
 ## Governed Workspace resources and named Agents
 
 The browser's document workspace is distinct from an execution Workspace resource. When the

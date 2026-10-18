@@ -7,6 +7,62 @@ import { Transform } from 'node:stream';
 
 const backendTokens = new WeakMap();
 
+function punycodeDigit(value) {
+  if (value >= 'a' && value <= 'z') return value.charCodeAt(0) - 97;
+  if (value >= '0' && value <= '9') return value.charCodeAt(0) - 22;
+  return -1;
+}
+
+function adaptPunycodeBias(delta, outputSize, firstCodePoint) {
+  delta = firstCodePoint ? Math.floor(delta / 700) : Math.floor(delta / 2);
+  delta += Math.floor(delta / outputSize);
+  let adjustment = 0;
+  while (delta > 455) {
+    delta = Math.floor(delta / 35);
+    adjustment += 36;
+  }
+  return adjustment + Math.floor(36 * delta / (delta + 38));
+}
+
+function validPunycodeLabel(encoded) {
+  if (!encoded) return false;
+  const decoded = [];
+  const delimiter = encoded.lastIndexOf('-');
+  let cursor = 0;
+  if (delimiter >= 0) {
+    for (; cursor < delimiter; cursor += 1) decoded.push(encoded.charCodeAt(cursor));
+    cursor += 1;
+  }
+  let codePoint = 128;
+  let delta = 0;
+  let bias = 72;
+  while (cursor < encoded.length) {
+    const previousDelta = delta;
+    let weight = 1;
+    for (let thresholdBase = 36; ; thresholdBase += 36) {
+      if (cursor >= encoded.length) return false;
+      const digit = punycodeDigit(encoded[cursor++]);
+      if (digit < 0 || digit > Math.floor((Number.MAX_SAFE_INTEGER - delta) / weight)) return false;
+      delta += digit * weight;
+      const threshold = thresholdBase <= bias ? 1 : Math.min(thresholdBase - bias, 26);
+      if (digit < threshold) break;
+      if (weight > Math.floor(Number.MAX_SAFE_INTEGER / (36 - threshold))) return false;
+      weight *= 36 - threshold;
+    }
+    const outputSize = decoded.length + 1;
+    bias = adaptPunycodeBias(delta - previousDelta, outputSize, previousDelta === 0);
+    const increment = Math.floor(delta / outputSize);
+    if (increment > 0x10ffff - codePoint) return false;
+    codePoint += increment;
+    delta %= outputSize;
+    if (codePoint <= 0x9f || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+        || (codePoint >= 0xfdd0 && codePoint <= 0xfdef) || (codePoint & 0xfffe) === 0xfffe) return false;
+    decoded.splice(delta, 0, codePoint);
+    delta += 1;
+  }
+  return decoded.some(value => value >= 0x80);
+}
+
 function configuredFrameAncestors(declared) {
   if (declared === undefined || declared === null || String(declared).trim() === '') return [];
   const ancestors = new Set();
@@ -23,9 +79,13 @@ function configuredFrameAncestors(declared) {
     // Keep CSP source syntax out of hostnames while preserving WHATWG-valid ASCII DNS forms.
     const asciiHostname = origin.hostname.startsWith('[')
       || /^[a-z0-9._-]+$/.test(origin.hostname);
+    // Node URL releases differ on malformed A-labels, so enforce the shared decoder explicitly.
+    const validPunycode = origin.hostname.startsWith('[')
+      || origin.hostname.split('.').every(label => !label.startsWith('xn--')
+        || validPunycodeLabel(label.substring(4)));
     if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
         || origin.pathname !== '/' || origin.search || origin.hash || origin.port === '0'
-        || origin.hostname.endsWith('.') || !asciiHostname || origin.origin !== value) {
+        || origin.hostname.endsWith('.') || !asciiHostname || !validPunycode || origin.origin !== value) {
       throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins');
     }
     ancestors.add(value);

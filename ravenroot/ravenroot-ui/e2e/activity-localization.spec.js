@@ -89,7 +89,7 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
     await page.locator('#btn-add-node').click();
     await page.locator('#node-editor input[name="name"]').fill(authoredName);
     await page.locator('#node-editor button[type="submit"]').click();
-    await page.evaluate(() => window.cy.nodes().last().select());
+    await page.evaluate(() => { window.cy.nodes().last().select(); });
     const before = await snapshot(page);
     expect(before.documents.some(item => item.dirty)).toBe(true);
     await page.locator('#menu-file').click();

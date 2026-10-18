@@ -9228,9 +9228,12 @@ def revision_product_version(root: Path, revision: str) -> str:
 
 def reachable_version_transition(
         root: Path, target_version: str, source_ref: str) -> tuple[str, str, str]:
-    """Find the real one-parent commit that introduced one reachable product version."""
+    """Select one proven inverse across every parent, independent of merge simplification."""
+    candidates = []
+    mixed_features = []
     for revision in subprocess.run(
-            ["git", "rev-list", "--topo-order", source_ref, "--", "ravenroot/pom.xml"], cwd=root,
+            ["git", "rev-list", "--full-history", "--topo-order", source_ref,
+             "--", "ravenroot/pom.xml"], cwd=root,
             check=True, capture_output=True, text=True,
     ).stdout.splitlines():
         ancestry = subprocess.run(
@@ -9243,15 +9246,31 @@ def reachable_version_transition(
         if revision_product_version(root, revision) != target_version:
             continue
         source_version = revision_product_version(root, parent)
-        if source_version != target_version:
-            return revision, parent, source_version
-    raise AssertionError(
-        f"no single-parent version transition to {target_version} is reachable from the prepared tree")
+        if source_version == target_version:
+            continue
+        changes = subprocess.run(
+            ["git", "diff", "--name-status", parent, revision], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        if f"A\tdocs/releases/v{target_version}.md" not in changes:
+            # Every candidate must contain the exact generated version surfaces. A mixed feature
+            # commit may have additional paths, but is never itself an inverse candidate. Missing
+            # or altered version bytes are errors, not reasons to try another commit until one passes.
+            _, _, _, unexpected = version_alignment_evidence(root, revision, target_version)
+            if unexpected:
+                mixed_features.append(revision)
+                continue
+        candidates.append((revision, parent, source_version))
+    if len(candidates) != 1:
+        raise AssertionError(
+            f"expected one bounded version transition to {target_version}; "
+            f"found {len(candidates)}; mixed feature transitions: {mixed_features}")
+    return candidates[0]
 
 
-def reverse_version_alignment_delta(
-        root: Path, revision: str, target_version: str) -> str:
-    """Reverse a validated bump_surfaces-only integration alignment without touching other bytes."""
+def version_alignment_evidence(
+        root: Path, revision: str, target_version: str) -> tuple[str, str, list[str], list[str]]:
+    """Prove all generated version bytes, separately identifying non-invertible feature paths."""
     ancestry = subprocess.run(
         ["git", "rev-list", "--parents", "-n", "1", revision], cwd=root,
         check=True, capture_output=True, text=True,
@@ -9284,16 +9303,17 @@ def reverse_version_alignment_delta(
                 ["git", "diff", "--name-status", parent, revision], cwd=root,
                 check=True, capture_output=True, text=True,
             ).stdout.splitlines()
-            if actual_changes != expected_changes:
-                expected_paths = {line.split("\t", 1)[-1] for line in expected_changes}
-                actual_paths = {line.split("\t", 1)[-1] for line in actual_changes}
-                unexpected = sorted(actual_paths - expected_paths)
-                missing = sorted(expected_paths - actual_paths)
+            expected_paths = {line.split("\t", 1)[-1] for line in expected_changes}
+            actual_paths = {line.split("\t", 1)[-1] for line in actual_changes}
+            unexpected = sorted(actual_paths - expected_paths)
+            missing = sorted(expected_paths - actual_paths)
+            actual_status = dict(line.split("\t", 1)[::-1] for line in actual_changes)
+            if missing:
                 raise AssertionError(
-                    f"version alignment changed an unexpected path: {unexpected}; missing: {missing}")
+                    f"version alignment omitted generated version surfaces: {missing}")
             for line in expected_changes:
                 status, path = line.split("\t", 1)
-                if status != "M":
+                if status != "M" or actual_status.get(path) != status:
                     raise AssertionError(f"version alignment has a non-modification change: {line}")
                 committed = subprocess.run(
                     ["git", "show", f"{revision}:{path}"], cwd=root,
@@ -9307,6 +9327,17 @@ def reverse_version_alignment_delta(
                 check=True, capture_output=True)
 
     expected_paths = [line.split("\t", 1)[-1] for line in expected_changes]
+    return parent, source_version, expected_paths, unexpected
+
+
+def reverse_version_alignment_delta(
+        root: Path, revision: str, target_version: str) -> str:
+    """Reverse a validated bump_surfaces-only integration alignment without touching other bytes."""
+    parent, source_version, expected_paths, unexpected = version_alignment_evidence(
+        root, revision, target_version)
+    if unexpected:
+        raise AssertionError(
+            f"version alignment changed an unexpected path: {unexpected}; missing: []")
     historical_poms = {path for path in expected_paths if path.endswith("pom.xml")}
     current_poms = set(subprocess.run(
         ["git", "ls-files", "*pom.xml"], cwd=root,
@@ -9376,6 +9407,112 @@ def normalize_authoritative_version_history(root: Path) -> str:
         current_version = source_version
         source_ref = parent
     return released_version
+
+
+class VersionHistoryTopologyTest(unittest.TestCase):
+    def setUp(self):
+        self.location = tempfile.TemporaryDirectory()
+        self.addCleanup(self.location.cleanup)
+        self.root = Path(self.location.name) / "source"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--no-local", str(ROOT), str(self.root)], check=True)
+        self.git("remote", "remove", "origin")
+        self.git("config", "user.name", "Test")
+        self.git("config", "user.email", "test@example.invalid")
+        self.parent = self.git("rev-parse", "HEAD")
+        self.source_version = product_version(self.root)
+        self.target_version = str(expected_next(parse_tag("v" + self.source_version), "patch"))
+
+    def git(self, *arguments):
+        return subprocess.run(
+            ["git", *arguments], cwd=self.root, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def transition(self, message, *, extra=False, corrupted=False, missing=False):
+        self.git("checkout", "--quiet", "--detach", self.parent)
+        bump_surfaces(self.root, self.source_version, self.target_version)
+        if extra:
+            (self.root / "feature.txt").write_text("Feature bytes must survive the inverse.\n")
+        if corrupted:
+            readme = self.root / "README.md"
+            readme.write_text(readme.read_text() + "\nUnexpected non-version content.\n")
+        if missing:
+            path = "ravenroot/ravenroot-ui/package.json"
+            (self.root / path).write_text(self.git("show", self.parent + ":" + path) + "\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")
+
+    def merge(self, tree_revision, *parents):
+        arguments = ["commit-tree", tree_revision + "^{tree}"]
+        for parent in parents:
+            arguments.extend(["-p", parent])
+        return self.git(*arguments, "-m", "isolated merge topology")
+
+    def test_branch_pr_and_queue_find_the_same_bounded_inverse(self):
+        pure = self.transition("standalone generated alignment")
+        mixed = self.transition("feature and generated alignment", extra=True)
+        branch = self.merge(mixed, pure, mixed)
+        pr = self.merge(mixed, mixed, branch)
+        self.git("checkout", "--quiet", "--detach", mixed)
+        (self.root / "queue-base.txt").write_text("Later base content stays intact.\n")
+        self.git("add", "queue-base.txt")
+        self.git("commit", "-qm", "advance queue base")
+        queue_base = self.git("rev-parse", "HEAD")
+        queue = self.merge(queue_base, queue_base, branch)
+        for name, revision in (("branch", branch), ("pull request", pr), ("merge queue", queue)):
+            with self.subTest(topology=name):
+                # Prove this fixture reproduces the parent-order/TREESAME trap: ordinary
+                # path-limited history hides the pure sibling in PR and queue checkouts.
+                simplified = self.git("rev-list", "--topo-order", revision,
+                                      "--", "ravenroot/pom.xml").splitlines()
+                self.assertIn(pure if name == "branch" else mixed, simplified)
+                self.assertNotIn(mixed if name == "branch" else pure, simplified)
+                self.git("checkout", "--quiet", "--detach", revision)
+                inventory = self.root / "scripts/operational-configuration-inventory.json"
+                protected = {path: (self.root / path).read_bytes()
+                             for path in ("feature.txt", "queue-base.txt")
+                             if (self.root / path).exists()}
+                inventory_bytes = inventory.read_bytes()
+                self.assertEqual(
+                    (pure, self.parent, self.source_version),
+                    reachable_version_transition(self.root, self.target_version, revision))
+                self.assertEqual(self.source_version, reverse_version_alignment_delta(
+                    self.root, pure, self.target_version))
+                self.assertEqual(self.source_version, product_version(self.root))
+                self.assertEqual(inventory_bytes, inventory.read_bytes())
+                self.assertEqual(protected, {path: (self.root / path).read_bytes()
+                                             for path in protected})
+                self.git("add", ".")
+                self.git("commit", "-qm", "record bounded fixture inverse")
+
+    def test_mixed_feature_is_not_an_inverse_or_a_standalone_candidate(self):
+        mixed = self.transition("mixed feature only", extra=True)
+        with self.assertRaisesRegex(AssertionError, "unexpected path"):
+            reverse_version_alignment_delta(self.root, mixed, self.target_version)
+        with self.assertRaisesRegex(AssertionError, "found 0"):
+            reachable_version_transition(self.root, self.target_version, mixed)
+        self.assertEqual("", self.git("status", "--porcelain"))
+
+    def test_invalid_version_surfaces_are_not_skipped_for_a_valid_sibling(self):
+        pure = self.transition("valid standalone alignment")
+        for mutation, expected in (("corrupted", "non-version content"),
+                                   ("missing", "omitted generated version surfaces")):
+            with self.subTest(mutation=mutation):
+                invalid = self.transition("invalid version alignment", **{mutation: True})
+                merged = self.merge(invalid, pure, invalid)
+                with self.assertRaisesRegex(AssertionError, expected):
+                    reachable_version_transition(self.root, self.target_version, merged)
+                with self.assertRaisesRegex(AssertionError, expected):
+                    reverse_version_alignment_delta(self.root, invalid, self.target_version)
+                self.assertEqual("", self.git("status", "--porcelain"))
+
+    def test_two_exact_alignment_candidates_are_ambiguous(self):
+        first = self.transition("first exact alignment")
+        second = self.transition("second exact alignment")
+        merged = self.merge(first, first, second)
+        with self.assertRaisesRegex(AssertionError, "found 2"):
+            reachable_version_transition(self.root, self.target_version, merged)
 
 
 if __name__ == "__main__":

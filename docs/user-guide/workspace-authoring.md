@@ -50,8 +50,10 @@ These workspace controls are separate from maximizing an individual document.
 The browser saves a versioned tool layout independently of graph documents. Existing panel layouts
 migrate to the overlay arrangement, and surface headers are kept inside the available workspace
 after a resize. If browser storage is unavailable, the controls still work for the current session.
-Layout changes preserve graph viewports and live renderer instances. Explicit **Fit** and search
-focus use the graph area available between the visible overlays.
+On narrow screens, panels open one at a time as drawers; their restore controls remain available
+and the saved desktop positions remain intact. Layout changes preserve graph viewports and live
+renderer instances. Explicit **Fit**, **Zoom to selection**, and search focus use the graph area
+available between the visible overlays.
 
 ## Governed Workspace resources and named Agents
 

@@ -300,6 +300,7 @@ public final class RavenrootServer implements AutoCloseable {
     private final DeploymentObservationCursorStore deploymentCursors;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean started = new AtomicBoolean();
+    private final AtomicBoolean listenerStarted = new AtomicBoolean();
     /** Installed only by the composition root before {@link #start()}; packages never see {@code HttpServer}. */
     private ai.ravenroot.server.ingress.ManagedIngressRegistry managedIngress;
     /** Installed only by the packaged composition before start; absent hosts expose no approval authority. */
@@ -380,6 +381,7 @@ public final class RavenrootServer implements AutoCloseable {
     /** Optional Git-backed graph authoring archive, installed by the packaged composition before start. */
     private ai.ravenroot.server.authoring.GraphAuthoringHttpApi graphAuthoring;
     private ai.ravenroot.server.authoring.PublishedGraphArtifactHttpApi publishedGraphArtifacts;
+    private boolean graphAuthoringConfigured;
 
     public RavenrootServer(RavenrootApplication application, int port) {
         this(application, new InetSocketAddress(InetAddress.getLoopbackAddress(), port), null,
@@ -1021,6 +1023,9 @@ public final class RavenrootServer implements AutoCloseable {
     }
 
     public void start() {
+        if (closed.get()) {
+            throw new IllegalStateException("server is closed");
+        }
         if (!started.compareAndSet(false, true)) {
             throw new IllegalStateException("server is already started");
         }
@@ -1028,9 +1033,73 @@ public final class RavenrootServer implements AutoCloseable {
             if (interactionWebSockets != null) interactionWebSockets.start();
             if (durableDeploymentControl != null) durableDeploymentControl.startRecovery();
             server.start();
+            listenerStarted.set(true);
             verifyRequestHeaderCapTookEffect();
-        } catch (RuntimeException failure) {
-            if (interactionWebSockets != null) interactionWebSockets.close();
+        } catch (RuntimeException | Error failure) {
+            try {
+                close();
+            } catch (RuntimeException | Error closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
+    }
+
+    /**
+     * Applies the supported embedded graph-authoring composition before listener startup.
+     *
+     * <p>This is one configuration operation rather than exposure of the individual repository,
+     * HTTP adapter and artifact catalog. The server assumes ownership of a successfully created
+     * repository and closes the listener, executor and owned application if configuration fails
+     * after the listener has been bound.</p>
+     *
+     * @param embedded operator-owned embedded authoring configuration
+     * @return this server for bootstrap chaining
+     */
+    public synchronized RavenrootServer configureGraphAuthoring(
+            EmbeddedGraphAuthoringConfiguration embedded) {
+        if (closed.get()) throw new IllegalStateException("server is closed");
+        if (started.get()) throw new IllegalStateException("graph authoring must be configured before server start");
+        if (graphAuthoringConfigured || graphAuthoring != null || publishedGraphArtifacts != null) {
+            throw new IllegalStateException("graph authoring is already configured");
+        }
+        ai.ravenroot.api.authoring.GraphAuthoringRepository repository = null;
+        ai.ravenroot.server.authoring.GraphAuthoringHttpApi authoringApi = null;
+        try {
+            embedded = java.util.Objects.requireNonNull(embedded, "embedded");
+            graphAuthoringConfigured = true;
+            if (!embedded.enabled()) return this;
+            if (!application.immutableGraphDefinitionsAvailable()) {
+                throw new IllegalStateException(
+                        "Git graph authoring requires an immutable graph definition store");
+            }
+            embedded.requireCredentialAvailable();
+            var catalog = embedded.createCatalog();
+            repository = embedded.createRepository(catalog, graph -> {
+                var inspected = application.inspectGraphMl(new java.io.ByteArrayInputStream(graph),
+                        ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
+                if (!inspected.valid()) throw new ai.ravenroot.api.authoring.GraphAuthoringException(
+                        ai.ravenroot.api.authoring.GraphAuthoringException.Failure.INVALID_DOCUMENT);
+            });
+            authoringApi = new ai.ravenroot.server.authoring.GraphAuthoringHttpApi(
+                    embedded.configuration(), repository, authorization, System.out::println);
+            var artifactApi = new ai.ravenroot.server.authoring.PublishedGraphArtifactHttpApi(
+                    catalog, authorizedApplication, authorization);
+            graphAuthoring = authoringApi;
+            publishedGraphArtifacts = artifactApi;
+            return this;
+        } catch (RuntimeException | Error failure) {
+            try {
+                if (authoringApi != null) authoringApi.close();
+                else if (repository != null) repository.close();
+            } catch (RuntimeException | Error closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            try {
+                close();
+            } catch (RuntimeException | Error closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
             throw failure;
         }
     }
@@ -6976,8 +7045,19 @@ public final class RavenrootServer implements AutoCloseable {
         if (interactionWebSockets != null) interactionWebSockets.close();
         if (durableDeploymentControl != null) durableDeploymentControl.close();
         if (graphAuthoring != null) graphAuthoring.close();
-        server.stop((int) httpStopDelay.toSeconds());
-        executor.close();
+        if (!listenerStarted.get()) {
+            // HttpServer.create(address, backlog) binds immediately, but HttpServer.stop() does not
+            // release that socket until the server has been started at least once. Configuration and
+            // pre-listener startup failures therefore close the executor first, so no handler can run,
+            // then start the listener only long enough to stop it with no drain delay.
+            executor.close();
+            server.start();
+            listenerStarted.set(true);
+            server.stop(0);
+        } else {
+            server.stop((int) httpStopDelay.toSeconds());
+            executor.close();
+        }
         try {
             auditSubscription.close();
         } catch (Exception ignored) {

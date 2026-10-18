@@ -1154390,6 +1154390,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-575-workbench-framing-node24-parity-v1",
+      "issue": "#575",
+      "sourceRevision": "89541790f0c1c281846d587356f48cbb8c15e87e",
+      "targetRevision": "4872f0450157f4d1bae5610b3784eeff27e40916",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "a2745139963bad5f96bd027276ad729ab99ab7baa08ab25d1003e6a120587e8a",
+      "targetCandidateDigest": "16aaa13c3e680d41faf5ffece94f74299e10ae7813870cba0fc021638b20f9ef",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

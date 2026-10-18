@@ -20,9 +20,12 @@ function configuredFrameAncestors(declared) {
     let origin;
     try { origin = new URL(value); }
     catch { throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins'); }
+    // Keep CSP source syntax out of hostnames while preserving WHATWG-valid ASCII DNS forms.
+    const asciiHostname = origin.hostname.startsWith('[')
+      || /^[a-z0-9._-]+$/.test(origin.hostname);
     if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
         || origin.pathname !== '/' || origin.search || origin.hash || origin.port === '0'
-        || origin.hostname.endsWith('.') || origin.origin !== value) {
+        || origin.hostname.endsWith('.') || !asciiHostname || origin.origin !== value) {
       throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins');
     }
     ancestors.add(value);

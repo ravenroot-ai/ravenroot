@@ -151,12 +151,15 @@ public final class SecurityHeadersPolicy {
             throw invalidFrameAncestor();
         }
         String scheme = uri.getScheme();
-        String host = uri.getHost();
-        int port = uri.getPort();
-        if (scheme == null || host == null || !("http".equals(scheme) || "https".equals(scheme))
+        if (scheme == null || !("http".equals(scheme) || "https".equals(scheme))
                 || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null
-                || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
-                || port == 0 || port > 65535) {
+                || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())) {
+            throw invalidFrameAncestor();
+        }
+        OriginAuthority authority = canonicalOriginAuthority(uri);
+        String host = authority.host();
+        int port = authority.port();
+        if (port == 0 || port > 65535) {
             throw invalidFrameAncestor();
         }
         String normalizedHost = canonicalOriginHost(host);
@@ -174,6 +177,41 @@ public final class SecurityHeadersPolicy {
             throw invalidFrameAncestor();
         }
         return canonical;
+    }
+
+    private static OriginAuthority canonicalOriginAuthority(URI uri) {
+        if (uri.getHost() != null) {
+            return new OriginAuthority(uri.getHost(), uri.getPort());
+        }
+        // URI#getHost omits browser-valid ASCII names whose final label starts with a digit.
+        // Parse only the CSP-safe ASCII hostname grammar shared with the UI-only runtime.
+        String rawAuthority = uri.getRawAuthority();
+        if (rawAuthority == null || rawAuthority.isEmpty()) {
+            throw invalidFrameAncestor();
+        }
+        int separator = rawAuthority.lastIndexOf(':');
+        if (separator != rawAuthority.indexOf(':')) {
+            throw invalidFrameAncestor();
+        }
+        String host = separator == -1 ? rawAuthority : rawAuthority.substring(0, separator);
+        String portText = separator == -1 ? null : rawAuthority.substring(separator + 1);
+        if (host.isEmpty() || !host.matches("[A-Za-z0-9._-]+")) {
+            throw invalidFrameAncestor();
+        }
+        if (portText == null) {
+            return new OriginAuthority(host, -1);
+        }
+        if (!portText.matches("[0-9]+")) {
+            throw invalidFrameAncestor();
+        }
+        try {
+            return new OriginAuthority(host, Integer.parseInt(portText));
+        } catch (NumberFormatException invalid) {
+            throw invalidFrameAncestor();
+        }
+    }
+
+    private record OriginAuthority(String host, int port) {
     }
 
     private static String canonicalOriginHost(String host) {
@@ -229,6 +267,11 @@ public final class SecurityHeadersPolicy {
                     ? String.join(":", before)
                     : String.join(":", before) + "::" + String.join(":", after);
         }
+        for (String label : normalizedHost.split("\\.", -1)) {
+            if (label.startsWith("xn--") && !validPunycodeLabel(label.substring(4))) {
+                throw invalidFrameAncestor();
+            }
+        }
         if (endsInWhatwgIpv4Number(normalizedHost)) {
             String[] components = normalizedHost.split("\\.", -1);
             if (components.length != 4) {
@@ -242,6 +285,90 @@ public final class SecurityHeadersPolicy {
             }
         }
         return normalizedHost;
+    }
+
+    private static boolean validPunycodeLabel(String encoded) {
+        if (encoded.isEmpty()) {
+            return false;
+        }
+        var decoded = new java.util.ArrayList<Integer>();
+        int delimiter = encoded.lastIndexOf('-');
+        int cursor = 0;
+        if (delimiter >= 0) {
+            for (; cursor < delimiter; cursor++) {
+                char value = encoded.charAt(cursor);
+                if (value >= 0x80) {
+                    return false;
+                }
+                decoded.add((int) value);
+            }
+            cursor++;
+        }
+        long codePoint = 128;
+        long delta = 0;
+        long bias = 72;
+        while (cursor < encoded.length()) {
+            long previousDelta = delta;
+            long weight = 1;
+            for (long thresholdBase = 36;; thresholdBase += 36) {
+                if (cursor >= encoded.length()) {
+                    return false;
+                }
+                int digit = punycodeDigit(encoded.charAt(cursor++));
+                if (digit < 0 || digit > (Long.MAX_VALUE - delta) / weight) {
+                    return false;
+                }
+                delta += digit * weight;
+                long threshold = thresholdBase <= bias ? 1
+                        : Math.min(thresholdBase - bias, 26);
+                if (digit < threshold) {
+                    break;
+                }
+                if (weight > Long.MAX_VALUE / (36 - threshold)) {
+                    return false;
+                }
+                weight *= 36 - threshold;
+            }
+            int outputSize = decoded.size() + 1;
+            bias = adaptPunycodeBias(delta - previousDelta, outputSize, previousDelta == 0);
+            long increment = delta / outputSize;
+            if (increment > Character.MAX_CODE_POINT - codePoint) {
+                return false;
+            }
+            codePoint += increment;
+            delta %= outputSize;
+            if (!Character.isValidCodePoint((int) codePoint)
+                    || codePoint <= 0x9f
+                    || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+                    || (codePoint >= 0xfdd0 && codePoint <= 0xfdef)
+                    || (codePoint & 0xfffe) == 0xfffe) {
+                return false;
+            }
+            decoded.add((int) delta, (int) codePoint);
+            delta++;
+        }
+        return decoded.stream().anyMatch(value -> value >= 0x80);
+    }
+
+    private static int punycodeDigit(char value) {
+        if (value >= 'a' && value <= 'z') {
+            return value - 'a';
+        }
+        if (value >= '0' && value <= '9') {
+            return value - '0' + 26;
+        }
+        return -1;
+    }
+
+    private static long adaptPunycodeBias(long delta, int outputSize, boolean firstCodePoint) {
+        delta = firstCodePoint ? delta / 700 : delta / 2;
+        delta += delta / outputSize;
+        long adjustment = 0;
+        while (delta > 455) {
+            delta /= 35;
+            adjustment += 36;
+        }
+        return adjustment + 36 * delta / (delta + 38);
     }
 
     /**

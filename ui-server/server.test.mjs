@@ -31,15 +31,15 @@ test('validates runtime configuration, refuses credentials and insecure TLS', ()
   assert.deepEqual(configuration({}).frameAncestors, []);
   assert.deepEqual(configuration({ RAVENROOT_UI_FRAME_ANCESTORS: ' \t ' }).frameAncestors, []);
   assert.deepEqual(configuration({
-    RAVENROOT_UI_FRAME_ANCESTORS: 'https://portal.example,http://localhost:4173,self,https://[::1]:8443,https://portal.example',
-  }).frameAncestors, ["'self'", 'http://localhost:4173', 'https://[::1]:8443', 'https://portal.example']);
+    RAVENROOT_UI_FRAME_ANCESTORS: 'https://portal.example,http://localhost:4173,self,https://portal.example',
+  }).frameAncestors, ["'self'", 'http://localhost:4173', 'https://portal.example']);
   for (const value of ['self', 'https://portal.example', 'https://1.example',
     'https://0x7f.example', 'https://192.168.1.1', 'http://127.0.0.1:8080',
-    'https://[::1]:8443', 'https://portal.123corp', 'https://example.123abc',
+    'https://portal.123corp', 'https://example.123abc',
     'https://example.0xg', 'https://example.0x1g', 'https://123corp',
-    'https://portal.123-corp:444', 'https://under_score.example',
-    'https://-portal.example', 'https://portal-.example', 'https://portal..example',
-    'https://.portal.example', 'https://xn--bcher-kva.123corp',
+    'https://portal.123-corp:444', 'https://under-score.example',
+    'https://-portal.example', 'https://portal-.example',
+    'https://xn--bcher-kva.123corp',
     'https://xn--fa-hia.123corp']) {
     assert.doesNotThrow(() => configuration({ RAVENROOT_UI_FRAME_ANCESTORS: value }), value);
   }
@@ -48,6 +48,8 @@ test('validates runtime configuration, refuses credentials and insecure TLS', ()
     'https://portal.example:443', 'https://PORTAL.example', 'https://portal.example.',
     'https://portal..', 'https://%70ortal.123corp', 'https://portal.%31%32%33corp',
     'https://portal.éxample', 'https://xn--a', 'https://xn--0', 'https://xn--abc',
+    'https://under_score.example', 'https://portal..example',
+    'https://.portal.example', 'https://[::1]:8443', 'https://[2001:db8::1]:8443',
     'http://127.1', 'http://2130706433', 'http://017700000001',
     'http://0x', 'http://0x7f000001', 'http://0X7F000001', 'http://0x7f.0.0.1',
     'http://0177.0.0.1', 'http://0x7f.01.0x0.1',
@@ -61,6 +63,9 @@ test('validates runtime configuration, refuses credentials and insecure TLS', ()
     assert.ok(error, value);
     assert.ok(!String(error.stack).includes(value), value);
   }
+  assert.throws(() => configuration({ RAVENROOT_UI_FRAME_ANCESTORS: 'https://[::1]:8443' }),
+    error => /explicit IPv6/.test(error.message) && /use self/.test(error.message)
+      && /DNS hostname/.test(error.message));
 });
 
 for (const [prefix, backendPrefix] of [['', ''], ['/workspace/ui', '/embedded/ravenroot']]) test(`real HTTP/static/API/incremental SSE, UI prefix ${prefix || '/'}`, async () => {

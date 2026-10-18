@@ -76,17 +76,18 @@ function configuredFrameAncestors(declared) {
     let origin;
     try { origin = new URL(value); }
     catch { throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins'); }
-    // Keep CSP source syntax out of hostnames while preserving WHATWG-valid ASCII DNS forms.
-    const asciiHostname = origin.hostname.startsWith('[')
-      || /^[a-z0-9._-]+$/.test(origin.hostname);
+    if (origin.hostname.startsWith('[')) {
+      throw new Error('RAVENROOT_UI_FRAME_ANCESTORS does not support explicit IPv6 origins because CSP cannot represent them; use self for same-origin framing or a DNS hostname');
+    }
+    // Each nonempty DNS label must use only the characters CSP host-sources can represent.
+    const cspHostname = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/.test(origin.hostname);
     // Node URL releases differ on malformed A-labels, so enforce the shared decoder explicitly.
-    const validPunycode = origin.hostname.startsWith('[')
-      || origin.hostname.split('.').every(label => !label.startsWith('xn--')
-        || validPunycodeLabel(label.substring(4)));
+    const validPunycode = origin.hostname.split('.').every(label => !label.startsWith('xn--')
+      || validPunycodeLabel(label.substring(4)));
     if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
         || origin.pathname !== '/' || origin.search || origin.hash || origin.port === '0'
-        || origin.hostname.endsWith('.') || !asciiHostname || !validPunycode || origin.origin !== value) {
-      throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins');
+        || origin.hostname.endsWith('.') || !cspHostname || !validPunycode || origin.origin !== value) {
+      throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins with CSP-compatible DNS or IPv4 hosts');
     }
     ancestors.add(value);
   }

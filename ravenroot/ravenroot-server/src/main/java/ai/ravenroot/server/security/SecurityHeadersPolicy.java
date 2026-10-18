@@ -3,7 +3,6 @@ package ai.ravenroot.server.security;
 import com.sun.net.httpserver.Headers;
 
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -166,12 +165,9 @@ public final class SecurityHeadersPolicy {
         if (normalizedHost.endsWith(".")) {
             throw invalidFrameAncestor();
         }
-        String renderedHost = normalizedHost.indexOf(':') >= 0
-                ? "[" + normalizedHost + "]"
-                : normalizedHost;
         boolean defaultPort = ("https".equals(scheme) && port == 443)
                 || ("http".equals(scheme) && port == 80);
-        String canonical = scheme + "://" + renderedHost
+        String canonical = scheme + "://" + normalizedHost
                 + (port == -1 || defaultPort ? "" : ":" + port);
         if (!canonical.equals(value)) {
             throw invalidFrameAncestor();
@@ -195,7 +191,7 @@ public final class SecurityHeadersPolicy {
         }
         String host = separator == -1 ? rawAuthority : rawAuthority.substring(0, separator);
         String portText = separator == -1 ? null : rawAuthority.substring(separator + 1);
-        if (host.isEmpty() || !host.matches("[A-Za-z0-9._-]+")) {
+        if (host.isEmpty() || !host.matches("[A-Za-z0-9.-]+")) {
             throw invalidFrameAncestor();
         }
         if (portText == null) {
@@ -220,54 +216,13 @@ public final class SecurityHeadersPolicy {
             normalizedHost = normalizedHost.substring(1, normalizedHost.length() - 1);
         }
         if (normalizedHost.indexOf(':') >= 0) {
-            if (normalizedHost.indexOf('%') >= 0) {
-                throw invalidFrameAncestor();
-            }
-            byte[] address;
-            try {
-                address = java.net.InetAddress.getByName(normalizedHost).getAddress();
-            } catch (UnknownHostException invalid) {
-                throw invalidFrameAncestor();
-            }
-            if (address.length != 16) {
-                throw invalidFrameAncestor();
-            }
-            int[] groups = new int[8];
-            for (int index = 0; index < groups.length; index++) {
-                groups[index] = Byte.toUnsignedInt(address[index * 2]) << 8
-                        | Byte.toUnsignedInt(address[index * 2 + 1]);
-            }
-            int bestStart = -1;
-            int bestLength = 0;
-            for (int start = 0; start < groups.length;) {
-                if (groups[start] != 0) {
-                    start++;
-                    continue;
-                }
-                int end = start;
-                while (end < groups.length && groups[end] == 0) {
-                    end++;
-                }
-                if (end - start > bestLength && end - start >= 2) {
-                    bestStart = start;
-                    bestLength = end - start;
-                }
-                start = end;
-            }
-            var before = new java.util.ArrayList<String>();
-            var after = new java.util.ArrayList<String>();
-            for (int index = 0; index < groups.length; index++) {
-                if (index < bestStart || bestStart == -1) {
-                    before.add(Integer.toHexString(groups[index]));
-                } else if (index >= bestStart + bestLength) {
-                    after.add(Integer.toHexString(groups[index]));
-                }
-            }
-            return bestStart == -1
-                    ? String.join(":", before)
-                    : String.join(":", before) + "::" + String.join(":", after);
+            throw unsupportedExplicitIpv6FrameAncestor();
         }
-        for (String label : normalizedHost.split("\\.", -1)) {
+        String[] labels = normalizedHost.split("\\.", -1);
+        for (String label : labels) {
+            if (!label.matches("[a-z0-9-]+")) {
+                throw invalidFrameAncestor();
+            }
             if (label.startsWith("xn--") && !validPunycodeLabel(label.substring(4))) {
                 throw invalidFrameAncestor();
             }
@@ -388,7 +343,14 @@ public final class SecurityHeadersPolicy {
 
     private static IllegalArgumentException invalidFrameAncestor() {
         return new IllegalArgumentException(
-                "RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins");
+                "RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins "
+                        + "with CSP-compatible DNS or IPv4 hosts");
+    }
+
+    private static IllegalArgumentException unsupportedExplicitIpv6FrameAncestor() {
+        return new IllegalArgumentException(
+                "RAVENROOT_UI_FRAME_ANCESTORS does not support explicit IPv6 origins because CSP "
+                        + "cannot represent them; use self for same-origin framing or a DNS hostname");
     }
 
     private static String canonicalConnectOrigin(String value) {

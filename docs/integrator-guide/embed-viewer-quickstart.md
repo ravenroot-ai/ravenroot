@@ -27,8 +27,13 @@ Framing is denied by default. Set `RAVENROOT_UI_FRAME_ANCESTORS` at process star
   `self,https://portal.example.com,https://operations.example.com:8443`.
 
 Origins have no trailing slash, path, credentials, query, fragment, wildcard, default port, or
-trailing-dot hostname. The scheme and host are lowercase. Empty list entries are invalid. Ravenroot
-refuses startup on an invalid nonblank value rather than copying it into CSP. Unset, empty, and
+trailing-dot hostname. The scheme and host are lowercase. An explicit hostname is either canonical
+IPv4 or dot-separated, nonempty DNS labels containing only ASCII letters, digits, and hyphens;
+underscores and empty labels cannot be represented by CSP and are rejected. Explicit IPv6 origins
+are also rejected because browsers do not represent them as `frame-ancestors` host sources. Use
+`self` when the portal and Ravenroot share an IPv6 origin, or give a cross-origin IPv6 portal a DNS
+hostname and configure that origin. Empty list entries are invalid. Ravenroot refuses startup on an
+invalid nonblank value rather than copying it into CSP. Unset, empty, and
 whitespace-only values retain `Content-Security-Policy: frame-ancestors 'none'` and
 `X-Frame-Options: DENY`. A valid opt-in emits the exact CSP sources and omits X-Frame-Options so CSP
 is the single framing decision.

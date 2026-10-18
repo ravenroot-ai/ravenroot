@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
@@ -257,9 +258,9 @@ test.describe('Layered arrangements on the test bench', () => {
       await arrange(page, 'Keep positions');
       expect(await positions(page)).toEqual(first);
       await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(3);
-      await page.locator('#btn-undo').click();
-      await page.locator('#btn-undo').click();
-      await page.locator('#btn-undo').click();
+      await clickCommand(page, 'edit.undo');
+      await clickCommand(page, 'edit.undo');
+      await clickCommand(page, 'edit.undo');
       await expect.poll(() => positions(page)).toEqual(initial);
       await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(0);
     }

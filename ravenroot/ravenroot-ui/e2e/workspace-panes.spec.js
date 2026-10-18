@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { createAppCommands } from '../src/app-commands.js';
 
@@ -250,7 +251,7 @@ test.describe('two documents side by side', () => {
     // The `*`-equivalent: a modified document says so with a character, not with a tint.
     await expect(pane(first).locator('.doc-pane-modified')).toHaveCount(0);
     await page.locator('#btn-modify').click();
-    await page.locator('#btn-add-node').click();
+    await clickCommand(page, 'edit.addNode');
     await page.locator('#node-editor button[type="submit"]').click();
     await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
 

@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
@@ -57,7 +58,7 @@ test('keyboard create, expand, rename, summary Delete and undo preserve canonica
   await page.keyboard.press('Delete');
   await expect.poll(async () => (await groupData(page)).groups.length).toBe(0);
   expect(await canonical(page)).toEqual(before);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect((await groupData(page)).groups[0].name).toBe('Renamed');
   expect(await canonical(page)).toEqual(before);
   expect(errors).toEqual([]);
@@ -162,7 +163,7 @@ test('a physical summary drag is one rigid move and member deletion reconciles i
     expect(moved[id].y - before[id].y).toBeCloseTo(delta.y, 6);
   }
   expect(moved.start).toEqual(before.start);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect(await page.evaluate(() => Object.fromEntries(window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }])))).toEqual(before);
   await select(page, await page.evaluate(() => [...window.cy.nodes('[rrVisualRole="summary"]').map(node => node.id()), 'start']));
   await page.locator('#cy-wrap').focus(); await page.keyboard.press('Delete');
@@ -173,7 +174,7 @@ test('a physical summary drag is one rigid move and member deletion reconciles i
   await page.waitForFunction(() => !window.ravenroot.workspace.active.visualGroupsRenderer.isAnimating);
   await select(page, ['error']); await page.locator('#cy-wrap').focus(); await page.keyboard.press('Delete');
   expect((await groupData(page)).groups[0].memberNodeIds).toEqual(['dosomething', 'end']);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect((await groupData(page)).groups[0].memberNodeIds).toEqual(originalMembers);
   expect((await canonical(page)).nodes).toHaveLength(4);
 });
@@ -220,7 +221,7 @@ for (const [arrangementId, arrangementLabel] of designArrangementEngines) test(
   const expanded = await page.evaluate(() => Object.fromEntries(['dosomething', 'end', 'error']
     .map(id => [id, window.cy.getElementById(id).position()])));
   for (const id of ['dosomething', 'end', 'error']) expect(expanded[id]).toEqual(after[id]);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect(await page.evaluate(() => Object.fromEntries(
     window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
   ))).toEqual(before);

@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
@@ -45,7 +46,7 @@ async function makeActiveDirty(page, name = 'Sibling-only edit') {
   if (await page.locator('#btn-modify').getAttribute('aria-pressed') !== 'true') {
     await page.locator('#btn-modify').click();
   }
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill(name);
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');

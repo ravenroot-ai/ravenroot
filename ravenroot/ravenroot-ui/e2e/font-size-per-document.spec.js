@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // UI-12: label font size is a property of the DOCUMENT, not the
@@ -150,7 +151,7 @@ test.describe('font size is a property of the document (UI-12)', () => {
     // against the SAME `graphData` object rather than a new one. It rebuilds synchronously without
     // running a layout, and the font-reset branch is never reached.
     await page.locator('#btn-modify').click();
-    await page.locator('#btn-add-node').click();
+    await clickCommand(page, 'edit.addNode');
     await page.locator('#node-editor button[type="submit"]').click();
     await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
 

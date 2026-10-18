@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // UI-03 document ownership.
@@ -193,7 +194,7 @@ test('the shared toolbar acts on the active document and leaves the others untou
   // Add a node through the real toolbar and inspector while the second document is active.
   await page.locator('#btn-modify').click();
   await expect(page.locator('#btn-modify')).toHaveAttribute('aria-pressed', 'true');
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill('Only in the second');
   await page.locator('#node-editor button[type="submit"]').click();
 

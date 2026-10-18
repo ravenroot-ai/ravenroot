@@ -1,3 +1,4 @@
+import { clickCommand } from '../command-actions.mjs';
 import { keepAuthenticationInMemory } from '../memory-only-auth.mjs';
 import { writeFile } from 'node:fs/promises';
 
@@ -42,7 +43,7 @@ async function authenticate(page) {
 }
 
 async function createLocalHumanTaskNode(page) {
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
   await page.locator('#node-catalog [data-catalog-add="human-task"]').click();
   await page.locator('#node-editor input[name="id"]').fill(NODE_ID);

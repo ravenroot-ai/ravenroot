@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 const PANELS = ['search', 'node-types', 'node-catalog', 'node-palettes', 'edge-types', 'graph-stats', 'inspector', 'assistant', 'activity'];
@@ -80,7 +81,7 @@ test('inventories every panel family without native-title or unnamed glyph fallb
   expect(await unclassified()).toEqual([]);
 
   // Re-run the same inventory after the Inspector replaces its body with its largest dynamic form.
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
   await page.evaluate(() => {
     const instance = window.cy;
@@ -242,7 +243,7 @@ test('central gating blocks Build until program languages load while exposing th
     if (request.url().includes('/program')) programRequests.push(`${request.method()} ${request.url()}`);
   });
   await page.goto('/');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
   await expect.poll(() => page.evaluate(() => Boolean(
     window.cy.scratch('_rrLayoutRunning')))).toBe(false);

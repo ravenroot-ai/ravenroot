@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -182,11 +183,11 @@ test('duplicate is one canonical history step and overlay/context menu share the
   });
   expect(await page.evaluate(() => window.cy.getElementById('dosomething-copy-1').position()))
     .toEqual({ x: sourcePosition.x + 32, y: sourcePosition.y + 32 });
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toEqual(before);
   expect(await page.evaluate(() => window.cy.getElementById('dosomething').position()))
     .toEqual(livePosition);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: ['dosomething', 'dosomething-copy-1', 'end', 'error', 'start'],
     edges: before.edges,
@@ -219,7 +220,7 @@ test('delete acts on only the hovered node without click-through and remains one
     historyDepth: before.historyDepth + 1,
   });
   await expect.poll(() => overlayState(page)).toMatchObject({ rootHidden: true, barHidden: true });
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: ['dosomething', 'end', 'error', 'start'],
     edges: ['edge-dosomething-end', 'edge-dosomething-error', 'edge-start-dosomething'],
@@ -260,13 +261,13 @@ test('mouse More hands each enabled menuitem a fresh canonical action sequence',
   await openMore();
   await (await expectMenuitemOwnsItsPoint('Duplicate Do something')).click();
   await expect.poll(() => graphState(page)).toMatchObject({ historyDepth: before.historyDepth + 1 });
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toEqual(before);
 
   await openMore();
   await (await expectMenuitemOwnsItsPoint('Delete Do something')).click();
   await expect.poll(() => graphState(page)).toMatchObject({ historyDepth: before.historyDepth + 1 });
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: before.nodes, edges: before.edges, historyDepth: before.historyDepth,
   });
@@ -999,7 +1000,7 @@ test('read-only, keyboard, theme, zoom and document ownership keep the minibar h
   await expect.poll(() => overlayState(page)).toMatchObject({ rootHidden: true, barHidden: true });
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('doc-pane'))).toBe(true);
 
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   const ownership = await page.evaluate(() => ({
     activeId: window.ravenroot.activeDocument().id,
     documents: window.ravenroot.documents().map(document_ => document_.id).sort(),

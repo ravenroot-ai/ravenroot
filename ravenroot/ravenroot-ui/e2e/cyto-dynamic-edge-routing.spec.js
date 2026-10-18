@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
@@ -414,10 +415,10 @@ test('actual node drag changes Cyto quadrants without persisting anchors or muta
     depth: 3, undoLabel: 'Move target', canUndo: true,
   });
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await settleRouting(page);
   expect(await routeState(page)).toMatchObject({ sourceSide: 'left', targetSide: 'right' });
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await settleRouting(page);
   expect(await routeState(page)).toMatchObject({ sourceSide: 'right', targetSide: 'left' });
 
@@ -480,7 +481,7 @@ test('actual node drag changes Cyto quadrants without persisting anchors or muta
   expect(distance(preview.target, committed.target)).toBeLessThanOrEqual(2);
 
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const exported = await readFile(await (await downloadPromise).path(), 'utf8');
   expect(exported).not.toMatch(/(?:source|target)?anchors?/i);
   expect(exported).not.toMatch(/obstacleDependency/i);

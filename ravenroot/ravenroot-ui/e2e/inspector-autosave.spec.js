@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 async function openEditable(page) {
@@ -40,7 +41,7 @@ test('Autosave defaults ON, persists OFF across reload, and remains an accessibl
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(toggle).toHaveAttribute('title', 'Save valid Inspector changes automatically');
 
-  await toggle.click();
+  await clickCommand(page, 'edit.autosave');
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await page.reload();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -73,10 +74,10 @@ test('valid text autosaves as one focus-session undo and undo/redo refresh the I
   await page.getByRole('button', { name: 'Save node' }).click();
   expect(await page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(1);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect(page.locator('#node-editor input[name="name"]')).toHaveValue(original);
   await expect(page.evaluate(() => window.cy.getElementById('dosomething').data('name'))).resolves.toBe(original);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect(page.locator('#node-editor input[name="name"]')).toHaveValue('Automatically saved');
   await expect(page.evaluate(() => window.cy.getElementById('dosomething').data('name')))
     .resolves.toBe('Automatically saved');
@@ -97,7 +98,7 @@ test('node saves preserve selection and Inspector continuity with Autosave ON an
   await expect(name).toBeFocused();
   await expect(page.locator('#node-editor')).toBeVisible();
 
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await expect(page.locator('#btn-autosave')).toHaveAttribute('aria-pressed', 'false');
   await name.fill('Selected through manual save');
   await page.getByRole('button', { name: 'Save node' }).click();
@@ -128,7 +129,7 @@ test('selection change flushes pending valid text and select/property removal co
   await expect.poll(async () => (await documentState()).node.kind).toBe('END');
   expect((await documentState()).depth).toBe(before.depth + 1);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect(page.locator('#node-editor select[name="kind"]')).toHaveValue(before.node.kind);
 
   await page.locator('[data-add-property="node-properties"]').click();
@@ -150,7 +151,7 @@ test('selection change flushes pending valid text and select/property removal co
 
 test('Autosave OFF guards node changes with Cancel, Discard, Save, same-node, and deselect outcomes', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await expect(page.locator('#btn-autosave')).toHaveAttribute('aria-pressed', 'false');
   await selectOnly(page, 'start');
   const name = page.locator('#node-editor input[name="name"]');
@@ -204,7 +205,7 @@ test('invalid drafts are retained with an explicit Discard path in Autosave ON a
   await openEditable(page);
   for (const autosave of [true, false]) {
     if ((await page.locator('#btn-autosave').getAttribute('aria-pressed')) !== String(autosave)) {
-      await page.locator('#btn-autosave').click();
+      await clickCommand(page, 'edit.autosave');
     }
     await selectOnly(page, 'start');
     const name = page.locator('#node-editor input[name="name"]');
@@ -226,7 +227,7 @@ test('invalid drafts are retained with an explicit Discard path in Autosave ON a
 
 test('Duplicate defers mutation until Save or Discard and Cancel preserves the exact draft', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, 'dosomething');
   const name = page.locator('#node-editor input[name="name"]');
   const original = await name.inputValue();
@@ -264,7 +265,7 @@ test('invalid Duplicate stays guarded in Autosave ON and OFF until explicit Disc
   await openEditable(page);
   for (const autosave of [true, false]) {
     if ((await page.locator('#btn-autosave').getAttribute('aria-pressed')) !== String(autosave)) {
-      await page.locator('#btn-autosave').click();
+      await clickCommand(page, 'edit.autosave');
     }
     await selectOnly(page, 'dosomething');
     const name = page.locator('#node-editor input[name="name"]');
@@ -287,7 +288,7 @@ test('invalid Duplicate stays guarded in Autosave ON and OFF until explicit Disc
 
 test('other direct Inspector replacements share the draft guard before acting', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, 'dosomething');
   const name = page.locator('#node-editor input[name="name"]');
   await name.fill('Guard add form');
@@ -301,14 +302,14 @@ test('other direct Inspector replacements share the draft guard before acting', 
   await expect(name).toHaveValue('Guard add form');
   await expect(name).toBeFocused();
 
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await expect(dialog).toBeVisible();
   expect(await graphState(page)).toEqual(before);
   await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
   await expect(name).toHaveValue('Guard add form');
   await expect(name).toBeFocused();
 
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await dialog.locator('[data-inspector-unsaved-action="discard"]').click();
   await expect(page.locator('#node-editor input[name="id"]')).toHaveValue(/node-/);
   expect((await graphState(page)).nodes).toBe(before.nodes);
@@ -316,7 +317,7 @@ test('other direct Inspector replacements share the draft guard before acting', 
 
 test('Connect defers exact Save, Discard and Cancel outcomes before arming or replacing the Inspector', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, 'dosomething');
   const name = page.locator('#node-editor input[name="name"]');
   const original = await name.inputValue();
@@ -324,7 +325,7 @@ test('Connect defers exact Save, Discard and Cancel outcomes before arming or re
   const dialog = page.locator('#inspector-unsaved-dialog');
   await name.fill('Connect draft');
 
-  await page.locator('#btn-connect').click();
+  await clickCommand(page, 'edit.connect');
   await expect(dialog).toBeVisible();
   await expect(page.locator('#btn-connect')).toHaveAttribute('aria-pressed', 'false');
   expect(await graphState(page)).toEqual(before);
@@ -333,18 +334,18 @@ test('Connect defers exact Save, Discard and Cancel outcomes before arming or re
   await expect(name).toBeFocused();
   await expect(page.locator('#btn-connect')).toHaveAttribute('aria-pressed', 'false');
 
-  await page.locator('#btn-connect').click();
+  await clickCommand(page, 'edit.connect');
   await dialog.locator('[data-inspector-unsaved-action="discard"]').click();
   await expect(page.locator('#btn-connect')).toHaveAttribute('aria-pressed', 'true');
   expect((await graphState(page)).depth).toBe(before.depth);
   await expect(page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.dosomething.name))
     .resolves.toBe(original);
 
-  await page.locator('#btn-connect').click();
+  await clickCommand(page, 'edit.connect');
   await selectOnly(page, 'dosomething');
   await page.locator('#node-editor input[name="name"]').fill('Connect saved');
   const beforeSave = await graphState(page);
-  await page.locator('#btn-connect').click();
+  await clickCommand(page, 'edit.connect');
   await dialog.locator('[data-inspector-unsaved-action="save"]').click();
   await expect(page.locator('#btn-connect')).toHaveAttribute('aria-pressed', 'true');
   expect((await graphState(page)).depth).toBe(beforeSave.depth + 1);
@@ -354,12 +355,12 @@ test('Connect defers exact Save, Discard and Cancel outcomes before arming or re
 
 test('Connect keeps an invalid draft through Save and only Discard may arm it', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, 'dosomething');
   const name = page.locator('#node-editor input[name="name"]');
   await name.fill('');
   const before = await graphState(page);
-  await page.locator('#btn-connect').click();
+  await clickCommand(page, 'edit.connect');
   const dialog = page.locator('#inspector-unsaved-dialog');
   await dialog.locator('[data-inspector-unsaved-action="save"]').click();
   await expect(dialog).toBeVisible();
@@ -368,7 +369,7 @@ test('Connect keeps an invalid draft through Save and only Discard may arm it', 
   await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
   await expect(name).toHaveValue('');
   await expect(name).toBeFocused();
-  await page.locator('#btn-connect').click();
+  await clickCommand(page, 'edit.connect');
   await dialog.locator('[data-inspector-unsaved-action="discard"]').click();
   await expect(page.locator('#btn-connect')).toHaveAttribute('aria-pressed', 'true');
   expect((await graphState(page)).depth).toBe(before.depth);
@@ -379,7 +380,7 @@ test('Monitoring defers mode and Editing changes for Cancel, Discard, Save and i
     await page.goto('/');
     await page.locator('#btn-modify').click();
     if ((await page.locator('#btn-autosave').getAttribute('aria-pressed')) !== 'false') {
-      await page.locator('#btn-autosave').click();
+      await clickCommand(page, 'edit.autosave');
     }
     await selectOnly(page, 'dosomething');
     const field = page.locator('#node-editor input[name="name"]');
@@ -431,7 +432,7 @@ test('Monitoring defers mode and Editing changes for Cancel, Discard, Save and i
 
 test('keyboard refusal and pointer edge start cannot replace a dirty draft before a decision', async ({ page }) => {
   await openEditable(page);
-  await page.locator('#btn-autosave').click();
+  await clickCommand(page, 'edit.autosave');
   await selectOnly(page, 'dosomething');
   const name = page.locator('#node-editor input[name="name"]');
   const before = await graphState(page);

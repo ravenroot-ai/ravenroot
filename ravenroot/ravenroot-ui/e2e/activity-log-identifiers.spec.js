@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { createServer } from 'node:http';
 
 import { expect, test } from '@playwright/test';
@@ -123,7 +124,7 @@ async function connectAndCreateWorkflow(page) {
   await page.locator('#service-url').fill(SERVICE_ORIGIN);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
 }
 
 async function connectAndLoadWorkflow(page, graphml) {
@@ -260,7 +261,7 @@ test('rehydrates a suspended Monitoring document and its open tooltip on activat
   await firstHost.locator('.d3-edges path').first().dispatchEvent('mouseover', { offsetX: 80, offsetY: 40 });
   await expect(firstHost.locator('.d3-tooltip')).toContainText('Traversals: 0');
 
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   const secondId = await page.evaluate(() => window.ravenroot.activeDocument().id);
   expect(secondId).not.toBe(first.id);
   await expect(firstHost).toHaveClass(/suspended/);

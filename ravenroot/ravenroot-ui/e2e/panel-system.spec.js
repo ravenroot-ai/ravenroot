@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // The panel system has nine panels in three zones, with Runtime activity in a bottom dock instead
@@ -30,7 +31,7 @@ async function clickFirstGraphNode(page) {
 // under test, not the graph's contents.
 async function selectedNodeInModifyMode(page) {
   await page.goto('/');
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
   await page.waitForTimeout(300);
   await clickFirstGraphNode(page);
@@ -953,7 +954,7 @@ test.describe('closing a panel', () => {
 
   test('reopens the Inspector when a node is selected, rather than swallowing the selection', async ({ page }) => {
     await page.goto('/');
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await page.waitForTimeout(300);
     await page.locator('.panel[data-panel-id="inspector"] [data-action="panel-close"]').click();
     await page.waitForTimeout(200);
@@ -1232,7 +1233,7 @@ test('the commit action stays bounded when the Inspector is moved into the dock'
   await page.waitForTimeout(140);
   await page.locator('#panel-menu [data-menu-command="move-zone"][data-menu-zone="bottom"]').click();
   await page.waitForTimeout(220);
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   await page.locator('#btn-modify').click();
   await page.waitForTimeout(250);
   await clickFirstGraphNode(page);
@@ -1346,7 +1347,7 @@ test.describe('dragging a panel', () => {
     // needs a measurement rather than confidence.
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await page.waitForTimeout(400);
 
     const from = await headerBox(page, 'node-types');
@@ -1639,7 +1640,7 @@ test.describe('the short form', () => {
     expect(await order()).toEqual(originalOrder);
     await expect(page.locator('[data-catalog-add="catalog-0"] .catalog-item-copy')).toBeHidden();
 
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await page.locator('#btn-modify').click();
     const before = await page.evaluate(() => window.cy.$('node').length);
     const beta = page.locator('[data-catalog-add="catalog-1"]');

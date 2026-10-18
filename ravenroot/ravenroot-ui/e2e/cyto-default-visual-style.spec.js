@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
@@ -52,7 +53,7 @@ async function openGraphMl(page, name = 'loaded.graphml') {
 
 async function downloadGraphMl(page) {
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   return readFileSync(await (await downloadPromise).path(), 'utf8');
 }
 
@@ -185,7 +186,7 @@ test('GraphML coordinates remain exact until explicit Design performs its comple
   });
 
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('#btn-export').click();
+  await clickCommand(page, 'file.save');
   const download = await downloadPromise;
   const exported = readFileSync(await download.path(), 'utf8');
   expect(coordinatePayload(exported)).toEqual(coordinatePayload(graphMl));
@@ -209,7 +210,7 @@ test('GraphML coordinates remain exact until explicit Design performs its comple
     layout: 'cyto',
   });
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(async () => (await activeView(page)).positions).toEqual(before.positions);
   expect(await activeView(page)).toMatchObject({
     modelPositions: before.modelPositions,

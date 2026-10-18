@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 function denseGraphMl() {
@@ -381,11 +382,11 @@ test.describe('Design arrangements', () => {
     expect(new Set(parallelEdges.map(edge => edge.targetEndpoint)).size).toBe(3);
 
     const download = page.waitForEvent('download');
-    await page.locator('#btn-export').click();
+    await clickCommand(page, 'file.save');
     expect((await download).suggestedFilename()).toBe('dense.graphml');
     expect(await page.evaluate(() => window.ravenroot.activeDocument().history.isDirty())).toBe(false);
 
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => positions(page)).toEqual(before);
     await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(0);
   });
@@ -497,7 +498,7 @@ test.describe('Design arrangements', () => {
   test('lets only the winning rapid Arrange request publish positions and history', async ({ page }) => {
     await arrange(page, 'Arrange — Hierarchical');
     const hierarchicalPositions = await positions(page);
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
 
     await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'dense.graphml'), denseGraphMl());
     await page.evaluate(() => {
@@ -538,10 +539,10 @@ test.describe('Design arrangements', () => {
       undo: window.ravenroot.activeDocument().history.undoLabel(),
     }))).toEqual({ name: 'Autosaved before arrangement', depth: 2, undo: 'Arrange — Hierarchical' });
 
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n5.name))
       .toBe('Autosaved before arrangement');
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n5.name)).toBe('Node 5');
   });
 

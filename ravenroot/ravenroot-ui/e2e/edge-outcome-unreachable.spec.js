@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // ── THE EDGE INSPECTOR WARNS WHEN THE SOURCE CANNOT EMIT THE OUTCOME ───────────────────────────
@@ -90,7 +91,7 @@ async function configureNode(page, nodeId, behavior, properties) {
 }
 
 async function openEdgeEditorFrom(page, sourceId) {
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor select[name="source"]').selectOption(sourceId);
 }
 

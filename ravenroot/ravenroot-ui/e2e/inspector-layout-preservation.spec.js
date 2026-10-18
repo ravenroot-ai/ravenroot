@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 function graphMl() {
@@ -40,7 +41,7 @@ async function startEditing(page, { autosave = true } = {}) {
   await page.locator('#btn-modify').click();
   await expect(page.locator('#btn-modify')).toHaveAttribute('aria-pressed', 'true');
   if (!autosave) {
-    await page.locator('#btn-autosave').click();
+    await clickCommand(page, 'edit.autosave');
     await expect(page.locator('#btn-autosave')).toHaveAttribute('aria-pressed', 'false');
   }
 }
@@ -118,10 +119,10 @@ test('Save node with Autosave OFF retains a Hierarchical canvas through undo and
   expect(await page.evaluate(() =>
     window.ravenroot.activeDocument().graph.nodeMap.n5.description)).toBe('Manually saved in place');
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   expect(await presentation(page)).toEqual(before);
   expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n5.description)).toBe('');
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   expect(await presentation(page)).toEqual(before);
   expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n5.description))
     .toBe('Manually saved in place');

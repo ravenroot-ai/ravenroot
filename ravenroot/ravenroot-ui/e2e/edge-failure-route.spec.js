@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 const DECLARED_ERROR_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
@@ -54,7 +55,7 @@ async function openEdgeInspector(page, targetId) {
 async function exportedGraphMl(page) {
   const download = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('#btn-export').click(),
+    clickCommand(page, 'file.save'),
   ]).then(([event]) => event);
   const stream = await download.createReadStream();
   return new Promise(resolve => {

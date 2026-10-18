@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { randomUUID } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
@@ -214,7 +215,7 @@ test('editing batches only touched common fields after confirmation, fails atomi
     beta: window.ravenroot.activeDocument().graph.nodeMap.dosomething.properties.betaOnly,
   }))).toEqual({ endpoint: ['https://shared.example.test', 'https://shared.example.test'], alpha: 'keep-alpha', beta: 'keep-beta' });
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => page.evaluate(() => {
     const graph = window.ravenroot.activeDocument().graph;
     return [graph.nodeMap.start.properties.description, graph.nodeMap.dosomething.properties.description];
@@ -332,7 +333,7 @@ test('a JVM-valid IPv6 zone URI remains byte-exact through a description-only ba
   });
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', 'Undo Edit properties on 2 selected nodes');
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => page.evaluate(() => {
     const graph = window.ravenroot.activeDocument().graph;
     return {

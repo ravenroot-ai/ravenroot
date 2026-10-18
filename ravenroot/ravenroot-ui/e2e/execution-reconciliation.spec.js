@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 test('lost terminal SSE plus failed GET becomes actionable without permitting a concurrent POST', async ({ page }, testInfo) => {
@@ -143,7 +144,7 @@ for (const invalidation of ['switch', 'close']) {
     await page.locator('#btn-play').click();
     await expect.poll(() => runtime.delayedLookups).toBe(1);
     if (invalidation === 'switch') {
-      await page.locator('#btn-new').click();
+      await clickCommand(page, 'file.new');
     } else {
       await page.evaluate(() => window.ravenroot.closeDocument(window.ravenroot.workspace.activeId));
     }
@@ -305,7 +306,7 @@ test('SSE outcome finishing after a document switch does not report into the act
   await expect.poll(() => runtime.postCount).toBe(1);
   runtime.sendTerminal();
   await expect.poll(() => runtime.getCount).toBeGreaterThanOrEqual(1);
-  await page.locator('#btn-new').click();
+  await clickCommand(page, 'file.new');
   runtime.releaseOutcome();
   await page.waitForTimeout(300);
   await expect(page.locator('#activity-log')).not.toContainText('sse-bypassed');

@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 // Browser coverage for UI-02: creating and reconnecting edges with the POINTER and with the
@@ -15,7 +16,7 @@ async function startEditableWorkflow(page) {
 // start -> dosomething -> {end, error} -- so `pinNodesApart` below also has to account for
 // dosomething and error, not just the three nodes these tests are actually about.
 async function addReviewNode(page) {
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill('Review');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect.poll(() => nodeIds(page)).toContain('node-1');
@@ -390,7 +391,7 @@ test('Cyto previews continuously, then creates one edge without moving the sourc
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
   // Routed through the command model, so it undoes like any other edit (UI-01).
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Connect start/);
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => documentEdges(page)).toEqual(before);
 });
 
@@ -482,7 +483,7 @@ for (const scenario of CUSTOM_RENDERER_CASES) {
     await expect.poll(() => page.evaluate(() => Object.fromEntries(window.cy.nodes().map(node => [node.id(), node.position()]))))
       .toEqual(before);
     await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Connect start/);
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => edgeLinks(page)).not.toContain('edge-1:start>node-1');
   });
 }
@@ -498,7 +499,7 @@ test('Design keeps preview and committed ports invariant at zoom 0.5, 1 and 2', 
     expect(previewFamily(preview)).toBe('unbundled-bezier');
     expect(committed.curve).toBe('unbundled-bezier');
     expectPreviewMatchesCommitted(preview, committed, 2);
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => edgeLinks(page)).not.toContain('edge-1:start>node-1');
   }
 });
@@ -617,7 +618,7 @@ test('Cyto preview and final share backward and vertical ports, controls and mid
 
     await expect.poll(() => edgeLinks(page)).toEqual([...before, 'edge-1:start>node-1'].sort());
     await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Connect start/);
-    await page.locator('#btn-undo').click();
+    await clickCommand(page, 'edit.undo');
     await expect.poll(() => edgeLinks(page)).toEqual(before);
     await expect.poll(() => page.evaluate(() =>
       window.ravenroot.activeDocument().cytoEdgeRouteCache.has('edge-1'))).toBe(false);
@@ -681,9 +682,9 @@ test('Cyto authors a readable self-loop atomically and preserves it through undo
   expect(loopGeometry.step).toBeGreaterThanOrEqual(88);
   expect(loopGeometry.clearanceRatio).toBeGreaterThan(0.5);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => edgeLinks(page)).toEqual(before);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect.poll(() => edgeLinks(page)).toContain('edge-1:node-1>node-1');
 
   // Block body, no implicit return. `emit()` returns the collection it was called on,
@@ -699,7 +700,7 @@ test('Cyto authors a readable self-loop atomically and preserves it through undo
 
   const download = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('#btn-export').click(),
+    clickCommand(page, 'file.save'),
   ]).then(([event]) => event);
   const stream = await download.createReadStream();
   const xml = await new Promise(resolve => {
@@ -826,9 +827,9 @@ test('reconnects an edge by dragging the end nearest the pointer onto another no
     .toEqual([]);
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Reconnect edge-start-dosomething/);
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => edgeLinks(page)).toEqual(beforeReconnect);
-  await page.locator('#btn-redo').click();
+  await clickCommand(page, 'edit.redo');
   await expect.poll(() => edgeLinks(page)).toContain('edge-start-dosomething:start>node-1');
   await expect.poll(() => edgeLinks(page)).toHaveLength(beforeReconnect.length);
 });
@@ -997,7 +998,7 @@ test('creates an edge with the keyboard alone', async ({ page }) => {
   expect(pageErrors).toEqual([]);
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
   // The keyboard edit is an ordinary command: it undoes like every other one.
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => documentEdges(page)).toEqual(before);
 });
 
@@ -1030,7 +1031,7 @@ test('reconnects an edge with the keyboard alone and undoes it', async ({ page }
   await expect.poll(() => edgeLinks(page)).toContain('edge-start-dosomething:start>node-1');
   await expect(page.locator('#graph-live')).toContainText('Reconnected');
 
-  await page.locator('#btn-undo').click();
+  await clickCommand(page, 'edit.undo');
   await expect.poll(() => edgeLinks(page)).toContain('edge-start-dosomething:start>dosomething');
 });
 
@@ -1058,7 +1059,7 @@ test('validates the edge form while it is being filled in, before anything is su
   await startEditableWorkflow(page);
   await addReviewNode(page);
 
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   const validation = page.locator('#edge-validation');
   const submit = page.locator('#edge-editor button[type="submit"]');
 
@@ -1090,7 +1091,7 @@ test('exports an authored graph as GraphML that still carries the edge and its p
   await startEditableWorkflow(page);
   await addReviewNode(page);
 
-  await page.locator('#btn-add-edge').click();
+  await clickCommand(page, 'edit.addEdge');
   await page.locator('#edge-editor input[name="id"]').fill('edge-approved');
   await page.locator('#edge-editor select[name="source"]').selectOption('start');
   await page.locator('#edge-editor select[name="target"]').selectOption('node-1');
@@ -1104,7 +1105,7 @@ test('exports an authored graph as GraphML that still carries the edge and its p
 
   const download = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('#btn-export').click(),
+    clickCommand(page, 'file.save'),
   ]).then(([event]) => event);
   const stream = await download.createReadStream();
   const xml = await new Promise(resolve => {

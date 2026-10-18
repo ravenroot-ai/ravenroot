@@ -1,3 +1,4 @@
+import { clickCommand } from './command-actions.mjs';
 import { expect, test } from '@playwright/test';
 
 const SOURCE_CATALOG = JSON.stringify([{
@@ -30,7 +31,7 @@ async function makeActiveDirty(page, name) {
   if (await page.locator('#btn-modify').getAttribute('aria-pressed') !== 'true') {
     await page.locator('#btn-modify').click();
   }
-  await page.locator('#btn-add-node').click();
+  await clickCommand(page, 'edit.addNode');
   await page.locator('#node-editor input[name="name"]').fill(name);
   await page.locator('#node-editor button[type="submit"]').click();
 }
@@ -91,7 +92,7 @@ test.describe('Close All Documents', () => {
       }, mode);
       await closeAllFromView(page);
       await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.size)).toBe(0);
-      await expect(page.locator('#btn-new')).toBeFocused();
+      await expect(page.locator('#menu-file')).toBeFocused();
       await expect(page.locator('#cy .doc-pane')).toHaveCount(0);
       expect(await page.evaluate(targetMode => ({
         stored: JSON.parse(localStorage.getItem('ravenroot.workspace-layout.v1')).mode,
@@ -104,7 +105,7 @@ test.describe('Close All Documents', () => {
       await expect(page.locator('[data-command-id="view.closeAllDocuments"]')).toHaveText('Close All Documents');
       await expect(page.locator('[data-command-id="view.closeAllDocuments"]')).toHaveAttribute('aria-disabled', 'true');
       await page.keyboard.press('Escape');
-      if (mode !== 'grid') await page.locator('#btn-new').click();
+      if (mode !== 'grid') await clickCommand(page, 'file.new');
     }
   });
 
@@ -127,7 +128,7 @@ test.describe('Close All Documents', () => {
   test('uses one dirty decision, and Cancel preserves every target and its history', async ({ page }) => {
     await page.goto('/');
     await makeActiveDirty(page, 'First change');
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await makeActiveDirty(page, 'Second change');
 
     await closeAllFromView(page);
@@ -149,7 +150,7 @@ test.describe('Close All Documents', () => {
   test('Save All downloads every dirty document and marks none saved when dispatch fails', async ({ page }) => {
     await page.goto('/');
     await makeActiveDirty(page, 'First change');
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await makeActiveDirty(page, 'Second change');
     const downloads = [];
     page.on('download', download => downloads.push(download.suggestedFilename()));
@@ -159,7 +160,7 @@ test.describe('Close All Documents', () => {
     await expect.poll(() => downloads.sort()).toEqual(['untitled-2.graphml', 'untitled.graphml']);
     await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.size)).toBe(0);
 
-    await page.locator('#btn-new').click();
+    await clickCommand(page, 'file.new');
     await makeActiveDirty(page, 'Failed save');
     await page.evaluate(() => { URL.createObjectURL = () => { throw new Error('blocked'); }; });
     await closeAllFromView(page);

@@ -50,6 +50,10 @@ auth:
 
 engine: pekko
 
+# Blank denies framing. Use self and/or comma-separated canonical HTTP(S) portal origins only when
+# the complete authenticated Workbench is intentionally hosted inside an iframe.
+uiFrameAncestors: ""
+
 # Optional Git-backed graph source archive. Credentials remain in a Kubernetes Secret and are
 # resolved server-side under the fixed opaque reference "git-authoring".
 graphAuthoring:

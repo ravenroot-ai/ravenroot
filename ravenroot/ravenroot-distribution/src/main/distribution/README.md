@@ -63,6 +63,9 @@ current authorization denial closes the stream. HSTS is emitted only under the e
 `RAVENROOT_UI_CONNECT_ORIGINS` is a separate comma-separated CSP destination allowlist for
 explicitly confirmed external UI targets. It defaults to empty (`connect-src 'self'`), requires
 HTTPS except for loopback development origins, and is never inferred from allowed browser callers.
+`RAVENROOT_UI_FRAME_ANCESTORS` separately opts the complete authenticated Workbench into iframe
+hosting. Blank denies framing; use `self` and/or canonical comma-separated HTTP(S) portal origins.
+The setting changes no authentication, authorization, plugin sandbox, or embedded-viewer authority.
 
 The standard archive contains Pekko and uses `RAVENROOT_ENGINE=pekko` by default. An archive built
 with the Maven `akka` profile also contains the optional Akka adapter and can be started with

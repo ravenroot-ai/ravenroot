@@ -416,6 +416,7 @@ HELM_OPERATOR_VALUE_CONTRACTS = (
     ("auth.issuer", "deployment.auth.issuer", '""', "required-auth", "auth-required"),
     ("auth.audience", "deployment.auth.audience", '""', "required-auth", "auth-required"),
     ("auth.jwksUri", "deployment.auth.jwks-uri", '""', "required-auth", "auth-required"),
+    ("uiFrameAncestors", "deployment.ui-frame-ancestors", '""', "ui-frame-ancestors", "ui-frame-ancestors"),
     ("programTimeoutMs", "deployment.program-timeout-ms", "15000", "program-timeout", "program-timeout"),
     ("resources.requests.cpu", "deployment.resources.requests.cpu", "100m", "quantity", "resources"),
     ("resources.requests.memory", "deployment.resources.requests.memory", "256Mi", "quantity", "resources"),
@@ -2248,6 +2249,8 @@ def helm_schema_rule_matches(schema: object, value_path: str, rule: str) -> bool
         "service-type": {"type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"]},
         "service-port": {"type": "integer", "minimum": 1, "maximum": 65535},
         "required-auth": {"type": "string", "minLength": 1, "not": graph_blank},
+        "ui-frame-ancestors": {"type": "string", "maxLength": 65536,
+                               "x-ravenroot-environment": "RAVENROOT_UI_FRAME_ANCESTORS"},
         "program-timeout": {"x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
                             "oneOf": [{"type": "integer", "minimum": 100, "maximum": 300000}, graph_blank]},
         "boolean": {"type": "boolean"},
@@ -2442,6 +2445,10 @@ def helm_projection_matches(root: Path, value_path: str, projection: str) -> boo
         return deployment.count(
             '- name: RAVENROOT_PROGRAM_TIMEOUT_MS\n'
             '              value: {{ include "ravenroot.graphLimitValue" .Values.programTimeoutMs }}') == 1
+    if projection == "ui-frame-ancestors":
+        return deployment.count(
+            '- name: RAVENROOT_UI_FRAME_ANCESTORS\n'
+            '              value: {{ .Values.uiFrameAncestors | quote }}') == 1
     source_pattern = direct.get(projection)
     return source_pattern is not None and len(re.findall(source_pattern[1], source_pattern[0])) == 1
 
@@ -8117,7 +8124,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'ensureProgramGraphReady',
   '9ebcb027de55f8e7acb92f1c5543e9925719d55d953832a3493eae345f57ed34',
   1),
- ('compose.yaml', 'file', '', '', '3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57', 1),
+ ('compose.yaml', 'file', '', '', '5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127', 1),
  ('deploy/dev/sandbox-supervisor.sh',
   'file',
   '',
@@ -8128,25 +8135,25 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '117546294f304c21b429471acf98f49438c11fe645a9fd9953c9d281361ef901',
+  '957882edc5e3ccaae07374755a85f9a8dea8c542eef117eacb1bbb2ecc1e491f',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  '3d15c7b54327641bdd2e8706b6e16f74baee63930dbec698eed74215a73ab0a4',
+  '157cb1046dce59a60d99e99c73cd6285e578f28bc7c148ac9392a63af14acee9',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  'ec49d09e39b1a195805237e914576820392b446e6115c2f4aceb03bb9f9af0b7',
+  '545c8b57083051abbbfe60cb19e987925d2056f273bf7ccb9f163ca8ced3698c',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
   '',
   '',
-  '844047483832c9676cdbd3941c8df1536ad11e5779edd1555164869f8c553824',
+  '7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b',
   1),
  ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
   'file',
@@ -8690,7 +8697,8 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-e5b8535d9326cf51d46d',
  'oc-f21e86ac333e9d880b35',
  'oc-f49404dab093ca3f78e9',
- 'oc-df87bb81d37de6a99f4d']
+ 'oc-df87bb81d37de6a99f4d',
+ 'oc-dda4f7c8180555cd514f']
 
 PROGRAM_GITHUB_CONTRACTS = [{'setting': 'program.runtime.selector',
   'owner': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java#ProgramRuntimeConfiguration',
@@ -12909,8 +12917,8 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': 'aeef42de111e13a773321a6938cb96d9dcb96dff4c39788b2cacacd3e195b42b',
- 'scripts/tests/test_publish_environment_reference.py': '966903d91067cdc574ce800578e9c59f91be269e5779ae932c131f51629d9a89',
+ 'scripts/publish_environment_reference.py': '33c990d111d4ab8182dbf3786e307c4531aca7bf6bf67f7e8819788bf2fc616b',
+ 'scripts/tests/test_publish_environment_reference.py': '38e51901e3903ee3b4edae4cf3aab9084cf31e7583e29700df51d49d81a2f525',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
@@ -14504,10 +14512,10 @@ ACTIVITY_CAPTURE_SOURCE_PROOFS = {
     ACTIVITY_CAPTURE_CONFIGURATION_PATH: "97449b115114f01987f0d7c9c1cc8c32e931eae8d14bcbd394bb9ce1d8953cf8",
     ACTIVITY_CAPTURE_POLICY_PATH: "a6ac890d6852d66729e2e46ab632ee5fc663c7c0b2b247479f6351fa370177bf",
     ACTIVITY_CAPTURE_TEST_PATH: "bc0c980884dcac6cbef97bc3867efacbb44a0428de8bcfdd6c2c7866743c6046",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "ec49d09e39b1a195805237e914576820392b446e6115c2f4aceb03bb9f9af0b7",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "3d15c7b54327641bdd2e8706b6e16f74baee63930dbec698eed74215a73ab0a4",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "117546294f304c21b429471acf98f49438c11fe645a9fd9953c9d281361ef901",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "545c8b57083051abbbfe60cb19e987925d2056f273bf7ccb9f163ca8ced3698c",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "157cb1046dce59a60d99e99c73cd6285e578f28bc7c148ac9392a63af14acee9",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "957882edc5e3ccaae07374755a85f9a8dea8c542eef117eacb1bbb2ecc1e491f",
 }
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")

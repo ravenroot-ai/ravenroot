@@ -89,7 +89,7 @@
       url: /integrator-guide/application-http.html
     - title: Activity archive client
       url: /integrator-guide/activity-archive-client.html
-    - title: Embed the read-only viewer quickstart
+    - title: Embed the Workbench or read-only viewer
       url: /integrator-guide/embed-viewer-quickstart.html
     - title: Embedded-viewer protocol
       url: /integrator-guide/embed-protocol.html

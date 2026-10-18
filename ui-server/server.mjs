@@ -7,6 +7,29 @@ import { Transform } from 'node:stream';
 
 const backendTokens = new WeakMap();
 
+function configuredFrameAncestors(declared) {
+  if (declared === undefined || declared === null || String(declared).trim() === '') return [];
+  const ancestors = new Set();
+  for (const item of String(declared).split(',')) {
+    const value = item.trim();
+    if (!value) throw new Error('RAVENROOT_UI_FRAME_ANCESTORS must not contain empty entries');
+    if (value === 'self') {
+      ancestors.add("'self'");
+      continue;
+    }
+    let origin;
+    try { origin = new URL(value); }
+    catch { throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins'); }
+    if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
+        || origin.pathname !== '/' || origin.search || origin.hash || origin.port === '0'
+        || origin.hostname.endsWith('.') || origin.origin !== value) {
+      throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins');
+    }
+    ancestors.add(value);
+  }
+  return [...ancestors].sort();
+}
+
 export function configuration(env = process.env) {
   const prefix = env.RAVENROOT_UI_PREFIX || '';
   if (prefix && !/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(prefix)) {
@@ -40,7 +63,9 @@ export function configuration(env = process.env) {
     throw new Error('UI_BACKEND_TOKEN_CONFIGURATION_REFUSED: provide a valid bearer value with a configured backend URL');
   }
   const backendPrefix = upstream?.pathname.replace(/\/$/, '') || '';
-  const config = { prefix, upstream, backendPrefix, port, headerTimeoutMs: 15000, root: resolve(env.RAVENROOT_UI_ROOT || '/opt/ravenroot/ui') };
+  const config = { prefix, upstream, backendPrefix, port, headerTimeoutMs: 15000,
+    root: resolve(env.RAVENROOT_UI_ROOT || '/opt/ravenroot/ui'),
+    frameAncestors: configuredFrameAncestors(env.RAVENROOT_UI_FRAME_ANCESTORS) };
   if (token !== undefined) backendTokens.set(config, token);
   return config;
 }
@@ -104,13 +129,17 @@ function browserMayUseDefault(req) {
 export function createServer(configuration) {
   const defaultToken = backendTokens.get(configuration);
   // Snapshot authority before accepting traffic. Mutable configuration objects cannot retarget it.
-  const config = { ...configuration, upstream: configuration.upstream ? new URL(configuration.upstream) : null };
+  const config = { ...configuration, upstream: configuration.upstream ? new URL(configuration.upstream) : null,
+    frameAncestors: [...configuration.frameAncestors] };
+  const frameAncestorPolicy = config.frameAncestors.length ? config.frameAncestors.join(' ') : "'none'";
+  const pluginFrameAncestorPolicy = [...new Set(["'self'", ...config.frameAncestors])].join(' ');
+  const commonCsp = `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors ${frameAncestorPolicy}; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'`;
   const server = http.createServer({ requestTimeout: 30000, headersTimeout: 10000 }, (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Frame-Options', 'DENY');
+    if (!config.frameAncestors.length) res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'");
+    res.setHeader('Content-Security-Policy', commonCsp);
     if (req.url === '/health' || req.url === '/ready') {
       res.setHeader('Content-Type', 'application/json');
       res.end('{"status":"UP"}'); return;
@@ -178,6 +207,13 @@ export function createServer(configuration) {
             }
           }
           replyHeaders['cache-control'] = 'no-store';
+          // A backend response with its own framing contract remains authoritative. This is
+          // required for the separately authorized embedded viewer, whose CSP names one registered
+          // parent and deliberately omits X-Frame-Options.
+          if (replyHeaders['x-frame-options'] === undefined
+              && String(replyHeaders['content-security-policy'] || '').includes('frame-ancestors ')) {
+            res.removeHeader('X-Frame-Options');
+          }
           res.writeHead(response.statusCode, replyHeaders);
           res.flushHeaders();
           if (defaultToken) {
@@ -202,6 +238,16 @@ export function createServer(configuration) {
     let size;
     try { const stat = statSync(path); if (!stat.isFile()) throw new Error(); size = stat.size; }
     catch { res.writeHead(404).end(); return; }
+    if (path.endsWith('/index.html')) {
+      // The Workbench owns one same-origin nested document: the opaque plugin sandbox below.
+      res.setHeader('Content-Security-Policy', commonCsp.replace("frame-src 'none'", "frame-src 'self'"));
+    } else if (path.endsWith('/frontend-plugin-sandbox.html')) {
+      // Every ancestor must satisfy CSP, so a framed Workbench's validated ancestors are carried
+      // through alongside self. The response sandbox keeps the document opaque even if an allowed
+      // portal addresses it directly; every network and nesting channel remains closed.
+      res.removeHeader('X-Frame-Options');
+      res.setHeader('Content-Security-Policy', `default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors ${pluginFrameAncestorPolicy}; form-action 'none'; script-src 'self' blob:; style-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; worker-src 'none'; sandbox allow-scripts`);
+    }
     res.setHeader('Content-Type', types[extname(path)] || 'application/octet-stream');
     res.setHeader('Cache-Control', path.endsWith('/index.html') ? 'no-store' : 'public, max-age=3600');
     if (path.endsWith('/index.html')) {

@@ -4,6 +4,8 @@ import com.sun.net.httpserver.Headers;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,6 +14,51 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SecurityHeadersPolicyTest {
+    @Test
+    void workbenchAncestorsDefaultClosedAndOptInWithoutConflictingXFrameOptions() {
+        for (Map<String, String> environment : List.<Map<String, String>>of(
+                Map.of(), Map.of("RAVENROOT_UI_FRAME_ANCESTORS", " \t "))) {
+            var headers = new Headers();
+            SecurityHeadersPolicy.fromEnvironment(environment).apply(headers);
+            assertTrue(headers.getFirst("Content-Security-Policy")
+                    .contains("frame-ancestors 'none'"));
+            assertEquals("DENY", headers.getFirst("X-Frame-Options"));
+        }
+
+        var headers = new Headers();
+        headers.set("X-Frame-Options", "STALE");
+        SecurityHeadersPolicy.fromEnvironment(Map.of(
+                "RAVENROOT_UI_FRAME_ANCESTORS",
+                "https://portal.example,http://localhost:4173,self,https://[::1]:8443,https://portal.example"))
+                .apply(headers);
+        String csp = headers.getFirst("Content-Security-Policy");
+        assertTrue(csp.contains(
+                "frame-ancestors 'self' http://localhost:4173 https://[::1]:8443 https://portal.example"), csp);
+        assertFalse(headers.containsKey("X-Frame-Options"));
+        assertEquals("nosniff", headers.getFirst("X-Content-Type-Options"));
+        assertEquals("no-referrer", headers.getFirst("Referrer-Policy"));
+    }
+
+    @Test
+    void workbenchAncestorsRejectMalformedUnsafeAndNoncanonicalValuesWithoutEchoingThem() {
+        for (String rejected : List.of(
+                "*", "'self'", "self,", "https://portal.example/path",
+                "https://user@portal.example", "https://portal.example?x=1",
+                "https://portal.example#fragment", "https://portal.example:443",
+                "https://PORTAL.example", "https://portal.example.",
+                "http://127.1", "http://0177.0.0.1", "https://[0:0:0:0:0:0:0:1]",
+                "https://portal.example:0", "https://portal.example:65536",
+                "ftp://portal.example", "https://portal.example;frame-ancestors *",
+                "https://portal.example\r\nX-Frame-Options: ALLOWALL")) {
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> SecurityHeadersPolicy.fromEnvironment(Map.of(
+                            "RAVENROOT_UI_FRAME_ANCESTORS", rejected)), rejected);
+            assertTrue(failure.getMessage().startsWith("RAVENROOT_UI_FRAME_ANCESTORS"));
+            assertFalse(failure.getMessage().contains(rejected));
+            assertEquals(null, failure.getCause());
+        }
+    }
+
     @Test
     void frameSourcesAreExactSortedOperatorOriginsAndDefaultClosed() {
         var policy = new SecurityHeadersPolicy(false);

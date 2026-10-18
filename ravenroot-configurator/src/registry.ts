@@ -116,10 +116,11 @@ export const DELIMITED_TEMPLATES: Readonly<Record<string, Readonly<Record<string
   "amqp.profile": { host: "localhost", port: 5672, tls: false, vhost: "/", username: "operator", credentialRef: "broker",
     defaultExchange: "", additionalExchanges: [], defaultRoutingKey: "events", additionalRoutingKeys: [], approvedHeaders: ["trace-id"],
     approvedReplyTo: [], allowPersistent: true, maxPriority: 5, maxExpirationMs: 60000, maxConcurrency: 2,
-    maxPerSecond: 10, timeoutMs: 1000, maxBodyBytes: 65536, retries: 1 },
+    maxPerSecond: 10, timeoutMs: 1000, maxBodyBytes: 65536, retries: 1, topicExchanges: [] },
   "amqp.consumer": { queue: "events", prefetch: 8, approvedHeaders: ["trace-id"], identityHeader: "trace-id",
     maxBodyBytes: 65536, maxHeaderBytes: 8192, retryBackoffMs: 100, maxRetryBackoffMs: 1000,
-    poisonAttempts: 3, poisonPolicy: "reject", drainTimeoutMs: 1000 },
+    poisonAttempts: 3, poisonPolicy: "reject", drainTimeoutMs: 1000, topicExchanges: [],
+    bindingPatterns: [], maxEphemeralSubscriptions: 0 },
   "filesystem.profile": { canonicalAbsoluteRoot: "/", read: true, write: false, allowedRelativeGlobs: ["**"],
     maxBytes: 65536, maxConcurrency: 2, deadlineMs: 1000 },
   "kafka.producer-profile": { bootstrapServers: "localhost:9092", clientDnsLookup: "use_all_dns_ips", tls: false,
@@ -197,14 +198,15 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
       requiredString("defaultRoutingKey"), optionalCsv("additionalRoutingKeys"), optionalCsv("approvedHeaders"), optionalCsv("approvedReplyTo"),
       requiredBoolean("allowPersistent"), requiredInt("maxPriority", 0, 9), requiredInt("maxExpirationMs", 0, 86400000),
       requiredInt("maxConcurrency", 1, 16), requiredInt("maxPerSecond", 1, 100), requiredInt("timeoutMs", 100, 30000),
-      requiredInt("maxBodyBytes", 1, 1048576), requiredInt("retries", 0, 3)
+      requiredInt("maxBodyBytes", 1, 1048576), requiredInt("retries", 0, 3), optionalCsv("topicExchanges")
     ], { credentials: "family" }),
   delimitedContract("amqp.consumer", "AMQP consumer policy", "AMQP 0-9-1", "ai.ravenroot.extensions.amqp091",
     ["amqp.consume"], "RAVENROOT_AMQP091_CONSUMER_", [
-      requiredString("queue"), requiredInt("prefetch", 1, 1024), optionalCsv("approvedHeaders"), optionalString("identityHeader"),
+      requiredPossiblyEmptyString("queue"), requiredInt("prefetch", 1, 1024), optionalCsv("approvedHeaders"), optionalString("identityHeader"),
       requiredInt("maxBodyBytes", 1, 1048576), requiredInt("maxHeaderBytes", 0, 65536), requiredInt("retryBackoffMs", 100, 60000),
       requiredInt("maxRetryBackoffMs", 1000, 60000), requiredInt("poisonAttempts", 1, 100),
-      { ...requiredString("poisonPolicy"), allowed: ["reject", "dead-letter"] }, requiredInt("drainTimeoutMs", 0, 30000)
+      { ...requiredString("poisonPolicy"), allowed: ["reject", "dead-letter"] }, requiredInt("drainTimeoutMs", 0, 30000),
+      optionalCsv("topicExchanges"), optionalCsv("bindingPatterns"), requiredInt("maxEphemeralSubscriptions", 0, 16)
     ], { credentials: "family" }),
   delimitedContract("filesystem.profile", "Filesystem profile", "Filesystem", "ai.ravenroot.extensions.filesystem",
     ["filesystem.read", "filesystem.write"], "RAVENROOT_FILESYSTEM_PROFILE_", [

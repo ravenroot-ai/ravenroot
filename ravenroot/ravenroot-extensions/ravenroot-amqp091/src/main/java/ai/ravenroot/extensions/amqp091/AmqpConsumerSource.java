@@ -28,6 +28,7 @@ import java.util.function.IntConsumer;
 final class AmqpConsumerSource implements InboundSource {
     enum State { STOPPED, STARTING, READY, BACKING_OFF, RECONNECTING, STOPPING, FAILED }
     private static final AmqpConsumerLeaseRegistry RESOURCE_LEASES = new AmqpConsumerLeaseRegistry();
+    private static final AmqpSubscriptionLeaseRegistry SUBSCRIPTION_LEASES = new AmqpSubscriptionLeaseRegistry();
 
     private final NodeConfiguration configuration;
     private final CredentialResolver credentials;
@@ -140,6 +141,7 @@ final class AmqpConsumerSource implements InboundSource {
         SecretValue secret = null;
         char[] password = null;
         AmqpConsumerLeaseRegistry.Lease resourceLease = null;
+        AmqpSubscriptionLeaseRegistry.Lease subscriptionLease = null;
         Map<String, Integer> attempts = new HashMap<>();
         FailureStreak reconnectFailures = new FailureStreak();
         try {
@@ -148,17 +150,25 @@ final class AmqpConsumerSource implements InboundSource {
             policy = resolvePolicy(context.identity().tenantId(), profileName);
             settings = Settings.resolve(configuration, policy);
             probeDurability(context, profile.timeoutMs());
-            String leaseKey = policy.tenant() + "\0" + policy.profile() + "\0" + policy.queue();
-            resourceLease = RESOURCE_LEASES.tryAcquire(leaseKey, settings.resourceMode);
-            if (resourceLease == null)
-                throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_ALREADY_ACTIVE);
+            if (settings.destination.mode() == AmqpConsumerProtocol.Destination.Mode.CONSUMER) {
+                String leaseKey = policy.tenant() + "\0" + policy.profile() + "\0" + policy.queue();
+                resourceLease = RESOURCE_LEASES.tryAcquire(leaseKey, settings.resourceMode);
+                if (resourceLease == null)
+                    throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_ALREADY_ACTIVE);
+            } else {
+                subscriptionLease = SUBSCRIPTION_LEASES.tryAcquire(policy.tenant(), policy.profile(),
+                        policy.maxEphemeralSubscriptions());
+                if (subscriptionLease == null)
+                    throw sourceFailure(AmqpSourceStartFailure.AMQP_SUBSCRIPTION_CAPACITY_EXHAUSTED);
+            }
             Optional<SecretValue> resolved = credentials.resolve(profile.credentialRef());
             if (resolved == null || resolved.isEmpty()) throw sourceFailure(AmqpSourceStartFailure.CREDENTIAL_UNAVAILABLE);
             secret = resolved.get(); password = secret.copy();
             while (!stopRequested) {
                 long sessionGeneration = nextGeneration();
                 try {
-                    AmqpConsumerProtocol.Owner opened = protocol.open(profile, policy, password, settings.prefetch);
+                    AmqpConsumerProtocol.Owner opened = protocol.open(profile, policy, password,
+                            settings.prefetch, settings.destination);
                     if (opened == null) throw sourceFailure(AmqpSourceStartFailure.AMQP_CONSUMER_UNAVAILABLE);
                     owner = opened;
                     claimReady(context, ready);
@@ -189,6 +199,7 @@ final class AmqpConsumerSource implements InboundSource {
             if (password != null) java.util.Arrays.fill(password, '\0');
             if (secret != null) secret.close();
             if (resourceLease != null) resourceLease.close();
+            if (subscriptionLease != null) subscriptionLease.close();
             lifecycle.lock();
             try {
                 if (!ready.isDone()) ready.completeExceptionally(
@@ -222,14 +233,14 @@ final class AmqpConsumerSource implements InboundSource {
                          Map<String, Integer> attempts, FailureStreak reconnectFailures, long sessionGeneration,
                          AmqpConsumerProtocol.Delivery delivery) throws AmqpConsumerProtocol.Failure {
         AmqpDeliveryEvent.Projected projected;
-        try { projected = AmqpDeliveryEvent.project(delivery, policy, 1); }
+        try { projected = AmqpDeliveryEvent.project(delivery, policy, settings.destination, 1); }
         catch (AmqpDeliveryEvent.Invalid invalid) {
             context.reportDegraded(invalid.safeReason());
             nackIfCurrent(sessionGeneration, delivery.deliveryTag(), false);
             return;
         }
         int attempt = attempts.merge(projected.idempotentKey(), 1, Integer::sum);
-        projected = AmqpDeliveryEvent.project(delivery, policy, attempt);
+        projected = AmqpDeliveryEvent.project(delivery, policy, settings.destination, attempt);
         IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
                 projected.payload(), context.nodeId(), projected.idempotentKey());
         if (!current(sessionGeneration)) return;
@@ -424,12 +435,33 @@ final class AmqpConsumerSource implements InboundSource {
 
     private record Settings(int prefetch, int retryBackoffMs, int maxRetryBackoffMs,
                             int poisonAttempts, int drainTimeoutMs,
-                            AmqpConsumerLeaseRegistry.Mode resourceMode) {
+                            AmqpConsumerLeaseRegistry.Mode resourceMode,
+                            AmqpConsumerProtocol.Destination destination) {
         static Settings resolve(NodeConfiguration c, AmqpConsumerPolicy policy) {
             if (!AmqpConsumeNodeBehavior.knownConfiguration().containsAll(c.properties().keySet()))
                 throw sourceFailure(AmqpSourceStartFailure.UNKNOWN_GRAPH_PROPERTY);
-            String queue = c.property("queue", "");
-            if (!queue.isEmpty() && !queue.equals(policy.queue())) throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
+            String mode = c.property("mode", "Consumer");
+            AmqpConsumerProtocol.Destination destination;
+            if ("Consumer".equals(mode)) {
+                String queue = c.property("queue", "");
+                if (policy.queue().isEmpty())
+                    throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
+                if (!queue.isEmpty() && !queue.equals(policy.queue()))
+                    throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
+                if (c.properties().containsKey("exchange") || c.properties().containsKey("bindingPattern"))
+                    throw sourceFailure(AmqpSourceStartFailure.INVALID_DESTINATION_MODE);
+                destination = AmqpConsumerProtocol.Destination.consumer(policy.queue());
+            } else if ("Subscriber".equals(mode)) {
+                if (c.properties().containsKey("queue") || c.properties().containsKey("resourceMode"))
+                    throw sourceFailure(AmqpSourceStartFailure.INVALID_DESTINATION_MODE);
+                String exchange = c.requiredProperty("exchange");
+                String bindingPattern = c.requiredProperty("bindingPattern");
+                if (!policy.allowsSubscription(exchange, bindingPattern))
+                    throw sourceFailure(AmqpSourceStartFailure.SUBSCRIPTION_NOT_AUTHORIZED);
+                destination = AmqpConsumerProtocol.Destination.subscriber(exchange, bindingPattern);
+            } else {
+                throw sourceFailure(AmqpSourceStartFailure.INVALID_DESTINATION_MODE);
+            }
             int prefetch = tighten(c.property("prefetch", ""), policy.prefetch(), 1,
                     AmqpSourceStartFailure.INVALID_PREFETCH);
             prefetch = Math.min(prefetch,
@@ -461,7 +493,7 @@ final class AmqpConsumerSource implements InboundSource {
                 case "exclusive" -> AmqpConsumerLeaseRegistry.Mode.EXCLUSIVE;
                 default -> throw sourceFailure(AmqpSourceStartFailure.INVALID_RESOURCE_MODE);
             };
-            return new Settings(prefetch, retry, maximum, poison, drain, resourceMode);
+            return new Settings(prefetch, retry, maximum, poison, drain, resourceMode, destination);
         }
 
         private static int tighten(String raw, int ceiling, int minimum, AmqpSourceStartFailure reason) {
@@ -484,6 +516,19 @@ final class AmqpConsumerSource implements InboundSource {
                 || queue.codePoints().anyMatch(Character::isISOControl))) {
             throw sourceFailure(AmqpSourceStartFailure.QUEUE_NOT_AUTHORIZED);
         }
+        String mode = configuration.property("mode", "Consumer");
+        if (!mode.equals("Consumer") && !mode.equals("Subscriber"))
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_DESTINATION_MODE);
+        for (String name : java.util.List.of("exchange", "bindingPattern")) {
+            String value = configuration.property(name, "");
+            if (!value.isEmpty() && (value.length() > 255 || !AmqpWireLimits.isShortstr(value)
+                    || value.codePoints().anyMatch(Character::isISOControl))) {
+                throw sourceFailure(AmqpSourceStartFailure.SUBSCRIPTION_NOT_AUTHORIZED);
+            }
+        }
+        if (mode.equals("Subscriber") && (configuration.property("exchange", "").isEmpty()
+                || configuration.property("bindingPattern", "").isEmpty()))
+            throw sourceFailure(AmqpSourceStartFailure.INVALID_DESTINATION_MODE);
         authoredInteger(configuration, "prefetch", 1, 1_024,
                 AmqpSourceStartFailure.INVALID_PREFETCH);
         authoredInteger(configuration, "maxInFlight", 1, 1_024,

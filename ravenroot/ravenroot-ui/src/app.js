@@ -6684,10 +6684,35 @@ function closeInfo() {
 function readNodeEditorPatch(form, model) {
   const values = new FormData(form);
   const id = String(values.get('id') || '').trim();
+  const behavior = String(values.get('behavior') || '').trim();
   const custom = readPropertyEditor(form);
   const additionalGroups = readAdditionalPropertyGroupEditor(
-    form, catalogDescriptor(String(values.get('behavior') || '').trim()));
+    form, catalogDescriptor(behavior));
   const catalog = readCatalogPropertyEditor(form);
+  const kind = String(values.get('kind'));
+  // Conditional catalog fields retain their draft and serialized value by default. AMQP destination
+  // modes are narrower: their runtime schemas reject inactive destination fields, so remove only
+  // those fields here, in the single read path shared by submit, autosave and draft comparison.
+  const removeCatalogProperty = name => {
+    delete catalog.properties[name];
+    delete catalog.propertyTypes[name];
+  };
+  if (behavior === 'amqp.consume') {
+    if ((catalog.properties.mode || 'Consumer') === 'Subscriber') {
+      removeCatalogProperty('queue');
+      removeCatalogProperty('resourceMode');
+    } else {
+      removeCatalogProperty('exchange');
+      removeCatalogProperty('bindingPattern');
+    }
+  } else if (behavior === 'amqp.publish') {
+    if ((catalog.properties.mode || 'Producer') === 'Publisher') {
+      removeCatalogProperty('queue');
+    } else if (catalog.properties.queue) {
+      removeCatalogProperty('exchange');
+      removeCatalogProperty('routingKey');
+    }
+  }
   const nature = readNatureEditor(form);
   // The bypass flag is read HERE and not at the submit site, and that placement is the
   // whole point rather than tidiness. This function has three callers: the submit handler, the
@@ -6702,11 +6727,10 @@ function readNodeEditorPatch(form, model) {
   const bypass = readBypassEditor(form);
   const runtimeConcurrency = readMaxConcurrencyEditor(form);
   const join = readJoinEditor(form, model, graphData);
-  const kind = String(values.get('kind'));
   return {
     name: String(values.get('name') || id).trim() || id,
     kind,
-    behavior: kind === 'BEHAVIOR' ? String(values.get('behavior') || '').trim() : '',
+    behavior: kind === 'BEHAVIOR' ? behavior : '',
     nodeType: kindOwnsNodeType(kind)
       ? kindToNodeType(kind) : String(values.get('nodeType') || kindToNodeType(kind)),
     isStart: kind === 'START',
@@ -7389,6 +7413,11 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
   // because a condition can name any other property in this same list, not only ones earlier in it.
   const resolvedValues = Object.fromEntries(
     descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
+  // Publisher inherits a Producer queue only as an in-session draft. The queue stays mounted and
+  // retained, but cannot suppress the Publisher exchange/routing controls while its own row is
+  // hidden. Other descriptors keep the established rule that conditions see retained hidden values.
+  const conditionValues = descriptor.behavior === 'amqp.publish' && resolvedValues.mode === 'Publisher'
+    ? { ...resolvedValues, queue: '' } : resolvedValues;
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
     const title = property.displayName || property.name;
@@ -7411,7 +7440,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // Visibility and conditional required-ness, read from `visibleWhen`/`requiredWhen` via the
     // same generic evaluator the HTTP layer's own contract is built from — nothing here names a
     // property or a behavior, so this is identical for any node package that declares a condition.
-    const visible = isPropertyVisible(property, resolvedValues);
+    const visible = isPropertyVisible(property, conditionValues);
     // `requiredNow` is the SCHEMA-level answer from the contract alone — used for the `*`
     // marker, which has always reflected "the author should fill this in" independently of whether
     // the browser enforces it natively (adapterBinding already establishes that split; see
@@ -7422,7 +7451,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // should never actually receive, the same fail-closed instinct `conditionHolds` applies to an
     // unrecognised contract), and never native-`required` for an adapter binding, unchanged from
     // existing behavior.
-    const requiredNow = isPropertyRequiredNow(property, resolvedValues);
+    const requiredNow = isPropertyRequiredNow(property, conditionValues);
     const nativeRequired = requiredNow && visible && !adapterBound;
     const unconfigured = adapterBound && adapterIdOf(value) === '';
     // A closed-choice property whose descriptor declares NO default has three states, not two
@@ -7714,11 +7743,14 @@ function readCurrentCatalogPropertyValues(container) {
  * reason.
  */
 function conditionalPropertyStates(descriptor, valuesByName) {
-  return (descriptor?.properties || []).map(property => ({
+  const properties = descriptor?.properties || [];
+  const conditionValues = descriptor?.behavior === 'amqp.publish' && valuesByName.mode === 'Publisher'
+    ? { ...valuesByName, queue: '' } : valuesByName;
+  return properties.map(property => ({
     name: property.name,
     displayName: property.displayName,
-    visible: isPropertyVisible(property, valuesByName),
-    requiredNow: isPropertyRequiredNow(property, valuesByName) && isPropertyVisible(property, valuesByName)
+    visible: isPropertyVisible(property, conditionValues),
+    requiredNow: isPropertyRequiredNow(property, conditionValues) && isPropertyVisible(property, conditionValues)
       && !property.adapterBinding,
   }));
 }

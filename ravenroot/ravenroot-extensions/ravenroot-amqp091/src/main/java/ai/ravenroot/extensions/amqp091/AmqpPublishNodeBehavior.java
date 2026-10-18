@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.amqp091;
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.catalog.PropertyCondition;
 import ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty;
 import ai.ravenroot.api.application.NodeTemplateReferenceUnavailableException;
 import ai.ravenroot.api.execution.NodeResult;
@@ -40,7 +41,7 @@ import java.util.function.LongSupplier;
 public final class AmqpPublishNodeBehavior implements NodeBehavior {
     public static final String BEHAVIOR = "amqp.publish";
     private static final String VERSION = "amqp.publish.v1";
-    private static final Set<String> CONFIGURATION_FIELDS = Set.of("brokerProfile", "exchange", "routingKey",
+    private static final Set<String> CONFIGURATION_FIELDS = Set.of("brokerProfile", "mode", "queue", "exchange", "routingKey",
             "mandatory", "contentType", "contentEncoding", "persistent", "priority", "expirationMs",
             "messageId", "correlationId", "replyTo", "type", "appId", "headers", "confirmTimeoutMs",
             "maxConcurrency", "retries");
@@ -89,8 +90,20 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         List<NodePropertyDescriptor> properties = new ArrayList<>();
         properties.add(NodePropertyDescriptor.required("brokerProfile", "Broker profile", NodePropertyType.STRING,
                 "Opaque tenant-scoped operator profile; endpoints and credentials never come from GraphML."));
-        properties.add(optional("exchange", "Exchange", NodePropertyType.STRING, "Authorized profile default override."));
-        properties.add(optional("routingKey", "Routing key", NodePropertyType.STRING, "Authorized profile default override."));
+        properties.add(new NodePropertyDescriptor("mode", "Mode", NodePropertyType.STRING, false,
+                "Producer sends to a queue or an existing configured destination; Publisher sends to an existing "
+                        + "topic exchange.", "Producer", List.of("Producer", "Publisher")));
+        PropertyCondition producer = PropertyCondition.equalTo("mode", "Producer");
+        properties.add(new NodePropertyDescriptor("queue", "Queue", NodePropertyType.STRING, false,
+                "Authorized queue sent through the AMQP default exchange.", "", List.of(), false,
+                producer, null, "", "", 0, 0, 0));
+        PropertyCondition noQueue = PropertyCondition.blank("queue");
+        properties.add(new NodePropertyDescriptor("exchange", "Exchange", NodePropertyType.STRING, false,
+                "Authorized profile default override; required for Publisher.", "", List.of(), false,
+                noQueue, null, "", "", 0, 0, 0));
+        properties.add(new NodePropertyDescriptor("routingKey", "Routing key", NodePropertyType.STRING, false,
+                "Authorized profile default override; required for Publisher.", "", List.of(), false,
+                noQueue, null, "", "", 0, 0, 0));
         properties.add(NodePropertyDescriptor.optional("mandatory", "Mandatory", NodePropertyType.BOOLEAN,
                 "Must remain true so unroutable publications are observed.", "true"));
         properties.add(optional("contentType", "Content type", NodePropertyType.STRING, "Default AMQP content type."));
@@ -574,7 +587,9 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         }
     }
 
-    private record Settings(AmqpProfile profile, String exchange, String routingKey, String contentType,
+    private record Settings(AmqpProfile profile, String exchange, String routingKey, boolean queueDestination,
+                            boolean publisherDestination,
+                            String contentType,
                             String contentEncoding, boolean persistent, Integer priority, int priorityCap,
                             Long expirationMs, long expirationCap,
                             String messageId, String correlationId, String replyTo, String type, String appId,
@@ -609,12 +624,27 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             if (!profileName.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
                 throw Refusal.rejected("INVALID_GRAPH_PROPERTY");
             }
+            String mode = configuration.property("mode", "Producer");
+            if (!mode.equals("Producer") && !mode.equals("Publisher"))
+                throw Refusal.rejected("INVALID_DESTINATION_MODE");
+            if (configuration.properties().containsKey("queue")) {
+                configured(configuration, "queue", "", 255, false);
+            }
+            if (mode.equals("Publisher") && configuration.properties().containsKey("queue"))
+                throw Refusal.rejected("INVALID_DESTINATION_MODE");
+            if (mode.equals("Publisher") && (!configuration.properties().containsKey("exchange")
+                    || !configuration.properties().containsKey("routingKey")))
+                throw Refusal.rejected("DESTINATION_REQUIRED");
+            if (configuration.properties().containsKey("queue")
+                    && (configuration.properties().containsKey("exchange")
+                    || configuration.properties().containsKey("routingKey")))
+                throw Refusal.rejected("INVALID_DESTINATION_MODE");
             if (!strictBoolean(configuration, "mandatory", true)) {
                 throw Refusal.rejected("MANDATORY_REQUIRED");
             }
             strictBoolean(configuration, "persistent", false);
             if (configuration.properties().containsKey("exchange")) {
-                configured(configuration, "exchange", "", 255, true);
+                configured(configuration, "exchange", "", 255, !mode.equals("Publisher"));
             }
             if (configuration.properties().containsKey("routingKey")) {
                 configured(configuration, "routingKey", "", 255, false);
@@ -660,9 +690,15 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             catch (SecurityException refused) { throw Refusal.permanent(policyReason(refused)); }
             if (!strictBoolean(configuration, "mandatory", true))
                 throw Refusal.rejected("MANDATORY_REQUIRED");
-            String exchange = configured(configuration, "exchange", profile.defaultExchange(), 255, true);
-            String routing = configured(configuration, "routingKey", profile.defaultRoutingKey(), 255, false);
-            if (!profile.allowsExchange(exchange) || !profile.allowsRoutingKey(routing))
+            String mode = configuration.property("mode", "Producer");
+            boolean publisherDestination = mode.equals("Publisher");
+            boolean queueDestination = configuration.properties().containsKey("queue");
+            String exchange = queueDestination ? ""
+                    : configured(configuration, "exchange", profile.defaultExchange(), 255, true);
+            String routing = queueDestination ? configured(configuration, "queue", "", 255, false)
+                    : configured(configuration, "routingKey", profile.defaultRoutingKey(), 255, false);
+            if (!(publisherDestination ? profile.allowsTopicExchange(exchange) : profile.allowsExchange(exchange))
+                    || !profile.allowsRoutingKey(routing))
                 throw Refusal.unauthorizedReference("PUBLICATION_FORBIDDEN");
             boolean persistent = strictBoolean(configuration, "persistent", false);
             if ("amqp-inbox-v1".equals(configuration.property("saga.participant", "")) && !persistent) {
@@ -674,7 +710,8 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             String replyTo = optional(configuration, "replyTo", 255);
             if (!profile.allowsReplyTo(replyTo)) throw Refusal.unauthorizedReference("REPLY_TO_FORBIDDEN");
             Map<String, Object> headers = parseHeaders(configuration.property("headers", ""), profile);
-            return new Settings(profile, exchange, routing, optional(configuration, "contentType", 128),
+            return new Settings(profile, exchange, routing, queueDestination, publisherDestination,
+                    optional(configuration, "contentType", 128),
                     optional(configuration, "contentEncoding", 128), persistent, priority,
                     priority == null ? profile.maxPriority() : priority, expiration,
                     expiration == null ? profile.maxExpirationMs() : expiration,
@@ -781,9 +818,13 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             int bodies = (map.containsKey("bodyText") ? 1 : 0) + (map.containsKey("bodyJson") ? 1 : 0)
                     + (map.containsKey("bodyBase64") ? 1 : 0);
             if (bodies != 1) throw Refusal.rejected("BODY_VARIANT_REQUIRED");
-            String exchange = overlayString(map, "exchange", settings.exchange, 255, true);
+            if (settings.queueDestination && (map.containsKey("exchange") || map.containsKey("routingKey")))
+                throw Refusal.rejected("INVALID_DESTINATION_MODE");
+            String exchange = overlayString(map, "exchange", settings.exchange, 255,
+                    !settings.publisherDestination);
             String routing = overlayString(map, "routingKey", settings.routingKey, 255, false);
-            if (!settings.profile.allowsExchange(exchange) || !settings.profile.allowsRoutingKey(routing))
+            if (!(settings.publisherDestination ? settings.profile.allowsTopicExchange(exchange)
+                    : settings.profile.allowsExchange(exchange)) || !settings.profile.allowsRoutingKey(routing))
                 throw Refusal.rejected("PUBLICATION_FORBIDDEN");
 
             byte[] body;

@@ -16,6 +16,11 @@ final class AmqpDeliveryEvent {
     private AmqpDeliveryEvent() { }
 
     static Projected project(AmqpConsumerProtocol.Delivery delivery, AmqpConsumerPolicy policy, int attempt) {
+        return project(delivery, policy, AmqpConsumerProtocol.Destination.consumer(policy.queue()), attempt);
+    }
+
+    static Projected project(AmqpConsumerProtocol.Delivery delivery, AmqpConsumerPolicy policy,
+                             AmqpConsumerProtocol.Destination destination, int attempt) {
         AmqpConsumerProtocol.Properties properties = delivery.properties();
         String identity = clean(properties.messageId(), 255);
         if (identity == null && !policy.identityHeader().isEmpty()) {
@@ -43,10 +48,22 @@ final class AmqpDeliveryEvent {
         event.put("attempt", attempt);
         event.put("correlation", clean(properties.correlationId(), 255) == null
                 ? "amqp:" + policy.profile() + ":" + identity : properties.correlationId());
-        event.put("provenance", Map.of("source", "amqp-0-9-1", "profile", policy.profile(),
-                "queue", policy.queue(), "messageId", identity));
+        Map<String, Object> provenance = new LinkedHashMap<>();
+        provenance.put("source", "amqp-0-9-1");
+        provenance.put("profile", policy.profile());
+        provenance.put("mode", destination.mode() == AmqpConsumerProtocol.Destination.Mode.CONSUMER
+                ? "Consumer" : "Subscriber");
+        if (destination.mode() == AmqpConsumerProtocol.Destination.Mode.CONSUMER) {
+            provenance.put("queue", destination.queue());
+        } else {
+            provenance.put("exchange", destination.exchange());
+            provenance.put("bindingPattern", destination.bindingPattern());
+            provenance.put("ephemeral", true);
+        }
+        provenance.put("messageId", identity);
+        event.put("provenance", java.util.Collections.unmodifiableMap(provenance));
         return new Projected(java.util.Collections.unmodifiableMap(event), identity,
-                idempotentKey(policy, identity, delivery, body));
+                idempotentKey(policy, destination, identity, delivery, body));
     }
 
     private static Map<String, Object> headers(Map<String, Object> raw, AmqpConsumerPolicy policy) {
@@ -129,21 +146,28 @@ final class AmqpDeliveryEvent {
         if (value != null) target.put(key, value);
     }
 
-    private static String idempotentKey(AmqpConsumerPolicy policy, String identity,
+    private static String idempotentKey(AmqpConsumerPolicy policy,
+                                        AmqpConsumerProtocol.Destination destination, String identity,
                                         AmqpConsumerProtocol.Delivery delivery, byte[] body) {
         Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
-        return policy.profile() + "/" + encoder.encodeToString(policy.queue().getBytes(StandardCharsets.UTF_8))
+        String scope = destination.mode() == AmqpConsumerProtocol.Destination.Mode.CONSUMER
+                ? destination.queue() : destination.stableScope();
+        return policy.profile() + "/" + encoder.encodeToString(scope.getBytes(StandardCharsets.UTF_8))
                 + "/" + encoder.encodeToString(identity.getBytes(StandardCharsets.UTF_8))
-                + "/" + contentBinding(policy, identity, delivery, body);
+                + "/" + contentBinding(policy, destination, identity, delivery, body);
     }
 
-    private static String contentBinding(AmqpConsumerPolicy policy, String identity,
+    private static String contentBinding(AmqpConsumerPolicy policy,
+                                         AmqpConsumerProtocol.Destination destination, String identity,
                                          AmqpConsumerProtocol.Delivery delivery, byte[] body) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            update(digest, "ravenroot.amqp.delivery-key.v1".getBytes(StandardCharsets.UTF_8));
+            boolean subscriber = destination.mode() == AmqpConsumerProtocol.Destination.Mode.SUBSCRIBER;
+            update(digest, (subscriber ? "ravenroot.amqp.delivery-key.v2" : "ravenroot.amqp.delivery-key.v1")
+                    .getBytes(StandardCharsets.UTF_8));
             update(digest, policy.profile().getBytes(StandardCharsets.UTF_8));
-            update(digest, policy.queue().getBytes(StandardCharsets.UTF_8));
+            update(digest, (subscriber ? destination.stableScope() : destination.queue())
+                    .getBytes(StandardCharsets.UTF_8));
             update(digest, identity.getBytes(StandardCharsets.UTF_8));
             update(digest, delivery.exchange().getBytes(StandardCharsets.UTF_8));
             update(digest, delivery.routingKey().getBytes(StandardCharsets.UTF_8));

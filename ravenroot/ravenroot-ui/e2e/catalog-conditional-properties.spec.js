@@ -22,6 +22,10 @@ function propertyCondition(property, values) {
   return { contract: CONTRACT, property, operator: values.length > 1 ? 'ONE_OF' : 'EQUALS', values };
 }
 
+function blankCondition(property) {
+  return { contract: CONTRACT, property, operator: 'BLANK', values: [] };
+}
+
 const MODE_PROPERTY = {
   name: 'mode', displayName: 'Mode', type: 'STRING', required: true,
   description: 'How this source receives events.', defaultValue: 'LONG_POLLING',
@@ -94,6 +98,60 @@ const MALFORMED_SOURCE = {
   properties: [MODE_PROPERTY, UNKNOWN_CONTRACT_PROPERTY, CYCLE_SHAPED_A, CYCLE_SHAPED_B],
 };
 
+const AMQP_CONSUME = {
+  behavior: 'amqp.consume', displayName: 'Consume AMQP deliveries', category: 'AMQP 0-9-1',
+  description: 'Consume from a queue or an ephemeral topic subscription.', visualType: 'actor',
+  agentic: false, capabilities: ['inbound-source'],
+  properties: [
+    { name: 'brokerProfile', displayName: 'Broker profile', type: 'STRING', required: true,
+      description: 'Operator profile.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: null, requiredWhen: null },
+    { name: 'mode', displayName: 'Mode', type: 'STRING', required: false,
+      description: 'Consumer or Subscriber.', defaultValue: 'Consumer',
+      allowedValues: ['Consumer', 'Subscriber'], adapterBinding: false,
+      visibleWhen: null, requiredWhen: null },
+    { name: 'queue', displayName: 'Queue', type: 'STRING', required: false,
+      description: 'Existing queue.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: propertyCondition('mode', ['Consumer']), requiredWhen: null },
+    { name: 'exchange', displayName: 'Topic exchange', type: 'STRING', required: false,
+      description: 'Existing topic exchange.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: propertyCondition('mode', ['Subscriber']),
+      requiredWhen: propertyCondition('mode', ['Subscriber']) },
+    { name: 'bindingPattern', displayName: 'Binding pattern', type: 'STRING', required: false,
+      description: 'Topic binding pattern.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: propertyCondition('mode', ['Subscriber']),
+      requiredWhen: propertyCondition('mode', ['Subscriber']) },
+    { name: 'resourceMode', displayName: 'Resource mode', type: 'STRING', required: false,
+      description: 'Consumer queue sharing.', defaultValue: 'shared',
+      allowedValues: ['shared', 'exclusive'], adapterBinding: false,
+      visibleWhen: propertyCondition('mode', ['Consumer']), requiredWhen: null },
+  ],
+};
+
+const AMQP_PUBLISH = {
+  behavior: 'amqp.publish', displayName: 'Publish AMQP message', category: 'AMQP 0-9-1',
+  description: 'Publish through an authorized queue or exchange.', visualType: 'actor',
+  agentic: false, capabilities: ['side-effect'],
+  properties: [
+    { name: 'brokerProfile', displayName: 'Broker profile', type: 'STRING', required: true,
+      description: 'Operator profile.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: null, requiredWhen: null },
+    { name: 'mode', displayName: 'Mode', type: 'STRING', required: false,
+      description: 'Producer or Publisher.', defaultValue: 'Producer',
+      allowedValues: ['Producer', 'Publisher'], adapterBinding: false,
+      visibleWhen: null, requiredWhen: null },
+    { name: 'queue', displayName: 'Queue', type: 'STRING', required: false,
+      description: 'Queue through the default exchange.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: propertyCondition('mode', ['Producer']), requiredWhen: null },
+    { name: 'exchange', displayName: 'Exchange', type: 'STRING', required: false,
+      description: 'Authorized exchange.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: blankCondition('queue'), requiredWhen: null },
+    { name: 'routingKey', displayName: 'Routing key', type: 'STRING', required: false,
+      description: 'Authorized routing key.', defaultValue: '', allowedValues: [], adapterBinding: false,
+      visibleWhen: blankCondition('queue'), requiredWhen: null },
+  ],
+};
+
 let service;
 let catalog;
 
@@ -148,6 +206,9 @@ async function reopenSubmittedNode(page, id) {
   }, id)).toEqual({ inDocument: true, inRenderer: true, layoutBusy: false });
   await page.evaluate(() => new Promise(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(() => {
+    window.ravenroot.activeDocument().cy.elements().unselect();
+  });
   const point = await page.evaluate(nodeId => {
     const owner = window.ravenroot.activeDocument();
     const rendered = owner.cy.getElementById(nodeId).renderedPosition();
@@ -164,8 +225,12 @@ async function reopenSubmittedNode(page, id) {
   await expect(editor.locator('input[name="id"]')).toHaveAttribute('readonly', '');
 }
 
+async function serializedProperties(page, id) {
+  return page.evaluate(nodeId => window.ravenroot.activeDocument().graph.nodeMap[nodeId].properties, id);
+}
+
 test.beforeEach(async () => {
-  catalog = [EXAMPLE_SOURCE, MALFORMED_SOURCE];
+  catalog = [EXAMPLE_SOURCE, MALFORMED_SOURCE, AMQP_CONSUME, AMQP_PUBLISH];
   await startService();
 });
 
@@ -262,6 +327,110 @@ test('a value typed while visible survives being hidden, shown again, and a real
   await reopenSubmittedNode(page, 'conditional-node-1');
   await page.locator('[data-catalog-property="mode"]').selectOption('WEBHOOK');
   await expect(page.locator('[data-catalog-property="callbackUrl"]')).toHaveValue('https://example.test/callback');
+});
+
+test('AMQP Consumer and Subscriber save only their active destination across reopen', async ({ page }, testInfo) => {
+  testInfo.setTimeout(60_000);
+  await connectAndModify(page);
+  await page.locator('#node-catalog [data-catalog-add="amqp.consume"]').click();
+  const field = name => page.locator(`[data-catalog-property="${name}"]`);
+  await page.locator('#node-editor input[name="id"]').fill('amqp-receive-modes');
+  await field('brokerProfile').fill('orders');
+  await field('queue').fill('orders.work');
+  await field('resourceMode').selectOption('exclusive');
+
+  await field('mode').selectOption('Subscriber');
+  await expect(field('queue')).toBeHidden();
+  await expect(field('queue')).toHaveValue('orders.work');
+  await expect(field('resourceMode')).toBeHidden();
+  await expect(field('exchange')).toBeVisible();
+  await expect(field('bindingPattern')).toBeVisible();
+  await field('exchange').fill('orders.topic');
+  await field('bindingPattern').fill('orders.*');
+  await page.locator('#node-editor button[type="submit"]').click();
+
+  let saved = await serializedProperties(page, 'amqp-receive-modes');
+  expect(saved).toMatchObject({
+    brokerProfile: 'orders', mode: 'Subscriber', exchange: 'orders.topic', bindingPattern: 'orders.*',
+  });
+  expect(saved).not.toHaveProperty('queue');
+  expect(saved).not.toHaveProperty('resourceMode');
+
+  await reopenSubmittedNode(page, 'amqp-receive-modes');
+  await expect(field('mode')).toHaveValue('Subscriber');
+  await expect(field('exchange')).toHaveValue('orders.topic');
+  await expect(field('bindingPattern')).toHaveValue('orders.*');
+  await field('mode').selectOption('Consumer');
+  await expect(field('queue')).toBeVisible();
+  await expect(field('queue')).toHaveValue('');
+  await expect(field('exchange')).toBeHidden();
+  await field('queue').fill('orders.work');
+  await field('resourceMode').selectOption('shared');
+  await page.locator('#node-editor button[type="submit"]').click();
+
+  saved = await serializedProperties(page, 'amqp-receive-modes');
+  expect(saved).toMatchObject({ brokerProfile: 'orders', mode: 'Consumer', queue: 'orders.work' });
+  expect(saved).not.toHaveProperty('exchange');
+  expect(saved).not.toHaveProperty('bindingPattern');
+  await reopenSubmittedNode(page, 'amqp-receive-modes');
+  await expect(field('mode')).toHaveValue('Consumer');
+  await expect(field('queue')).toHaveValue('orders.work');
+  await expect(field('exchange')).toBeHidden();
+});
+
+test('AMQP queue Producer and Publisher retain drafts but serialize only the active destination', async ({ page }, testInfo) => {
+  testInfo.setTimeout(60_000);
+  await connectAndModify(page);
+  await page.locator('#node-catalog [data-catalog-add="amqp.publish"]').click();
+  const field = name => page.locator(`[data-catalog-property="${name}"]`);
+  await page.locator('#node-editor input[name="id"]').fill('amqp-send-modes');
+  await field('brokerProfile').fill('orders');
+  await field('exchange').fill('legacy.exchange');
+  await field('routingKey').fill('legacy.route');
+  await field('queue').fill('orders.work');
+  await field('queue').press('Tab');
+  await expect(field('exchange')).toBeHidden();
+  await expect(field('routingKey')).toBeHidden();
+
+  await field('mode').selectOption('Publisher');
+  await expect(field('queue')).toBeHidden();
+  await expect(field('queue')).toHaveValue('orders.work');
+  await expect(field('exchange')).toBeVisible();
+  await expect(field('routingKey')).toBeVisible();
+  await expect(field('exchange')).toHaveValue('legacy.exchange');
+  await expect(field('routingKey')).toHaveValue('legacy.route');
+  await field('exchange').fill('orders.topic');
+  await field('routingKey').fill('orders.created');
+  await page.locator('#node-editor button[type="submit"]').click();
+
+  let saved = await serializedProperties(page, 'amqp-send-modes');
+  expect(saved).toMatchObject({
+    brokerProfile: 'orders', mode: 'Publisher', exchange: 'orders.topic', routingKey: 'orders.created',
+  });
+  expect(saved).not.toHaveProperty('queue');
+
+  await reopenSubmittedNode(page, 'amqp-send-modes');
+  await expect(field('mode')).toHaveValue('Publisher');
+  await expect(field('exchange')).toHaveValue('orders.topic');
+  await expect(field('routingKey')).toHaveValue('orders.created');
+  await field('mode').selectOption('Producer');
+  await expect(field('queue')).toBeVisible();
+  await expect(field('queue')).toHaveValue('');
+  await expect(field('exchange')).toBeVisible();
+  await field('queue').fill('orders.work');
+  await field('queue').press('Tab');
+  await expect(field('exchange')).toBeHidden();
+  await expect(field('routingKey')).toBeHidden();
+  await page.locator('#node-editor button[type="submit"]').click();
+
+  saved = await serializedProperties(page, 'amqp-send-modes');
+  expect(saved).toMatchObject({ brokerProfile: 'orders', mode: 'Producer', queue: 'orders.work' });
+  expect(saved).not.toHaveProperty('exchange');
+  expect(saved).not.toHaveProperty('routingKey');
+  await reopenSubmittedNode(page, 'amqp-send-modes');
+  await expect(field('mode')).toHaveValue('Producer');
+  await expect(field('queue')).toHaveValue('orders.work');
+  await expect(field('exchange')).toBeHidden();
 });
 
 test('the reveal is reachable purely from the keyboard: mode changes by keyboard, Tab reaches the newly shown field', async ({ page }) => {

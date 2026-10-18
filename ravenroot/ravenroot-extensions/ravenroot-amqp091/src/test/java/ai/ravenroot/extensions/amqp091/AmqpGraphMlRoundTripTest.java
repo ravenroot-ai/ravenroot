@@ -107,4 +107,27 @@ class AmqpGraphMlRoundTripTest {
             assertEquals(properties, node.properties());
         }
     }
+
+    @Test
+    void subscriberAndQueueProducerSelectorsRoundTripWithoutBrokerGeneratedQueueNames() throws Exception {
+        Map<String, Object> subscribe = Map.of("brokerProfile", "production-orders", "mode", "Subscriber",
+                "exchange", "orders.topic", "bindingPattern", "orders.*");
+        Map<String, Object> produce = Map.of("brokerProfile", "production-orders", "mode", "Producer",
+                "queue", "orders.q");
+        var definition = new GraphDefinition(List.of(GraphNode.start("start"),
+                new GraphNode("consume", NodeKind.BEHAVIOR, AmqpConsumeNodeBehavior.BEHAVIOR, subscribe),
+                new GraphNode("publish", NodeKind.BEHAVIOR, AmqpPublishNodeBehavior.BEHAVIOR, produce),
+                GraphNode.error("error"), GraphNode.end("end")), List.of());
+        byte[] xml;
+        try (var graph = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {
+            graph.writeGraphMl(output);
+            xml = output.toByteArray();
+        }
+        String serialized = new String(xml, StandardCharsets.UTF_8);
+        assertFalse(serialized.contains("amq.gen-"));
+        try (var reread = GraphManager.readGraphMl(new ByteArrayInputStream(xml))) {
+            assertEquals(subscribe, reread.definition().node("consume").properties());
+            assertEquals(produce, reread.definition().node("publish").properties());
+        }
+    }
 }

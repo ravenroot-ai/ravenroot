@@ -75,7 +75,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Complete broker -> Human Task -> SpEL -> broker proof against an isolated RabbitMQ. */
@@ -87,6 +90,150 @@ class AmqpHumanTaskWorkflowIntegrationTest {
     private static final String USER = "ravenroot";
     private static final String PASSWORD = "integration-password";
     private static final Duration LEASE_TTL = Duration.ofSeconds(30);
+
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void topicSubscribersAreIndependentOnlineOnlyAndCleanUpOwnedQueues() throws Exception {
+        Assumptions.assumeTrue(command(Duration.ofSeconds(10), "docker", "info").exitCode() == 0,
+                "Docker is required for the pinned RabbitMQ integration");
+        requireSuccess(command(Duration.ofMinutes(2), "docker", "pull", IMAGE), "RabbitMQ image pull");
+        try (RabbitServer rabbit = RabbitServer.start()) {
+            Connection administration = rabbit.connect();
+            Channel channel = administration.createChannel();
+            String exchange = "orders.topic";
+            channel.exchangeDeclare(exchange, "topic", true, false, Map.of());
+            String producerQueue = "producer-" + UUID.randomUUID();
+            String publisherQueue = "publisher-" + UUID.randomUUID();
+            channel.queueDeclare(producerQueue, false, true, true, Map.of());
+            channel.queueDeclare(publisherQueue, false, true, true, Map.of());
+            channel.queueBind(publisherQueue, exchange, "orders.*");
+            AmqpProfile profile = topicProfile(rabbit.port(), exchange);
+            profile = new AmqpProfile(profile.tenant(), profile.name(), profile.host(), profile.port(), profile.tls(),
+                    profile.vhost(), profile.username(), profile.credentialRef(), profile.defaultExchange(),
+                    profile.exchanges(), profile.defaultRoutingKey(), Set.of("orders.updated", producerQueue),
+                    profile.headers(), profile.replyTo(), profile.allowPersistent(), profile.maxPriority(),
+                    profile.maxExpirationMs(), profile.maxConcurrency(), profile.maxPerSecond(), profile.timeoutMs(),
+                    profile.maxBodyBytes(), profile.retries(), profile.topicExchanges());
+            AmqpProfile authorized = profile;
+            var publish = new AmqpPublishNodeBehavior(ignored ->
+                    Optional.of(new SecretValue(PASSWORD.toCharArray())),
+                    (tenant, name) -> Optional.of(authorized), new RabbitMqAmqpProtocol(),
+                    AmqpRuntimeControls.PRODUCTION, System::nanoTime, Thread::sleep,
+                    ReservedNetworkPolicy.shippedDefault());
+            Map<String, Object> body = Map.of("version", "amqp.publish.v1", "bodyText", "wire",
+                    "messageId", "wire-1");
+            assertEquals("CONFIRMED", AmqpTestSupport.output(publish.create(new NodeConfiguration("produce",
+                    AmqpPublishNodeBehavior.BEHAVIOR, Map.of("brokerProfile", PROFILE, "mode", "Producer",
+                    "queue", producerQueue))), body).get("status"));
+            assertEquals("wire-1", channel.basicGet(producerQueue, true).getProps().getMessageId());
+            assertEquals("CONFIRMED", AmqpTestSupport.output(publish.create(new NodeConfiguration("publish",
+                    AmqpPublishNodeBehavior.BEHAVIOR, Map.of("brokerProfile", PROFILE, "mode", "Publisher",
+                    "exchange", exchange, "routingKey", "orders.updated"))), body).get("status"));
+            assertEquals("wire-1", channel.basicGet(publisherQueue, true).getProps().getMessageId());
+            AmqpConsumerPolicy policy = new AmqpConsumerPolicy(TENANT, PROFILE, "", 4, Set.of(), "",
+                    4_096, 0, 100, 1_000, 3, "reject", 1_000,
+                    Set.of(exchange), Set.of("orders.*"), 4);
+            var protocol = new RabbitMqAmqpConsumerProtocol();
+            AmqpConsumerProtocol.Destination destination =
+                    AmqpConsumerProtocol.Destination.subscriber(exchange, "orders.*");
+            AmqpConsumerProtocol.Owner first = protocol.open(profile, policy, PASSWORD.toCharArray(), 4, destination);
+            AmqpConsumerProtocol.Owner second = protocol.open(profile, policy, PASSWORD.toCharArray(), 4, destination);
+            try {
+                assertNotEquals(first.resourceName(), second.resourceName());
+                assertTrue(!first.resourceName().isBlank() && !second.resourceName().isBlank());
+                channel.basicPublish(exchange, "orders.created", message("topic-1"), "one".getBytes(StandardCharsets.UTF_8));
+                assertEquals("topic-1", delivery(first).properties().messageId());
+                assertEquals("topic-1", delivery(second).properties().messageId());
+
+                channel.basicPublish(exchange, "audit.created", message("ignored"), "x".getBytes(StandardCharsets.UTF_8));
+                assertTrue(first.poll(Duration.ofMillis(250)) instanceof AmqpConsumerProtocol.Idle);
+                assertTrue(second.poll(Duration.ofMillis(250)) instanceof AmqpConsumerProtocol.Idle);
+
+                String retired = first.resourceName();
+                first.close(Duration.ofSeconds(2));
+                assertFalse(rabbit.queueNames().contains(retired));
+                channel.basicPublish(exchange, "orders.created", message("offline"), "lost".getBytes(StandardCharsets.UTF_8));
+                assertEquals("offline", delivery(second).properties().messageId());
+
+                first = protocol.open(profile, policy, PASSWORD.toCharArray(), 4, destination);
+                assertNotEquals(retired, first.resourceName());
+                assertTrue(first.poll(Duration.ofMillis(250)) instanceof AmqpConsumerProtocol.Idle,
+                        "offline topic publications are not replayed into a fresh ephemeral queue");
+                channel.basicPublish(exchange, "orders.updated", message("topic-2"), "two".getBytes(StandardCharsets.UTF_8));
+                assertEquals("topic-2", delivery(first).properties().messageId());
+                assertEquals("topic-2", delivery(second).properties().messageId());
+
+                Set<String> queuesBeforeFailure = rabbit.queueNames();
+                AmqpConsumerProtocol.Failure missing = assertThrows(AmqpConsumerProtocol.Failure.class,
+                        () -> protocol.open(authorized, policy, PASSWORD.toCharArray(), 4,
+                                AmqpConsumerProtocol.Destination.subscriber("missing.topic", "orders.*")));
+                assertTrue(missing.permanent());
+                assertQueuesEventually(rabbit, queuesBeforeFailure);
+            } finally {
+                first.close(Duration.ofSeconds(2));
+                second.close(Duration.ofSeconds(2));
+            }
+
+            String shared = "shared-" + UUID.randomUUID();
+            channel.queueDeclare(shared, true, false, false, Map.of());
+            AmqpConsumerPolicy sharedPolicy = new AmqpConsumerPolicy(TENANT, PROFILE, shared, 4, Set.of(), "",
+                    4_096, 0, 100, 1_000, 3, "reject", 1_000);
+            AmqpConsumerProtocol.Owner consumerOne = protocol.open(authorized, sharedPolicy,
+                    PASSWORD.toCharArray(), 4);
+            AmqpConsumerProtocol.Owner consumerTwo = protocol.open(authorized, sharedPolicy,
+                    PASSWORD.toCharArray(), 4);
+            try {
+                channel.basicPublish("", shared, message("shared-1"), "one".getBytes(StandardCharsets.UTF_8));
+                AmqpConsumerProtocol.Event one = consumerOne.poll(Duration.ofSeconds(2));
+                AmqpConsumerProtocol.Event two = consumerTwo.poll(Duration.ofSeconds(2));
+                assertEquals(1, (one instanceof AmqpConsumerProtocol.Delivery ? 1 : 0)
+                        + (two instanceof AmqpConsumerProtocol.Delivery ? 1 : 0));
+                if (one instanceof AmqpConsumerProtocol.Delivery value) consumerOne.ack(value.deliveryTag());
+                if (two instanceof AmqpConsumerProtocol.Delivery value) consumerTwo.ack(value.deliveryTag());
+            } finally {
+                consumerOne.close(Duration.ofSeconds(2));
+                consumerTwo.close(Duration.ofSeconds(2));
+            }
+            channel.queueDelete(shared);
+            channel.queueDelete(producerQueue);
+            channel.queueDelete(publisherQueue);
+            channel.close();
+            administration.close();
+
+            var ingress = new AmqpConsumerTestSupport.Ingress();
+            var context = new AmqpConsumerTestSupport.Context(ingress, 2);
+            var source = new AmqpConsumerSource(new NodeConfiguration("subscriber", AmqpConsumeNodeBehavior.BEHAVIOR,
+                    Map.of("brokerProfile", PROFILE, "mode", "Subscriber", "exchange", exchange,
+                            "bindingPattern", "orders.*")),
+                    ignored -> Optional.of(new SecretValue(PASSWORD.toCharArray())),
+                    (tenant, name) -> Optional.of(authorized), (tenant, name) -> Optional.of(policy), protocol,
+                    task -> Thread.ofVirtual().name("amqp-topic-reconnect").start(task), Clock.systemUTC());
+            source.start(context).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            rabbit.closeAllConnections();
+            assertTrue(context.healthyLatch.await(10, TimeUnit.SECONDS),
+                    "source must detect broker cancellation and become ready on a fresh queue");
+            source.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertTrue(rabbit.queueNames().isEmpty(), "undeploy must remove the final ephemeral queue");
+        }
+    }
+
+    private static AMQP.BasicProperties message(String id) {
+        return new AMQP.BasicProperties.Builder().messageId(id).build();
+    }
+
+    private static AmqpConsumerProtocol.Delivery delivery(AmqpConsumerProtocol.Owner owner) throws Exception {
+        AmqpConsumerProtocol.Event event = owner.poll(Duration.ofSeconds(5));
+        assertTrue(event instanceof AmqpConsumerProtocol.Delivery, event::toString);
+        AmqpConsumerProtocol.Delivery delivery = (AmqpConsumerProtocol.Delivery) event;
+        owner.ack(delivery.deliveryTag());
+        return delivery;
+    }
+
+    private static void assertQueuesEventually(RabbitServer rabbit, Set<String> expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline && !rabbit.queueNames().equals(expected)) Thread.sleep(50);
+        assertEquals(expected, rabbit.queueNames(), "failed startup must not leak its ephemeral queue");
+    }
 
     @Test
     @Timeout(value = 180, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
@@ -207,6 +354,12 @@ class AmqpHumanTaskWorkflowIntegrationTest {
         return new AmqpProfile(TENANT, PROFILE, "localhost", port, false, "/", USER,
                 "workflow-secret", "", Set.of(), outputQueue, Set.of(), Set.of(), Set.of(),
                 false, 0, 0, 4, 100, 5_000, 4_096, 0);
+    }
+
+    private static AmqpProfile topicProfile(int port, String exchange) {
+        return new AmqpProfile(TENANT, PROFILE, "localhost", port, false, "/", USER,
+                "workflow-secret", exchange, Set.of(""), "orders.created", Set.of("orders.updated"),
+                Set.of(), Set.of(), false, 0, 0, 4, 100, 5_000, 4_096, 0, Set.of(exchange));
     }
 
     private static AmqpConsumerPolicy policy(String inputQueue) {
@@ -345,6 +498,20 @@ class AmqpHumanTaskWorkflowIntegrationTest {
             factory.setConnectionTimeout(1_000);
             factory.setHandshakeTimeout(1_000);
             return factory.newConnection("ravenroot-amqp-workflow-test");
+        }
+
+        Set<String> queueNames() throws Exception {
+            CommandResult listed = command(Duration.ofSeconds(10), "docker", "exec", name,
+                    "rabbitmqctl", "-q", "list_queues", "name");
+            requireSuccess(listed, "RabbitMQ queue inventory");
+            if (listed.output().isBlank()) return Set.of();
+            return Set.of(listed.output().split("\\R"));
+        }
+
+        void closeAllConnections() throws Exception {
+            requireSuccess(command(Duration.ofSeconds(10), "docker", "exec", name,
+                    "rabbitmqctl", "close_all_connections", "issue-567-reconnect"),
+                    "RabbitMQ connection cancellation");
         }
 
         @Override public void close() throws Exception {

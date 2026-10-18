@@ -372,12 +372,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def test_version_only_alignment_inverse_refuses_an_unrelated_source_mutation(self) -> None:
         target_version = product_version(ROOT)
-        _revision, parent, source_version = reachable_version_transition(
-            ROOT, target_version, "HEAD")
         with tempfile.TemporaryDirectory() as location:
             root = Path(location) / "alignment"
             subprocess.run(
                 ["git", "clone", "--quiet", "--no-local", str(ROOT), str(root)], check=True)
+            subprocess.run(["git", "remote", "remove", "origin"], cwd=root, check=True)
+            _revision, parent, source_version = reachable_version_transition(
+                root, target_version, "HEAD")
             subprocess.run(["git", "checkout", "--quiet", parent], cwd=root, check=True)
             bump_surfaces(root, source_version, target_version)
             unexpected = root / "unexpected-runtime-policy.txt"
@@ -395,12 +396,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def test_version_only_alignment_inverse_refuses_same_surface_semantic_mutation(self) -> None:
         target_version = product_version(ROOT)
-        _revision, parent, source_version = reachable_version_transition(
-            ROOT, target_version, "HEAD")
         with tempfile.TemporaryDirectory() as location:
             root = Path(location) / "alignment"
             subprocess.run(
                 ["git", "clone", "--quiet", "--no-local", str(ROOT), str(root)], check=True)
+            subprocess.run(["git", "remote", "remove", "origin"], cwd=root, check=True)
+            _revision, parent, source_version = reachable_version_transition(
+                root, target_version, "HEAD")
             subprocess.run(["git", "checkout", "--quiet", parent], cwd=root, check=True)
             bump_surfaces(root, source_version, target_version)
             readme = root / "README.md"

@@ -282,6 +282,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "controlled second integration alignment")
             normalize_authoritative_version_history(source_fixture)
             self.assertEqual(source_version, product_version(source_fixture))
+            self.assertFalse(
+                (source_fixture / f"docs/releases/v{first_alignment}.md").exists())
             self.assertEqual(
                 [f"normalize {first_alignment} to {source_version}",
                  f"normalize {second_alignment} to {first_alignment}"],
@@ -9116,9 +9118,10 @@ def _revision_product_version(root: Path, revision: str) -> str:
     return str(parse_tag("v" + version.text.strip()))
 
 
-def reverse_release_preparation_delta(
-        root: Path, preparation_revision: str, target_version: str) -> None:
-    """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
+def release_preparation_evidence(
+        root: Path, preparation_revision: str, target_version: str,
+) -> tuple[str, str, set[str], list[str], str]:
+    """Validate one release preparation without changing the authoritative fixture."""
     ancestry = subprocess.run(
         ["git", "rev-list", "--parents", "-n", "1", preparation_revision], cwd=root,
         check=True, capture_output=True, text=True,
@@ -9179,6 +9182,15 @@ def reverse_release_preparation_delta(
     source_version = revision_product_version(parent)
     if prepared_version != target_version or prepared_version == source_version:
         raise AssertionError("release preparation versions do not match the requested inverse")
+    return parent, source_version, pom_paths, inverse_paths, notes
+
+
+def reverse_release_preparation_delta(
+        root: Path, preparation_revision: str, target_version: str) -> None:
+    """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
+    parent, source_version, pom_paths, inverse_paths, notes = release_preparation_evidence(
+        root, preparation_revision, target_version)
+    prepared_version = target_version
 
     # A module may be added after the historical preparation while the branch still carries the
     # prepared product version. It is absent from the preparation diff, so reconstruct only its
@@ -9230,7 +9242,7 @@ def revision_product_version(root: Path, revision: str) -> str:
 
 def reachable_version_transition(
         root: Path, target_version: str, source_ref: str) -> tuple[str, str, str]:
-    """Select one proven inverse across every parent, independent of merge simplification."""
+    """Select the unique causally latest proven inverse across every reachable parent."""
     candidates = []
     mixed_features = []
     for revision in subprocess.run(
@@ -9254,20 +9266,39 @@ def reachable_version_transition(
             ["git", "diff", "--name-status", parent, revision], cwd=root,
             check=True, capture_output=True, text=True,
         ).stdout.splitlines()
-        if f"A\tdocs/releases/v{target_version}.md" not in changes:
-            # Every candidate must contain the exact generated version surfaces. A mixed feature
-            # commit may have additional paths, but is never itself an inverse candidate. Missing
-            # or altered version bytes are errors, not reasons to try another commit until one passes.
+        notes = f"docs/releases/v{target_version}.md"
+        if any(line.split("\t", 1)[-1] == notes for line in changes):
+            release_preparation_evidence(root, revision, target_version)
+        else:
+            # Validate every generated surface before excluding an unrelated mixed feature.
             _, _, _, unexpected = version_alignment_evidence(root, revision, target_version)
             if unexpected:
                 mixed_features.append(revision)
                 continue
         candidates.append((revision, parent, source_version))
-    if len(candidates) != 1:
+    maxima = []
+    for candidate in candidates:
+        dominated = False
+        for other in candidates:
+            if candidate == other:
+                continue
+            relation = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", candidate[0], other[0]], cwd=root,
+                capture_output=True, text=True,
+            )
+            if relation.returncode not in {0, 1}:
+                relation.check_returncode()
+            if relation.returncode == 0:
+                dominated = True
+                break
+        if not dominated:
+            maxima.append(candidate)
+    if len(maxima) != 1:
         raise AssertionError(
             f"expected one bounded version transition to {target_version}; "
-            f"found {len(candidates)}; mixed feature transitions: {mixed_features}")
-    return candidates[0]
+            f"found {len(maxima)} maximal of {len(candidates)} validated candidates; "
+            f"mixed feature transitions: {mixed_features}")
+    return maxima[0]
 
 
 def version_alignment_evidence(
@@ -9462,7 +9493,9 @@ class VersionHistoryTopologyTest(unittest.TestCase):
         self.git("commit", "-qm", "advance queue base")
         queue_base = self.git("rev-parse", "HEAD")
         queue = self.merge(queue_base, queue_base, branch)
-        for name, revision in (("branch", branch), ("pull request", pr), ("merge queue", queue)):
+        reverse = self.merge(mixed, mixed, pure)
+        for name, revision in (("branch", branch), ("reversed parents", reverse),
+                               ("pull request", pr), ("merge queue", queue)):
             with self.subTest(topology=name):
                 # Prove this fixture reproduces the parent-order/TREESAME trap: ordinary
                 # path-limited history hides the pure sibling in PR and queue checkouts.
@@ -9508,6 +9541,41 @@ class VersionHistoryTopologyTest(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, expected):
                     reverse_version_alignment_delta(self.root, invalid, self.target_version)
                 self.assertEqual("", self.git("status", "--porcelain"))
+
+    def test_invalid_dominated_ancestor_is_validated_before_causal_selection(self):
+        invalid = self.transition("invalid dominated alignment", corrupted=True)
+        self.git("checkout", "--quiet", "--detach", invalid)
+        bump_surfaces(self.root, self.target_version, self.source_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "restore source version after invalid alignment")
+        bump_surfaces(self.root, self.source_version, self.target_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "later exact alignment")
+        later = self.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(AssertionError, "non-version content"):
+            reachable_version_transition(self.root, self.target_version, later)
+
+    def test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum(self):
+        self.git("tag", f"v{self.source_version}", self.parent)
+        fragment = self.root / ".changes" / "fixture.fix.md"
+        fragment.write_text("Exact release preparation fixture.\n", encoding="utf-8")
+        self.git("add", fragment.relative_to(self.root).as_posix())
+        self.git("commit", "-qm", "release fragment")
+        preparation_parent = self.git("rev-parse", "HEAD")
+        prepared = prepare(self.root, "patch")
+        self.assertEqual(self.target_version, prepared["version"])
+        self.git("add", ".")
+        self.git("commit", "-qm", "canonical release preparation")
+        revision = self.git("rev-parse", "HEAD")
+        self.assertEqual(
+            (revision, preparation_parent, self.source_version),
+            reachable_version_transition(self.root, self.target_version, revision),
+        )
+        reverse_release_preparation_delta(self.root, revision, self.target_version)
+        self.assertEqual(self.source_version, product_version(self.root))
+        self.assertFalse(
+            (self.root / f"docs/releases/v{self.target_version}.md").exists())
+        self.assertTrue(fragment.exists())
 
     def test_two_exact_alignment_candidates_are_ambiguous(self):
         first = self.transition("first exact alignment")

@@ -1157862,6 +1157862,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "release-080-finalization-test-fixture-causal-v2",
+      "issue": "#575",
+      "sourceRevision": "763977591585317cfca9d6ca35b04192a449e2e8",
+      "targetRevision": "9c7a104a9a9477b10f479df4f3a83c9b2fabaca9",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "9da9fbebfffa6fc17826474b928838bdeec6497fb5db0a18cebf0b2ed6253fea",
+      "targetCandidateDigest": "7d124ba32c7a9a9f05a3d0a12c21ed5416d40b1b7f469858ec95d27948f15540",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

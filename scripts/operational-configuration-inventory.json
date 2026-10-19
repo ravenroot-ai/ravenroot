@@ -523947,9 +523947,114 @@
       "rationale": "Issue #561 bounded multi-step version-history reconstruction fixture; it verifies test scaffolding and is not production runtime configuration."
     },
     {
+      "id": "oc-3a5e95447d15ebf179b9",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9447,
+      "symbol": "ensure_release_fixture_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"\"",
+      "expressionDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "evidenceDigest": "fc45a4edfce17c70dff39357937d39cbc1457c60f7ec3180c52e7097f6465596",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-98c083fb5f7b2ff5d59d",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9447,
+      "symbol": "ensure_release_fixture_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"\"",
+      "expressionDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "evidenceDigest": "fc45a4edfce17c70dff39357937d39cbc1457c60f7ec3180c52e7097f6465596",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-15088b86fbedc6b011c0",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9447,
+      "symbol": "ensure_release_fixture_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"Create or reuse a coherent source tag in a remote-free release fixture.\"",
+      "expressionDigest": "25ebd3a8e4683659dac0813d7b800e576cdd86c99756466e1226899a8a558eca",
+      "evidenceDigest": "fc45a4edfce17c70dff39357937d39cbc1457c60f7ec3180c52e7097f6465596",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-f54fdd6cc75d4b04371e",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9455,
+      "symbol": "git",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"release fixture source tag requires a remote-free repository\"",
+      "expressionDigest": "9a42827d58857f31511ab0e19e3ad6ec8ec00dff72ceac1d10fed800e96a79ee",
+      "evidenceDigest": "c6a4212041738b9b19d6f222b775bfd8cfff8427a133d743fb40517a0a4650cc",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-fb94b70f198b8ccc95a0",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9465,
+      "symbol": "git",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"release fixture source tag {source_tag} has mismatched product bytes\"",
+      "expressionDigest": "831c19c83a999e896aec4cebf31287a030d0e3fb3b99263cc2eeab51fb794b68",
+      "evidenceDigest": "ca837192a220653cda76f1c3d227b8824efc32feda639740a50382de6b6e3fd1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-38735dfc4cdf8ba209fa",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9470,
+      "symbol": "git",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"release fixture source tag {source_tag} is not reachable from its source\"",
+      "expressionDigest": "d64cd406c15167a474626ecc6d7f2874ba56ad6ffca09793472fb40901acdc80",
+      "evidenceDigest": "da9f40a4753c040ff54e81c86cf9efb8f646c24788a96f39c14daf37ead39454",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-2f2e08c8590b6728b2ac",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9476,
+      "symbol": "git",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"release fixture has an unrelated newer release tag\"",
+      "expressionDigest": "a32f061a0f374aa60368209176c994fe47fc6f55759ac4c616d72048f2e24e05",
+      "evidenceDigest": "07922a220b0e4039d9da1fb3ef92b88d44c397dcf36b89479b9f4ceec271ab30",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
       "id": "oc-5cac449822a16b82f8d2",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9449,
+      "line": 9484,
       "symbol": "setUp",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -523964,7 +524069,7 @@
     {
       "id": "oc-5020a88faace5133a2fc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9468,
+      "line": 9504,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -523979,7 +524084,7 @@
     {
       "id": "oc-ddd79a75abca26edbe7a",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9468,
+      "line": 9504,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -523994,7 +524099,7 @@
     {
       "id": "oc-60da796b4f9d0ead4798",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9473,
+      "line": 9509,
       "symbol": "transition",
       "kind": "script-default",
       "role": "path",
@@ -524009,7 +524114,7 @@
     {
       "id": "oc-47e8784289743a26f118",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9474,
+      "line": 9510,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524024,7 +524129,7 @@
     {
       "id": "oc-4463d8991f4617780334",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9474,
+      "line": 9510,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524039,7 +524144,7 @@
     {
       "id": "oc-1ddd73fa8e7eb04ff01d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9474,
+      "line": 9510,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524054,7 +524159,7 @@
     {
       "id": "oc-30f903d4650c68abe9eb",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9476,
+      "line": 9512,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524069,7 +524174,7 @@
     {
       "id": "oc-4182604432f7ba2efa59",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9476,
+      "line": 9512,
       "symbol": "transition",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524084,7 +524189,7 @@
     {
       "id": "oc-ffc4d85bbc1cb7c67f2a",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9486,
+      "line": 9522,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524099,7 +524204,7 @@
     {
       "id": "oc-134eb7ac238063e5ba19",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9487,
+      "line": 9523,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524114,7 +524219,7 @@
     {
       "id": "oc-3a534be04f4561f2e70b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9491,
+      "line": 9527,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524129,7 +524234,7 @@
     {
       "id": "oc-aba30c28aea59c5d0d5b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9491,
+      "line": 9527,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524144,7 +524249,7 @@
     {
       "id": "oc-9b73f335c6109b7b571b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9492,
+      "line": 9528,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524159,7 +524264,7 @@
     {
       "id": "oc-a6628466c63c6e9f3ab4",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9492,
+      "line": 9528,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524174,7 +524279,7 @@
     {
       "id": "oc-ed984d5c3911b28a21c5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9493,
+      "line": 9529,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524189,7 +524294,7 @@
     {
       "id": "oc-0f788614fd524420600a",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9493,
+      "line": 9529,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524204,7 +524309,7 @@
     {
       "id": "oc-aab81eba14f1fba5da32",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9493,
+      "line": 9529,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524219,7 +524324,7 @@
     {
       "id": "oc-09b1ba4cf3e414ecadda",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9494,
+      "line": 9530,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "script-default",
       "role": "queue_base",
@@ -524234,7 +524339,7 @@
     {
       "id": "oc-4fa13cc6f64d9cb9f606",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9494,
+      "line": 9530,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "script-default",
       "role": "queue_base",
@@ -524249,7 +524354,7 @@
     {
       "id": "oc-32535367b46d65bcb191",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9501,
+      "line": 9537,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524268,7 +524373,7 @@
     {
       "id": "oc-98629892f15c85bc4499",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9513,
+      "line": 9549,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524283,7 +524388,7 @@
     {
       "id": "oc-e11503533972f5ff2a71",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9513,
+      "line": 9549,
       "symbol": "test_branch_pr_and_queue_find_the_same_bounded_inverse",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524298,7 +524403,7 @@
     {
       "id": "oc-4f6faff176ad487724ca",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9530,
+      "line": 9566,
       "symbol": "test_mixed_feature_is_not_an_inverse_or_a_standalone_candidate",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524313,7 +524418,7 @@
     {
       "id": "oc-f645f59a93247289a151",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9539,
+      "line": 9575,
       "symbol": "test_invalid_version_surfaces_are_not_skipped_for_a_valid_sibling",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524328,7 +524433,7 @@
     {
       "id": "oc-cfd8633b7c3efaac3803",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9539,
+      "line": 9575,
       "symbol": "test_invalid_version_surfaces_are_not_skipped_for_a_valid_sibling",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524343,7 +524448,7 @@
     {
       "id": "oc-e9c09f4bff444a501615",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9550,
+      "line": 9586,
       "symbol": "test_invalid_dominated_ancestor_is_validated_before_causal_selection",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -524356,10 +524461,10 @@
       "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
     },
     {
-      "id": "oc-54847e84722031dc18d9",
+      "id": "oc-ea6e7d6ca423f6db2c54",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9565,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9602,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"Exact release preparation fixture.\\n\"",
@@ -524368,13 +524473,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-54847e84722031dc18d9"
+      }
     },
     {
-      "id": "oc-380a1791551dab2a13a8",
+      "id": "oc-db347c68053f9c61f842",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9565,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9602,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"utf-8\"",
@@ -524383,13 +524492,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-380a1791551dab2a13a8"
+      }
     },
     {
-      "id": "oc-01070a9c362f592632db",
+      "id": "oc-73c86b2777ebcf207cda",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9567,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9604,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"-qm\"",
@@ -524398,13 +524511,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-01070a9c362f592632db"
+      }
     },
     {
-      "id": "oc-62a5aa2c4340ec11ed4f",
+      "id": "oc-378253ba382fe5f82417",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9567,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9604,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"commit\"",
@@ -524413,13 +524530,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-62a5aa2c4340ec11ed4f"
+      }
     },
     {
-      "id": "oc-1fdff8eefe0ea99ba174",
+      "id": "oc-cc60b2144ea5632ab0d7",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9567,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9604,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"release fragment\"",
@@ -524428,13 +524549,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-1fdff8eefe0ea99ba174"
+      }
     },
     {
-      "id": "oc-0b8b7e82e1b590a19ce3",
+      "id": "oc-4c954fa4d4e216eb64e5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9572,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9609,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"-qm\"",
@@ -524443,13 +524568,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-0b8b7e82e1b590a19ce3"
+      }
     },
     {
-      "id": "oc-b055b8520966220ff6e2",
+      "id": "oc-f3967205f88c67f2f980",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9572,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9609,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"canonical release preparation\"",
@@ -524458,13 +524587,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-b055b8520966220ff6e2"
+      }
     },
     {
-      "id": "oc-54234e8f628052ee0549",
+      "id": "oc-c5b48385de8874812479",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9572,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9609,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"commit\"",
@@ -524473,13 +524606,17 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-54234e8f628052ee0549"
+      }
     },
     {
-      "id": "oc-7eca85dc263294daa2f2",
+      "id": "oc-e159a2b75fb83bea3bce",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 9581,
-      "symbol": "test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum",
+      "line": 9618,
+      "symbol": "assert_valid_release_preparation_is_selected",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"docs/releases/v{self.target_version}.md\"",
@@ -524488,7 +524625,101 @@
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+      "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority.",
+      "identityMigration": {
+        "history": "release-080-published-tag-fixture-v1",
+        "fromId": "oc-7eca85dc263294daa2f2"
+      }
+    },
+    {
+      "id": "oc-770b1210c098390be816",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9634,
+      "symbol": "test_release_preparation_rejects_an_unreachable_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"-m\"",
+      "expressionDigest": "acb8b2aaec464a0b49fb8783175564725e948043059afe3518493a2b6ae1b581",
+      "evidenceDigest": "84aff7d3d7d54faf3ccbfe3d1c02202e4ace5d8d642d74e434119da3794a4614",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-6d8c3778a03cc39dadd8",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9634,
+      "symbol": "test_release_preparation_rejects_an_unreachable_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"^{tree}\"",
+      "expressionDigest": "d773fb1b75a9dad03c664a0110b2e0a419252bb7933cd6da6c205fcc7fc07899",
+      "evidenceDigest": "84aff7d3d7d54faf3ccbfe3d1c02202e4ace5d8d642d74e434119da3794a4614",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-ecbaa98522cedb2b2e3e",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9634,
+      "symbol": "test_release_preparation_rejects_an_unreachable_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"commit-tree\"",
+      "expressionDigest": "77da6b445af52b83d062ac272ba802809974ad03307c7f2bc88d65c9f7f41fc4",
+      "evidenceDigest": "84aff7d3d7d54faf3ccbfe3d1c02202e4ace5d8d642d74e434119da3794a4614",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-224b9e133f3551a2ef0d",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9634,
+      "symbol": "test_release_preparation_rejects_an_unreachable_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"unreachable release fixture\"",
+      "expressionDigest": "da62f7f7069b45a01535f3f7545000cc2631ac18063c2adee483e989bce073f1",
+      "evidenceDigest": "84aff7d3d7d54faf3ccbfe3d1c02202e4ace5d8d642d74e434119da3794a4614",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-a84f14a3a1810c580980",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9641,
+      "symbol": "test_release_preparation_rejects_a_mismatched_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"mismatched tagged product bytes\"",
+      "expressionDigest": "d81fe1ced00ae2ad3f56ee6917481536980f895e4e492b3e4dfe65d30fb5f26f",
+      "evidenceDigest": "9b6db6885e1f58252cb1b936cf16296ef5d955f8d4e88413e9575b3acd664d4d",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+    },
+    {
+      "id": "oc-49488e9dd3114cdc71e8",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 9643,
+      "symbol": "test_release_preparation_rejects_a_mismatched_source_tag",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"mismatched product bytes\"",
+      "expressionDigest": "e3ede9c82e8a5dce6a17e1e89ea8c48ef7eb8db639e1fe784fbbdf5ff6994c6a",
+      "evidenceDigest": "f1761229aac30c0e5ad5300dbc155e64b0f03ec4774e112a261954cc2afcaec4",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
     },
     {
       "id": "oc-55ffb6c422fc576de77a",
@@ -650770,6 +651001,7 @@
     "0782b71e5588f5d39b8e46f62e8c8d12d1de5db681a6f0ca11cf1c23cd7cd13d": "if not 0 < size <= MAX_REQUEST_BYTES:",
     "0782d6ce9fb969bc28aac5d14f10923bbca199e712eeaf108a9dd0431df13dce": "const visitedNodes = cy.nodes(':visible').filter(n => representatives.has(n.id()));",
     "07876eac772fa84aa71249919ccf6eca1dfe7d39b5fe50fc60e1e702e87a51ae": "private static final int MAX_HEADER_AGGREGATE_BYTES = 8_192;",
+    "07922a220b0e4039d9da1fb3ef92b88d44c397dcf36b89479b9f4ceec271ab30": "raise AssertionError(\"release fixture has an unrelated newer release tag\")",
     "079b754a8920937f53f064da47f754bb5c11ab009bdd8cce6243c621287dcc7f": "\"The checked-in TSV is generated by \",",
     "079e04a308e1640cabedf3968780214a9f7f0e716693f413adc3409931746f9f": "(\"fixture\", 'MINIKUBE = \"v1.38.1\"', 'MINIKUBE = \"v1.39.0\"'),",
     "07a066e1a7e4e97043457474e2719077f5c654a852bc573fe57b385adcf221df": "test_path.write_text(mutant, encoding=\"utf-8\")",
@@ -656242,6 +656474,7 @@
     "84a9ad0ba7407e1b6f559120dc6615cbf7f30a3068c15b6ba7c3dd3603604420": "\"$source_dir\" \"$plan_dir/manifest-id.$candidate_index\" \"$extension_id\"; then",
     "84adc83d14639f9c52f74f6c39d355f0fa605f45b2280a90c146bca7b34c3d5c": "self.assertGreaterEqual(workflow.count(\"packages: read\"), 2)",
     "84af76021a6f9234a6a303a283bfe3512e992befdc48e5de6df851595520be84": "assertInstanceOf(NodeNotAcceptingException.class, rootCause(assertThrows(ExecutionException.class, () -> own.send(ref, message(\"late\")).toCompletableFuture().get(5, TimeUnit.SECONDS))));",
+    "84aff7d3d7d54faf3ccbfe3d1c02202e4ace5d8d642d74e434119da3794a4614": "\"commit-tree\", self.parent + \"^{tree}\", \"-m\", \"unreachable release fixture\")",
     "84b6c2421b8a01b3f62c99d67bf11cd35edcb4caa285b08972566ac47ed2fec2": "const needsBoolean = presetId === 'register-zero-test' || presetId === 'register-decjz';",
     "84b79637ec57d606d42d017a5b1525b711c557a4368099bda1f629e38d34aba6": "\"maxPageSize\": { \"$ref\": \"#/definitions/positive1000\" },",
     "84b9526980e44ae765d03ccfda942e75f83eaf5645a4302fca42611b3df757a6": "public final class PluginBundleValidator { public static final String MANIFEST_FILE_NAME = \"ravenroot-plugin.json\";",
@@ -657257,6 +657490,7 @@
     "9b6126e22625768df22e59e8ca827414c808f21a3eed96e0368de4928c55cdc3": "if ! wait_for_port \"${PORT}\"; then",
     "9b62529423ed7e11482d4e8442fb506e6ec829489763b2aaa8c86895a199c5c9": "reconcile(Path(archive.name), VERSION, \"sha256:\" + \"0\" * 64)",
     "9b68b0ff7f68914a545eff676836f22d1f14860b1ac7a3b13d63179b1f239911": "python3 \"$SCRIPT_DIR/verify_attestations.py\" \\",
+    "9b6db6885e1f58252cb1b936cf16296ef5d955f8d4e88413e9575b3acd664d4d": "mismatched = self.transition(\"mismatched tagged product bytes\")",
     "9b6e572365517cde57ec5b4fb60dccdf0a971f88e4c5aa37b9f05268cfd51865": "const HUMAN_TASK_DECISION_OUTCOMES = new Set(['APPLIED', 'ALREADY_APPLIED']);",
     "9b7610c3a249778eccb7689f61e289a4712a6b1d369f4e46c8ff74e82b910a3f": "public final class GraphRunner implements AutoCloseable { private static final java.time.Duration SAGA_TERMINAL_INLINE_WAIT = java.time.Duration.ofSeconds(2);",
     "9b7996ab05db502c6499ae62ade80621a0784a4ed81ee2fbc9230122cb945ec1": "public record GraphContentId(String value) { private static final Pattern LOWERCASE_SHA256 = Pattern.compile(\"[0-9a-f]{64}\");",
@@ -659154,6 +659388,7 @@
     "c696757faf10017b5e775fb856b0b632de01974b534b399d3e5bd9076dc52320": "- name: RAVENROOT_RATELIMIT_ADDRESS_RPS",
     "c699b7f33f092a6cc3fc2a5ade7343fe9a3d3837c7e26391e39925cffdf6d9ce": "try { lease = store.claim(candidate.key(), workerId + \"-saga\", claimTtl).toCompletableFuture().join();",
     "c6a0cd312bbc2584aed6716cb3ea928f87b92f4021eebe00b839585ad635bea2": "} @Override public NodeTypeDescriptor descriptor() { return new NodeTypeDescriptor(BEHAVIOR, \"LLM prompt\", \"AI\", \"Sends the incoming payload to an operator-configured OpenAI-compatible model, \" + \"following a prompt, and continues with the model's answer.\", \"agent\", false, List.of( NodePropertyDescriptor.adapterId(\"provider\", \"Provider\", NodePropertyType.STRING, \"Name of a model profile this deployment declared in its environment \" + \"(RAVENROOT_LLM_PROFILE_<hex(name)>).\"), NodePropertyDescriptor.required(\"prompt\", \"Prompt\", NodePropertyType.TEXT, \"Instruction template. Supports {{payload}}, {{payload.a.b}} and \" + \"{{attributes.x}}.\"), NodePropertyDescriptor.optional(\"model\", \"Model\", NodePropertyType.STRING, \"Overrides the profile's model. The endpoint is not overridable.\", \"\"), NodePropertyDescriptor.optional(\"timeoutMs\", \"Deadline\", NodePropertyType.INTEGER, \"May only tighten the profile deadline.\", \"\"), NodePropertyDescriptor.optional(\"maxTokens\", \"Max tokens\", NodePropertyType.INTEGER, \"Upper bound on the generated answer, when the endpoint honours it.\", \"\"), NodePropertyDescriptor.optional(\"temperature\", \"Temperature\", NodePropertyType.STRING, \"Sampling temperature forwarded verbatim.\", \"\"), NodePropertyDescriptor.optional(\"topP\", \"Top-p\", NodePropertyType.STRING, \"Nucleus sampling parameter forwarded verbatim.\", \"\"), NodePropertyDescriptor.optional(\"seed\", \"Seed\", NodePropertyType.INTEGER, \"Sampling seed, when the endpoint honours it.\", \"\")), Set.of(\"ai\", \"external-provider\", \"network\", \"credential-reference\")) .withOutcomes(NodeOutcomeDescriptor.literal(\"continue\", \"The endpoint returned a completion, which becomes the outgoing payload. The \" + \"only outcome this node produces: anything else fails the node.\"));",
+    "c6a4212041738b9b19d6f222b775bfd8cfff8427a133d743fb40517a0a4650cc": "raise AssertionError(\"release fixture source tag requires a remote-free repository\")",
     "c6ad496f1f6d044b24707e82e509310d1c19a5fa081fd07592201d8bd234c5a6": "} private static final String INVENTORY_COLUMNS = \"SELECT p.process_instance_id, p.status, p.termination_reason, p.graph_version_pin, \" + \"p.revision, p.fencing_token, \" + \"p.lifecycle_generation, p.deployment_id, p.deployment_incarnation_id, \" + \"p.workload_id, p.correlation_id, \" + \"p.created_at_epoch_second, p.created_at_nano, p.updated_at_epoch_second, \" + \"p.updated_at_nano, p.retained_until_epoch_second, p.retained_until_nano, \" + \"l.worker_id AS lease_worker_id, l.expires_at_epoch_second AS lease_expires_at_epoch_second, \" + \"l.expires_at_nano AS lease_expires_at_nano, \" + \"(SELECT COUNT(*) FROM traversal t WHERE t.tenant_id = p.tenant_id \" + \"AND t.process_instance_id = p.process_instance_id) AS traversal_count, \" + \"(SELECT COUNT(*) FROM attempt a WHERE a.tenant_id = p.tenant_id \" + \"AND a.process_instance_id = p.process_instance_id AND a.status = 'PARKED') \" + \"AS parked_count \" + \"FROM process_instance p LEFT JOIN lease l ON l.tenant_id = p.tenant_id \" + \"AND l.process_instance_id = p.process_instance_id \";",
     "c6af7c3ad9c5cee43c4b4980f23f4cdd155c26ab2b291e4c7f1f09c2d0a9fab4": "int MAXIMUM_REASON_LENGTH = 256;",
     "c6b1c4bed6a7daa1650595d6b192f9cdea5f4dc13de9331297d7d14ea8a5bb56": "const refitPending = document_.layoutPendingRefit || Boolean(cy.scratch('_rrRefitAfterLayout'));",
@@ -659338,6 +659573,7 @@
     "ca74e219b3574b296f445d1b9b8223b8552535ad5a6826e8d88c802f1ec2f557": "(Path(\"other/src/main/java/Other.java\"), source, True),",
     "ca75a75842c036bcfcce51bde4441dc1321ce885b75067ba0ea7fc0ebbcd1d69": "log_path = Path(os.environ[\"FAKE_GH_LOG\"])",
     "ca7ccee19f6f7104da06d7fb335fb3012096ec32e40a9752e1fbe220011c83c6": "\"resources\": {\"$ref\": \"#/properties/resources\"}",
+    "ca837192a220653cda76f1c3d227b8824efc32feda639740a50382de6b6e3fd1": "f\"release fixture source tag {source_tag} has mismatched product bytes\")",
     "ca8da78ba154c88f68400506e1ed2b3f624b7f29a500c89d23c2e36fdc44ad62": "var directory = java.nio.file.Path.of(args[1]);",
     "ca91676a2e9a525cdedf4540ac889a52279f63b9204e1936bd05456455ad1efc": "const main = document.getElementById('main');",
     "ca93d052344fd82edf2b4a22814ff2bfc4d86b345cad92aa4e753c363565444d": "byte[] bytes = GithubValues.canonicalBase64(selected, 4 * 1024 * 1024);",
@@ -660067,6 +660303,7 @@
     "da90b02ca83ab35543fd2da36e6fc1563c068c347087ec6ae85e9c09e5abb628": "RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES: ${RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES:-}",
     "da913026594c7a3b4665ffbe608e9b9961abae406d45e7bf01b1f75314df445c": "public final class EnvironmentMailProfileResolver implements MailProfileResolver { enum Rejection { FIELD_COUNT, PORT_FORMAT, CONCURRENCY_FORMAT, HOST_BLANK, UNKNOWN_SECURITY_MODE, PORT_RANGE, CONCURRENCY_RANGE, CREDENTIAL_PAIRING, DUPLICATE_LIST_ENTRY, ALLOWED_FROM_EMPTY, ALLOWED_RECIPIENTS_EMPTY, DEFAULT_FROM_NOT_ALLOWED, RESERVED_DESTINATION, RECORD_POLICY } private static final Set<String> SECURITY_MODES = Set.of(\"SMTPS\", \"STARTTLS\", \"SMTP\");",
     "da9f29c607e1e7351009a3dc90ebc4d73a010c26a9a65e25fc771455ebbee4a2": "raise AssertionError(\"version normalization exceeded its bounded transition count\")",
+    "da9f40a4753c040ff54e81c86cf9efb8f646c24788a96f39c14daf37ead39454": "f\"release fixture source tag {source_tag} is not reachable from its source\")",
     "daa3f669592c54f1a975f376534d2f1457e9bb2b7aed23f9071c53a23dd4ab4d": "if helm_base --set-string \"$invalid\" >\"$TEMP_DIR/helm-invalid.out\" 2>&1; then",
     "daa6cf78191717ad653e61a935473dba67535b6eab39a76ee601f28e46436fc2": "attentionPollMillis: \"\"",
     "daac51126ddf02bf8c542d25b4c5eef5adf30d4ec16360330c641ebcf78260c6": "descriptor_path.write_text(original_descriptor, encoding=\"utf-8\")",
@@ -661086,6 +661323,7 @@
     "f16f645a6aa8ab0324bd38dc55387ce544b6ef33b90821177de6cbd92b787516": "maxEdges: \"\"",
     "f1735e2b9e202a3b814e8cb842cf506dd0d2df0ec86910120a4e7133798de11b": "\"path\": source.name, \"surface\": \"java\", \"expression\": \"429\", \"line\": 1,",
     "f175cd0bf80f1e3b83f44ba905130aab7c3423a6c017855b35a9a2e81d9a2166": "if ci_workflow.count(buildkit) != 1:",
+    "f1761229aac30c0e5ad5300dbc155e64b0f03ec4774e112a261954cc2afcaec4": "with self.assertRaisesRegex(AssertionError, \"mismatched product bytes\"):",
     "f18106445fd9902423fcb73e8028244956dbb2aa8e61cb74abfc99a437968ea5": "const operations = element('pre');",
     "f1833f34250d257040268dee19dc8aefedde161cf47ff7f5fdb9b0f93f250dbf": "old = [c for _, c in audit.java_source_candidates(relative, source) if c.role == \"interaction-websocket-default:max-message-bytes\"][0]",
     "f1875a307d9f5894ffff5c8441ee1a88169434e11803654c631b81bc78412e0a": "} private static final class ExternalResourceRefused extends XMLStreamException { private static final long serialVersionUID = 1L;",
@@ -661579,6 +661817,7 @@
     "fc3e0a5e566867a0bed370e664a5ec6945dcd004f7d9b3bc9ef20e5c9405e8b1": "public static final int FORMAT_VERSION_2 = 2;",
     "fc3fcbcfc1218c965034944a84ec5f06c9b9653c948696cd0f2ecd3b21038e62": "const use = doc.createElement('button');",
     "fc431c82059e2d57b9b276511a55dd7e0346f2c952d6291165584ee4ec62e2a1": "final class JdbcRuntime { static final int CLEANUP_LANES_PER_INVOCATION = 4;",
+    "fc45a4edfce17c70dff39357937d39cbc1457c60f7ec3180c52e7097f6465596": "\"\"\"Create or reuse a coherent source tag in a remote-free release fixture.\"\"\"",
     "fc46ab43700687800fb960f9305e46b53c245ead68e2958bcb57c10c9600c9e1": "} static JdbcParameters parse(Object raw, JdbcProfile profile, JdbcStatementProfile statement) { try { var limits = new PayloadLimits(profile.maxParameterBytes(), 5, profile.maxParameters() + 2, profile.maxParameters() * 3 + 4, profile.maxParameterBytes(), 64);",
     "fc4e382151042ca2dce611b7b61ba1691e35073110d9c4b288372cfe6ff2f1e9": "\"--labels\", '[\"release:minor\"]', \"--prior-prs-json\", str(prior_path),",
     "fc51787ee9064816efbbd2df717e3a00e6ebd394f7f9ce26b7c136051f276cbc": "const form = element('deployment-register-form');",
@@ -1155338,6 +1155577,250 @@
             "status": "retained",
             "classification": "test-fixture",
             "rationale": "This literal is confined to the isolated release-history fixture that proves fully validated causal transition selection; it grants no production runtime authority."
+          }
+        }
+      ]
+    },
+    {
+      "id": "release-080-published-tag-fixture-v1",
+      "issue": "#575",
+      "sourceRevision": "151d050b5fa5d0f738c7004b819d11691bc8c422",
+      "targetRevision": "5ac229a87ab77e772ed424efef894fc7bc558709",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "4c9293edaa4c28e7021eed15b2b3f4879909b57db700562fa40f65dd86cc0a3c",
+      "targetCandidateDigest": "31ff6d2c39e5623df280a9c2233c94bab16bcefd369dd7f9d33e0b60447ddd45",
+      "mappings": [
+        {
+          "fromId": "oc-01070a9c362f592632db",
+          "toId": "oc-73c86b2777ebcf207cda",
+          "approved": true,
+          "rationale": "The identical commit-command atom remains in the shared canonical-preparation assertion after the tagged and untagged cases were factored through it; only its test-fixture source location changed.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9567,
+            "afterLine": 9604,
+            "beforeEvidenceDigest": "d9f85eac354b6558fd2feec434481dd6a3e1ad7f3886f3fbb4fbad885a2941c9",
+            "afterEvidenceDigest": "d9f85eac354b6558fd2feec434481dd6a3e1ad7f3886f3fbb4fbad885a2941c9"
+          }
+        },
+        {
+          "fromId": "oc-0b8b7e82e1b590a19ce3",
+          "toId": "oc-4c954fa4d4e216eb64e5",
+          "approved": true,
+          "rationale": "The identical commit-command atom remains in the shared canonical-preparation assertion after the tagged and untagged cases were factored through it; only its test-fixture source location changed.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9572,
+            "afterLine": 9609,
+            "beforeEvidenceDigest": "955359af5cbee2cb6f2024d0427524133e0b864db9fe74a2c2162d58ea640986",
+            "afterEvidenceDigest": "955359af5cbee2cb6f2024d0427524133e0b864db9fe74a2c2162d58ea640986"
+          }
+        },
+        {
+          "fromId": "oc-1fdff8eefe0ea99ba174",
+          "toId": "oc-cc60b2144ea5632ab0d7",
+          "approved": true,
+          "rationale": "The same remote-free release-history fixture expression moved while published-tag coverage was added; its test-only authority is unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9567,
+            "afterLine": 9604,
+            "beforeEvidenceDigest": "d9f85eac354b6558fd2feec434481dd6a3e1ad7f3886f3fbb4fbad885a2941c9",
+            "afterEvidenceDigest": "d9f85eac354b6558fd2feec434481dd6a3e1ad7f3886f3fbb4fbad885a2941c9"
+          }
+        },
+        {
+          "fromId": "oc-380a1791551dab2a13a8",
+          "toId": "oc-db347c68053f9c61f842",
+          "approved": true,
+          "rationale": "The same remote-free release-history fixture expression moved while published-tag coverage was added; its test-only authority is unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9565,
+            "afterLine": 9602,
+            "beforeEvidenceDigest": "1aaa7fdfff6f6d21ad3c9c55243ab0be9575a1a3c29191260d81973e5bbfc18c",
+            "afterEvidenceDigest": "1aaa7fdfff6f6d21ad3c9c55243ab0be9575a1a3c29191260d81973e5bbfc18c"
+          }
+        },
+        {
+          "fromId": "oc-54234e8f628052ee0549",
+          "toId": "oc-c5b48385de8874812479",
+          "approved": true,
+          "rationale": "The identical commit-command atom remains in the shared canonical-preparation assertion after the tagged and untagged cases were factored through it; only its test-fixture source location changed.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9572,
+            "afterLine": 9609,
+            "beforeEvidenceDigest": "955359af5cbee2cb6f2024d0427524133e0b864db9fe74a2c2162d58ea640986",
+            "afterEvidenceDigest": "955359af5cbee2cb6f2024d0427524133e0b864db9fe74a2c2162d58ea640986"
+          }
+        },
+        {
+          "fromId": "oc-54847e84722031dc18d9",
+          "toId": "oc-ea6e7d6ca423f6db2c54",
+          "approved": true,
+          "rationale": "The same remote-free release-history fixture expression moved while published-tag coverage was added; its test-only authority is unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9565,
+            "afterLine": 9602,
+            "beforeEvidenceDigest": "1aaa7fdfff6f6d21ad3c9c55243ab0be9575a1a3c29191260d81973e5bbfc18c",
+            "afterEvidenceDigest": "1aaa7fdfff6f6d21ad3c9c55243ab0be9575a1a3c29191260d81973e5bbfc18c"
+          }
+        },
+        {
+          "fromId": "oc-62a5aa2c4340ec11ed4f",
+          "toId": "oc-378253ba382fe5f82417",
+          "approved": true,
+          "rationale": "The identical commit-command atom remains in the shared canonical-preparation assertion after the tagged and untagged cases were factored through it; only its test-fixture source location changed.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9567,
+            "afterLine": 9604,
+            "beforeEvidenceDigest": "d9f85eac354b6558fd2feec434481dd6a3e1ad7f3886f3fbb4fbad885a2941c9",
+            "afterEvidenceDigest": "d9f85eac354b6558fd2feec434481dd6a3e1ad7f3886f3fbb4fbad885a2941c9"
+          }
+        },
+        {
+          "fromId": "oc-7eca85dc263294daa2f2",
+          "toId": "oc-e159a2b75fb83bea3bce",
+          "approved": true,
+          "rationale": "The same remote-free release-history fixture expression moved while published-tag coverage was added; its test-only authority is unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9581,
+            "afterLine": 9618,
+            "beforeEvidenceDigest": "64f87bca73d95727aa23bd2b25c9fdb5c08ba8fbc95d4ce6f26c07bd4bb85bbe",
+            "afterEvidenceDigest": "64f87bca73d95727aa23bd2b25c9fdb5c08ba8fbc95d4ce6f26c07bd4bb85bbe"
+          }
+        },
+        {
+          "fromId": "oc-b055b8520966220ff6e2",
+          "toId": "oc-f3967205f88c67f2f980",
+          "approved": true,
+          "rationale": "The same remote-free release-history fixture expression moved while published-tag coverage was added; its test-only authority is unchanged.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_audit_operational_configuration.py",
+            "beforeLine": 9572,
+            "afterLine": 9609,
+            "beforeEvidenceDigest": "955359af5cbee2cb6f2024d0427524133e0b864db9fe74a2c2162d58ea640986",
+            "afterEvidenceDigest": "955359af5cbee2cb6f2024d0427524133e0b864db9fe74a2c2162d58ea640986"
+          }
+        }
+      ],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-15088b86fbedc6b011c0",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-224b9e133f3551a2ef0d",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-2f2e08c8590b6728b2ac",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-38735dfc4cdf8ba209fa",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-3a5e95447d15ebf179b9",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-49488e9dd3114cdc71e8",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-6d8c3778a03cc39dadd8",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-770b1210c098390be816",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-98c083fb5f7b2ff5d59d",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-a84f14a3a1810c580980",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-ecbaa98522cedb2b2e3e",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-f54fdd6cc75d4b04371e",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
+          }
+        },
+        {
+          "id": "oc-fb94b70f198b8ccc95a0",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This literal is confined to the remote-free release-history fixture that verifies immutable published-tag reuse and rejects polluted provenance; it grants no production authority."
           }
         }
       ]

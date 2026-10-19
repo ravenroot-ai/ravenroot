@@ -9494,8 +9494,12 @@ class VersionHistoryTopologyTest(unittest.TestCase):
         queue_base = self.git("rev-parse", "HEAD")
         queue = self.merge(queue_base, queue_base, branch)
         reverse = self.merge(mixed, mixed, pure)
-        for name, revision in (("branch", branch), ("reversed parents", reverse),
-                               ("pull request", pr), ("merge queue", queue)):
+        for name, revision in (
+                ("branch", branch),
+                ("reversed parents", reverse),
+                ("pull request", pr),
+                ("merge queue", queue),
+        ):
             with self.subTest(topology=name):
                 # Prove this fixture reproduces the parent-order/TREESAME trap: ordinary
                 # path-limited history hides the pure sibling in PR and queue checkouts.

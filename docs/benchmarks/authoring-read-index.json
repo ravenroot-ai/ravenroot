@@ -28,7 +28,7 @@
     "liveProviders": "none; in-process scripted HttpClient fixtures, no added latency; local Docker PostgreSQL and local SQLite",
     "hostContention": "benchmark job ran serially; idle editor/server processes were present; no dedicated hardware isolation",
     "rss": "process_rss_bytes: instantaneous test-JVM resident set from ps RSS (KiB converted to bytes), recorded after warm/concurrent verification; not process peak or per-operation allocation",
-    "publicationDataset": "separate20-draft/20-release/20-publication workload within200 cap;10 warm/restart list samples per combination; publication-only unpublish1sample; fresh first restart page asserts3provider+1catalog/no bodies before warming loops"
+    "publicationDataset": "Separate 20-draft/20-release/20-publication workload within the 200-entry cap; 10 warm/restart list samples per combination; publication-only unpublish has 1 sample; the first restart page asserts 3 provider calls, 1 catalog call and no bodies before warming loops."
   },
   "baseline": [
     {

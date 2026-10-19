@@ -14831,7 +14831,7 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/BoundedHttpResponseBodyTest.java"):
         "8de6368ff8a8bfc6714b6ba993747c844966cfc870d2069467a3cc85f4f71edb",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphAuthoringConfigurationTest.java"):
-        "365e63c8229ee79416ebb8c940462cb4043af010f3a332c86e6009bb7f9b3894",
+        "3ae7718b20c822c724caa7cf80cec8a6167ac824e3e27027fa413f78216cd309",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalogTest.java"):
         "327f6232c54a5373ea74c8535fa9c92d4685686a276620fb0e73093550e0cef9",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphReleaseMetadataTest.java"):

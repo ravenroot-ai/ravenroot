@@ -1154530,6 +1154530,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-575-release-080-docker-build-context-v1",
+      "issue": "#575",
+      "sourceRevision": "17ea6e1edb4dcdf12d513b39c1dbe375b0bed752",
+      "targetRevision": "0fc7c5155514df8bf2bb4e325f996c2ab3edc561",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "47c10d87c8b8bf8058b3b8003e47d61cca4162f5a9e4e76f729e2d2157274c53",
+      "targetCandidateDigest": "ad1b7fcfab167890b917c4c56c3edb84d9f03ca954f0c5a912d2f33044995082",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1231259,7 +1231271,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "b162c48814a770a5dce0eb9be5e3fef42d2dea023aac81c290f2ced11c26864c"
+    "digest": "a9e498d458e6769e7ae55d32b12d8baccaf1f6d089892e9d55eb31c442722789"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {

@@ -1276,8 +1276,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Production image declares JVM, port, and healthcheck defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Production image declares JVM, port, and healthcheck defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1309,8 +1309,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1605,8 +1605,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1675,8 +1675,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",

@@ -1157850,6 +1157850,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "release-080-finalization-test-fixture-v1",
+      "issue": "#575",
+      "sourceRevision": "b955566f10287bcc22fc4815a48b43c4b4b9b2fa",
+      "targetRevision": "8c8cb43e0ac1cce343615ea3e201657853e1272d",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "74beed206bbba05d85d68ac716ccba7b2b6280adda2c25f0171bea42fee95694",
+      "targetCandidateDigest": "7d124ba32c7a9a9f05a3d0a12c21ed5416d40b1b7f469858ec95d27948f15540",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

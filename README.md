@@ -76,12 +76,12 @@ published prerelease is `0.6.1-alpha.1`:
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-core</artifactId>
-    <version>0.8.0-alpha.1</version>
+    <version>0.7.0-alpha.1</version>
   </dependency>
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-pekko</artifactId>
-    <version>0.8.0-alpha.1</version>
+    <version>0.7.0-alpha.1</version>
     <scope>runtime</scope>
   </dependency>
 </dependencies>

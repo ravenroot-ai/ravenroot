@@ -255,7 +255,15 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_TRUSTED_TLS_TERMINATOR` | strict Boolean; `false` |
 | `RAVENROOT_PUBLIC_ORIGIN` | exact HTTPS origin required only with a trusted TLS terminator; blank |
 | `RAVENROOT_UI_CONNECT_ORIGINS` | comma-separated exact additional UI connect origins; blank |
+| `RAVENROOT_UI_FRAME_ANCESTORS` | `self` and/or comma-separated canonical HTTP(S) origins allowed to frame the complete Workbench; blank denies framing |
 | `RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS` | positive whole seconds; `30` |
+
+`RAVENROOT_UI_FRAME_ANCESTORS` changes only the browser framing response policy. It does not grant
+CORS access, authenticate the iframe, widen API authorization, or alter the limited-authority
+embedded viewer. Invalid origins, empty entries, wildcards, paths, credentials, header characters,
+and noncanonical ports refuse startup. See
+[Embed Ravenroot](../integrator-guide/embed-viewer-quickstart.md#embed-the-complete-authenticated-workbench)
+for complete host and startup examples.
 
 The optional interaction WebSocket has one typed property/environment authority and is disabled by
 default. Its complete limits, protocol contract, and secure proxy topology are documented in

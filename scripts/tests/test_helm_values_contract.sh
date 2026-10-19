@@ -23,6 +23,7 @@ helm_base \
   --set image.pullPolicy=Always \
   --set service.type=NodePort \
   --set service.port=9090 \
+  --set-string uiFrameAncestors=self \
   --set resources.requests.cpu=200m \
   --set resources.requests.memory=384Mi \
   --set-string resources.limits.cpu=2 \
@@ -112,6 +113,9 @@ for document_path, expected in [(Path(sys.argv[2]), values), (Path(sys.argv[3]),
         raise SystemExit("the pod HTTP port must remain the fixed image contract port 8080")
     if env.get("RAVENROOT_PORT") != "8080" or env.get("RAVENROOT_BIND_ADDRESS") != "0.0.0.0":
         raise SystemExit("the chart must retain the exact image port and bind-address mirrors")
+    expected_ancestors = "" if expected is not None else "self"
+    if env.get("RAVENROOT_UI_FRAME_ANCESTORS") != expected_ancestors:
+        raise SystemExit("the chart must render the Workbench frame-ancestor startup setting")
     if service_doc["spec"]["ports"] != [{"name": "http", "port": service_doc["spec"]["ports"][0]["port"], "targetPort": "http", "protocol": "TCP"}]:
         raise SystemExit("the Service must target the named pod HTTP port")
     mounts = {item["name"]: item["mountPath"] for item in container["volumeMounts"]}

@@ -7,6 +7,93 @@ import { Transform } from 'node:stream';
 
 const backendTokens = new WeakMap();
 
+function punycodeDigit(value) {
+  if (value >= 'a' && value <= 'z') return value.charCodeAt(0) - 97;
+  if (value >= '0' && value <= '9') return value.charCodeAt(0) - 22;
+  return -1;
+}
+
+function adaptPunycodeBias(delta, outputSize, firstCodePoint) {
+  delta = firstCodePoint ? Math.floor(delta / 700) : Math.floor(delta / 2);
+  delta += Math.floor(delta / outputSize);
+  let adjustment = 0;
+  while (delta > 455) {
+    delta = Math.floor(delta / 35);
+    adjustment += 36;
+  }
+  return adjustment + Math.floor(36 * delta / (delta + 38));
+}
+
+function validPunycodeLabel(encoded) {
+  if (!encoded) return false;
+  const decoded = [];
+  const delimiter = encoded.lastIndexOf('-');
+  let cursor = 0;
+  if (delimiter >= 0) {
+    for (; cursor < delimiter; cursor += 1) decoded.push(encoded.charCodeAt(cursor));
+    cursor += 1;
+  }
+  let codePoint = 128;
+  let delta = 0;
+  let bias = 72;
+  while (cursor < encoded.length) {
+    const previousDelta = delta;
+    let weight = 1;
+    for (let thresholdBase = 36; ; thresholdBase += 36) {
+      if (cursor >= encoded.length) return false;
+      const digit = punycodeDigit(encoded[cursor++]);
+      if (digit < 0 || digit > Math.floor((Number.MAX_SAFE_INTEGER - delta) / weight)) return false;
+      delta += digit * weight;
+      const threshold = thresholdBase <= bias ? 1 : Math.min(thresholdBase - bias, 26);
+      if (digit < threshold) break;
+      if (weight > Math.floor(Number.MAX_SAFE_INTEGER / (36 - threshold))) return false;
+      weight *= 36 - threshold;
+    }
+    const outputSize = decoded.length + 1;
+    bias = adaptPunycodeBias(delta - previousDelta, outputSize, previousDelta === 0);
+    const increment = Math.floor(delta / outputSize);
+    if (increment > 0x10ffff - codePoint) return false;
+    codePoint += increment;
+    delta %= outputSize;
+    if (codePoint <= 0x9f || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+        || (codePoint >= 0xfdd0 && codePoint <= 0xfdef) || (codePoint & 0xfffe) === 0xfffe) return false;
+    decoded.splice(delta, 0, codePoint);
+    delta += 1;
+  }
+  return decoded.some(value => value >= 0x80);
+}
+
+function configuredFrameAncestors(declared) {
+  if (declared === undefined || declared === null || String(declared).trim() === '') return [];
+  const ancestors = new Set();
+  for (const item of String(declared).split(',')) {
+    const value = item.trim();
+    if (!value) throw new Error('RAVENROOT_UI_FRAME_ANCESTORS must not contain empty entries');
+    if (value === 'self') {
+      ancestors.add("'self'");
+      continue;
+    }
+    let origin;
+    try { origin = new URL(value); }
+    catch { throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins'); }
+    if (origin.hostname.startsWith('[')) {
+      throw new Error('RAVENROOT_UI_FRAME_ANCESTORS does not support explicit IPv6 origins because CSP cannot represent them; use self for same-origin framing or a DNS hostname');
+    }
+    // Each nonempty DNS label must use only the characters CSP host-sources can represent.
+    const cspHostname = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/.test(origin.hostname);
+    // Node URL releases differ on malformed A-labels, so enforce the shared decoder explicitly.
+    const validPunycode = origin.hostname.split('.').every(label => !label.startsWith('xn--')
+      || validPunycodeLabel(label.substring(4)));
+    if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
+        || origin.pathname !== '/' || origin.search || origin.hash || origin.port === '0'
+        || origin.hostname.endsWith('.') || !cspHostname || !validPunycode || origin.origin !== value) {
+      throw new Error('RAVENROOT_UI_FRAME_ANCESTORS entries must be self or canonical HTTP(S) origins with CSP-compatible DNS or IPv4 hosts');
+    }
+    ancestors.add(value);
+  }
+  return [...ancestors].sort();
+}
+
 export function configuration(env = process.env) {
   const prefix = env.RAVENROOT_UI_PREFIX || '';
   if (prefix && !/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(prefix)) {
@@ -40,7 +127,9 @@ export function configuration(env = process.env) {
     throw new Error('UI_BACKEND_TOKEN_CONFIGURATION_REFUSED: provide a valid bearer value with a configured backend URL');
   }
   const backendPrefix = upstream?.pathname.replace(/\/$/, '') || '';
-  const config = { prefix, upstream, backendPrefix, port, headerTimeoutMs: 15000, root: resolve(env.RAVENROOT_UI_ROOT || '/opt/ravenroot/ui') };
+  const config = { prefix, upstream, backendPrefix, port, headerTimeoutMs: 15000,
+    root: resolve(env.RAVENROOT_UI_ROOT || '/opt/ravenroot/ui'),
+    frameAncestors: configuredFrameAncestors(env.RAVENROOT_UI_FRAME_ANCESTORS) };
   if (token !== undefined) backendTokens.set(config, token);
   return config;
 }
@@ -104,13 +193,17 @@ function browserMayUseDefault(req) {
 export function createServer(configuration) {
   const defaultToken = backendTokens.get(configuration);
   // Snapshot authority before accepting traffic. Mutable configuration objects cannot retarget it.
-  const config = { ...configuration, upstream: configuration.upstream ? new URL(configuration.upstream) : null };
+  const config = { ...configuration, upstream: configuration.upstream ? new URL(configuration.upstream) : null,
+    frameAncestors: [...configuration.frameAncestors] };
+  const frameAncestorPolicy = config.frameAncestors.length ? config.frameAncestors.join(' ') : "'none'";
+  const pluginFrameAncestorPolicy = [...new Set(["'self'", ...config.frameAncestors])].join(' ');
+  const commonCsp = `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors ${frameAncestorPolicy}; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'`;
   const server = http.createServer({ requestTimeout: 30000, headersTimeout: 10000 }, (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Frame-Options', 'DENY');
+    if (!config.frameAncestors.length) res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'");
+    res.setHeader('Content-Security-Policy', commonCsp);
     if (req.url === '/health' || req.url === '/ready') {
       res.setHeader('Content-Type', 'application/json');
       res.end('{"status":"UP"}'); return;
@@ -178,6 +271,13 @@ export function createServer(configuration) {
             }
           }
           replyHeaders['cache-control'] = 'no-store';
+          // A backend response with its own framing contract remains authoritative. This is
+          // required for the separately authorized embedded viewer, whose CSP names one registered
+          // parent and deliberately omits X-Frame-Options.
+          if (replyHeaders['x-frame-options'] === undefined
+              && String(replyHeaders['content-security-policy'] || '').includes('frame-ancestors ')) {
+            res.removeHeader('X-Frame-Options');
+          }
           res.writeHead(response.statusCode, replyHeaders);
           res.flushHeaders();
           if (defaultToken) {
@@ -202,6 +302,16 @@ export function createServer(configuration) {
     let size;
     try { const stat = statSync(path); if (!stat.isFile()) throw new Error(); size = stat.size; }
     catch { res.writeHead(404).end(); return; }
+    if (path.endsWith('/index.html')) {
+      // The Workbench owns one same-origin nested document: the opaque plugin sandbox below.
+      res.setHeader('Content-Security-Policy', commonCsp.replace("frame-src 'none'", "frame-src 'self'"));
+    } else if (path.endsWith('/frontend-plugin-sandbox.html')) {
+      // Every ancestor must satisfy CSP, so a framed Workbench's validated ancestors are carried
+      // through alongside self. The response sandbox keeps the document opaque even if an allowed
+      // portal addresses it directly; every network and nesting channel remains closed.
+      res.removeHeader('X-Frame-Options');
+      res.setHeader('Content-Security-Policy', `default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors ${pluginFrameAncestorPolicy}; form-action 'none'; script-src 'self' blob:; style-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; worker-src 'none'; sandbox allow-scripts`);
+    }
     res.setHeader('Content-Type', types[extname(path)] || 'application/octet-stream');
     res.setHeader('Cache-Control', path.endsWith('/index.html') ? 'no-store' : 'public, max-age=3600');
     if (path.endsWith('/index.html')) {

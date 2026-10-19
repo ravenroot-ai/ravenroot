@@ -27,6 +27,45 @@ test('validates runtime configuration, refuses credentials and insecure TLS', ()
   assert.ok(!diagnostic.includes(sentinel));
   for (const value of ['/a/', '/a/../b', '/a"', '//a']) assert.throws(() => configuration({ RAVENROOT_UI_PREFIX: value }));
   assert.throws(() => configuration({ NODE_TLS_REJECT_UNAUTHORIZED: '0' }));
+
+  assert.deepEqual(configuration({}).frameAncestors, []);
+  assert.deepEqual(configuration({ RAVENROOT_UI_FRAME_ANCESTORS: ' \t ' }).frameAncestors, []);
+  assert.deepEqual(configuration({
+    RAVENROOT_UI_FRAME_ANCESTORS: 'https://portal.example,http://localhost:4173,self,https://portal.example',
+  }).frameAncestors, ["'self'", 'http://localhost:4173', 'https://portal.example']);
+  for (const value of ['self', 'https://portal.example', 'https://1.example',
+    'https://0x7f.example', 'https://192.168.1.1', 'http://127.0.0.1:8080',
+    'https://portal.123corp', 'https://example.123abc',
+    'https://example.0xg', 'https://example.0x1g', 'https://123corp',
+    'https://portal.123-corp:444', 'https://under-score.example',
+    'https://-portal.example', 'https://portal-.example',
+    'https://xn--bcher-kva.123corp',
+    'https://xn--fa-hia.123corp']) {
+    assert.doesNotThrow(() => configuration({ RAVENROOT_UI_FRAME_ANCESTORS: value }), value);
+  }
+  for (const value of ['*', "'self'", 'self,', 'https://portal.example/path',
+    'https://user@portal.example', 'https://portal.example?x=1', 'https://portal.example#fragment',
+    'https://portal.example:443', 'https://PORTAL.example', 'https://portal.example.',
+    'https://portal..', 'https://%70ortal.123corp', 'https://portal.%31%32%33corp',
+    'https://portal.éxample', 'https://xn--a', 'https://xn--0', 'https://xn--abc',
+    'https://under_score.example', 'https://portal..example',
+    'https://.portal.example', 'https://[::1]:8443', 'https://[2001:db8::1]:8443',
+    'http://127.1', 'http://2130706433', 'http://017700000001',
+    'http://0x', 'http://0x7f000001', 'http://0X7F000001', 'http://0x7f.0.0.1',
+    'http://0177.0.0.1', 'http://0x7f.01.0x0.1',
+    'https://example.1', 'https://example.0x1', 'https://[0:0:0:0:0:0:0:1]',
+    'https://portal.example:0', 'https://portal.example:65536',
+    'https://portal.123corp:0444', 'ftp://portal.example',
+    'https://portal.example;frame-ancestors *', 'https://portal.123corp;frame-ancestors*',
+    'https://portal.example\r\nX-Frame-Options: ALLOWALL']) {
+    let error;
+    try { configuration({ RAVENROOT_UI_FRAME_ANCESTORS: value }); } catch (caught) { error = caught; }
+    assert.ok(error, value);
+    assert.ok(!String(error.stack).includes(value), value);
+  }
+  assert.throws(() => configuration({ RAVENROOT_UI_FRAME_ANCESTORS: 'https://[::1]:8443' }),
+    error => /explicit IPv6/.test(error.message) && /use self/.test(error.message)
+      && /DNS hostname/.test(error.message));
 });
 
 for (const [prefix, backendPrefix] of [['', ''], ['/workspace/ui', '/embedded/ravenroot']]) test(`real HTTP/static/API/incremental SSE, UI prefix ${prefix || '/'}`, async () => {
@@ -154,6 +193,57 @@ test('unset upstream serves static UI safely and returns explicit 503 for every 
       assert.equal((await response.json()).error, 'UI_BACKEND_NOT_CONFIGURED');
     }
   } finally { await stop(server); rmSync(root, { recursive: true }); }
+});
+
+test('Workbench framing is opt-in and the plugin sandbox keeps its narrower policy', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ravenroot-ui-frames-'));
+  writeFileSync(join(root, 'index.html'), '<input id="service-url" value=""><main>Workbench</main>');
+  writeFileSync(join(root, 'frontend-plugin-sandbox.html'), '<!doctype html><title>Plugin sandbox</title>');
+  const closedServer = createServer(configuration({ RAVENROOT_UI_ROOT: root }));
+  const closed = await listen(closedServer);
+  const framedServer = createServer(configuration({ RAVENROOT_UI_ROOT: root,
+    RAVENROOT_UI_FRAME_ANCESTORS: 'self,https://portal.example,http://localhost:4173' }));
+  const framed = await listen(framedServer);
+  try {
+    const denied = await fetch(closed + '/');
+    assert.equal(denied.headers.get('x-frame-options'), 'DENY');
+    assert.match(denied.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+
+    for (const path of ['/', '/health', '/missing']) {
+      const response = await fetch(framed + path);
+      assert.equal(response.headers.get('x-frame-options'), null, path);
+      assert.match(response.headers.get('content-security-policy'),
+        /frame-ancestors 'self' http:\/\/localhost:4173 https:\/\/portal\.example/, path);
+    }
+
+    const sandbox = await fetch(framed + '/frontend-plugin-sandbox.html');
+    assert.equal(sandbox.headers.get('x-frame-options'), null);
+    assert.match(sandbox.headers.get('content-security-policy'),
+      /frame-ancestors 'self' http:\/\/localhost:4173 https:\/\/portal\.example/);
+    assert.match(sandbox.headers.get('content-security-policy'), /connect-src 'none'/);
+    assert.match(sandbox.headers.get('content-security-policy'), /sandbox allow-scripts/);
+  } finally {
+    await stop(closedServer); await stop(framedServer); rmSync(root, { recursive: true });
+  }
+});
+
+test('UI-only proxy preserves the embedded viewer framing authority', async () => {
+  const viewerCsp = "default-src 'none'; frame-ancestors https://viewer-host.example; sandbox allow-scripts";
+  const backend = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html', 'Content-Security-Policy': viewerCsp });
+    res.end('<!doctype html><title>Viewer</title>');
+  });
+  const backendOrigin = await listen(backend);
+  const ui = createServer(configuration({ RAVENROOT_UI_BACKEND_URL: backendOrigin }));
+  const uiOrigin = await listen(ui);
+  try {
+    const response = await fetch(uiOrigin + '/v1/embed/launch');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-security-policy'), viewerCsp);
+    assert.equal(response.headers.get('x-frame-options'), null);
+  } finally {
+    await stop(ui); await stop(backend);
+  }
 });
 
 test('explicit loopback targets cannot point at the configured UI port', () => {

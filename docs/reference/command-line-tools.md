@@ -129,7 +129,8 @@ and only process state can be checked. Configure the Java command, port, and log
 requires `RAVENROOT_AUTH_LOCAL_TOKEN` or the OIDC identity settings described in
 [Configuration](configuration.md). Browser and proxy deployments also use
 `RAVENROOT_BROWSER_ALLOWED_ORIGINS`, `RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS`,
-`RAVENROOT_UI_CONNECT_ORIGINS`, `RAVENROOT_TRUSTED_TLS_TERMINATOR`, and
+`RAVENROOT_UI_CONNECT_ORIGINS`, `RAVENROOT_UI_FRAME_ANCESTORS`,
+`RAVENROOT_TRUSTED_TLS_TERMINATOR`, and
 `RAVENROOT_PUBLIC_ORIGIN`. Program execution requires `RAVENROOT_ALLOWED_TOOLS=program.execute`;
 maker-checker artifact approval is separately enabled with `RAVENROOT_ARTIFACT_DUAL_CONTROL=true`
 and defaults to false.

@@ -23,6 +23,8 @@ spec:
           env:
             - {name: RAVENROOT_UI_PREFIX, value: /ravenroot}
             - {name: RAVENROOT_UI_BACKEND_URL, value: "http://existing-backend.application.svc.cluster.local:8080/automation"}
+            # This same-origin portal serves the host page and Workbench below one HTTPS origin.
+            - {name: RAVENROOT_UI_FRAME_ANCESTORS, value: self}
           ports: [{name: http, containerPort: 8080}]
           startupProbe:
             httpGet: {path: /health, port: http}

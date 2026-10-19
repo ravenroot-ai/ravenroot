@@ -43,6 +43,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -189,6 +190,24 @@ class EmbeddedGraphAuthoringBootstrapTest {
                 assertFalse(failure.toString().contains("embedded-fixture"), failure.toString());
                 assertPortCanBind(port);
             }
+        }
+        int port = availablePort();
+        try (var engine = new PekkoExecutionEngine("embedded-resolver-failure-" + UUID.randomUUID())) {
+            var server = new RavenrootServer(application(engine, true),
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), port), null,
+                    new DisabledLoopbackAuthenticator());
+            var resolverFailure = new IllegalStateException(
+                    "Git graph authoring credential is unavailable",
+                    new IllegalArgumentException("embedded-fixture-secret-cause"));
+            resolverFailure.addSuppressed(new IllegalArgumentException("embedded-fixture-secret-suppressed"));
+            var failure = assertThrows(IllegalStateException.class,
+                    () -> server.configureGraphAuthoring(EmbeddedGraphAuthoringConfiguration.of(
+                            configuration(), ignored -> { throw resolverFailure; })));
+            assertEquals("Git graph authoring credential is unavailable", failure.getMessage());
+            assertNull(failure.getCause());
+            assertEquals(0, failure.getSuppressed().length);
+            assertFalse(failure.toString().contains("embedded-fixture-secret"), failure.toString());
+            assertPortCanBind(port);
         }
     }
 

@@ -109,10 +109,6 @@ public final class EmbeddedGraphAuthoringConfiguration {
                 }
             }
         } catch (RuntimeException failure) {
-            if (failure instanceof IllegalStateException
-                    && "Git graph authoring credential is unavailable".equals(failure.getMessage())) {
-                throw failure;
-            }
             throw unavailableCredential();
         }
     }

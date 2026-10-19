@@ -14740,7 +14740,7 @@ GRAPH_AUTHORING_PUBLISHER_PATH = Path("scripts/publish-graph-artifacts.py")
 
 GRAPH_AUTHORING_FILE_PROOFS = {
     GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH:
-        "a90c00ea16774c22ccb898eba76fd7e59672c84c6a67481f33c7e7fd01ceea37",
+        "362b4ab765803b46f5ac6a1082edde10e6439a00fac880b30e3e4e5a2de12be3",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): "c059c79e39ad04c4352057d227a8719532493cdf64b3bcbfdefb715fbdfb3cd5",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "36c56d5a54111abdbe2a1e6b442e7827dd023ce18e86a9fff917690a238e34d6",
     Path("docs/examples/graph-authoring/gitlab-ci.yml"): "d49fa1887422a5bf726ad2c55e08b9f29185438314b626d9fd7e5feeb9c268b7",
@@ -14792,7 +14792,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
     GRAPH_AUTHORING_EMBEDDED_TEST_PATH:
-        "d9937a8a62e878f7979aeb635e0ced320e3e4ef568f327b94558626b63ffdbc6",
+        "a5b56a3f2c1794b2252ebc748c2419900c8887ec4c5eaae60d8554beb9c38a8e",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): "0ec29db6cab49b7ad89853e8201b6515b9f8619798fccee11c2c012e56fa95ea",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
         "5f00033d6093669f0dbb8f41ab188eb4e19650eb88e0a4e7ef370f16ad4306e8",
@@ -14833,7 +14833,7 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
         "36b332cb270fea42c7f84b21c22238730456e4a77693c870fddc3edba4e806e7",
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
      "requireCredentialAvailable"):
-        "a6d534cae644e6c373390ab748242da5e917567866bb4ac8b3ab1a97cab32217",
+        "a68b4baa15f401f8d904680e0429c934d5628d46f58a6c496bab91fa7efb1bda",
     (GRAPH_AUTHORING_MAIN_PATH, "RavenrootServerMain", "run"):
         "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "configureGraphAuthoring"):

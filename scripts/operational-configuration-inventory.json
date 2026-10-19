@@ -1152353,6 +1152353,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-578-credential-failure-audit-20261019-v2",
+      "issue": "#578",
+      "sourceRevision": "aa0d3bd43ff479e77d37bc06ff821ce15d4e465f",
+      "targetRevision": "48f792cd0c968697d2fbe5bc3ad2cc53de84619d",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "8306e9779f8f2ebbaad029d99be1a5d482512ec1f15e7d5db356a84bb563e2b8",
+      "targetCandidateDigest": "f16a8610b78a396b84f8ecc02f6cc58d456fe9c70ddbac12234b4bbcd1aa9541",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1233597,7 +1233609,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java",
-          "digest": "a90c00ea16774c22ccb898eba76fd7e59672c84c6a67481f33c7e7fd01ceea37"
+          "digest": "362b4ab765803b46f5ac6a1082edde10e6439a00fac880b30e3e4e5a2de12be3"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/BoundedHttpResponseBody.java",
@@ -1233649,7 +1233661,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/EmbeddedGraphAuthoringBootstrapTest.java",
-          "digest": "d9937a8a62e878f7979aeb635e0ced320e3e4ef568f327b94558626b63ffdbc6"
+          "digest": "a5b56a3f2c1794b2252ebc748c2419900c8887ec4c5eaae60d8554beb9c38a8e"
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java",
@@ -1233731,7 +1233743,7 @@
       "javaMethodDigests": {
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.fromEnvironment": "bed301e4c06fd86473d366d7c70be85682dd580002223f1b08d3c55199963ac1",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.of": "36b332cb270fea42c7f84b21c22238730456e4a77693c870fddc3edba4e806e7",
-        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.requireCredentialAvailable": "a6d534cae644e6c373390ab748242da5e917567866bb4ac8b3ab1a97cab32217",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.requireCredentialAvailable": "a68b4baa15f401f8d904680e0429c934d5628d46f58a6c496bab91fa7efb1bda",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java#RavenrootServerMain.run": "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.configureGraphAuthoring": "88408f397407131e0898ee913cf595d12c1766203b8d09ce31a31ce267e8cd00",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.start": "331ee9c47489d9cd62fec499e63c30266cae473b5f5d2ea6a46ca89cb1c05272",

@@ -122587,7 +122587,7 @@
     {
       "id": "oc-86ec24b91c7449c418be",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 665,
+      "line": 670,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "graphExecutionLimits",
@@ -122605,7 +122605,7 @@
     {
       "id": "oc-a68d837bf511cde6b728",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 679,
+      "line": 684,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "programAuthoringLimits",
@@ -122621,7 +122621,7 @@
     {
       "id": "oc-243ee3fb5526e4f51793",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 820,
+      "line": 825,
       "symbol": "activateProgramArtifact",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122637,7 +122637,7 @@
     {
       "id": "oc-6dec0a3906cffaa4ab9d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 822,
+      "line": 827,
       "symbol": "activateProgramArtifact",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122653,7 +122653,7 @@
     {
       "id": "oc-e80755c43d1b24d66d4f",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 822,
+      "line": 827,
       "symbol": "activateProgramArtifact",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122669,7 +122669,7 @@
     {
       "id": "oc-199cdfb2f0c3b2bc5711",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 825,
+      "line": 830,
       "symbol": "activateProgramArtifact",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -122685,7 +122685,7 @@
     {
       "id": "oc-0ac3d6b70e699c7434eb",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 826,
+      "line": 831,
       "symbol": "activateProgramArtifact",
       "kind": "property-binding",
       "role": "ravenroot.program.payloadDigest",
@@ -122701,7 +122701,7 @@
     {
       "id": "oc-5633324a5dcf8f742a09",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 973,
+      "line": 978,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.digestFormat",
@@ -122717,7 +122717,7 @@
     {
       "id": "oc-f21e86ac333e9d880b35",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 984,
+      "line": 989,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122735,7 +122735,7 @@
     {
       "id": "oc-a35ea52a7d68498116e3",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 984,
+      "line": 989,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122753,7 +122753,7 @@
     {
       "id": "oc-db3c83b8a42bd2ff8769",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 984,
+      "line": 989,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -122769,7 +122769,7 @@
     {
       "id": "oc-b29bc94bb970f4cbefbf",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 985,
+      "line": 990,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122787,7 +122787,7 @@
     {
       "id": "oc-67dea8d9cc0d391132e7",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 985,
+      "line": 990,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122805,7 +122805,7 @@
     {
       "id": "oc-1581d10568bcc2d16e1f",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 985,
+      "line": 990,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.payloadDigest",
@@ -122821,7 +122821,7 @@
     {
       "id": "oc-06d013d0303f2ff20895",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 996,
+      "line": 1001,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -122837,7 +122837,7 @@
     {
       "id": "oc-1377543e9545904d69ae",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1056,
+      "line": 1061,
       "symbol": "catch",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -122853,7 +122853,7 @@
     {
       "id": "oc-9c03470f47fa93f6fc2c",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1057,
+      "line": 1062,
       "symbol": "catch",
       "kind": "property-binding",
       "role": "ravenroot.program.payloadDigest",
@@ -122869,7 +122869,7 @@
     {
       "id": "oc-36015132ceabd984f796",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1063,
+      "line": 1068,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122887,7 +122887,7 @@
     {
       "id": "oc-ab46d6e79a37d169af02",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1063,
+      "line": 1068,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122905,7 +122905,7 @@
     {
       "id": "oc-91e80bd8ad594a9ecaa7",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1210,
+      "line": 1215,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.digestFormat",
@@ -122921,7 +122921,7 @@
     {
       "id": "oc-e5b8535d9326cf51d46d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1221,
+      "line": 1226,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122939,7 +122939,7 @@
     {
       "id": "oc-6db386ed0c189a0fa9a3",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1221,
+      "line": 1226,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122957,7 +122957,7 @@
     {
       "id": "oc-20b21bd2c944e8afebb0",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1221,
+      "line": 1226,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -122973,7 +122973,7 @@
     {
       "id": "oc-4de831fe7ec2c66a5f5a",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1222,
+      "line": 1227,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -122991,7 +122991,7 @@
     {
       "id": "oc-2f2f5e423979f041f17a",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1222,
+      "line": 1227,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -123009,7 +123009,7 @@
     {
       "id": "oc-3e3658902a2df99fa40d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1222,
+      "line": 1227,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.payloadDigest",
@@ -123025,7 +123025,7 @@
     {
       "id": "oc-3bef507a43b20ca8895b",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1231,
+      "line": 1236,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -123041,7 +123041,7 @@
     {
       "id": "oc-8ed0d39907d055a321db",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1236,
+      "line": 1241,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -123057,7 +123057,7 @@
     {
       "id": "oc-8f4972ec07d0258c9a1d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1237,
+      "line": 1242,
       "symbol": "if",
       "kind": "property-binding",
       "role": "ravenroot.program.payloadDigest",
@@ -123073,7 +123073,7 @@
     {
       "id": "oc-4a2fdaacbdbab687ddce",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1391,
+      "line": 1396,
       "symbol": "inspectGraphMl",
       "kind": "operational-declaration",
       "role": "bytes",
@@ -123089,7 +123089,7 @@
     {
       "id": "oc-4ab3379c3727ffee4f5d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1417,
+      "line": 1422,
       "symbol": "for",
       "kind": "operational-declaration",
       "role": "language",
@@ -123105,7 +123105,7 @@
     {
       "id": "oc-d148b6247a5b792cf63c",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1445,
+      "line": 1450,
       "symbol": "programArtifactCompatible",
       "kind": "property-binding",
       "role": "ravenroot.program.compatibilityFingerprint",
@@ -123121,7 +123121,7 @@
     {
       "id": "oc-d90fb1706d573146bf39",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1481,
+      "line": 1486,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "settlement",
@@ -123136,7 +123136,7 @@
     {
       "id": "oc-f97053845be90daf1c12",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1687,
+      "line": 1692,
       "symbol": "derivedRequestFingerprint",
       "kind": "operational-declaration",
       "role": "attemptId",
@@ -123151,7 +123151,7 @@
     {
       "id": "oc-0f72c5b804c422675f9c",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 1706,
+      "line": 1711,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "settlement",
@@ -123166,7 +123166,7 @@
     {
       "id": "oc-5a68946f004c6340821b",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 3390,
+      "line": 3395,
       "symbol": "deployment",
       "kind": "operational-declaration",
       "role": "graphBytes",
@@ -123182,7 +123182,7 @@
     {
       "id": "oc-d0e947ccf540d38e537d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 4042,
+      "line": 4047,
       "symbol": "requireTenant",
       "kind": "fixed-declaration",
       "role": "LOCAL_ID",
@@ -123200,7 +123200,7 @@
     {
       "id": "oc-c2ef6da38ace43e5331d",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 4099,
+      "line": 4104,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
@@ -123218,7 +123218,7 @@
     {
       "id": "oc-03f170950d627e254ae9",
       "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-      "line": 4115,
+      "line": 4120,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -229376,7 +229376,7 @@
     {
       "id": "oc-5a8bd2fe322ae448350c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 719,
+      "line": 721,
       "symbol": "RavenrootServer",
       "kind": "operational-declaration",
       "role": "programAuthoringLimits",
@@ -229392,7 +229392,7 @@
     {
       "id": "oc-886d1581ff889079e85d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 736,
+      "line": 738,
       "symbol": "RavenrootServer",
       "kind": "operational-declaration",
       "role": "rateLimiter",
@@ -229410,7 +229410,7 @@
     {
       "id": "oc-00dc7c6b323744d9427e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 738,
+      "line": 740,
       "symbol": "RavenrootServer",
       "kind": "operational-declaration",
       "role": "httpStopDelay",
@@ -229428,7 +229428,7 @@
     {
       "id": "oc-4e82a9fdd4a3c358b6e8",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 739,
+      "line": 741,
       "symbol": "RavenrootServer",
       "kind": "operational-declaration",
       "role": "drainBound",
@@ -229446,7 +229446,7 @@
     {
       "id": "oc-0881b2bc28aa469b0208",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1047,
+      "line": 1116,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "managedIngress",
@@ -229464,7 +229464,7 @@
     {
       "id": "oc-ff0ca766907310e77898",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1207,
+      "line": 1276,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "agentAuthorityControl",
@@ -229482,7 +229482,7 @@
     {
       "id": "oc-1877f4fa51c2ca5907ff",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1222,
+      "line": 1291,
       "symbol": "installNodePalettes",
       "kind": "operational-declaration",
       "role": "agentAuthorityControlAudit",
@@ -229504,7 +229504,7 @@
     {
       "id": "oc-3d33bcd7a383a4fb40e3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1303,
+      "line": 1372,
       "symbol": "if",
       "kind": "property-binding",
       "role": "System.getProperty",
@@ -229522,7 +229522,7 @@
     {
       "id": "oc-dbf5a9aad83df6c958c5",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1331,
+      "line": 1400,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "probeServer",
@@ -229540,7 +229540,7 @@
     {
       "id": "oc-909dc491cafdb65dbb1c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1331,
+      "line": 1400,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "probeServer",
@@ -229558,7 +229558,7 @@
     {
       "id": "oc-f228902669819b6f5f86",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1425,
+      "line": 1494,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229576,7 +229576,7 @@
     {
       "id": "oc-fc62298d243ea10813aa",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1426,
+      "line": 1495,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229594,7 +229594,7 @@
     {
       "id": "oc-62b3899ff7d54f4fd221",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1426,
+      "line": 1495,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229612,7 +229612,7 @@
     {
       "id": "oc-b094cfd4dfb9177a89e3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1426,
+      "line": 1495,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229630,7 +229630,7 @@
     {
       "id": "oc-b4d441f8fa5ecf869e83",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1427,
+      "line": 1496,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229648,7 +229648,7 @@
     {
       "id": "oc-4c99642dc3a62cb0f25b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1427,
+      "line": 1496,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229666,7 +229666,7 @@
     {
       "id": "oc-d91d0b615f74dde248bb",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1427,
+      "line": 1496,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229684,7 +229684,7 @@
     {
       "id": "oc-071ade090e8c75ac4669",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1428,
+      "line": 1497,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "probe",
@@ -229702,7 +229702,7 @@
     {
       "id": "oc-196b466b644a4e00c0e3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 1740,
+      "line": 1809,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -229720,7 +229720,7 @@
     {
       "id": "oc-0bb4d5f81f3fd4ad191f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2164,
+      "line": 2233,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -229742,7 +229742,7 @@
     {
       "id": "oc-5cc859036ec85f54143e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2206,
+      "line": 2275,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -229762,7 +229762,7 @@
     {
       "id": "oc-6e44c0652ce7d3a85a35",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2233,
+      "line": 2302,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -229782,7 +229782,7 @@
     {
       "id": "oc-4ae010a2fb7f9bfd94ea",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2241,
+      "line": 2310,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229800,7 +229800,7 @@
     {
       "id": "oc-803af2d60d6a6bb975c2",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2241,
+      "line": 2310,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229818,7 +229818,7 @@
     {
       "id": "oc-d8de7d03e78831997ec0",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2241,
+      "line": 2310,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229836,7 +229836,7 @@
     {
       "id": "oc-63047f162d89117e20f5",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2241,
+      "line": 2310,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229854,7 +229854,7 @@
     {
       "id": "oc-b5679b1c894831977b55",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2244,
+      "line": 2313,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229872,7 +229872,7 @@
     {
       "id": "oc-5f4310e7be163ee262b8",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2244,
+      "line": 2313,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229890,7 +229890,7 @@
     {
       "id": "oc-389255cffa9d91785bc3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2253,
+      "line": 2322,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -229912,7 +229912,7 @@
     {
       "id": "oc-1bed77f8f397cfa98208",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2287,
+      "line": 2356,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -229930,7 +229930,7 @@
     {
       "id": "oc-bcfca62bd73fd92da58b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2321,
+      "line": 2390,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229948,7 +229948,7 @@
     {
       "id": "oc-cb8b270a5c9d1962c4bf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2321,
+      "line": 2390,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229966,7 +229966,7 @@
     {
       "id": "oc-66e7c6c9174c08af4397",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2323,
+      "line": 2392,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -229984,7 +229984,7 @@
     {
       "id": "oc-0edb533a7d3226ad4f96",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2323,
+      "line": 2392,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230002,7 +230002,7 @@
     {
       "id": "oc-129ca7aa97bac03f246f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2326,
+      "line": 2395,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230020,7 +230020,7 @@
     {
       "id": "oc-655206e809f5f47eca16",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2326,
+      "line": 2395,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230038,7 +230038,7 @@
     {
       "id": "oc-7363516cbd825416c733",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2328,
+      "line": 2397,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230056,7 +230056,7 @@
     {
       "id": "oc-2a53efd1c6e9b282d86d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2328,
+      "line": 2397,
       "symbol": "switch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230074,7 +230074,7 @@
     {
       "id": "oc-51017a0fa4b2433b0368",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2347,
+      "line": 2416,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -230096,7 +230096,7 @@
     {
       "id": "oc-be5b990c35d15c4b7421",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2353,
+      "line": 2422,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230114,7 +230114,7 @@
     {
       "id": "oc-50c3349443f48ce8fc05",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2354,
+      "line": 2423,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230132,7 +230132,7 @@
     {
       "id": "oc-c40f218e312e2fa4aac7",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2354,
+      "line": 2423,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230150,7 +230150,7 @@
     {
       "id": "oc-23af22da1545fba41506",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2710,
+      "line": 2779,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230165,7 +230165,7 @@
     {
       "id": "oc-f01db24fa589b912224e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2710,
+      "line": 2779,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230180,7 +230180,7 @@
     {
       "id": "oc-c326ecf5f6bca1963c15",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2903,
+      "line": 2972,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230198,7 +230198,7 @@
     {
       "id": "oc-2195139f3c87fb6263e2",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 2903,
+      "line": 2972,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230216,7 +230216,7 @@
     {
       "id": "oc-8586550902a019471099",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3129,
+      "line": 3198,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "limit",
@@ -230234,7 +230234,7 @@
     {
       "id": "oc-295fc63560cd9fffc107",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3131,
+      "line": 3200,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "includeTerminal",
@@ -230252,7 +230252,7 @@
     {
       "id": "oc-777e0c2a2802a2ea0e48",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3131,
+      "line": 3200,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "includeTerminal",
@@ -230270,7 +230270,7 @@
     {
       "id": "oc-9c04314072401599f50e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3219,
+      "line": 3288,
       "symbol": "switch",
       "kind": "operational-declaration",
       "role": "settlement",
@@ -230286,7 +230286,7 @@
     {
       "id": "oc-d21021b465c5543234a2",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3220,
+      "line": 3289,
       "symbol": "switch",
       "kind": "operational-declaration",
       "role": "settlement",
@@ -230302,7 +230302,7 @@
     {
       "id": "oc-bf516646c60b3247000f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3347,
+      "line": 3416,
       "symbol": "switch",
       "kind": "operational-declaration",
       "role": "settlement",
@@ -230318,7 +230318,7 @@
     {
       "id": "oc-e61dcf37cacd43f9629e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3403,
+      "line": 3472,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -230338,7 +230338,7 @@
     {
       "id": "oc-ac4a4abbf9d623756ab6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3477,
+      "line": 3546,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -230360,7 +230360,7 @@
     {
       "id": "oc-d5ef10abe741e81108ea",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3522,
+      "line": 3591,
       "symbol": "switch",
       "kind": "operational-declaration",
       "role": "settlement",
@@ -230376,7 +230376,7 @@
     {
       "id": "oc-227eed649a9a0d28e9df",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3604,
+      "line": 3673,
       "symbol": "containsAll",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230391,7 +230391,7 @@
     {
       "id": "oc-4310ff8bde297cbaceb2",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3616,
+      "line": 3685,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230406,7 +230406,7 @@
     {
       "id": "oc-8a15f407197a54b39a94",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3616,
+      "line": 3685,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230421,7 +230421,7 @@
     {
       "id": "oc-eb9ece5817bf7291800f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3618,
+      "line": 3687,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230436,7 +230436,7 @@
     {
       "id": "oc-0439260d8915b587b452",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3618,
+      "line": 3687,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230451,7 +230451,7 @@
     {
       "id": "oc-f9f4c620b0864f38875a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3664,
+      "line": 3733,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230469,7 +230469,7 @@
     {
       "id": "oc-b0adbf60ed7613a9b464",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3664,
+      "line": 3733,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230487,7 +230487,7 @@
     {
       "id": "oc-13578b5ec6519c654e24",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3665,
+      "line": 3734,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230505,7 +230505,7 @@
     {
       "id": "oc-4dfa6d43292bddefe577",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3667,
+      "line": 3736,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230523,7 +230523,7 @@
     {
       "id": "oc-34f4f4e2ed5e2b2c8a98",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3667,
+      "line": 3736,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230541,7 +230541,7 @@
     {
       "id": "oc-f1286a474d89d3bdf5df",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3708,
+      "line": 3777,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230563,7 +230563,7 @@
     {
       "id": "oc-2907fa4d8aa931317062",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3708,
+      "line": 3777,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230578,7 +230578,7 @@
     {
       "id": "oc-f2568e9cbaa600c04157",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3747,
+      "line": 3816,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230593,7 +230593,7 @@
     {
       "id": "oc-583e6bfa5224796db6a6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3747,
+      "line": 3816,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230608,7 +230608,7 @@
     {
       "id": "oc-aff460dc685e5ca58e15",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3748,
+      "line": 3817,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230623,7 +230623,7 @@
     {
       "id": "oc-b13c3f9587f9606323a4",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3748,
+      "line": 3817,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230638,7 +230638,7 @@
     {
       "id": "oc-3c71ca6719423b50ab62",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3749,
+      "line": 3818,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230653,7 +230653,7 @@
     {
       "id": "oc-9a88a8bd0ba543aad0f6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3749,
+      "line": 3818,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230668,7 +230668,7 @@
     {
       "id": "oc-e426eb5a9e0830e9115c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3750,
+      "line": 3819,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230683,7 +230683,7 @@
     {
       "id": "oc-1fc8648aff95f0403da7",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3751,
+      "line": 3820,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230698,7 +230698,7 @@
     {
       "id": "oc-cc58376a8394b367d8a1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3752,
+      "line": 3821,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230713,7 +230713,7 @@
     {
       "id": "oc-2035e2bacce059c671bf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3752,
+      "line": 3821,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230728,7 +230728,7 @@
     {
       "id": "oc-4648f896ad58e2b8ba33",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3752,
+      "line": 3821,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230743,7 +230743,7 @@
     {
       "id": "oc-e5d409d854ce47e2b9c0",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3799,
+      "line": 3868,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -230765,7 +230765,7 @@
     {
       "id": "oc-ad9751c0b77835e42cf5",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3819,
+      "line": 3888,
       "symbol": "containsAll",
       "kind": "operational-declaration",
       "role": "limit",
@@ -230783,7 +230783,7 @@
     {
       "id": "oc-0061495c35da4272abfd",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3852,
+      "line": 3921,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230798,7 +230798,7 @@
     {
       "id": "oc-e2c152ca5416816707e1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3852,
+      "line": 3921,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230813,7 +230813,7 @@
     {
       "id": "oc-76294c77d375bf5fb13a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3853,
+      "line": 3922,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230828,7 +230828,7 @@
     {
       "id": "oc-1a07419abf0ce0f99921",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3855,
+      "line": 3924,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230843,7 +230843,7 @@
     {
       "id": "oc-9c050f95ecbfc654d9d8",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3855,
+      "line": 3924,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "counts",
@@ -230858,7 +230858,7 @@
     {
       "id": "oc-c70178f967d880cc158d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 3916,
+      "line": 3985,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -230874,7 +230874,7 @@
     {
       "id": "oc-cb51dc40aed49681cadd",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 4077,
+      "line": 4146,
       "symbol": "HumanTaskBodyTooLarge",
       "kind": "fixed-declaration",
       "role": "serialVersionUID",
@@ -230892,7 +230892,7 @@
     {
       "id": "oc-9c55fb2aad9a872b10ce",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 4130,
+      "line": 4199,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -230910,7 +230910,7 @@
     {
       "id": "oc-0d1863c6c4b88ec23063",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 4756,
+      "line": 4825,
       "symbol": "DeploymentSourceInvalidated",
       "kind": "operational-declaration",
       "role": "settled",
@@ -230929,7 +230929,7 @@
     {
       "id": "oc-bc616f8d99e33cf7739c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 4915,
+      "line": 4984,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230944,7 +230944,7 @@
     {
       "id": "oc-b7a68d656a047ea00aab",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 4915,
+      "line": 4984,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -230962,7 +230962,7 @@
     {
       "id": "oc-9a36e7fe92c6d7d79b40",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5092,
+      "line": 5161,
       "symbol": "liveExecutionJson",
       "kind": "fixed-declaration",
       "role": "INVENTORY_QUERY_PARAMETERS",
@@ -230980,7 +230980,7 @@
     {
       "id": "oc-87ed419e0b9ba44a9133",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5092,
+      "line": 5161,
       "symbol": "liveExecutionJson",
       "kind": "fixed-declaration",
       "role": "INVENTORY_QUERY_PARAMETERS",
@@ -230998,7 +230998,7 @@
     {
       "id": "oc-1d637ee9f7deb8c6b345",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5092,
+      "line": 5161,
       "symbol": "liveExecutionJson",
       "kind": "fixed-declaration",
       "role": "INVENTORY_QUERY_PARAMETERS",
@@ -231016,7 +231016,7 @@
     {
       "id": "oc-b3aeb7a252de7dc9b02c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5092,
+      "line": 5161,
       "symbol": "liveExecutionJson",
       "kind": "fixed-declaration",
       "role": "INVENTORY_QUERY_PARAMETERS",
@@ -231034,7 +231034,7 @@
     {
       "id": "oc-f5e5bd737090a16f1ec1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5092,
+      "line": 5161,
       "symbol": "liveExecutionJson",
       "kind": "fixed-declaration",
       "role": "INVENTORY_QUERY_PARAMETERS",
@@ -231052,7 +231052,7 @@
     {
       "id": "oc-290c794b3d735792c1c3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5092,
+      "line": 5161,
       "symbol": "liveExecutionJson",
       "kind": "fixed-declaration",
       "role": "INVENTORY_QUERY_PARAMETERS",
@@ -231070,7 +231070,7 @@
     {
       "id": "oc-f17ea1aad48e342ff349",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5174,
+      "line": 5243,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "rawIncludeTerminal",
@@ -231088,7 +231088,7 @@
     {
       "id": "oc-f184e4d66db885de8d18",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5186,
+      "line": 5255,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "rawLimit",
@@ -231106,7 +231106,7 @@
     {
       "id": "oc-d0457cfc6413df293e49",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5712,
+      "line": 5781,
       "symbol": "findingsJson",
       "kind": "operational-declaration",
       "role": "packages",
@@ -231122,7 +231122,7 @@
     {
       "id": "oc-43232c063cf25cd4cb6d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5713,
+      "line": 5782,
       "symbol": "findingsJson",
       "kind": "operational-declaration",
       "role": "packages",
@@ -231138,7 +231138,7 @@
     {
       "id": "oc-e9352044988a7282f33c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5714,
+      "line": 5783,
       "symbol": "findingsJson",
       "kind": "operational-declaration",
       "role": "packages",
@@ -231154,7 +231154,7 @@
     {
       "id": "oc-b0c3beb10aefa3b4baa0",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5715,
+      "line": 5784,
       "symbol": "findingsJson",
       "kind": "operational-declaration",
       "role": "packages",
@@ -231170,7 +231170,7 @@
     {
       "id": "oc-991c6b58e6e37f7497ff",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5715,
+      "line": 5784,
       "symbol": "findingsJson",
       "kind": "operational-declaration",
       "role": "packages",
@@ -231186,7 +231186,7 @@
     {
       "id": "oc-7fc62b1023867d8c1318",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5715,
+      "line": 5784,
       "symbol": "findingsJson",
       "kind": "operational-declaration",
       "role": "packages",
@@ -231202,7 +231202,7 @@
     {
       "id": "oc-7c7f2faabe425b23d18c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5824,
+      "line": 5893,
       "symbol": "try",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -231222,7 +231222,7 @@
     {
       "id": "oc-ef1121e1c703f53b504c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5834,
+      "line": 5903,
       "symbol": "readGraphMlRequest",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -231240,7 +231240,7 @@
     {
       "id": "oc-403e8f08f3393559adfd",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5898,
+      "line": 5967,
       "symbol": "catch",
       "kind": "fixed-declaration",
       "role": "RECENT_EVENTS_MAX_LIMIT",
@@ -231258,7 +231258,7 @@
     {
       "id": "oc-e3932243cb08f8954d56",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5901,
+      "line": 5970,
       "symbol": "catch",
       "kind": "fixed-declaration",
       "role": "RECENT_EVENTS_DEFAULT_LIMIT",
@@ -231276,7 +231276,7 @@
     {
       "id": "oc-fc0f515957907698d835",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 5915,
+      "line": 5984,
       "symbol": "catch",
       "kind": "fixed-declaration",
       "role": "INCLUDE_DIAGNOSTICS",
@@ -231294,7 +231294,7 @@
     {
       "id": "oc-00bb178e7a709fcb06d5",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 6035,
+      "line": 6104,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "rawLimit",
@@ -231312,7 +231312,7 @@
     {
       "id": "oc-5433422b8b5d07b8afa9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 6124,
+      "line": 6193,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "limit",
@@ -231327,7 +231327,7 @@
     {
       "id": "oc-c01a593cf588908e45bf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 6125,
+      "line": 6194,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "limit",
@@ -231342,7 +231342,7 @@
     {
       "id": "oc-b5cb8fc1735c09ae043b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 6126,
+      "line": 6195,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "limit",
@@ -231357,7 +231357,7 @@
     {
       "id": "oc-9d2f389572c3d1ead2d3",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 6231,
+      "line": 6300,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "page",
@@ -231375,7 +231375,7 @@
     {
       "id": "oc-e9e6b367b31bf6739387",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-      "line": 6934,
+      "line": 7003,
       "symbol": "defaultHttpSecurity",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
@@ -231846,7 +231846,7 @@
     {
       "id": "oc-78d69934138449db9524",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-      "line": 843,
+      "line": 817,
       "symbol": "PackagedEmbedStartupRefused",
       "kind": "fixed-declaration",
       "role": "literal",
@@ -231864,7 +231864,7 @@
     {
       "id": "oc-1ad2e0a507373350dd55",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-      "line": 850,
+      "line": 824,
       "symbol": "ReplicaTopologyRefused",
       "kind": "fixed-declaration",
       "role": "literal",
@@ -231879,7 +231879,7 @@
     {
       "id": "oc-ad7d124b048882cce394",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-      "line": 1074,
+      "line": 1048,
       "symbol": "artifactProvenance",
       "kind": "environment-binding",
       "role": "RAVENROOT_ARTIFACT_PROVENANCE",
@@ -231897,7 +231897,7 @@
     {
       "id": "oc-e55f29fc2bf0e9de3cb6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-      "line": 1074,
+      "line": 1048,
       "symbol": "artifactProvenance",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -231915,7 +231915,7 @@
     {
       "id": "oc-80de18a4a116c2a304fe",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-      "line": 1074,
+      "line": 1048,
       "symbol": "artifactProvenance",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -231933,7 +231933,7 @@
     {
       "id": "oc-436a02d622f96b7bfe51",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-      "line": 1078,
+      "line": 1052,
       "symbol": "switch",
       "kind": "environment-binding",
       "role": "RAVENROOT_ARTIFACT_PROVENANCE",
@@ -1154530,6 +1154530,42 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-578-embedded-authoring-audit-20261019-v1",
+      "issue": "#578",
+      "sourceRevision": "85c8296bd0f61d3d2aa57ca41415548df2331a7b",
+      "targetRevision": "f9b157fe00d40f72380341238e55292f7f74eec8",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "bb5a988d3d2724d25261ba0795988322d635e199c535ffc09a2a91e8afaaae88",
+      "targetCandidateDigest": "f16a8610b78a396b84f8ecc02f6cc58d456fe9c70ddbac12234b4bbcd1aa9541",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
+    },
+    {
+      "id": "issue-578-credential-failure-audit-20261019-v2",
+      "issue": "#578",
+      "sourceRevision": "aa0d3bd43ff479e77d37bc06ff821ce15d4e465f",
+      "targetRevision": "48f792cd0c968697d2fbe5bc3ad2cc53de84619d",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "8306e9779f8f2ebbaad029d99be1a5d482512ec1f15e7d5db356a84bb563e2b8",
+      "targetCandidateDigest": "f16a8610b78a396b84f8ecc02f6cc58d456fe9c70ddbac12234b4bbcd1aa9541",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
+    },
+    {
+      "id": "issue-578-integrate-dev-575-audit-20261019-v3",
+      "issue": "#578",
+      "sourceRevision": "f6f6008766e6aa63c549cb989a4e257820e3f2a5",
+      "targetRevision": "f6f6008766e6aa63c549cb989a4e257820e3f2a5",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "42a9985085362756447d7450cb8997ec8a15400abcb58ea41dff4efcb7bd4756",
+      "targetCandidateDigest": "ad1b7fcfab167890b917c4c56c3edb84d9f03ca954f0c5a912d2f33044995082",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1221967,7 +1222003,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/deployment/registry/InMemoryDeploymentRegistry.java",
@@ -1222015,7 +1222051,7 @@
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-          "digest": "c3a8a749afa8afd12b8b482d31a5a16dbd47b51fb7ac07eee23ff6bdb7fd2be6"
+          "digest": "4eaf5c81e2a9f66ec42ea2521ad0e16f6c2f19f6afc78a96d3048fa0fa435500"
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java",
@@ -1223864,11 +1223900,11 @@
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-          "digest": "c3a8a749afa8afd12b8b482d31a5a16dbd47b51fb7ac07eee23ff6bdb7fd2be6"
+          "digest": "4eaf5c81e2a9f66ec42ea2521ad0e16f6c2f19f6afc78a96d3048fa0fa435500"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/plugin/EnvironmentNodePackageServiceGrants.java",
@@ -1228950,7 +1228986,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java",
-          "digest": "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d"
+          "digest": "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333"
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java",
@@ -1229006,7 +1229042,7 @@
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-          "digest": "c3a8a749afa8afd12b8b482d31a5a16dbd47b51fb7ac07eee23ff6bdb7fd2be6"
+          "digest": "4eaf5c81e2a9f66ec42ea2521ad0e16f6c2f19f6afc78a96d3048fa0fa435500"
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/ProgramNodeBehaviorFactory.java",
@@ -1229158,11 +1229194,11 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8"
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ServedConfiguration.java",
@@ -1231163,11 +1231199,11 @@
       "sourceDigests": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8"
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java",
@@ -1231259,7 +1231295,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "b162c48814a770a5dce0eb9be5e3fef42d2dea023aac81c290f2ced11c26864c"
+    "digest": "6673c50899dd45dcef125ffcaa7b721488d605fd34e9094bfa4b6acc646ba35f"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {
@@ -1231846,7 +1231882,7 @@
         "currency": "826e1d36fdd50775c95d308fb71c28c317dfbdd511da70956eb6ad0354094234",
         "tokens": "ae19a9065c06212980f0ed4537338c27860f3c16d79fa10dadf112880c8dc183",
         "AgentAuthorityBudgetPolicy.compactConstructor": "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f",
-        "RavenrootServerMain.run": "a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4",
+        "RavenrootServerMain.run": "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
         "AgentAuthorityBudgetService.Session.reserve": "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
       },
       "sourceDigests": [
@@ -1231864,7 +1231900,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
@@ -1232233,7 +1232269,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java",
@@ -1232257,7 +1232293,7 @@
         "EmbedBrowserConfiguration.enabledFromEnvironment": "588d7b8040df972b78b2b4a561e29cd01af019c87a9cc5ab2a6d3b8d1250c030",
         "EmbedBrowserConfiguration.strictBoolean": "36be3f38649947f3cb45f162b238de19e534ac922d6532d70567b3dd145237f8",
         "EmbedStartupCheck.evaluate": "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
-        "RavenrootServerMain.run": "a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4",
+        "RavenrootServerMain.run": "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
         "RavenrootServerMain.refuseUnsupportablePackagedEmbed": "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
         "ReplicaTopologyStartupCheck.replicaLocalAuthorities": "6afe09b7fd2a809f9bd981d8117cc0c902df5b3cd31baa6cafa4e842d1807d1d"
       },
@@ -1235806,7 +1235842,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java",
-          "digest": "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d"
+          "digest": "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333"
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/authoring/GraphAuthoringRepository.java",
@@ -1235819,6 +1235855,10 @@
         {
           "path": "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/GraphArtifactDependencyResolutionTest.java",
           "digest": "b9af762c8ac692b000591000f6bf55061818c7013812a1693d67e17fcc0b9b0d"
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java",
+          "digest": "362b4ab765803b46f5ac6a1082edde10e6439a00fac880b30e3e4e5a2de12be3"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/BoundedHttpResponseBody.java",
@@ -1235867,6 +1235907,10 @@
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java",
           "digest": "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299"
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/EmbeddedGraphAuthoringBootstrapTest.java",
+          "digest": "a5b56a3f2c1794b2252ebc748c2419900c8887ec4c5eaae60d8554beb9c38a8e"
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java",
@@ -1235946,15 +1235990,24 @@
         }
       ],
       "javaMethodDigests": {
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.fromEnvironment": "bed301e4c06fd86473d366d7c70be85682dd580002223f1b08d3c55199963ac1",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.of": "36b332cb270fea42c7f84b21c22238730456e4a77693c870fddc3edba4e806e7",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/EmbeddedGraphAuthoringConfiguration.java#EmbeddedGraphAuthoringConfiguration.requireCredentialAvailable": "a68b4baa15f401f8d904680e0429c934d5628d46f58a6c496bab91fa7efb1bda",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java#RavenrootServerMain.run": "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.configureGraphAuthoring": "88408f397407131e0898ee913cf595d12c1766203b8d09ce31a31ce267e8cd00",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.start": "331ee9c47489d9cd62fec499e63c30266cae473b5f5d2ea6a46ca89cb1c05272",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.close": "e85e56ec94274395713ec4141701749be63ad0a8f8e1392eb72a0cad9fbfd288",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.installGraphAuthoring": "e55468297916b313cd7e6b993d50867e25a3679ba7aa6b6e3d78e9bc57232366",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.graphAuthoring": "1c5981f6c7548dca0b569d44214a817902a299b748c24537023483623ed52cf8",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.installPublishedGraphArtifacts": "4222014e1a5b1797adc44689cbc5fe387bceb671595d3d0c3411940b4dae3c52",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.publishedGraphArtifacts": "3fc65b63e928bf849bf2854933d02880c05df2fdc5f18f2eff75aaa103b6e862",
         "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java#RavenrootServer.graphArtifactDependenciesJson": "a90f072738431cffc0f836f9e0d6812eb9d8598518edaef476b42404720a7a71",
         "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java#DefaultRavenrootApplication.importPublishedGraphDefinition": "c9a979d7c81c71430c0c45b40825d9fa52ce7f6b4cd5a3c460061a438e2777df",
+        "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java#DefaultRavenrootApplication.immutableGraphDefinitionsAvailable": "125b5007d70721862001cd50e90642de415fada313d1899c9c8ec07cfa59c489",
         "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java#DefaultRavenrootApplication.resolveGraphArtifactDependencies": "4acb49dd5c595eb1322bd76dd28c1802dcefcdcaaae23672fdd4b7304724d53f",
         "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java#DefaultRavenrootApplication.programArtifactCompatible": "fba0dabfe9698464e03999be81708e10de098c972fe1d19d26338274d1756e07",
-        "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java#DefaultRavenrootApplication.registerPublishedLocalDeployment": "ce151ac425186080f2508e6d8bf3bc337d30ca1be8c0d74bb4c8a4940b9ac648"
+        "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java#DefaultRavenrootApplication.registerPublishedLocalDeployment": "ce151ac425186080f2508e6d8bf3bc337d30ca1be8c0d74bb4c8a4940b9ac648",
+        "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java#RavenrootApplication.immutableGraphDefinitionsAvailable": "d46d97df5cdc89fa09d20c0bb4d8100295e3497d064cf88383475ba9ac49868b"
       },
       "uiMethodDigests": {
         "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",

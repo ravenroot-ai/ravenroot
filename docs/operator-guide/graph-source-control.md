@@ -32,6 +32,48 @@ Git mode supports GitHub, GitHub Enterprise, GitLab.com and GitLab Self-Managed 
 
 For a GitHub App, also set the App and installation IDs. Store the PKCS#8/PKCS#1 private key at the credential reference. The adapter mints a short-lived installation token scoped to the configured repository with contents, pull-request, and metadata permissions. A PAT is resolved through the same server-only credential chain. The Helm chart uses the fixed reference `git-authoring` and reads its encoded environment binding from a Kubernetes Secret.
 
+### Embedded server integration
+
+An embedded host can opt into the same Git repository, published artifact catalog, admission checks,
+and provider adapters as the packaged server. Build the ordinary application and server, then apply
+one public configuration operation before starting the listener:
+
+```java
+var authoring = EmbeddedGraphAuthoringConfiguration.fromEnvironment(
+        environment, credentialResolver);
+try (var server = new RavenrootServer(application, address, uiDirectory, authenticator)
+        .configureGraphAuthoring(authoring)) {
+    server.start();
+    // Serve until the host's normal shutdown signal.
+}
+```
+
+`environment` uses the settings in the table above. `credentialResolver` receives only the opaque
+`RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE`; it must return the referenced PAT or GitHub App
+private key from the host's trusted secret boundary. Git mode validates that the reference resolves
+to nonblank credential material during configuration and reports only
+`Git graph authoring credential is unavailable` when it does not. The diagnostic never contains the
+reference, credential, or resolver failure. GitHub PAT, GitHub App, Enterprise API base, tenant
+namespace, and artifact settings are identical to the packaged server settings.
+
+The application must expose an immutable graph definition store. `DefaultRavenrootApplication`
+reports this capability when it is constructed with a `GraphDefinitionStore`; a custom
+`RavenrootApplication` must implement `immutableGraphDefinitionsAvailable()` and the existing
+published-definition and pinned-deployment operations against its immutable store. Git mode fails
+during configuration when this capability is absent. Leaving the mode unset selects `LOCAL`, does
+not resolve a credential, and preserves the existing disabled embedded authoring routes.
+
+The configured server retains its existing authenticator, authorization service, and tenant
+isolation. It owns the application and any authoring repository after construction. `close()` releases
+those components; a configuration or `start()` failure also closes the listener, executor,
+repository, and application before the failure is returned.
+
+For an embedded host that previously used package access, reflection, or a bridge to call
+`installGraphAuthoring` and `installPublishedGraphArtifacts`, remove that composition and construct
+`EmbeddedGraphAuthoringConfiguration` instead. Do not create a second artifact catalog or repository:
+`configureGraphAuthoring` creates and binds both routes as one operation, using the same composition
+as `RavenrootServerMain`.
+
 `ravenroot.graph.inspect` reads source. `ravenroot.graph.write` saves, restores, discards, or deletes drafts. `ravenroot.graph.release` proposes review in the graph repository. `ravenroot.graph.deploy.published` registers a verified publication. Tenant ownership checks still apply after scope and role checks; graph scopes alone never grant another tenant's configured namespace.
 
 ## Version and release behavior

@@ -6825,7 +6825,7 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
         cls.root = Path(cls.temporary.name)
         paths = {
             *audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
-            *audit.GRAPH_AUTHORING_TEST_PROOFS,
+            *audit.GRAPH_AUTHORING_TEST_PROOFS, *(proof[0] for proof in audit.GRAPH_AUTHORING_JAVA_METHOD_PROOFS),
             audit.GRAPH_AUTHORING_ROUTE_PATH, audit.GRAPH_AUTHORING_SERVER_PATH,
             audit.GRAPH_AUTHORING_APPLICATION_PATH, audit.GRAPH_AUTHORING_UI_PATH,
             *(path for path, _method in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS),

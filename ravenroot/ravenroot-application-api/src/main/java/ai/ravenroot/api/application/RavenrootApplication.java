@@ -25,10 +25,25 @@ public interface RavenrootApplication extends AutoCloseable {
     default ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
         return ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
     }
-/**
- * Reports whether the application can accept work and its current lifecycle state.
- * @return an immutable application status snapshot
- */
+
+    /**
+     * Reports whether published graph bytes can be committed to an immutable definition store.
+     *
+     * <p>The default is deliberately false so an older or custom embedded application cannot opt
+     * into Git authoring while silently discarding the publication that an artifact deployment is
+     * expected to pin. Implementations returning true must implement the published-definition and
+     * pinned-deployment methods against that store.</p>
+     *
+     * @return true only when immutable graph-definition persistence is composed
+     */
+    default boolean immutableGraphDefinitionsAvailable() {
+        return false;
+    }
+
+    /**
+     * Reports whether the application can accept work and its current lifecycle state.
+     * @return an immutable application status snapshot
+     */
     ApplicationStatus status();
 
 /**

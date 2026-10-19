@@ -476,31 +476,8 @@ public final class RavenrootServerMain {
         // switch it describes cannot.
         var authorization = new ai.ravenroot.api.security.DefaultAuthorizationService(
                 new AuditTrailAuthorizationSink(auditTrail));
-        var graphAuthoringConfiguration =
-                ai.ravenroot.server.authoring.GraphAuthoringConfiguration.fromEnvironment(System.getenv());
-        ai.ravenroot.server.authoring.GraphAuthoringHttpApi graphAuthoringApi = null;
-        ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog publishedGraphCatalog = null;
-        if (graphAuthoringConfiguration.mode()
-                == ai.ravenroot.server.authoring.GraphAuthoringConfiguration.Mode.GIT) {
-            if (executionStoreOwner.graphDefinitionStore() == null) {
-                throw new IllegalStateException(
-                        "Git graph artifact import requires a configured immutable graph definition store");
-            }
-            publishedGraphCatalog = new ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog(
-                    graphAuthoringConfiguration);
-            var gitRepository = ai.ravenroot.server.authoring.GraphAuthoringRepositories.create(
-                    graphAuthoringConfiguration, credentialResolver, publishedGraphCatalog, graph -> {
-                        var inspected = application.inspectGraphMl(new java.io.ByteArrayInputStream(graph),
-                                ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
-                        if (!inspected.valid()) throw new ai.ravenroot.api.authoring.GraphAuthoringException(
-                                ai.ravenroot.api.authoring.GraphAuthoringException.Failure.INVALID_DOCUMENT);
-                    });
-            graphAuthoringApi = new ai.ravenroot.server.authoring.GraphAuthoringHttpApi(
-                    graphAuthoringConfiguration, gitRepository,
-                    authorization, System.out::println);
-        }
-        var installedGraphAuthoring = graphAuthoringApi;
-        var installedPublishedGraphCatalog = publishedGraphCatalog;
+        var embeddedGraphAuthoring = EmbeddedGraphAuthoringConfiguration.fromEnvironment(
+                System.getenv(), credentialResolver);
         var runnerControl = runnerJobs == null ? null : new ai.ravenroot.core.runner.AuthorizedRunnerControl(
                 runnerJobs, authorization, runnerConfiguration.issuer(),
                 runnerConfiguration.artifacts(), java.time.Clock.systemUTC());
@@ -579,6 +556,7 @@ public final class RavenrootServerMain {
                         new AuditTrailExecutionControlSink(auditTrail),
                         assistantComposition.service(),
                         embedConfiguration, userCredentials, graphExecutionLimits.graphMl());
+                server.configureGraphAuthoring(embeddedGraphAuthoring);
                 // No null check on approvalRecovery: both services are composed only when the
                 // execution store is, which is the same condition that composes the loop.
                 if (toolApprovals != null) {
@@ -605,10 +583,6 @@ public final class RavenrootServerMain {
                 }
                 if (installedDeploymentControl != null) {
                     server.installDurableDeploymentControl(installedDeploymentControl);
-                }
-                if (installedGraphAuthoring != null) {
-                    server.installGraphAuthoring(installedGraphAuthoring);
-                    server.installPublishedGraphArtifacts(installedPublishedGraphCatalog);
                 }
                 if (processLifecycle != null) {
                     server.installProcessLifecycle(processLifecycle);

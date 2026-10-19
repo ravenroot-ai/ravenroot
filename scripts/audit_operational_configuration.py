@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4"
+    "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15"
+    "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -199,7 +199,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "87c3acca15ead9fdc7a7e3f763de17dc78bcb7acf603dace99cd43cd65a96d15",
+    EMBED_MAIN_PATH: "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -215,7 +215,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4",
+        "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -6395,7 +6395,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4"),
+         "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -8062,7 +8062,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  'a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4',
+  '48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -12925,7 +12925,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  'a1dcb0132fd7c3197f48c6664078a4af0b0f652865dec5a857534ff1081d78a4'),
+  '48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -12933,11 +12933,11 @@ INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/jav
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'start',
-  'bf915d7d150c1fcfce76af9581d80098bf34358a39e00d5a1a44a166d109f636'),
+  '331ee9c47489d9cd62fec499e63c30266cae473b5f5d2ea6a46ca89cb1c05272'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'close',
-  '6af457f74845bcbfd1aec165d28334096a8023b0a35ac931b066eb844b8a623d')]
+  'e85e56ec94274395713ec4141701749be63ad0a8f8e1392eb72a0cad9fbfd288')]
 
 INTERACTION_WEBSOCKET_TEST_PROOFS = [('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
   'InteractionWebSocketConfigurationTest',
@@ -14723,8 +14723,19 @@ GRAPH_AUTHORING_ROUTE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 GRAPH_AUTHORING_SERVER_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java")
+GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/"
+    "EmbeddedGraphAuthoringConfiguration.java")
+GRAPH_AUTHORING_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
 GRAPH_AUTHORING_APPLICATION_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+GRAPH_AUTHORING_APPLICATION_API_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/"
+    "RavenrootApplication.java")
+GRAPH_AUTHORING_EMBEDDED_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+    "EmbeddedGraphAuthoringBootstrapTest.java")
 GRAPH_AUTHORING_UI_PATH = Path("ravenroot/ravenroot-ui/src/app.js")
 GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-document.js")
 GRAPH_AUTHORING_GRAPH_PARSERS_PATH = Path("ravenroot/ravenroot-ui/src/graph-parsers.js")
@@ -14736,6 +14747,8 @@ GRAPH_AUTHORING_RAW_KUBERNETES_PATH = Path("deploy/kubernetes/ravenroot.yaml")
 GRAPH_AUTHORING_PUBLISHER_PATH = Path("scripts/publish-graph-artifacts.py")
 
 GRAPH_AUTHORING_FILE_PROOFS = {
+    GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH:
+        "362b4ab765803b46f5ac6a1082edde10e6439a00fac880b30e3e4e5a2de12be3",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): "c059c79e39ad04c4352057d227a8719532493cdf64b3bcbfdefb715fbdfb3cd5",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "36c56d5a54111abdbe2a1e6b442e7827dd023ce18e86a9fff917690a238e34d6",
     Path("docs/examples/graph-authoring/gitlab-ci.yml"): "d49fa1887422a5bf726ad2c55e08b9f29185438314b626d9fd7e5feeb9c268b7",
@@ -14779,13 +14792,15 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "0526126730d4ecfbe9ffaa9f29e6d77f67e156a859758979f45e2a30a7c7412d",
+        "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
         "753cf2cb56afd581e1ed341ca518cd88ed103aa3c764f835a6902a0839ab1f06",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
+    GRAPH_AUTHORING_EMBEDDED_TEST_PATH:
+        "a5b56a3f2c1794b2252ebc748c2419900c8887ec4c5eaae60d8554beb9c38a8e",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): "0ec29db6cab49b7ad89853e8201b6515b9f8619798fccee11c2c012e56fa95ea",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
         "5f00033d6093669f0dbb8f41ab188eb4e19650eb88e0a4e7ef370f16ad4306e8",
@@ -14819,6 +14834,22 @@ GRAPH_AUTHORING_TEST_PROOFS = {
         "ae2cdb72c8aade6e319e717eac8cf267cdb14f2d7af98bbf918e27476b159986",
 }
 GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
+    (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
+     "fromEnvironment"):
+        "bed301e4c06fd86473d366d7c70be85682dd580002223f1b08d3c55199963ac1",
+    (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration", "of"):
+        "36b332cb270fea42c7f84b21c22238730456e4a77693c870fddc3edba4e806e7",
+    (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
+     "requireCredentialAvailable"):
+        "a68b4baa15f401f8d904680e0429c934d5628d46f58a6c496bab91fa7efb1bda",
+    (GRAPH_AUTHORING_MAIN_PATH, "RavenrootServerMain", "run"):
+        "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "configureGraphAuthoring"):
+        "88408f397407131e0898ee913cf595d12c1766203b8d09ce31a31ce267e8cd00",
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "start"):
+        "331ee9c47489d9cd62fec499e63c30266cae473b5f5d2ea6a46ca89cb1c05272",
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "close"):
+        "e85e56ec94274395713ec4141701749be63ad0a8f8e1392eb72a0cad9fbfd288",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installGraphAuthoring"):
         "e55468297916b313cd7e6b993d50867e25a3679ba7aa6b6e3d78e9bc57232366",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "graphAuthoring"):
@@ -14831,13 +14862,36 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
         "a90f072738431cffc0f836f9e0d6812eb9d8598518edaef476b42404720a7a71",
     (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "importPublishedGraphDefinition"):
         "c9a979d7c81c71430c0c45b40825d9fa52ce7f6b4cd5a3c460061a438e2777df",
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication",
+     "immutableGraphDefinitionsAvailable"):
+        "125b5007d70721862001cd50e90642de415fada313d1899c9c8ec07cfa59c489",
     (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "resolveGraphArtifactDependencies"):
         "4acb49dd5c595eb1322bd76dd28c1802dcefcdcaaae23672fdd4b7304724d53f",
     (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "programArtifactCompatible"):
         "fba0dabfe9698464e03999be81708e10de098c972fe1d19d26338274d1756e07",
     (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "registerPublishedLocalDeployment"):
         "ce151ac425186080f2508e6d8bf3bc337d30ca1be8c0d74bb4c8a4940b9ac648",
+    (GRAPH_AUTHORING_APPLICATION_API_PATH, "RavenrootApplication",
+     "immutableGraphDefinitionsAvailable"):
+        "d46d97df5cdc89fa09d20c0bb4d8100295e3497d064cf88383475ba9ac49868b",
 }
+# Only these narrow pre-existing methods contribute scanner candidates to this authority. The
+# broader bootstrap and lifecycle methods above are exact supporting evidence: using their spans
+# for ownership would incorrectly absorb unrelated Main and server lifecycle configuration.
+GRAPH_AUTHORING_CANDIDATE_JAVA_METHODS = (
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installGraphAuthoring"),
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "graphAuthoring"),
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installPublishedGraphArtifacts"),
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "publishedGraphArtifacts"),
+    (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "graphArtifactDependenciesJson"),
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication",
+     "importPublishedGraphDefinition"),
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication",
+     "resolveGraphArtifactDependencies"),
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication", "programArtifactCompatible"),
+    (GRAPH_AUTHORING_APPLICATION_PATH, "DefaultRavenrootApplication",
+     "registerPublishedLocalDeployment"),
+)
 GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",
     "primaryPersistenceUnavailable": "342b4fa699e42b1d46930147387078f5799ff3380ef58baa3c39c92ae3d51a48",
@@ -14929,8 +14983,8 @@ def graph_authoring_cohort_candidate_ids(
         root: Path, discovered: dict[str, Candidate]) -> set[str] | None:
     try:
         route_source = (root / GRAPH_AUTHORING_ROUTE_PATH).read_text(encoding="utf-8")
-        server = (root / GRAPH_AUTHORING_SERVER_PATH).read_text(encoding="utf-8")
-        application = (root / GRAPH_AUTHORING_APPLICATION_PATH).read_text(encoding="utf-8")
+        method_sources = {path: (root / path).read_text(encoding="utf-8")
+                          for path, _type_symbol, _method in GRAPH_AUTHORING_JAVA_METHOD_PROOFS}
         ui = (root / GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
         ui_span_sources = {path: (root / path).read_text(encoding="utf-8")
                            for path, _method in GRAPH_AUTHORING_UI_SPAN_PROOFS}
@@ -14942,8 +14996,8 @@ def graph_authoring_cohort_candidate_ids(
     paths = {path.as_posix() for path in (*GRAPH_AUTHORING_FILE_PROOFS, *GRAPH_AUTHORING_TEST_PROOFS)}
     selected = {identifier for identifier, candidate in discovered.items()
                 if candidate.path in paths}
-    for path, type_symbol, method in GRAPH_AUTHORING_JAVA_METHOD_PROOFS:
-        source = server if path == GRAPH_AUTHORING_SERVER_PATH else application
+    for path, type_symbol, method in GRAPH_AUTHORING_CANDIDATE_JAVA_METHODS:
+        source = method_sources[path]
         for start, end in program_github_method_spans(source, type_symbol, method):
             first, last = line_number(source, start), line_number(source, end)
             selected.update(identifier for identifier, candidate in discovered.items()
@@ -15016,8 +15070,13 @@ def graph_authoring_authority_from_source(
                    for path in (*GRAPH_AUTHORING_FILE_PROOFS,
                                 *GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
                                 *GRAPH_AUTHORING_TEST_PROOFS)}
-        server = (root / GRAPH_AUTHORING_SERVER_PATH).read_text(encoding="utf-8")
-        application = (root / GRAPH_AUTHORING_APPLICATION_PATH).read_text(encoding="utf-8")
+        method_sources = {path: sources.get(path) or (root / path).read_text(encoding="utf-8")
+                          for path, _type_symbol, _method in GRAPH_AUTHORING_JAVA_METHOD_PROOFS}
+        server = method_sources[GRAPH_AUTHORING_SERVER_PATH]
+        application = method_sources[GRAPH_AUTHORING_APPLICATION_PATH]
+        application_api = method_sources[GRAPH_AUTHORING_APPLICATION_API_PATH]
+        embedded = method_sources[GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH]
+        main = method_sources[GRAPH_AUTHORING_MAIN_PATH]
         ui = (root / GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
         ui_span_sources = {path: (root / path).read_text(encoding="utf-8")
                            for path, _method in GRAPH_AUTHORING_UI_SPAN_PROOFS}
@@ -15033,8 +15092,7 @@ def graph_authoring_authority_from_source(
             **GRAPH_AUTHORING_FILE_PROOFS, **GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
             **GRAPH_AUTHORING_TEST_PROOFS}.items()):
         return None
-    if any(java_method_digest(server if path == GRAPH_AUTHORING_SERVER_PATH else application,
-                              type_symbol, method) != digest
+    if any(java_method_digest(method_sources[path], type_symbol, method) != digest
            for (path, type_symbol, method), digest in GRAPH_AUTHORING_JAVA_METHOD_PROOFS.items()):
         return None
     ui_digests: dict[str, str] = {}
@@ -15091,6 +15149,17 @@ def graph_authoring_authority_from_source(
          "Resolution is observational: it must not build, activate, admit for execution, or run any"),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphProgramDependency.java")],
          "tenant-owned ACTIVE program artifact"),
+        (embedded, "GraphAuthoringConfiguration.fromEnvironment(environment)"),
+        (embedded, "GraphAuthoringRepositories::create"),
+        (embedded, "PublishedGraphArtifactCatalog::new"),
+        (embedded, "Git graph authoring credential is unavailable"),
+        (embedded, "Arrays.fill(copy, '\\0')"),
+        (main, "server.configureGraphAuthoring(embeddedGraphAuthoring)"),
+        (server, "Git graph authoring requires an immutable graph definition store"),
+        (server, "embedded.requireCredentialAvailable()"),
+        (server, "close();"),
+        (application_api, "default boolean immutableGraphDefinitionsAvailable()"),
+        (application, "return graphDefinitionStore != null"),
         (application, "published graph imports require an immutable definition store"),
         (application, "pinned graph deployments require an immutable definition store"),
         (application, "GraphAdmissionPurpose.LOCAL_DEPLOYMENT"),

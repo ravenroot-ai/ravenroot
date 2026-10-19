@@ -1,9 +1,11 @@
+import { productError } from './product-error.js';
 import * as d3 from 'd3';
 import { edgeFlowWidth, formatRuntimeTime } from './monitoring-runtime-state.js';
 import { createElasticVisualGroupRenderer } from './visual-group-elastic-renderer.js';
+import { uiText } from './ui-text.js';
 
 function requiredElement(value, name) {
-  if (!(value instanceof Element)) throw new TypeError(`${name} is required.`);
+  if (!(value instanceof Element)) throw productError("workspace.error.viewer.elastic.renderer.is.required", new TypeError(`${name} is required.`), { value1: name });
   return value;
 }
 
@@ -59,14 +61,16 @@ export function mountD3ElasticRenderer({
   initialTransform = null,
   startSimulation = true,
   idleRadius = null,
+  t = uiText,
+  formatTime = formatRuntimeTime,
 }) {
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
   if (!Array.isArray(nodes) || !Array.isArray(links)) {
-    throw new TypeError('Elastic nodes and links are required.');
+    throw productError("workspace.error.viewer.elastic.renderer.elastic.nodes.and.links.are.required", new TypeError('Elastic nodes and links are required.'));
   }
   if (typeof isLive !== 'function' || typeof onViewportChange !== 'function') {
-    throw new TypeError('Elastic lifecycle callbacks are required.');
+    throw productError("workspace.error.viewer.elastic.renderer.elastic.lifecycle.callbacks.are.required", new TypeError('Elastic lifecycle callbacks are required.'));
   }
 
   const viewportWidth = Math.max(1, finite(width, 800));
@@ -168,14 +172,16 @@ export function mountD3ElasticRenderer({
   if (tooltip !== null) {
     const tip = d3.select(tooltip);
     let tooltipPoint = null;
-    const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
-    const nodeText = runtimeNodeTooltipText;
+    const known = (labelKey, value) => value == null || value === ''
+      ? t('embed.tooltip.unavailable', { label: t(labelKey) })
+      : t('embed.tooltip.value', { label: t(labelKey), value });
+    const nodeText = node => runtimeNodeTooltipText(node, t, formatTime);
     const edgeText = link => [link.label || link.id,
-      `Recent activity: ${link.flow?.recent ?? 0}`,
-      `Traversals: ${link.flow?.count ?? 0}`,
-      known('Last traversal', link.flow?.lastEvent),
-      known('Last traversal time', formatRuntimeTime(link.flow?.lastOccurredAt)),
-      known('Configured weight', link.configuredWeight),
+      t('embed.tooltip.recentActivity', { count: link.flow?.recent ?? 0 }),
+      t('embed.tooltip.traversals', { count: link.flow?.count ?? 0 }),
+      known('embed.tooltip.lastTraversal', link.flow?.lastEvent),
+      known('embed.tooltip.lastTraversalTime', formatTime(link.flow?.lastOccurredAt)),
+      known('embed.tooltip.configuredWeight', link.configuredWeight),
     ].join('\n');
     const positionTooltip = event => {
       if (!event) return;
@@ -338,12 +344,13 @@ export function mountD3ElasticRenderer({
       node.fy = null;
     }));
 
-  visualGroups = createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
+  visualGroups = createElasticVisualGroupRenderer({ t, zoomGroup, nodes, links, simulation,
     nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection, isLive,
     marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange,
     groupFill: palette.nodeSurface, groupText: palette.nodeText, groupBorder: palette.nodeBorder });
 
   return {
+    refreshLocale() { refreshTooltip(); visualGroups.refresh(); },
     nodes,
     links,
     simulation,
@@ -489,15 +496,18 @@ export function mountD3ElasticRenderer({
   };
 }
 
-export function runtimeNodeTooltipText(node) {
-  const known = (label, value) => value == null || value === '' ? `${label}: Unavailable` : `${label}: ${value}`;
-  const state = node.runtimeObserved ? node.runtimeState : null;
-  return [node.label, known('ID', node.id), known('State', state),
-    known('Active instances', node.runtimeObserved ? node.instances : null),
-    known('In-flight arrivals', node.runtimeObserved ? node.arrivals : null),
-    known('Last event', node.lastEventType), known('Last event time', formatRuntimeTime(node.lastOccurredAt)),
-    known('Processing duration', node.processingDuration == null ? null : `${node.processingDuration}s`),
-    known('Fallback', node.runtimeObserved ? (node.fallback ? 'yes' : 'no') : null),
-    known('Bypassed', node.runtimeObserved ? (node.runtimeState === 'bypassed' ? 'yes' : 'no') : null),
+export function runtimeNodeTooltipText(node, t = uiText, formatTime = formatRuntimeTime) {
+  const known = (labelKey, value) => value == null || value === ''
+    ? t('embed.tooltip.unavailable', { label: t(labelKey) })
+    : t('embed.tooltip.value', { label: t(labelKey), value });
+  const state = node.runtimeObserved ? t(`embed.runtime.state.${node.runtimeState}`) : null;
+  return [node.label, known('embed.tooltip.id', node.id), known('embed.tooltip.state', state),
+    known('embed.tooltip.activeInstances', node.runtimeObserved ? node.instances : null),
+    known('embed.tooltip.inFlightArrivals', node.runtimeObserved ? node.arrivals : null),
+    known('embed.tooltip.lastEvent', node.lastEventType),
+    known('embed.tooltip.lastEventTime', formatTime(node.lastOccurredAt)),
+    known('embed.tooltip.processingDuration', node.processingDuration == null ? null : `${node.processingDuration}s`),
+    known('embed.tooltip.fallback', node.runtimeObserved ? t(node.fallback ? 'common.yes' : 'common.no') : null),
+    known('embed.tooltip.bypassed', node.runtimeObserved ? t(node.runtimeState === 'bypassed' ? 'common.yes' : 'common.no') : null),
   ].join('\n');
 }

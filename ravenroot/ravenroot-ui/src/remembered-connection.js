@@ -1,17 +1,19 @@
+import { productError } from './product-error.js';
+import { uiText } from './ui-text.js';
 import { memoryTokenProvider } from './runtime-client.js';
 
 export const CONNECTION_STORAGE_KEY = 'ravenroot.ui.connection';
 const MAX_RECORD_LENGTH = 24 * 1024;
-const STORAGE_FAILURE = 'Browser storage is unavailable. Authentication is memory only; clear this site’s browser data if a previously saved token could not be removed.';
+const storageFailure = () => uiText("workspace.remembered.connection.browser.storage.is.unavailable.authentication.is.memory.only.clear");
 
 /** Public browser authority, including API prefix; never the proxy's private upstream identity. */
 export function connectionService(value, origin = globalThis.location?.origin) {
   const raw = String(value || '').trim();
-  if (raw.length > 2048 || /[\\\u0000-\u001f\u007f?#]/u.test(raw)) throw new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment');
+  if (raw.length > 2048 || /[\\\u0000-\u001f\u007f?#]/u.test(raw)) throw productError("workspace.error.remembered.connection.enter.a.valid.http.s.service.url.without.credentials.query.or.fra", new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment'));
   const url = new URL(raw || origin, origin);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
       || /%(?:2f|5c|2e|25)|\/\//i.test(url.pathname)) {
-    throw new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment');
+    throw productError("workspace.error.remembered.connection.enter.a.valid.http.s.service.url.without.credentials.query.or.fra", new Error('Enter a valid HTTP(S) service URL without credentials, query or fragment'));
   }
   return url.origin + url.pathname.replace(/\/+$/, '');
 }
@@ -26,9 +28,10 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
   let rejectedSnapshot = null;
   let asked = false;
   let notice = '';
-  const report = message => { notice = message; onNotice(message); };
+  const noticeText = () => typeof notice === 'function' ? notice() : notice;
+  const report = message => { notice = message; onNotice(noticeText()); };
   const publish = () => onChange({ hasToken: Boolean(memory.getAccessToken()),
-    remembered: Boolean(saved?.service === service && saved.token === memory.getAccessToken() && saved.token), notice });
+    remembered: Boolean(saved?.service === service && saved.token === memory.getAccessToken() && saved.token), notice: noticeText() });
   const write = record => {
     // If a write fails, also try removing the previous token-bearing record. Never claim removal
     // succeeded when the browser denied both operations.
@@ -36,7 +39,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
     catch {
       try { storage().removeItem(CONNECTION_STORAGE_KEY); } catch { /* notice explains uncertainty */ }
       saved = null;
-      report(STORAGE_FAILURE);
+      report(storageFailure);
       return false;
     }
   };
@@ -54,7 +57,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
     }
   } catch {
     try { storage().removeItem(CONNECTION_STORAGE_KEY); } catch { /* optional storage */ }
-    report('The saved connection could not be read. Authenticate explicitly; browser storage may be unavailable or the record unsupported.');
+    report(() => uiText("workspace.remembered.connection.the.saved.connection.could.not.be.read.authenticate.explicitly"));
   }
   const forget = () => {
     pending = null;
@@ -93,7 +96,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
       const empty = Object.freeze({ accessToken: '' });
       const assertUsable = () => {
         if (bound === service && rejectedSnapshot === memory.getAccessTokenSnapshot()) {
-          throw new Error('Authenticate with a replacement service token');
+          throw productError("workspace.error.remembered.connection.authenticate.with.a.replacement.service.token", new Error('Authenticate with a replacement service token'));
         }
       };
       return {
@@ -125,7 +128,7 @@ export function createRememberedConnection({ origin, storage = () => globalThis.
       }
     },
     forget,
-    get notice() { return notice; },
+    get notice() { return noticeText(); },
     get hasSavedService() { return Boolean(saved); },
   };
 }

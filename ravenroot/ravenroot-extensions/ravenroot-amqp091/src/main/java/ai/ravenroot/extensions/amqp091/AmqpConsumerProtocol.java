@@ -9,7 +9,49 @@ import java.util.LinkedHashMap;
 interface AmqpConsumerProtocol {
     Owner open(AmqpProfile profile, AmqpConsumerPolicy policy, char[] password, int prefetch) throws Failure;
 
+    default Owner open(AmqpProfile profile, AmqpConsumerPolicy policy, char[] password, int prefetch,
+                       Destination destination) throws Failure {
+        if (destination.mode() != Destination.Mode.CONSUMER) {
+            throw new Failure(true, "amqp-subscription-unsupported");
+        }
+        return open(profile, policy, password, prefetch);
+    }
+
+    record Destination(Mode mode, String queue, String exchange, String bindingPattern) {
+        enum Mode { CONSUMER, SUBSCRIBER }
+
+        public Destination {
+            java.util.Objects.requireNonNull(mode, "mode");
+            queue = queue == null ? "" : queue;
+            exchange = exchange == null ? "" : exchange;
+            bindingPattern = bindingPattern == null ? "" : bindingPattern;
+            if (mode == Mode.CONSUMER && (queue.isEmpty() || !exchange.isEmpty() || !bindingPattern.isEmpty())) {
+                throw new IllegalArgumentException("invalid consumer destination");
+            }
+            if (mode == Mode.SUBSCRIBER && (!queue.isEmpty() || exchange.isEmpty() || bindingPattern.isEmpty())) {
+                throw new IllegalArgumentException("invalid subscriber destination");
+            }
+        }
+
+        static Destination consumer(String queue) {
+            return new Destination(Mode.CONSUMER, queue, "", "");
+        }
+
+        static Destination subscriber(String exchange, String bindingPattern) {
+            return new Destination(Mode.SUBSCRIBER, "", exchange, bindingPattern);
+        }
+
+        String stableScope() {
+            if (mode == Mode.CONSUMER) return "queue:" + queue;
+            java.util.Base64.Encoder encoder = java.util.Base64.getUrlEncoder().withoutPadding();
+            return "topic:" + encoder.encodeToString(exchange.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    + ":" + encoder.encodeToString(bindingPattern.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
     interface Owner {
+        /** Actual broker resource for lifecycle diagnostics; never serialized into authored configuration. */
+        default String resourceName() { return ""; }
         Event poll(Duration timeout) throws Failure;
         void ack(long deliveryTag) throws Failure;
         void nack(long deliveryTag, boolean requeue) throws Failure;

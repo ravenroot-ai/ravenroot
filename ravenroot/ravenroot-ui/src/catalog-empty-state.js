@@ -1,3 +1,4 @@
+import { uiMessage, uiErrorMessage, renderUiMessage, withUiMessage } from './ui-message.js';
 // Why the node palette is empty, in the user's words.
 //
 // An empty palette has several causes and they are not interchangeable: a service that answered
@@ -10,40 +11,37 @@
 // `catalog` is the array the service returned, or null when no request has completed.
 // `pending` is true while a request is in flight and no answer has arrived yet.
 
-const EDITABLE_TAIL = 'Custom and unknown behaviors remain editable.';
+import { uiText } from './ui-text.js';
 
-export function catalogEmptyState(error, catalog, pending = false) {
-  if (error) return failureState(error);
+function state(kind, key, params, t) {
+  const message = uiMessage(key, params);
+  return withUiMessage({ kind, message: renderUiMessage(message, t) }, message);
+}
+
+export function catalogEmptyState(error, catalog, pending = false, t = uiText) {
+  if (error) return failureState(error, t);
   if (catalog === null || catalog === undefined) {
     // "Connect to the service" is an instruction. Once the page connects on its own it is an
     // instruction the user can neither act on nor decline, so while the request is in flight the
     // palette says what is happening instead of asking for something that is already under way.
     if (pending) {
-      return { kind: 'connecting', message: 'Connecting to the service to load programmable nodes…' };
+      return state('connecting', 'catalog.empty.connecting', {}, t);
     }
-    return { kind: 'disconnected', message: 'Connect to the service to load programmable nodes.' };
+    return state('disconnected', 'catalog.empty.disconnected', {}, t);
   }
   if (!catalog.length) {
-    return { kind: 'empty', message: `The service answered with an empty node catalog. ${EDITABLE_TAIL}` };
+    return state('empty', 'catalog.empty.available', {}, t);
   }
   return { kind: 'available', message: '' };
 }
 
-function failureState(error) {
+function failureState(error, t) {
   const status = Number(error?.status) || 0;
   if (status === 401) {
-    return {
-      kind: 'authentication-required',
-      message: 'The service replied that authentication is required (HTTP 401). '
-        + `Paste an access token to load the node catalog. ${EDITABLE_TAIL}`,
-    };
+    return state('authentication-required', 'catalog.empty.authenticationRequired', {}, t);
   }
   if (status === 403) {
-    return {
-      kind: 'access-revoked',
-      message: 'The service refused the node catalog for this token (HTTP 403). '
-        + `Access has been revoked. ${EDITABLE_TAIL}`,
-    };
+    return state('access-revoked', 'catalog.empty.accessRevoked', {}, t);
   }
   // Do not add "The service did not answer" for a
   // status-less error (`error.status` null/undefined -- the fetch promise itself rejected) and drop
@@ -57,13 +55,8 @@ function failureState(error) {
   // service did or did not do -- only `reason(error)`, which is already the client's own observation
   // (and, for the status-less case, already enumerates the possibilities via `runtime-client.js`'s
   // hint) -- so there is nothing left to add here, and both cases share one sentence.
-  return {
-    kind: 'unreachable',
-    message: `Node catalog unreachable: ${reason(error)}. ${EDITABLE_TAIL}`,
-  };
-}
-
-function reason(error) {
-  const message = String(error?.message || '').trim();
-  return message || 'the request failed';
+  return state('unreachable', 'catalog.empty.unreachable', {
+    reason: error?.uiMessageKey ? uiErrorMessage(error)
+      : String(error?.message || '').trim() || uiMessage('catalog.empty.requestFailed'),
+  }, t);
 }

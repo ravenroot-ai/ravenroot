@@ -113,4 +113,7 @@ it('renders unknown effects and untrusted artifact previews as text, without a r
   [...dialog.querySelectorAll('button')].find(button => button.textContent.startsWith('LOG')).click(); await flush();
   expect(dialog.querySelector('img')).toBeNull();
   expect(dialog.textContent).toContain('<img src=x');
+  panel.setClient(null); panel.refreshLocale();
+  expect(dialog.textContent).not.toContain('<img src=x');
+  expect(dialog.querySelector('textarea').value).toBe('');
 });

@@ -51,6 +51,8 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: {{ .Values.engine | quote }}
+            - name: RAVENROOT_UI_FRAME_ANCESTORS
+              value: {{ .Values.uiFrameAncestors | quote }}
             {{- if .Values.graphAuthoring.enabled }}
             - name: RAVENROOT_GRAPH_AUTHORING_MODE
               value: GIT
@@ -68,6 +70,10 @@ spec:
               value: {{ .Values.graphAuthoring.releaseBranch | quote }}
             - name: RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE
               value: {{ .Values.graphAuthoring.githubApiBase | quote }}
+            - name: RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE
+              value: {{ .Values.graphAuthoring.gitlabApiBase | quote }}
+            - name: RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT
+              value: {{ .Values.graphAuthoring.gitlabProject | quote }}
             - name: RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE
               value: {{ .Values.graphAuthoring.credentialMode | quote }}
             - name: RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE

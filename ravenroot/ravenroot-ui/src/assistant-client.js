@@ -1,3 +1,5 @@
+import { uiText } from './ui-text.js';
+import { productError } from './product-error.js';
 import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 // The panel's only way out of the browser — and it goes to this product's own service, never to a
 // model provider (the per-author credential contract and the design record's §1).
@@ -68,7 +70,7 @@ const PERMITTED_PATHS = new Set(Object.values(ASSISTANT_PATHS));
 // half of the guarantee actually lives and what pins it.
 export function assistantUrl(baseUrl, path) {
   if (!PERMITTED_PATHS.has(path)) {
-    throw new Error(`assistant destination is not permitted: ${path}`);
+    throw productError("workspace.error.assistant.client.assistant.destination.is.not.permitted", new Error(`assistant destination is not permitted: ${path}`), { value1: path });
   }
   return `${baseUrl}${path}`;
 }
@@ -143,6 +145,10 @@ export function failureFromEnvelope(status, body) {
     : sentence;
 
   const error = new AssistantUnavailableError(ENVELOPE_REASONS[code] ?? null, message);
+  productError(correlationId ? 'workspace.assistant.reference' : 'workspace.assistant.sentence', error, () => ({
+    sentence: assistantFailureText(assistantReason) || prose || uiText('workspace.assistant.requestHttp', { status }),
+    correlationId,
+  }));
   // Carried so the panel and its tests can assert on the token rather than on prose, and so a
   // future server field can be threaded through without reshaping this type.
   error.code = code || null;
@@ -176,25 +182,25 @@ export class RavenrootAssistantClient {
     } catch (error) {
       // Network-level failure is indistinguishable from an absent deployment from here, and both
       // are honestly described by the same sentence: nothing is configured to answer.
-      return unreachable(error?.message || 'the assistant service could not be reached');
+      return unreachable(error?.message || uiText('workspace.assistant.unreachable'));
     }
 
     // A deployment may intentionally omit or disable the service.
     if (response.status === 404 || response.status === 501) {
-      return unreachable('this deployment does not provide the assistant service');
+      return unreachable(uiText('workspace.assistant.notProvided'));
     }
     if (response.status === 401 || response.status === 403) {
       return { reachable: true, configured: true, allowlisted: true, signedIn: false, provider: null };
     }
     if (!response.ok) {
-      return unreachable(`the assistant service responded with HTTP ${response.status}`);
+      return unreachable(uiText('workspace.assistant.httpStatus', { status: response.status }));
     }
 
     let body;
     try {
       body = await response.json();
     } catch {
-      return unreachable('the assistant service returned a response this build cannot read');
+      return unreachable(uiText('workspace.assistant.unreadable'));
     }
     return normalizeStatus(body);
   }
@@ -233,14 +239,14 @@ export class RavenrootAssistantClient {
         signal,
       });
     } catch (error) {
-      throw new AssistantUnavailableError('service-unavailable',
-        `The assistant service could not be reached: ${error?.message || error}`);
+      throw productError("workspace.error.assistant.client.the.assistant.service.could.not.be.reached", new AssistantUnavailableError('service-unavailable',
+        `The assistant service could not be reached: ${error?.message || error}`), { value1: error?.message || error });
     }
 
     if (response.status === 404 || response.status === 501) {
       // NO FALLBACK. See the header: an echo here would make an unconnected panel look connected.
-      throw new AssistantUnavailableError('service-unavailable',
-        'This deployment does not provide the assistant service, so the message was not sent.');
+      throw productError("workspace.error.assistant.client.this.deployment.does.not.provide.the.assistant.service.so.the.mes", new AssistantUnavailableError('service-unavailable',
+        'This deployment does not provide the assistant service, so the message was not sent.'));
     }
     let body = null;
     let unreadable = false;
@@ -256,8 +262,8 @@ export class RavenrootAssistantClient {
     // service's mouth that the service did not author, which is the same defect as echoing wearing
     // a quieter costume. `status()` already guarded the identical case; this is that guard's twin.
     if (unreadable) {
-      throw new AssistantUnavailableError(null,
-        'The assistant service returned a response this build cannot read, so nothing was answered.');
+      throw productError("workspace.error.assistant.client.the.assistant.service.returned.a.response.this.build.cannot.read", new AssistantUnavailableError(null,
+        'The assistant service returned a response this build cannot read, so nothing was answered.'));
     }
     // Text remains inert. Structured proposals travel only in the named additive member: JSON-looking
     // prose and unknown response fields can never be promoted into an editor action here.
@@ -297,16 +303,16 @@ export class RavenrootAssistantClient {
     const body = await readJson(response);
     if (!response.ok) throw failureFromEnvelope(response.status, body);
     if (!body || typeof body !== 'object') {
-      throw new AssistantUnavailableError(null,
-        'The connection could not be started: the service returned a response this build cannot read.');
+      throw productError("workspace.error.assistant.client.the.connection.could.not.be.started.the.service.returned.a.respon", new AssistantUnavailableError(null,
+        'The connection could not be started: the service returned a response this build cannot read.'));
     }
     const userCode = typeof body.userCode === 'string' ? body.userCode : '';
     const verificationUri = typeof body.verificationUri === 'string' ? body.verificationUri : '';
     // Both or neither. A code with nowhere to type it, or an address with no code, is not a usable
     // instruction, and rendering half of one is how an author is left staring at a dead panel.
     if (!userCode || !verificationUri) {
-      throw new AssistantUnavailableError(null,
-        'The connection could not be started: the service did not return a code and an address.');
+      throw productError("workspace.error.assistant.client.the.connection.could.not.be.started.the.service.did.not.return.a", new AssistantUnavailableError(null,
+        'The connection could not be started: the service did not return a code and an address.'));
     }
     return {
       userCode,
@@ -358,13 +364,13 @@ export class RavenrootAssistantClient {
       });
     } catch (error) {
       if (error?.name === 'AbortError') throw error;
-      throw new AssistantUnavailableError('service-unavailable',
-        `The assistant service could not be reached: ${error?.message || error}`);
+      throw productError("workspace.error.assistant.client.the.assistant.service.could.not.be.reached", new AssistantUnavailableError('service-unavailable',
+        `The assistant service could not be reached: ${error?.message || error}`), { value1: error?.message || error });
     }
   }
 
   async #fetch(path, options) {
-    if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
+    if (!this.fetchImpl) throw productError("workspace.error.assistant.client.fetch.api.is.not.supported.by.this.browser", new Error('Fetch API is not supported by this browser'));
     const credential = await requestCredential(this.tokenProvider);
     const { token } = credential;
     const response = await this.fetchImpl(assistantUrl(this.baseUrl, path), {
@@ -434,7 +440,7 @@ function normalizeBaseUrl(value) {
   if (!baseUrl) return '';
   const parsed = new URL(baseUrl, globalThis.location?.origin || 'http://localhost');
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Service URL must use HTTP(S)');
+    throw productError("workspace.error.assistant.client.service.url.must.use.http.s", new Error('Service URL must use HTTP(S)'));
   }
   return parsed.origin + parsed.pathname.replace(/\/$/, '');
 }

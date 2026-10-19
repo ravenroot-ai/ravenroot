@@ -18,12 +18,20 @@ export function stableEdgeIdUtf8Bytes(value) {
   return new TextEncoder().encode(String(value)).byteLength;
 }
 
-export function stableEdgeIdViolation(value) {
-  if (typeof value !== 'string' || isJavaBlank(value)) return 'must be a nonblank string';
-  if (!isWellFormedUnicode(value)) return 'must be well-formed Unicode';
+export function stableEdgeIdFinding(value) {
+  if (typeof value !== 'string' || isJavaBlank(value)) return { kind: 'nonblank', params: {} };
+  if (!isWellFormedUnicode(value)) return { kind: 'unicode', params: {} };
   const bytes = stableEdgeIdUtf8Bytes(value);
   return bytes > STABLE_EDGE_ID_MAX_UTF8_BYTES
-    ? `uses ${bytes} UTF-8 bytes; maximum is ${STABLE_EDGE_ID_MAX_UTF8_BYTES}` : null;
+    ? { kind: 'maximumBytes', params: { bytes, maximum: STABLE_EDGE_ID_MAX_UTF8_BYTES } } : null;
+}
+
+export function stableEdgeIdViolation(value) {
+  const finding = stableEdgeIdFinding(value);
+  if (!finding) return null;
+  if (finding.kind === 'nonblank') return 'must be a nonblank string';
+  if (finding.kind === 'unicode') return 'must be well-formed Unicode';
+  return `uses ${finding.params.bytes} UTF-8 bytes; maximum is ${finding.params.maximum}`;
 }
 
 export function assertStableEdgeId(value, context = 'Edge id') {

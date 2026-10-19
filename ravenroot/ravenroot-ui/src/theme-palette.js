@@ -55,6 +55,7 @@ export const RENDERER_PALETTES = Object.freeze({
     nodeType: SHARED.nodeType,
     edgeType: SHARED.edgeType,
     nodeSurfaceByType: Object.freeze({
+      // i18n-audit-exempt: protocol-token - Theme palette values are CSS colors, including the error-state color.
       start: '#dafbe1', end: '#ffebe9', error: '#fff8c5', terminal: '#f6f8fa',
       consumer: '#fff1e5', handler: '#fbefff', agent: '#ddf4ff', flow: '#ddf4ff',
       actor: '#fff8c5', system: '#f6f8fa', trace: '#ddf4ff', 'human-task': '#fbefff',

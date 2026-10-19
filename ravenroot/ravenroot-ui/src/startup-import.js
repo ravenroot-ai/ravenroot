@@ -1,3 +1,6 @@
+import { uiText, uiErrorReason } from './ui-text.js';
+import { productError } from './product-error.js';
+
 export const STARTUP_IMPORT_PHASE = Object.freeze({
   WAITING_RUNTIME: 'waiting-runtime',
   WAITING_AUTHENTICATION: 'waiting-authentication',
@@ -19,10 +22,13 @@ export class StartupImportError extends Error {
 }
 
 function decodedFilename(pathname) {
+  // i18n-audit-exempt: authored-content - Import filename is retained as the document's stable identity.
   const segment = pathname.split('/').at(-1) || 'imported.graphml';
   try {
+    // i18n-audit-exempt: authored-content - Import filename is retained as the document's stable identity.
     return decodeURIComponent(segment) || 'imported.graphml';
   } catch {
+    // i18n-audit-exempt: authored-content - Import filename is retained as the document's stable identity.
     return segment || 'imported.graphml';
   }
 }
@@ -30,7 +36,8 @@ function decodedFilename(pathname) {
 export function startupImportTarget(rawUrl, pageUrl) {
   const url = new URL(rawUrl, pageUrl);
   if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new StartupImportError('unsupported-url', 'The graph URL must use HTTP or HTTPS.');
+    throw productError('startupImport.url.unsupported', new StartupImportError('unsupported-url',
+      'The graph URL must use HTTP or HTTPS.'));
   }
   const page = new URL(pageUrl);
   return Object.freeze({
@@ -43,12 +50,12 @@ export function startupImportTarget(rawUrl, pageUrl) {
 
 function publicFailure(error) {
   if (error instanceof StartupImportError) {
-    return { code: error.code, message: error.publicMessage };
+    return { code: error.code, get message() { return error.uiMessageKey ? uiErrorReason(error) : error.publicMessage; } };
   }
   if (error?.name === 'AbortError') {
-    return { code: 'aborted', message: 'The graph import was cancelled.' };
+    return { code: 'aborted', get message() { return uiText('startupImport.cancelled'); } };
   }
-  return { code: 'import-failed', message: 'The graph could not be imported. Check the file and try again.' };
+  return { code: 'import-failed', get message() { return uiText('startupImport.failed'); } };
 }
 
 function sameBinding(left, right) {
@@ -69,16 +76,16 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
   let phase = target.crossOrigin
     ? STARTUP_IMPORT_PHASE.WAITING_ORIGIN_CONFIRMATION
     : STARTUP_IMPORT_PHASE.WAITING_RUNTIME;
-  let message = target.crossOrigin
-    ? `Confirm ${target.origin} before importing ${target.filename}.`
-    : `Waiting for the service before importing ${target.filename}.`;
+  let message = () => target.crossOrigin
+    ? uiText("workspace.import.confirm", { origin: target.origin, filename: target.filename })
+    : uiText("workspace.import.waiting", { filename: target.filename });
   let errorCode = null;
   let originConfirmed = !target.crossOrigin;
   let runtimeOutcome = null;
   let generation = 0;
   let flight = null;
 
-  const snapshot = () => Object.freeze({ phase, message, errorCode, target,
+  const snapshot = () => Object.freeze({ phase, message: typeof message === 'function' ? message() : message, errorCode, target,
     canConfirmOrigin: target.crossOrigin && !originConfirmed
       && [STARTUP_IMPORT_PHASE.WAITING_ORIGIN_CONFIRMATION,
         STARTUP_IMPORT_PHASE.WAITING_RUNTIME,
@@ -115,18 +122,18 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
     const currentGeneration = ++generation;
     const controller = new AbortController();
     flight = { controller, binding, generation: currentGeneration };
-    set(STARTUP_IMPORT_PHASE.DOWNLOADING, `Importing ${target.filename}…`);
+    set(STARTUP_IMPORT_PHASE.DOWNLOADING, () => (uiText("workspace.startup.progress.downloading", { filename: target.filename })));
     try {
       await run({ target, binding, signal: controller.signal, generation: currentGeneration });
       if (flight?.generation !== currentGeneration || generation !== currentGeneration) return false;
       flight = null;
-      set(STARTUP_IMPORT_PHASE.COMPLETED, `Imported ${target.filename}.`);
+      set(STARTUP_IMPORT_PHASE.COMPLETED, () => (uiText("workspace.startup.progress.completed", { filename: target.filename })));
       return true;
     } catch (error) {
       if (flight?.generation !== currentGeneration || generation !== currentGeneration) return false;
       flight = null;
       const failure = publicFailure(error);
-      set(STARTUP_IMPORT_PHASE.FAILED, failure.message, failure.code);
+      set(STARTUP_IMPORT_PHASE.FAILED, () => (failure.message), failure.code);
       return false;
     }
   }
@@ -137,11 +144,11 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
     if (phase === STARTUP_IMPORT_PHASE.DOWNLOADING) {
       abortFlight();
       set(STARTUP_IMPORT_PHASE.FAILED,
-        'The service or workspace changed during the import. Retry to import into the current workspace.',
+        () => (uiText("workspace.startup.import.the.service.or.workspace.changed.during.the.import.retry")),
         'stale-authority');
     } else if (phase !== STARTUP_IMPORT_PHASE.FAILED && originConfirmed) {
       set(STARTUP_IMPORT_PHASE.WAITING_RUNTIME,
-        `Waiting for the service before importing ${target.filename}.`);
+        () => (uiText("workspace.import.waiting", { filename: target.filename })));
     }
   }
 
@@ -152,7 +159,7 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
       runtimeOutcome = outcome;
       abortFlight();
       set(STARTUP_IMPORT_PHASE.FAILED,
-        'The service or workspace changed during the import. Retry to import into the current workspace.',
+        () => (uiText("workspace.startup.import.the.service.or.workspace.changed.during.the.import.retry")),
         'stale-authority');
       return;
     }
@@ -161,21 +168,21 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
     if (outcome.kind === 'ready') {
       if (!originConfirmed) {
         set(STARTUP_IMPORT_PHASE.WAITING_ORIGIN_CONFIRMATION,
-          `Confirm ${target.origin} before importing ${target.filename}.`);
+          () => (uiText("workspace.import.confirm", { origin: target.origin, filename: target.filename })));
       } else {
         void startIfReady();
       }
     } else if (outcome.kind === 'authentication-required') {
       set(STARTUP_IMPORT_PHASE.WAITING_AUTHENTICATION,
-        `Authenticate with the Ravenroot service${originConfirmed ? ''
-          : ` and confirm ${target.origin}`} to import ${target.filename}.`);
+        () => (uiText("workspace.startup.import.authenticate.with.the.ravenroot.service.to.import", { value: originConfirmed ? ''
+          : uiText("workspace.import.and.confirm", { origin: target.origin }), filename: target.filename })));
     } else if (outcome.kind === 'service-confirmation-required') {
       set(STARTUP_IMPORT_PHASE.WAITING_SERVICE_CONFIRMATION,
-        `Confirm the Ravenroot service connection${originConfirmed ? ''
-          : ` and ${target.origin}`} to import ${target.filename}.`);
+        () => (uiText("workspace.startup.import.confirm.the.ravenroot.service.connection.to.import", { value: originConfirmed ? ''
+          : uiText("workspace.import.and.origin", { origin: target.origin }), filename: target.filename })));
     } else if (outcome.kind === 'error') {
       set(STARTUP_IMPORT_PHASE.FAILED,
-        outcome.message || 'The service is not ready for graph imports. Retry the connection.',
+        () => (outcome.message || uiText("workspace.startup.import.the.service.is.not.ready.for.graph.imports.retry")),
         outcome.code || 'runtime-unavailable');
     }
   }
@@ -185,13 +192,13 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
     originConfirmed = true;
     if (runtimeOutcome?.kind === 'authentication-required') {
       set(STARTUP_IMPORT_PHASE.WAITING_AUTHENTICATION,
-        `Authenticate with the Ravenroot service to import ${target.filename}.`);
+        () => (uiText("workspace.startup.import.authenticate.with.the.ravenroot.service.to.import.alternative", { filename: target.filename })));
     } else if (runtimeOutcome?.kind === 'service-confirmation-required') {
       set(STARTUP_IMPORT_PHASE.WAITING_SERVICE_CONFIRMATION,
-        `Confirm the Ravenroot service connection to import ${target.filename}.`);
+        () => (uiText("workspace.startup.import.confirm.the.ravenroot.service.connection.to.import.alternative", { filename: target.filename })));
     } else {
       set(STARTUP_IMPORT_PHASE.WAITING_RUNTIME,
-        `Waiting for the service before importing ${target.filename}.`);
+        () => (uiText("workspace.import.waiting", { filename: target.filename })));
       void startIfReady();
     }
     return true;
@@ -203,18 +210,18 @@ export function createStartupImportController({ rawUrl, pageUrl, run, onChange =
     runtimeOutcome = null;
     set(originConfirmed ? STARTUP_IMPORT_PHASE.WAITING_RUNTIME
       : STARTUP_IMPORT_PHASE.WAITING_ORIGIN_CONFIRMATION,
-    originConfirmed ? `Waiting for the service before importing ${target.filename}.`
-      : `Confirm ${target.origin} before importing ${target.filename}.`);
+    () => (originConfirmed ? uiText("workspace.import.waiting", { filename: target.filename })
+      : uiText("workspace.import.confirm", { origin: target.origin, filename: target.filename })));
     return true;
   }
 
   function cancel() {
     if ([STARTUP_IMPORT_PHASE.COMPLETED, STARTUP_IMPORT_PHASE.CANCELLED].includes(phase)) return false;
     abortFlight();
-    set(STARTUP_IMPORT_PHASE.CANCELLED, `Cancelled import of ${target.filename}.`);
+    set(STARTUP_IMPORT_PHASE.CANCELLED, () => (uiText("workspace.startup.import.cancelled.import.of", { filename: target.filename })));
     return true;
   }
 
   publish();
-  return Object.freeze({ snapshot, runtimePending, updateRuntime, confirmOrigin, retry, cancel });
+  return Object.freeze({ snapshot, refreshLocale: publish, runtimePending, updateRuntime, confirmOrigin, retry, cancel });
 }

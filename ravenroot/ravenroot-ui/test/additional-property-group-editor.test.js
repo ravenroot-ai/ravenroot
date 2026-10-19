@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { productError } from '../src/product-error.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -46,6 +47,7 @@ function loadEditor() {
     'nextAdditionalPropertyGroupItem',
     'serializeAdditionalPropertyGroups',
     'secretReferenceOptionsHtml',
+    'productError',
     `${names.map(name => extractFunctionSource(source, name)).join('\n')}
     return {
       additionalPropertyGroupsHtml,
@@ -59,6 +61,7 @@ function loadEditor() {
     nextAdditionalPropertyGroupItem,
     serializeAdditionalPropertyGroups,
     value => `<option value="${String(value)}" selected>${String(value)}</option>`,
+    productError,
   );
 }
 

@@ -59,13 +59,16 @@ class AmqpConsumeContractTest {
     @Test void typedEmissionVocabularyIsExactlyTheTrustedDeclaration() {
         Set<String> expected = Set.of("amqp-consumer-already-active", "amqp-consumer-failed",
                 "amqp-consumer-policy-unavailable", "amqp-consumer-unavailable", "amqp-profile-unavailable",
+                "amqp-subscription-capacity-exhausted",
                 "credential-unavailable", "durable-ingress-lost", "durable-ingress-required",
                 "invalid-checkpoint-policy", "invalid-dead-letter-mode", "invalid-drain-timeout",
+                "invalid-destination-mode",
                 "invalid-max-in-flight", "invalid-max-retry-backoff", "invalid-poison-attempts",
                 "invalid-poison-policy", "invalid-prefetch", "invalid-retry-backoff",
                 "invalid-resource-mode", "outbound-destination-policy-refused",
                 "outbound-transport-encryption-required",
                 "poison-policy-forbidden", "queue-not-authorized", "startup-cancelled",
+                "subscription-not-authorized",
                 "unknown-graph-property");
         assertEquals(expected, AmqpSourceStartFailure.codes());
         assertEquals(AmqpSourceStartFailure.codes(), behavior(new AmqpConsumerTestSupport.FakeProtocol())
@@ -179,6 +182,88 @@ class AmqpConsumeContractTest {
         source.start(context).toCompletableFuture().join();
         assertEquals(2, protocol.openCalls.get());
         assertEquals(0, second.closes.get());
+    }
+
+    @Test
+    void subscriberUsesAuthorizedTopicDestinationAndKeepsReceiptIdentityAcrossFreshGenerations() {
+        var first = new AmqpConsumerTestSupport.FakeOwner();
+        var second = new AmqpConsumerTestSupport.FakeOwner();
+        var protocol = new AmqpConsumerTestSupport.FakeProtocol(first, second);
+        var ingress = new AmqpConsumerTestSupport.Ingress(2).deduplicate();
+        var context = new AmqpConsumerTestSupport.Context(ingress, 2);
+        source = source(protocol, AmqpConsumerTestSupport.policy(), configuration(Map.of(
+                "mode", "Subscriber", "exchange", "orders.topic", "bindingPattern", "orders.*")),
+                ignored -> secret());
+
+        source.start(context).toCompletableFuture().join();
+        assertEquals(AmqpConsumerProtocol.Destination.subscriber("orders.topic", "orders.*"),
+                protocol.observedDestination);
+        first.deliver(AmqpConsumerTestSupport.delivery(81, "same-message", false));
+        AmqpConsumerTestSupport.await(first.acked);
+        first.disconnect();
+        AmqpConsumerTestSupport.await(context.healthyLatch);
+        second.deliver(AmqpConsumerTestSupport.delivery(82, "same-message", true));
+        AmqpConsumerTestSupport.await(second.acked);
+
+        assertEquals(ingress.keys.get(0), ingress.keys.get(1));
+        assertEquals(java.util.List.of("DurablyCommitted", "Duplicate"), ingress.outcomes);
+    }
+
+    @Test
+    void sameTopicSubscribersRemainIndependentAcrossDurableSourceScopes() {
+        var ingress = new AmqpConsumerTestSupport.Ingress(2).deduplicate();
+        var firstOwner = new AmqpConsumerTestSupport.FakeOwner();
+        var secondOwner = new AmqpConsumerTestSupport.FakeOwner();
+        Map<String, Object> selector = Map.of("mode", "Subscriber", "exchange", "orders.topic",
+                "bindingPattern", "orders.*");
+        var first = source(new AmqpConsumerTestSupport.FakeProtocol(firstOwner),
+                AmqpConsumerTestSupport.policy(), configuration(selector), ignored -> secret());
+        var second = new AmqpConsumerSource(configuration(selector), ignored -> secret(),
+                (tenant, name) -> Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2)),
+                (tenant, name) -> Optional.of(AmqpConsumerTestSupport.policy()),
+                new AmqpConsumerTestSupport.FakeProtocol(secondOwner), virtualExecutor(), Clock.systemUTC());
+        first.start(new AmqpConsumerTestSupport.Context(ingress, 1, "subscriber-a")).toCompletableFuture().join();
+        second.start(new AmqpConsumerTestSupport.Context(ingress, 1, "subscriber-b")).toCompletableFuture().join();
+
+        firstOwner.deliver(AmqpConsumerTestSupport.delivery(91, "copied-message", false));
+        secondOwner.deliver(AmqpConsumerTestSupport.delivery(92, "copied-message", false));
+        AmqpConsumerTestSupport.await(ingress.offered);
+        AmqpConsumerTestSupport.await(firstOwner.acked);
+        AmqpConsumerTestSupport.await(secondOwner.acked);
+        assertEquals(java.util.List.of("DurablyCommitted", "DurablyCommitted"), ingress.outcomes);
+
+        first.stop().toCompletableFuture().join();
+        second.stop().toCompletableFuture().join();
+        source = null;
+    }
+
+    @Test
+    void subscriberScopeEncodingCannotAliasColonContainingDestinations() {
+        var left = AmqpConsumerProtocol.Destination.subscriber("a:b", "c");
+        var right = AmqpConsumerProtocol.Destination.subscriber("a", "b:c");
+        assertNotEquals(left.stableScope(), right.stableScope());
+    }
+
+    @Test
+    void subscriberAuthorityAndInactiveConsumerFieldsFailBeforeCredentialOrNetwork() {
+        for (Map<String, Object> invalid : java.util.List.<Map<String, Object>>of(
+                Map.of("mode", "Subscriber", "exchange", "other.topic", "bindingPattern", "orders.*"),
+                Map.of("mode", "Subscriber", "exchange", "orders.topic", "bindingPattern", "other.*"),
+                Map.of("mode", "Subscriber", "exchange", "orders.topic", "bindingPattern", "orders.*",
+                        "queue", "orders.q"),
+                Map.of("mode", "Consumer", "exchange", "orders.topic"))) {
+            var protocol = new AmqpConsumerTestSupport.FakeProtocol(new AmqpConsumerTestSupport.FakeOwner());
+            AtomicInteger credentials = new AtomicInteger();
+            source = source(protocol, AmqpConsumerTestSupport.policy(), configuration(invalid), ignored -> {
+                credentials.incrementAndGet(); return secret();
+            });
+            var context = new AmqpConsumerTestSupport.Context(new AmqpConsumerTestSupport.Ingress());
+            assertThrows(CompletionException.class, () -> source.start(context).toCompletableFuture().join());
+            assertEquals(0, credentials.get(), invalid.toString());
+            assertEquals(0, protocol.openCalls.get(), invalid.toString());
+            source.stop().toCompletableFuture().join();
+            source = null;
+        }
     }
 
     @Test
@@ -481,10 +566,16 @@ class AmqpConsumeContractTest {
     void consumerAuthorityIsSeparateTenantScopedAndStrict() {
         String key = EnvironmentAmqpConsumerPolicyResolver.variableName(AmqpTestSupport.TENANT,
                 AmqpTestSupport.PROFILE);
-        String value = "orders.q;4;trace,identity;identity;4096;1024;100;1000;3;dead-letter;500";
+        String value = "orders.q;4;trace,identity;identity;4096;1024;100;1000;3;dead-letter;500;orders.topic;orders.*,orders.#;4";
         var resolver = new EnvironmentAmqpConsumerPolicyResolver(Map.of(key, value));
 
         assertTrue(resolver.resolve(AmqpTestSupport.TENANT, AmqpTestSupport.PROFILE).isPresent());
+        String subscriberOnly = ";4;trace,identity;identity;4096;1024;100;1000;3;dead-letter;500;"
+                + "orders.topic;orders.*;2";
+        var subscriberPolicy = new EnvironmentAmqpConsumerPolicyResolver(Map.of(key, subscriberOnly))
+                .resolve(AmqpTestSupport.TENANT, AmqpTestSupport.PROFILE).orElseThrow();
+        assertEquals("", subscriberPolicy.queue());
+        assertTrue(subscriberPolicy.allowsSubscription("orders.topic", "orders.*"));
         assertTrue(resolver.resolve("other", AmqpTestSupport.PROFILE).isEmpty());
         assertTrue(new EnvironmentAmqpConsumerPolicyResolver(Map.of()).resolve(
                 AmqpTestSupport.TENANT, AmqpTestSupport.PROFILE).isEmpty());

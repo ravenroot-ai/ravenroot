@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { uiText } from '../src/ui-text.js';
 
 // Process, traversal and invocation are not synonyms. A process is the
 // long-lived instance; a traversal is one crossing of the graph (a process can have several —
@@ -43,13 +44,13 @@ function loadActivityIdentifiersHtml() {
   const escapeHtmlSrc = extractFunctionSource(source, 'escapeHtml');
   const targetSrc = extractFunctionSource(source, 'activityIdentifiersHtml');
   // eslint-disable-next-line no-new-func
-  const factory = new Function(`
+  const factory = new Function('uiText', `
     ${shortIdSrc}
     ${escapeHtmlSrc}
     ${targetSrc}
     return activityIdentifiersHtml;
   `);
-  return factory();
+  return factory(uiText);
 }
 
 // Real-shaped UUIDs (distinct per field, distinct between the two traversals) so a test failure

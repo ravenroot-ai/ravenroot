@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["replicaCount", "runnerPlane", "image", "service", "auth", "engine", "graphAuthoring", "executionRuntime", "activityCapture", "graph", "ai", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
+  "required": ["replicaCount", "runnerPlane", "image", "service", "auth", "engine", "uiFrameAncestors", "graphAuthoring", "executionRuntime", "activityCapture", "graph", "ai", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "programTimeoutMs": {
@@ -43,15 +43,17 @@
     "graphAuthoring": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "provider", "repositoryOwner", "repositoryName", "graphDirectory", "draftBranch", "releaseBranch", "githubApiBase", "credentialMode", "credentialSecretName", "credentialSecretKey", "githubAppId", "githubInstallationId", "tenantNamespaces", "artifactBaseUrl", "artifactCatalogPath"],
+      "required": ["enabled", "provider", "repositoryOwner", "repositoryName", "graphDirectory", "draftBranch", "releaseBranch", "githubApiBase", "gitlabApiBase", "gitlabProject", "credentialMode", "credentialSecretName", "credentialSecretKey", "githubAppId", "githubInstallationId", "tenantNamespaces", "artifactBaseUrl", "artifactCatalogPath"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "provider": { "type": "string", "enum": ["github"] },
+        "provider": { "type": "string", "enum": ["github", "gitlab"] },
         "repositoryOwner": { "type": "string" },
         "repositoryName": { "type": "string" },
         "graphDirectory": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$" },
         "draftBranch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$" },
         "releaseBranch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$" },
+        "gitlabApiBase": { "type": "string", "pattern": "^https://[^?#]+/api/v4/?$" },
+        "gitlabProject": { "type": "string" },
         "githubApiBase": { "type": "string", "pattern": "^https://" },
         "credentialMode": { "type": "string", "enum": ["PAT", "APP"] },
         "credentialSecretName": { "type": "string" },
@@ -65,9 +67,19 @@
       "allOf": [{
         "if": { "properties": { "enabled": { "const": true } } },
         "then": { "properties": {
-          "repositoryOwner": { "minLength": 1 }, "repositoryName": { "minLength": 1 },
           "credentialSecretName": { "minLength": 1 }, "tenantNamespaces": { "minLength": 3 },
           "artifactBaseUrl": { "pattern": "^https://" }
+        } }
+      }, {
+        "if": { "properties": { "enabled": { "const": true }, "provider": { "const": "github" } } },
+        "then": { "properties": {
+          "repositoryOwner": { "minLength": 1 }, "repositoryName": { "minLength": 1 }
+        } }
+      }, {
+        "if": { "properties": { "enabled": { "const": true }, "provider": { "const": "gitlab" } } },
+        "then": { "required": ["gitlabApiBase", "gitlabProject"], "properties": {
+          "gitlabProject": { "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.\\/-]*$" },
+          "credentialMode": { "const": "PAT" }
         } }
       }, {
         "if": { "properties": { "enabled": { "const": true }, "credentialMode": { "const": "APP" } } },
@@ -536,7 +548,8 @@
         "sizeLimit": { "$ref": "#/definitions/kubernetesPositiveQuantity" }
       }
     },
-    "runnerPlane": { "$ref": "#/definitions/runnerPlaneConfiguration" }
+    "runnerPlane": { "$ref": "#/definitions/runnerPlaneConfiguration" },
+    "uiFrameAncestors": { "type": "string", "maxLength": 65536, "x-ravenroot-environment": "RAVENROOT_UI_FRAME_ANCESTORS" }
   },
   "definitions": {
     "kubernetesNonNegativeQuantity": {

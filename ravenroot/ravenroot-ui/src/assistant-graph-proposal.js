@@ -1,3 +1,5 @@
+import { uiErrorReason } from './ui-text.js';
+import { productError } from './product-error.js';
 import { catalogPropertyHasDeclaredDefault } from './adapter-binding.js';
 import { resolveDescriptorNodeType } from './catalog-node-icon.js';
 import {
@@ -39,16 +41,16 @@ export function planAssistantGraphProposal(proposal, {
 } = {}) {
   try {
     const normalized = normalizeProposal(proposal);
-    if (!graph || graph.format !== 'graphml') fail('This document is not an editable GraphML graph.');
+    if (!graph || graph.format !== 'graphml') fail('This document is not an editable GraphML graph.', "workspace.error.assistant.graph.proposal.this.document.is.not.an.editable.graphml.graph");
     if (normalized.document.incarnation !== String(documentIncarnation)) {
-      fail('This proposal belongs to a different open document.');
+      fail('This proposal belongs to a different open document.', "workspace.error.assistant.graph.proposal.this.proposal.belongs.to.a.different.open.document");
     }
     if (normalized.document.revision !== revision) {
-      fail('This proposal is stale because the document changed after it was requested.');
+      fail('This proposal is stale because the document changed after it was requested.', "workspace.error.assistant.graph.proposal.this.proposal.is.stale.because.the.document.changed.after.it.was");
     }
     if (normalized.document.catalogDigest !== catalogDigest
         || catalogProposalDigest(catalog) !== catalogDigest) {
-      fail('This proposal is stale because the node catalog changed after it was requested.');
+      fail('This proposal is stale because the node catalog changed after it was requested.', "workspace.error.assistant.graph.proposal.this.proposal.is.stale.because.the.node.catalog.changed.after.it");
     }
     const working = cloneGraph(graph);
     const catalogByBehavior = new Map((catalog || []).map(entry => [entry?.behavior, entry]));
@@ -64,11 +66,11 @@ export function planAssistantGraphProposal(proposal, {
           working, catalogByBehavior, refs, mutated, directlyChangedEdges, commands, changes, index,
         });
       } catch (error) {
-        fail(`Operation ${index + 1}: ${error.message}`);
+        fail(`Operation ${index + 1}: ${error.message}`, "workspace.error.assistant.graph.proposal.operation", { value1: index + 1, value2: uiErrorReason(error) });
       }
     });
 
-    if (!commands.length) fail('The proposal does not contain an edit.');
+    if (!commands.length) fail('The proposal does not contain an edit.', "workspace.error.assistant.graph.proposal.the.proposal.does.not.contain.an.edit");
     return {
       ok: true,
       proposal: normalized,
@@ -76,7 +78,7 @@ export function planAssistantGraphProposal(proposal, {
       preview: Object.freeze({ summary: normalized.summary, changes: Object.freeze(changes) }),
     };
   } catch (error) {
-    return { ok: false, errors: [String(error?.message || error)] };
+    return { ok: false, errors: [uiErrorReason(error)] };
   }
 }
 
@@ -107,7 +109,7 @@ function planOperation(operation, state) {
       exactKeys(operation, ['op', 'ref', 'id', 'behavior'], ['name', 'position', 'properties']);
       const ref = newRef(operation.ref, refs);
       const descriptor = catalogByBehavior.get(operation.behavior);
-      if (!descriptor) fail(`Unknown catalog behavior '${operation.behavior}'.`);
+      if (!descriptor) fail(`Unknown catalog behavior '${operation.behavior}'.`, "workspace.error.assistant.graph.proposal.unknown.catalog.behavior", { value1: operation.behavior });
       const id = explicitElementId(operation.id, working);
       const position = normalizePosition(operation.position, working.nodes.length);
       const node = createNode(id, optionalName(operation.name) || descriptor.displayName || id,
@@ -137,7 +139,7 @@ function planOperation(operation, state) {
       claimMutation(mutated, selected, 'node');
       const node = working.nodeMap[selected.id];
       const descriptor = catalogByBehavior.get(node.behavior);
-      if (!descriptor) fail(`Node '${selected.id}' has no trusted catalog descriptor.`);
+      if (!descriptor) fail(`Node '${selected.id}' has no trusted catalog descriptor.`, "workspace.error.assistant.graph.proposal.node.has.no.trusted.catalog.descriptor", { value1: selected.id });
       const patch = {};
       if (Object.hasOwn(operation, 'name')) patch.name = requiredText(operation.name, 'node name', 500);
       const next = {
@@ -161,7 +163,7 @@ function planOperation(operation, state) {
           id: selected.id, ox: position.x, oy: position.y, positionIsCenter: true,
         }], `Move ${selected.id}`));
       }
-      if (!operationCommands.length) fail('An update-node operation needs a change.');
+      if (!operationCommands.length) fail('An update-node operation needs a change.', "workspace.error.assistant.graph.proposal.an.update.node.operation.needs.a.change");
       for (const command of operationCommands) {
         applyCommand(working, command);
         commands.push(command);
@@ -173,13 +175,13 @@ function planOperation(operation, state) {
       exactKeys(operation, ['op', 'target']);
       const selected = resolveSelector(operation.target, refs, working, 'node');
       claimMutation(mutated, selected, 'node');
-      if (selected.created) fail('A proposal cannot delete a node it just created.');
+      if (selected.created) fail('A proposal cannot delete a node it just created.', "workspace.error.assistant.graph.proposal.a.proposal.cannot.delete.a.node.it.just.created");
       const incident = working.edges
         .filter(edge => edge.source === selected.id || edge.target === selected.id)
         .map(edge => edge.id);
       const contradictory = incident.filter(edgeId => directlyChangedEdges.has(edgeId));
       if (contradictory.length) {
-        fail(`Deleting node '${selected.id}' would also delete an edge changed by this proposal.`);
+        fail(`Deleting node '${selected.id}' would also delete an edge changed by this proposal.`, "workspace.error.assistant.graph.proposal.deleting.node.would.also.delete.an.edge.changed.by.this.proposal", { value1: selected.id });
       }
       if (incident.length) {
         const removeIncident = removeEdgesCommand(incident, `Delete edges incident to ${selected.id}`);
@@ -222,7 +224,7 @@ function planOperation(operation, state) {
         patch.target = resolveSelector(operation.destination, refs, working, 'node').id;
       }
       if (Object.hasOwn(operation, 'outcome')) patch.outcome = optionalOutcome(operation.outcome);
-      if (Object.keys(patch).length === 0) fail('An update-edge operation needs a change.');
+      if (Object.keys(patch).length === 0) fail('An update-edge operation needs a change.', "workspace.error.assistant.graph.proposal.an.update.edge.operation.needs.a.change");
       validateEdge(working, { ...edge, ...patch }, catalogByBehavior, selected.id);
       const command = updateEdgeCommand(selected.id, patch, `Edit ${selected.id}`);
       applyCommand(working, command);
@@ -235,7 +237,7 @@ function planOperation(operation, state) {
       exactKeys(operation, ['op', 'target']);
       const selected = resolveSelector(operation.target, refs, working, 'edge');
       claimMutation(mutated, selected, 'edge');
-      if (selected.created) fail('A proposal cannot delete an edge it just created.');
+      if (selected.created) fail('A proposal cannot delete an edge it just created.', "workspace.error.assistant.graph.proposal.a.proposal.cannot.delete.an.edge.it.just.created");
       const command = removeEdgesCommand([selected.id], `Delete ${selected.id}`);
       applyCommand(working, command);
       commands.push(command);
@@ -243,31 +245,31 @@ function planOperation(operation, state) {
       break;
     }
     default:
-      fail(`Unknown operation '${operation.op}'.`);
+      fail(`Unknown operation '${operation.op}'.`, "workspace.error.assistant.graph.proposal.unknown.operation", { value1: operation.op });
   }
 }
 
 function normalizeProposal(value) {
-  if (!plainObject(value)) fail('The assistant proposal must be an object.');
+  if (!plainObject(value)) fail('The assistant proposal must be an object.', "workspace.error.assistant.graph.proposal.the.assistant.proposal.must.be.an.object");
   if (new TextEncoder().encode(JSON.stringify(value)).length > ASSISTANT_PROPOSAL_BYTE_LIMIT) {
-    fail('The assistant proposal is too large.');
+    fail('The assistant proposal is too large.', "workspace.error.assistant.graph.proposal.the.assistant.proposal.is.too.large");
   }
   exactKeys(value, ['version', 'id', 'document', 'summary', 'operations']);
-  if (value.version !== ASSISTANT_PROPOSAL_VERSION) fail('Unknown assistant proposal version.');
+  if (value.version !== ASSISTANT_PROPOSAL_VERSION) fail('Unknown assistant proposal version.', "workspace.error.assistant.graph.proposal.unknown.assistant.proposal.version");
   const id = requiredText(value.id, 'proposal id', IDENTIFIER_LIMIT);
   const summary = requiredText(value.summary, 'proposal summary', SUMMARY_LIMIT);
-  if (!plainObject(value.document)) fail('The proposal document binding must be an object.');
+  if (!plainObject(value.document)) fail('The proposal document binding must be an object.', "workspace.error.assistant.graph.proposal.the.proposal.document.binding.must.be.an.object");
   exactKeys(value.document, ['incarnation', 'revision', 'catalogDigest']);
   const incarnation = requiredText(value.document.incarnation, 'document incarnation', IDENTIFIER_LIMIT);
   if (!Number.isSafeInteger(value.document.revision) || value.document.revision < 0) {
-    fail('The proposal document revision is invalid.');
+    fail('The proposal document revision is invalid.', "workspace.error.assistant.graph.proposal.the.proposal.document.revision.is.invalid");
   }
   if (!Array.isArray(value.operations) || value.operations.length < 1
       || value.operations.length > ASSISTANT_PROPOSAL_OPERATION_LIMIT) {
-    fail(`A proposal needs between 1 and ${ASSISTANT_PROPOSAL_OPERATION_LIMIT} operations.`);
+    fail(`A proposal needs between 1 and ${ASSISTANT_PROPOSAL_OPERATION_LIMIT} operations.`, "workspace.error.assistant.graph.proposal.a.proposal.needs.between.1.and.operations", { value1: ASSISTANT_PROPOSAL_OPERATION_LIMIT });
   }
   for (const operation of value.operations) {
-    if (!plainObject(operation) || !OP_TYPES.has(operation.op)) fail('The proposal contains an unknown operation.');
+    if (!plainObject(operation) || !OP_TYPES.has(operation.op)) fail('The proposal contains an unknown operation.', "workspace.error.assistant.graph.proposal.the.proposal.contains.an.unknown.operation");
   }
   return Object.freeze({
     version: value.version,
@@ -283,26 +285,26 @@ function normalizeProposal(value) {
 }
 
 function applyValidatedProperties(node, descriptor, set, remove) {
-  if (!Array.isArray(set)) fail('Properties must be an array.');
+  if (!Array.isArray(set)) fail('Properties must be an array.', "workspace.error.assistant.graph.proposal.properties.must.be.an.array");
   if (!Array.isArray(remove) || remove.some(name => typeof name !== 'string')) {
-    fail('removeProperties must be a string list.');
+    fail('removeProperties must be a string list.', "workspace.error.assistant.graph.proposal.removeproperties.must.be.a.string.list");
   }
-  if (new Set(remove).size !== remove.length) fail('removeProperties contains duplicates.');
+  if (new Set(remove).size !== remove.length) fail('removeProperties contains duplicates.', "workspace.error.assistant.graph.proposal.removeproperties.contains.duplicates");
   const declarations = new Map((descriptor.properties || []).map(property => [property.name, property]));
   const names = new Set();
   for (const entry of set) {
     exactKeys(entry, ['name', 'value']);
     const name = requiredText(entry.name, 'property name', IDENTIFIER_LIMIT);
     const raw = entry.value;
-    if (names.has(name)) fail(`Property '${name}' occurs twice.`);
+    if (names.has(name)) fail(`Property '${name}' occurs twice.`, "workspace.error.assistant.graph.proposal.property.occurs.twice", { value1: name });
     names.add(name);
-    if (remove.includes(name)) fail(`Property '${name}' is both set and removed.`);
+    if (remove.includes(name)) fail(`Property '${name}' is both set and removed.`, "workspace.error.assistant.graph.proposal.property.is.both.set.and.removed", { value1: name });
     const property = declarations.get(name);
-    if (!property) fail(`Property '${name}' is not declared by catalog behavior '${descriptor.behavior}'.`);
+    if (!property) fail(`Property '${name}' is not declared by catalog behavior '${descriptor.behavior}'.`, "workspace.error.assistant.graph.proposal.property.is.not.declared.by.catalog.behavior", { value1: name, value2: descriptor.behavior });
     if (secretProperty(property) || SENSITIVE_NAME.test(name)) {
-      fail(`Property '${name}' is secret-class and cannot appear in an Assistant proposal.`);
+      fail(`Property '${name}' is secret-class and cannot appear in an Assistant proposal.`, "workspace.error.assistant.graph.proposal.property.is.secret.class.and.cannot.appear.in.an.assistant.propos", { value1: name });
     }
-    if (typeof raw !== 'string') fail(`Property '${name}' must be a string.`);
+    if (typeof raw !== 'string') fail(`Property '${name}' must be a string.`, "workspace.error.assistant.graph.proposal.property.must.be.a.string", { value1: name });
     const normalized = { ...property, type: String(property.type || '').toUpperCase() };
     const invalid = validateMultiPropertyValue(normalized, raw);
     if (invalid) fail(invalid);
@@ -311,9 +313,9 @@ function applyValidatedProperties(node, descriptor, set, remove) {
   }
   for (const name of remove) {
     const property = declarations.get(name);
-    if (!property) fail(`Property '${name}' is not declared by catalog behavior '${descriptor.behavior}'.`);
+    if (!property) fail(`Property '${name}' is not declared by catalog behavior '${descriptor.behavior}'.`, "workspace.error.assistant.graph.proposal.property.is.not.declared.by.catalog.behavior", { value1: name, value2: descriptor.behavior });
     if (secretProperty(property) || SENSITIVE_NAME.test(name)) {
-      fail(`Property '${name}' is secret-class and cannot appear in an Assistant proposal.`);
+      fail(`Property '${name}' is secret-class and cannot appear in an Assistant proposal.`, "workspace.error.assistant.graph.proposal.property.is.secret.class.and.cannot.appear.in.an.assistant.propos", { value1: name });
     }
     delete node.properties[name];
     delete node.propertyTypes[name];
@@ -332,7 +334,7 @@ function validateRequiredProperties(node, descriptor) {
     if (!isPropertyVisible(property, values)) continue;
     if (isPropertyRequiredNow(property, values)
         && !String(node.properties?.[property.name] ?? '').trim()) {
-      fail(`Required property '${property.name}' is missing.`);
+      fail(`Required property '${property.name}' is missing.`, "workspace.error.assistant.graph.proposal.required.property.is.missing", { value1: property.name });
     }
   }
 }
@@ -347,34 +349,34 @@ function validateEdge(graph, edge, catalogByBehavior, existingId = null) {
   const source = graph.nodeMap[edge.source];
   const descriptor = catalogByBehavior.get(source?.behavior);
   if (unreachableOutcome(resolveOutcomes(descriptor, source?.properties), edge.outcome)) {
-    fail(`Outcome '${edge.outcome}' is not declared by source node '${edge.source}'.`);
+    fail(`Outcome '${edge.outcome}' is not declared by source node '${edge.source}'.`, "workspace.error.assistant.graph.proposal.outcome.is.not.declared.by.source.node", { value1: edge.outcome, value2: edge.source });
   }
 }
 
 function resolveSelector(selector, refs, graph, kind) {
-  if (!plainObject(selector)) fail('An element selector must be an object.');
+  if (!plainObject(selector)) fail('An element selector must be an object.', "workspace.error.assistant.graph.proposal.an.element.selector.must.be.an.object");
   const keys = Object.keys(selector);
   if (!(keys.length === 1 && (keys[0] === 'existing' || keys[0] === 'created'))) {
-    fail('An element selector needs exactly one existing or created tag.');
+    fail('An element selector needs exactly one existing or created tag.', "workspace.error.assistant.graph.proposal.an.element.selector.needs.exactly.one.existing.or.created.tag");
   }
   const token = keys[0] === 'existing' && kind === 'edge'
     ? exactEdgeIdentity(selector[keys[0]], 'element selector')
     : requiredText(selector[keys[0]], 'element selector', IDENTIFIER_LIMIT);
   if (keys[0] === 'created') {
     const resolved = refs.get(token);
-    if (!resolved || resolved.kind !== kind) fail(`Unknown ${kind} ref '${token}'.`);
+    if (!resolved || resolved.kind !== kind) fail(`Unknown ${kind} ref '${token}'.`, "workspace.error.assistant.graph.proposal.unknown.ref", { value1: kind, value2: token });
     return resolved;
   }
   const exists = kind === 'node'
     ? Boolean(graph.nodeMap[token])
     : graph.edges.some(edge => edge.id === token);
-  if (!exists) fail(`Unknown ${kind} '${token}'.`);
+  if (!exists) fail(`Unknown ${kind} '${token}'.`, "workspace.error.assistant.graph.proposal.unknown", { value1: kind, value2: token });
   return { kind, id: token, created: false };
 }
 
 function newRef(value, refs) {
   const ref = requiredText(value, 'proposal ref', IDENTIFIER_LIMIT);
-  if (refs.has(ref)) fail(`Proposal ref '${ref}' is duplicated.`);
+  if (refs.has(ref)) fail(`Proposal ref '${ref}' is duplicated.`, "workspace.error.assistant.graph.proposal.proposal.ref.is.duplicated", { value1: ref });
   return ref;
 }
 
@@ -467,39 +469,39 @@ function rotateRight(value, bits) {
 
 function explicitElementId(value, graph) {
   const id = requiredText(value, 'final graph id', IDENTIFIER_LIMIT);
-  if (/\s/u.test(id)) fail('A final graph id cannot contain whitespace.');
+  if (/\s/u.test(id)) fail('A final graph id cannot contain whitespace.', "workspace.error.assistant.graph.proposal.a.final.graph.id.cannot.contain.whitespace");
   if (graph.nodeMap[id] || graph.edges.some(edge => edge.id === id)) {
-    fail(`Final graph id '${id}' already exists.`);
+    fail(`Final graph id '${id}' already exists.`, "workspace.error.assistant.graph.proposal.final.graph.id.already.exists", { value1: id });
   }
   return id;
 }
 
 function exactEdgeIdentity(value, label = 'edge id') {
   const violation = stableEdgeIdViolation(value);
-  if (violation || /[\u0000-\u001f\u007f]/u.test(value)) fail(`The ${label} is invalid.`);
+  if (violation || /[\u0000-\u001f\u007f]/u.test(value)) fail(`The ${label} is invalid.`, "workspace.error.assistant.graph.proposal.the.is.invalid", { value1: label });
   return value;
 }
 
 function explicitEdgeId(value, graph) {
   const id = exactEdgeIdentity(value, 'final graph id');
   if (graph.nodeMap[id] || graph.edges.some(edge => edge.id === id)) {
-    fail(`Final graph id '${id}' already exists.`);
+    fail(`Final graph id '${id}' already exists.`, "workspace.error.assistant.graph.proposal.final.graph.id.already.exists", { value1: id });
   }
   return id;
 }
 
 function claimMutation(mutated, selected, kind) {
   const key = `${kind}:${selected.id}`;
-  if (mutated.has(key)) fail(`${kind} '${selected.id}' is changed more than once.`);
+  if (mutated.has(key)) fail(`${kind} '${selected.id}' is changed more than once.`, "workspace.error.assistant.graph.proposal.is.changed.more.than.once", { value1: kind, value2: selected.id });
   mutated.add(key);
 }
 
 function exactKeys(object, required, optional = []) {
-  if (!plainObject(object)) fail('Proposal fields must be objects.');
+  if (!plainObject(object)) fail('Proposal fields must be objects.', "workspace.error.assistant.graph.proposal.proposal.fields.must.be.objects");
   const keys = Object.keys(object);
   const allowed = new Set([...required, ...optional]);
   if (!required.every(key => Object.hasOwn(object, key)) || keys.some(key => !allowed.has(key))) {
-    fail('The proposal contains unknown or missing fields.');
+    fail('The proposal contains unknown or missing fields.', "workspace.error.assistant.graph.proposal.the.proposal.contains.unknown.or.missing.fields");
   }
 }
 
@@ -511,7 +513,7 @@ function plainObject(value) {
 function requiredText(value, label, limit) {
   if (typeof value !== 'string' || !value.trim() || value !== value.trim()
       || value.length > limit || /[\u0000-\u001f\u007f]/u.test(value)) {
-    fail(`The ${label} is invalid.`);
+    fail(`The ${label} is invalid.`, "workspace.error.assistant.graph.proposal.the.is.invalid", { value1: label });
   }
   return value;
 }
@@ -528,7 +530,7 @@ function optionalOutcome(value) {
 function normalizePosition(value, index) {
   if (value == null) return { x: 180 + (index % 4) * 180, y: 180 + Math.floor(index / 4) * 130 };
   exactKeys(value, ['x', 'y']);
-  if (![value.x, value.y].every(Number.isFinite)) fail('Node coordinates must be finite numbers.');
+  if (![value.x, value.y].every(Number.isFinite)) fail('Node coordinates must be finite numbers.', "workspace.error.assistant.graph.proposal.node.coordinates.must.be.finite.numbers");
   return { x: value.x, y: value.y };
 }
 
@@ -564,6 +566,6 @@ function describeEdgePatch(patch) {
   return parts.length ? ` (${parts.join('; ')})` : '';
 }
 
-function fail(message) {
-  throw new Error(message);
+function fail(message, key, params) {
+  throw key ? productError(key, new Error(message), params) : new Error(message);
 }

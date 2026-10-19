@@ -1,3 +1,8 @@
+import { uiText } from './ui-text.js';
+import { productError } from './product-error.js';
+
+const humanTaskValidationError = message => productError('humanTasks.validation.failed', message);
+
 const LIVE_STATUSES = new Set(['WAITING', 'ESCALATED']);
 const ALL_STATUSES = new Set([...LIVE_STATUSES, 'RESOLVED', 'DENIED', 'EXPIRED', 'CANCELLED']);
 const ACTIONS = new Set(['RESOLVE', 'DENY', 'CANCEL']);
@@ -9,30 +14,30 @@ const FORM_TYPES = new Set(['TEXT', 'MULTILINE_TEXT', 'BOOLEAN', 'INTEGER', 'DEC
   'DATE', 'DATE_TIME']);
 
 function object(value, message) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(message);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw humanTaskValidationError(message);
   return value;
 }
 
 function text(value, name, { optional = false } = {}) {
   if (optional && (value === null || value === undefined)) return null;
-  if (typeof value !== 'string' || !value) throw new Error(`Human Task ${name} is missing`);
+  if (typeof value !== 'string' || !value) throw humanTaskValidationError(`Human Task ${name} is missing`);
   return value;
 }
 
 function displayText(value, name, { required = false } = {}) {
   if (typeof value !== 'string' || (required && !value.length)) {
-    throw new Error(`Human Task ${name} is missing`);
+    throw humanTaskValidationError(`Human Task ${name} is missing`);
   }
   if ((typeof value.isWellFormed === 'function' && !value.isWellFormed())
       || /[\u0000-\u001f\u007f-\u009f]/u.test(value)) {
-    throw new Error(`Human Task ${name} contains invalid display text`);
+    throw humanTaskValidationError(`Human Task ${name} contains invalid display text`);
   }
   return value;
 }
 
 function integer(value, name, minimum = 0) {
   if (!Number.isSafeInteger(value) || value < minimum) {
-    throw new Error(`Human Task ${name} is not a valid integer`);
+    throw humanTaskValidationError(`Human Task ${name} is not a valid integer`);
   }
   return value;
 }
@@ -40,7 +45,7 @@ function integer(value, name, minimum = 0) {
 function timestamp(value, name, { optional = false } = {}) {
   const string = text(value, name, { optional });
   if (string === null) return null;
-  if (!Number.isFinite(Date.parse(string))) throw new Error(`Human Task ${name} is not a valid timestamp`);
+  if (!Number.isFinite(Date.parse(string))) throw humanTaskValidationError(`Human Task ${name} is not a valid timestamp`);
   return string;
 }
 
@@ -84,7 +89,7 @@ export function validateHumanTaskCapability(value) {
   if (![1, 2].includes(capability.schemaVersion) || !Array.isArray(versions) || versions.length !== 1
       || versions[0] !== 1 || !Array.isArray(reviewVersions) || reviewVersions.length !== 1
       || reviewVersions[0] !== 1) {
-    throw new Error('Human Task capability is not a valid schema version 1 document');
+    throw humanTaskValidationError('Human Task capability is not a valid schema version 1 document');
   }
   const attentionPollMillis = integer(capability.attentionPollMillis, 'poll interval', 1);
   const attentionBackoffMaxMillis = integer(capability.attentionBackoffMaxMillis,
@@ -108,10 +113,10 @@ export function validateHumanTaskCapability(value) {
         || registeredPresentationProtocolVersions[0] !== 1
         || typeof capability.registeredPresentationsEnabled !== 'boolean'
         || capability.capabilityCompletionPath !== '/v1/human-task-interactions/complete')) {
-    throw new Error('Human Task registered-presentation capability is malformed');
+    throw humanTaskValidationError('Human Task registered-presentation capability is malformed');
   }
   if (reviewTextMaxUtf8Bytes > 1024 * 1024) {
-    throw new Error('Human Task review-text maximum exceeds the technical ceiling');
+    throw humanTaskValidationError('Human Task review-text maximum exceeds the technical ceiling');
   }
   return Object.freeze({
     schemaVersion: capability.schemaVersion,
@@ -137,7 +142,7 @@ export function validateHumanTaskCapability(value) {
 function validateInteractionPresentation(value) {
   const presentation = object(value, 'Human Task interaction presentation is missing');
   if (!PRESENTATION_KINDS.has(presentation.kind)) {
-    throw new Error('Human Task interaction presentation kind is invalid');
+    throw humanTaskValidationError('Human Task interaction presentation kind is invalid');
   }
   const version = integer(presentation.version, 'interaction presentation version');
   const profileId = typeof presentation.profileId === 'string' ? presentation.profileId : '';
@@ -147,20 +152,20 @@ function validateInteractionPresentation(value) {
   if (presentation.kind === 'FORM') {
     const schema = object(presentation.formSchema, 'Human Task form schema is missing');
     if (schema.version !== 1 || !Array.isArray(schema.fields) || schema.fields.length < 1
-        || schema.fields.length > 64) throw new Error('Human Task form schema is invalid');
+        || schema.fields.length > 64) throw humanTaskValidationError('Human Task form schema is invalid');
     const names = new Set();
     const fields = schema.fields.map(fieldValue => {
       const field = object(fieldValue, 'Human Task form field is invalid');
       const name = text(field.name, 'form field name');
       if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name) || names.has(name)
           || !FORM_TYPES.has(field.type) || typeof field.required !== 'boolean') {
-        throw new Error('Human Task form field is invalid');
+        throw humanTaskValidationError('Human Task form field is invalid');
       }
       names.add(name);
       const allowedValues = Array.isArray(field.allowedValues) ? field.allowedValues.map(value =>
         displayText(value, 'form allowed value', { required: true })) : [];
       if ((field.type === 'ENUM') !== (allowedValues.length > 0)) {
-        throw new Error('Human Task form enum values are invalid');
+        throw humanTaskValidationError('Human Task form enum values are invalid');
       }
       const minimum = field.minimum == null ? null : field.minimum;
       const maximum = field.maximum == null ? null : field.maximum;
@@ -171,7 +176,7 @@ function validateInteractionPresentation(value) {
           || (minimum != null && maximum != null && minimum > maximum)
           || (field.type === 'INTEGER' && ((minimum != null && !Number.isSafeInteger(minimum))
             || (maximum != null && !Number.isSafeInteger(maximum))))) {
-        throw new Error('Human Task form numeric bounds are invalid');
+        throw humanTaskValidationError('Human Task form numeric bounds are invalid');
       }
       return Object.freeze({ name, label: displayText(field.label, 'form label', { required: true }),
         help: displayText(field.help ?? '', 'form help'), type: field.type, required: field.required,
@@ -190,19 +195,19 @@ export function validateHumanTaskReviewPresentation(value, capability) {
   if (!capability.reviewPresentationVersions.includes(version) || review.contentType !== 'text/plain'
       || typeof review.text !== 'string' || typeof review.contentDigest !== 'string'
       || !REVIEW_DIGEST.test(review.contentDigest)) {
-    throw new Error('Human Task review presentation is not supported');
+    throw humanTaskValidationError('Human Task review presentation is not supported');
   }
   const maxUtf8Bytes = integer(review.maxUtf8Bytes, 'review-text pinned maximum', 1);
   if (maxUtf8Bytes > 1024 * 1024) {
-    throw new Error('Human Task review-text pinned maximum exceeds the technical ceiling');
+    throw humanTaskValidationError('Human Task review-text pinned maximum exceeds the technical ceiling');
   }
   if ((typeof review.text.isWellFormed === 'function' && !review.text.isWellFormed())
       || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(review.text)
       || BIDI_FORMATTING.test(review.text)) {
-    throw new Error('Human Task review text contains unsafe plain text');
+    throw humanTaskValidationError('Human Task review text contains unsafe plain text');
   }
   if (utf8Length(review.text) > maxUtf8Bytes) {
-    throw new Error('Human Task review text exceeds its pinned maximum');
+    throw humanTaskValidationError('Human Task review text exceeds its pinned maximum');
   }
   return Object.freeze({ version, contentType: review.contentType, text: review.text,
     contentDigest: review.contentDigest, maxUtf8Bytes });
@@ -212,24 +217,24 @@ export function validateHumanTaskPresentation(value, capability, pinnedLimits) {
   const presentation = object(value, 'Human Task presentation is missing');
   const version = integer(presentation.version, 'presentation version', 1);
   if (!capability.confirmationPresentationVersions.includes(version)) {
-    throw new Error(`Human Task presentation version ${version} is not supported`);
+    throw humanTaskValidationError(`Human Task presentation version ${version} is not supported`);
   }
   // Current capability maxima admit new definitions. Reopened tasks keep the presentation pinned
   // when they were created, so a tighter current policy must not make their safe text unreadable.
   const prompt = displayText(presentation.prompt, 'prompt', { required: true });
   if (utf8Length(prompt) > pinnedLimits.promptMaxUtf8Bytes) {
-    throw new Error('Human Task prompt exceeds its pinned maximum');
+    throw humanTaskValidationError('Human Task prompt exceeds its pinned maximum');
   }
   if (!COMMENT_MODES.has(presentation.commentRequirement)) {
-    throw new Error('Human Task comment requirement is invalid');
+    throw humanTaskValidationError('Human Task comment requirement is invalid');
   }
   if (!Array.isArray(presentation.actions) || presentation.actions.length < 1) {
-    throw new Error('Human Task presentation has no permitted actions');
+    throw humanTaskValidationError('Human Task presentation has no permitted actions');
   }
   const seen = new Set();
   const actions = presentation.actions.map((entry, index) => {
     if (!ACTIONS.has(entry) || seen.has(entry)) {
-      throw new Error(`Human Task action ${index + 1} is invalid`);
+      throw humanTaskValidationError(`Human Task action ${index + 1} is invalid`);
     }
     seen.add(entry);
     return entry;
@@ -239,7 +244,7 @@ export function validateHumanTaskPresentation(value, capability, pinnedLimits) {
     CANCEL: displayText(presentation.cancelLabel, 'cancel label') });
   for (const action of actions) {
     if (utf8Length(labels[action]) > pinnedLimits.actionLabelMaxUtf8Bytes) {
-      throw new Error('Human Task action label exceeds its pinned maximum');
+      throw humanTaskValidationError('Human Task action label exceeds its pinned maximum');
     }
   }
   return Object.freeze({ version, prompt, commentRequirement: presentation.commentRequirement,
@@ -250,7 +255,7 @@ export function validateHumanTaskRow(candidate, capability,
   { actionable = false, exact = false, index = 0 } = {}) {
   const item = object(candidate, `Human Task row ${index + 1} is invalid`);
   if (!ALL_STATUSES.has(item.status) || (actionable && !LIVE_STATUSES.has(item.status))) {
-    throw new Error(`Human Task row ${index + 1} is not ${actionable ? 'actionable' : 'valid'}`);
+    throw humanTaskValidationError(`Human Task row ${index + 1} is not ${actionable ? 'actionable' : 'valid'}`);
   }
   const generation = integer(item.generation, 'generation', 1);
   const pinnedLimits = Object.freeze({
@@ -260,17 +265,17 @@ export function validateHumanTaskRow(candidate, capability,
   });
   if (!Array.isArray(item.availableActions) || item.availableActions.some(action => !ACTIONS.has(action))
       || new Set(item.availableActions).size !== item.availableActions.length) {
-    throw new Error('Human Task available actions are invalid');
+    throw humanTaskValidationError('Human Task available actions are invalid');
   }
   if (actionable && item.availableActions.length < 1) {
-    throw new Error(`Human Task row ${index + 1} has no authorized action`);
+    throw humanTaskValidationError(`Human Task row ${index + 1} has no authorized action`);
   }
   const presentation = validateHumanTaskPresentation(item.presentation, capability, pinnedLimits);
   if (item.availableActions.some(action => !presentation.actions.includes(action))) {
-    throw new Error('Human Task available action is outside the pinned presentation');
+    throw humanTaskValidationError('Human Task available action is outside the pinned presentation');
   }
   if (!exact && item.reviewPresentation != null) {
-    throw new Error('Human Task summary row disclosed review content');
+    throw humanTaskValidationError('Human Task summary row disclosed review content');
   }
   const reviewPresentation = item.reviewPresentation == null ? null
     : validateHumanTaskReviewPresentation(item.reviewPresentation, capability);
@@ -296,49 +301,49 @@ export function validateHumanTaskRow(candidate, capability,
 export function validateHumanTaskAttention(value, capability, expected = {}) {
   const page = object(value, 'Human Task attention response is invalid');
   if (page.schemaVersion !== 1 || !Array.isArray(page.items)) {
-    throw new Error('Human Task attention response is not a schema version 1 page');
+    throw humanTaskValidationError('Human Task attention response is not a schema version 1 page');
   }
   if (page.items.length > capability.attentionPageSizeMax) {
-    throw new Error('Human Task attention response exceeds the advertised page maximum');
+    throw humanTaskValidationError('Human Task attention response exceeds the advertised page maximum');
   }
   if (expected.limit != null && page.items.length > Number(expected.limit)) {
-    throw new Error('Human Task attention response exceeds the requested page size');
+    throw humanTaskValidationError('Human Task attention response exceeds the requested page size');
   }
   const counts = object(page.counts, 'Human Task attention counts are missing');
   const pending = integer(counts.pending, 'pending count');
   const escalated = integer(counts.escalated, 'escalated count');
-  if (escalated > pending) throw new Error('Human Task escalated count exceeds pending count');
+  if (escalated > pending) throw humanTaskValidationError('Human Task escalated count exceeds pending count');
   const items = page.items.map((candidate, index) =>
     validateHumanTaskRow(candidate, capability, { actionable: true, index,
       exact: expected.taskId != null && expected.generation != null }));
   if (pending < items.length
       || escalated < items.filter(item => item.status === 'ESCALATED').length) {
-    throw new Error('Human Task attention counts are smaller than the returned page');
+    throw humanTaskValidationError('Human Task attention counts are smaller than the returned page');
   }
   const rowKeys = items.map(item => `${item.taskId}\u0000${item.generation}`);
   if (new Set(rowKeys).size !== rowKeys.length) {
-    throw new Error('Human Task attention page contains a duplicate task generation');
+    throw humanTaskValidationError('Human Task attention page contains a duplicate task generation');
   }
   for (const item of items) {
     for (const field of ['graphVersion', 'deploymentId', 'processInstanceId', 'traversalId', 'nodeId', 'taskId']) {
       if (expected[field] != null && String(item[field]) !== String(expected[field])) {
-        throw new Error(`Human Task row ${field} does not match the requested context`);
+        throw humanTaskValidationError(`Human Task row ${field} does not match the requested context`);
       }
     }
     if (expected.generation != null && item.generation !== Number(expected.generation)) {
-      throw new Error('Human Task row generation does not match the requested context');
+      throw humanTaskValidationError('Human Task row generation does not match the requested context');
     }
   }
   const nextCursor = page.nextCursor == null ? null : text(page.nextCursor, 'next cursor');
-  if (!Array.isArray(page.nodeCounts)) throw new Error('Human Task node counts are missing');
+  if (!Array.isArray(page.nodeCounts)) throw humanTaskValidationError('Human Task node counts are missing');
   const seenNodeIds = new Set();
   const nodeCounts = page.nodeCounts.map((candidate, index) => {
     const count = object(candidate, `Human Task node count ${index + 1} is invalid`);
     const nodePending = integer(count.pending, 'node pending count');
     const nodeEscalated = integer(count.escalated, 'node escalated count');
-    if (nodeEscalated > nodePending) throw new Error('Human Task node escalated count exceeds pending count');
+    if (nodeEscalated > nodePending) throw humanTaskValidationError('Human Task node escalated count exceeds pending count');
     const nodeId = text(count.nodeId, 'node id');
-    if (seenNodeIds.has(nodeId)) throw new Error('Human Task node counts contain a duplicate node');
+    if (seenNodeIds.has(nodeId)) throw humanTaskValidationError('Human Task node counts contain a duplicate node');
     seenNodeIds.add(nodeId);
     return Object.freeze({ nodeId, pending: nodePending,
       escalated: nodeEscalated });
@@ -348,10 +353,10 @@ export function validateHumanTaskAttention(value, capability, expected = {}) {
     const totals = nodeCounts.reduce((sum, count) => ({ pending: sum.pending + count.pending,
       escalated: sum.escalated + count.escalated }), { pending: 0, escalated: 0 });
     if (totals.pending !== pending || totals.escalated !== escalated) {
-      throw new Error('Human Task node counts do not match aggregate counts');
+      throw humanTaskValidationError('Human Task node counts do not match aggregate counts');
     }
   } else if (nodeCounts.length) {
-    throw new Error('Human Task node counts are not valid for this selected task or node query');
+    throw humanTaskValidationError('Human Task node counts are not valid for this selected task or node query');
   }
   return Object.freeze({ schemaVersion: 1, items: Object.freeze(items), nextCursor,
     counts: Object.freeze({ pending, escalated }), nodeCounts: Object.freeze(nodeCounts) });
@@ -388,14 +393,14 @@ export function validateDecisionComment(comment, mode, maximumUtf8Bytes) {
   const raw = String(comment ?? '');
   if ((typeof raw.isWellFormed === 'function' && !raw.isWellFormed())
       || /[\u0000-\u0008\u000b\u000c\u000d-\u001f\u007f]/u.test(raw)) {
-    return { ok: false, error: 'Comment contains a control character or malformed Unicode.' };
+    return { ok: false, error: uiText("workspace.humanTask.comment.invalid") };
   }
   const value = raw.trim();
-  if (mode === 'DISALLOWED' && value.length) return { ok: false, error: 'This task does not accept a comment.' };
-  if (mode === 'REQUIRED' && !value.trim()) return { ok: false, error: 'Enter the required comment.' };
+  if (mode === 'DISALLOWED' && value.length) return { ok: false, error: uiText("workspace.humanTask.comment.disallowed") };
+  if (mode === 'REQUIRED' && !value.trim()) return { ok: false, error: uiText("workspace.humanTask.comment.required") };
   const bytes = utf8Length(value);
   if (bytes > maximumUtf8Bytes) {
-    return { ok: false, error: `Comment uses ${bytes} UTF-8 bytes; the service permits ${maximumUtf8Bytes}.` };
+    return { ok: false, error: uiText("workspace.humanTask.comment.tooLong", { bytes, maximum: maximumUtf8Bytes }) };
   }
   return { ok: true, value, bytes };
 }

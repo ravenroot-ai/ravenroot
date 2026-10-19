@@ -48,13 +48,17 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertIn("defaults to `LOCAL`", section)
         self.assertIn("defaults to `10485760`", section)
         self.assertIn("maximum `120000` milliseconds", section)
+        self.assertIn("eligible GitHub and GitLab `GET` failures", section)
         self.assertIn("mutations are never retried blindly", section)
 
-    def test_independent_ui_mapping_tracks_runtime_without_entering_java_inventory(self):
+    def test_independent_ui_mapping_tracks_runtime_and_shared_java_setting(self):
         names = publisher.ui_settings()
-        self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_BACKEND_TOKEN", "RAVENROOT_UI_PREFIX",
+        self.assertEqual({"RAVENROOT_UI_BACKEND_URL", "RAVENROOT_UI_BACKEND_TOKEN", "RAVENROOT_UI_FRAME_ANCESTORS", "RAVENROOT_UI_PREFIX",
                           "RAVENROOT_UI_PORT", "RAVENROOT_UI_ROOT"}, set(names))
-        self.assertFalse(set(names).intersection(variables()))
+        self.assertEqual(
+            {"RAVENROOT_UI_FRAME_ANCESTORS"},
+            set(names).intersection(variables()),
+        )
         section = render().split("## Independent UI web server", 1)[1]
         for name in names:
             self.assertIn(f"`{name}`", section)

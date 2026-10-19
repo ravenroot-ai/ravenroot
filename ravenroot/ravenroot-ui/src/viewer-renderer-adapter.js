@@ -1,6 +1,7 @@
+import { productError } from './product-error.js';
 function requireMethod(target, name) {
   if (typeof target?.[name] !== 'function') {
-    throw new TypeError(`Viewer renderer requires ${name}().`);
+    throw productError("workspace.error.viewer.renderer.adapter.viewer.renderer.requires", new TypeError(`Viewer renderer requires ${name}().`), { value1: name });
   }
   return target[name].bind(target);
 }
@@ -30,7 +31,7 @@ export function createReadOnlyRendererAdapter(renderer) {
 
 /** Adapt a Cytoscape instance without exposing it to viewer-core consumers. */
 export function createCytoscapeReadOnlyRendererAdapter(instance) {
-  if (instance == null) throw new TypeError('A Cytoscape instance is required.');
+  if (instance == null) throw productError("workspace.error.viewer.renderer.adapter.a.cytoscape.instance.is.required", new TypeError('A Cytoscape instance is required.'));
 
   const requestFrame = typeof globalThis.requestAnimationFrame === 'function'
     ? globalThis.requestAnimationFrame.bind(globalThis)
@@ -66,7 +67,7 @@ export function createCytoscapeReadOnlyRendererAdapter(instance) {
 
   return createReadOnlyRendererAdapter({
     render(snapshot) {
-      if (destroyed) return Promise.reject(new Error('Viewer renderer is destroyed.'));
+      if (destroyed) return Promise.reject(productError("workspace.error.viewer.renderer.adapter.viewer.renderer.is.destroyed", new Error('Viewer renderer is destroyed.')));
       generation += 1;
       cancelOperations(abortError('Viewer render superseded.'));
       requireMethod(instance, 'elements')().remove();

@@ -166,7 +166,7 @@ describe('a class larger than its budget', () => {
     expect(context.truncated).toBe(true);
     expect(context.payload.graph.truncated).toBe(true);
     expect(context.payload.graph.omittedBytes).toBeGreaterThan(0);
-    expect(contextChipDescription(entry)).toMatch(/attached, truncated · \d+ bytes omitted/);
+    expect(contextChipDescription(entry)).toMatch(/attached, truncated · [\d,]+ bytes omitted/);
     // Truncation is a size outcome, not a lost source: it must not put the panel in DEGRADED.
     expect(context.degraded).toBe(false);
   });

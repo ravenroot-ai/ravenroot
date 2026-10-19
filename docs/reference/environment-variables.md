@@ -218,16 +218,18 @@ Detailed contract: [Graph source control and published artifacts](../operator-gu
 | `RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE` | absolute HTTPS GitHub API origin/path; unset defaults to `https://api.github.com`; Enterprise path prefixes are retained and credentials, query, or fragment are refused |
 | `RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID` | required only for `APP`; positive decimal GitHub App identifier of 1 through 20 digits; not a credential |
 | `RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID` | required only for `APP`; positive decimal installation identifier of 1 through 20 digits; the minted token is limited to the configured repository |
+| `RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE` | GitLab HTTPS API base ending in `/api/v4`; unset defaults to `https://gitlab.com/api/v4`; Self-Managed prefixes are preserved; credentials, query and fragment are refused |
+| `RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT` | required for GitLab: project ID or complete nested-group project path; encoded as one API parameter |
 | `RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY` | confined repository-relative graph root; unset defaults to `graphs`; 1 through 512 allowed path characters with no absolute, trailing, doubled, or `..` segment |
 | `RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES` | Git-mode GraphML request, Git blob, and downloaded artifact ceiling; unset defaults to `10485760`; accepted range is 1 through `104857600` bytes |
 | `RAVENROOT_GRAPH_AUTHORING_MODE` | startup enum `LOCAL` or `GIT`; unset defaults to `LOCAL`, which keeps browser-local files and ignores the remaining Git authoring and artifact bindings |
-| `RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE` | Git document and history page size; unset defaults to `50`; accepted range is 1 through `200` |
-| `RAVENROOT_GRAPH_AUTHORING_PROVIDER` | Git-mode provider enum; unset defaults to `GITHUB`, currently the only accepted value |
+| `RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE` | Git document and history page size; unset defaults to `50`; accepted range is 1 through `200` for GitHub and 1 through `100` for GitLab |
+| `RAVENROOT_GRAPH_AUTHORING_PROVIDER` | Git-mode provider enum; unset defaults to `GITHUB`; accepted Git-mode values are `GITHUB` and `GITLAB` |
 | `RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH` | reviewed graph release branch; unset defaults to `main`; 1 through 200 allowed branch characters and must differ from the draft prefix |
-| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME` | required in Git mode; operator-owned repository name, 1 through 100 ASCII letters, digits, `_`, `.`, or `-` |
-| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER` | required in Git mode; operator-owned GitHub account or organization, 1 through 100 ASCII letters, digits, `_`, `.`, or `-` |
+| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME` | required for GitHub; operator-owned repository name, 1 through 100 ASCII letters, digits, `_`, `.`, or `-` |
+| `RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER` | required for GitHub; operator-owned GitHub account or organization, 1 through 100 ASCII letters, digits, `_`, `.`, or `-` |
 | `RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS` | positive connect, request, and complete response-body deadline; unset defaults to `15000`; maximum `120000` milliseconds |
-| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | additional retries for eligible GitHub `GET` failures; unset defaults to `1`; accepted range is 0 through 3 and mutations are never retried blindly |
+| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | additional retries for eligible GitHub and GitLab `GET` failures; unset defaults to `1`; accepted range is 0 through 3 and mutations are never retried blindly |
 | `RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES` | required comma-separated `tenant=relative/path` grants; namespaces are confined, duplicate tenants and colliding derived draft branches are refused, and absent tenants receive no access |
 
 ## Graph execution
@@ -325,6 +327,7 @@ Detailed contract: [Identity and HTTP boundary](configuration.md#identity-and-br
 | `RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_TRUSTED_TLS_TERMINATOR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_UI_CONNECT_ORIGINS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_UI_FRAME_ANCESTORS` | See the linked contract for exact type, default, and applicability. |
 
 ## Interaction WebSocket
 
@@ -528,6 +531,7 @@ These variables configure the optional UI-only static server, not the Java backe
 |---|---|
 | `RAVENROOT_UI_BACKEND_URL` | Server-side HTTP(S) upstream; unset selects static-only mode with backend routes returning `503`; optional backend path prefix, no credentials/query/fragment |
 | `RAVENROOT_UI_BACKEND_TOKEN` | Optional literal bearer value, nonempty RFC 6750 characters, at most 16384 characters; requires backend URL; startup server memory only; missing-Authorization fallback, shared identity |
+| `RAVENROOT_UI_FRAME_ANCESTORS` | Blank denies framing; otherwise `self` and/or comma-separated canonical HTTP(S) portal origins |
 | `RAVENROOT_UI_PREFIX` | Empty (root) or public slash-prefixed path without trailing slash |
 | `RAVENROOT_UI_PORT` | Integer TCP port, default `8080` |
 | `RAVENROOT_UI_ROOT` | Asset directory, default `/opt/ravenroot/ui` |

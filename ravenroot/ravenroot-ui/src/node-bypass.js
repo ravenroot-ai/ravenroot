@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 // The editor half of the per-node execution bypass. Read
 // `ai.ravenroot.api.catalog.NodeBypassProperty` and `ai.ravenroot.core.runtime.NodeBypassValidator`
 // first, and `docs/architecture/per-node-execution-bypass.md` for the boundary between this flag and
@@ -143,8 +144,5 @@ export function bypassRoutingConsequence(untakenOutcomes, defaultOutcome = 'cont
   const outcomes = Array.isArray(untakenOutcomes) ? untakenOutcomes.filter(Boolean) : [];
   if (!outcomes.length) return '';
   const quoted = outcomes.map(outcome => `“${outcome}”`).join(', ');
-  const branch = outcomes.length === 1 ? 'branch is' : 'branches are';
-  return `A switched-off node does not choose an outcome — it always takes the ${defaultOutcome} `
-    + `branch. This node's ${quoted} ${branch} therefore not taken while the flag is on. If those `
-    + 'branches converge on a join downstream, the join can stop being satisfiable.';
+  return uiText("workspace.node.bypass.a.switched.off.node.does.not.choose.an.outcome", { defaultOutcome: defaultOutcome, quoted: quoted, count: outcomes.length });
 }

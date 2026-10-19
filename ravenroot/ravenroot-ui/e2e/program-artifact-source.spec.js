@@ -513,7 +513,7 @@ test('a server-retired binding stays gated with the exact diagnostic and authore
     name: 'retired.graphml', mimeType: 'application/xml', buffer: Buffer.from(externalProgramGraphMl(1)),
   });
 
-  await expect(page.locator('#program-readiness-summary')).toContainText('1 failed', { timeout: 10_000 });
+  await expect(page.locator('#program-readiness-summary')).toContainText('one failed', { timeout: 10_000 });
   await expect(page.locator('.program-status')).toContainText('RETIRED');
   await expect(page.locator('.program-status')).toContainText('cannot be rebuilt or resurrected');
   expect(await page.evaluate(() => window.cy.getElementById('program-0').data('properties').source)).toBe('source 0');
@@ -732,7 +732,7 @@ test('external 20-node GraphML uses one modal batch, default-false READY, server
   })).toContain('program-readiness-overlay');
   await expect(overlay).toContainText(/REGISTER|VALIDATE|SMOKE_TEST|APPROVE_BY_POLICY|ACTIVATE/,
     { timeout: 10_000 });
-  await expect(page.locator('#program-readiness-summary')).toContainText('Programs 20/20 ready', { timeout: 20_000 });
+  await expect(page.locator('#program-readiness-summary')).toContainText('20 programs ready', { timeout: 20_000 });
   await expect(overlay).toBeHidden();
   expect(await page.evaluate(() => document.querySelector('.doc-pane--active').inert)).toBe(false);
   expect(buildRequests).toHaveLength(1);
@@ -747,7 +747,7 @@ test('external 20-node GraphML uses one modal batch, default-false READY, server
     name: 'twenty-programs-reopened.graphml', mimeType: 'application/xml',
     buffer: Buffer.from(externalProgramGraphMl(20)),
   });
-  await expect(page.locator('#program-readiness-summary')).toContainText('Programs 20/20 ready', { timeout: 20_000 });
+  await expect(page.locator('#program-readiness-summary')).toContainText('20 programs ready', { timeout: 20_000 });
   expect(buildRequests).toHaveLength(2);
   expect(buildResults[1].every(result => result.reused)).toBe(true);
   expect(legacyLifecycleRequests).toHaveLength(0);
@@ -756,7 +756,7 @@ test('external 20-node GraphML uses one modal batch, default-false READY, server
     name: 'twenty-programs-one-payload.graphml', mimeType: 'application/xml',
     buffer: Buffer.from(externalProgramGraphMl(20, { changedPayload: 7 })),
   });
-  await expect(page.locator('#program-readiness-summary')).toContainText('Programs 20/20 ready', { timeout: 20_000 });
+  await expect(page.locator('#program-readiness-summary')).toContainText('20 programs ready', { timeout: 20_000 });
   expect(buildRequests).toHaveLength(3);
   expect(buildResults[2].filter(result => result.smokeOutput?.requalified)).toHaveLength(1);
   expect(buildResults[2].every(result => result.reused)).toBe(true);
@@ -765,7 +765,7 @@ test('external 20-node GraphML uses one modal batch, default-false READY, server
     name: 'twenty-programs-one-changed.graphml', mimeType: 'application/xml',
     buffer: Buffer.from(externalProgramGraphMl(20, { changedSource: 7 })),
   });
-  await expect(page.locator('#program-readiness-summary')).toContainText('Programs 20/20 ready', { timeout: 20_000 });
+  await expect(page.locator('#program-readiness-summary')).toContainText('20 programs ready', { timeout: 20_000 });
   expect(buildRequests).toHaveLength(4);
   expect(buildResults[3].filter(result => !result.reused)).toHaveLength(1);
   expect(buildResults[3].find(result => !result.reused).nodeId).toBe('program-7');
@@ -796,7 +796,7 @@ test('competing open and catalog triggers post once, and reopen rejoins the dura
   await page.locator('#file-inp').setInputFiles({
     name: 'race-programs-reopened.graphml', mimeType: 'application/xml', buffer: Buffer.from(graphml),
   });
-  await expect(page.locator('#program-readiness-summary')).toContainText('Programs 20/20 ready',
+  await expect(page.locator('#program-readiness-summary')).toContainText('20 programs ready',
     { timeout: 20_000 });
 
   expect(buildRequests).toHaveLength(2);
@@ -826,7 +826,7 @@ test('dual control pauses new content and uses one independently authenticated g
 
   await expect(page.locator('#program-readiness-summary')).toContainText('2 awaiting approval', { timeout: 10_000 });
   await page.locator('#btn-program-approve').click();
-  await expect(page.locator('#program-readiness-summary')).toContainText('Programs 2/2 ready');
+  await expect(page.locator('#program-readiness-summary')).toContainText('2 programs ready');
   expect(approvalRequests).toHaveLength(1);
   expect(approvalRequests[0].artifactIds).toHaveLength(2);
   expect(approvalRequests[0].reason).toContain('Graph-level approval');

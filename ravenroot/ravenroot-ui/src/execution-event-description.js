@@ -43,26 +43,26 @@ export function conformingPublicReason(value) {
  * has to exist and has to agree, otherwise a peer that predates `publicReason`, or one that sends the
  * classifier without the sentence, silently reverts the panel to the false copy.
  */
-function describeWithReason(type, publicReason) {
+function describeWithReason(type, publicReason, text = uiText) {
   const reason = conformingPublicReason(publicReason);
   if (!reason) return null;
   switch (String(type || '')) {
     case 'NODE_COMPLETED':
       return reason === DEFAULT_ROUTED_OUTCOME
-        ? 'Node completed successfully.'
-        : `Node completed and routed its "${reason}" outcome.`;
+        ? text('executionEvent.nodeCompletedSuccess')
+        : text('executionEvent.nodeCompletedOutcome', { reason });
     case 'NODE_FAILED':
-      return `Node failed with ${reason}. Protected diagnostics may contain more detail.`;
+      return text('executionEvent.nodeFailedReason', { reason });
     case 'EXECUTION_FAILED':
-      return `Execution failed with ${reason}. Protected diagnostics may contain more detail.`;
+      return text('executionEvent.executionFailedReason', { reason });
     case 'JOIN_FAILED':
-      return `Join conditions could not be satisfied: ${reason}.`;
+      return text('executionEvent.joinFailedReason', { reason });
     // Kept in step with `PublicExecutionDescription.forType`'s NODE_RETRY_SCHEDULED branch. The
     // classifier here is the failure's retry classification, a fixed four-member vocabulary rather
     // than a Java type name, and it is named rather than characterised for the same reason a routed
     // outcome is.
     case 'NODE_RETRY_SCHEDULED':
-      return `Node attempt failed as "${reason}" and another attempt was scheduled.`;
+      return text('executionEvent.retryReason', { reason });
     // Kept in step with `PublicExecutionDescription.forType`'s NODE_BYPASSED branch -- INCLUDING
     // the thing that branch deliberately does NOT do. The cases above interpolate the classifier into
     // the sentence; this one SELECTS among sentences written here, so an unrecognised token falls
@@ -71,10 +71,10 @@ function describeWithReason(type, publicReason) {
     // a classifier, lands on that same bare sentence.
     case 'NODE_BYPASSED':
       if (reason === BYPASS_REASON_AUTHORED) {
-        return 'Node was bypassed: the graph author switched this node off.';
+        return text('executionEvent.bypassedAuthored');
       }
       if (reason === BYPASS_REASON_COMMAND) {
-        return 'Node was bypassed: the traversal was not executing node behaviours.';
+        return text('executionEvent.bypassedCommand');
       }
       return null;
     default:
@@ -82,39 +82,39 @@ function describeWithReason(type, publicReason) {
   }
 }
 
-const DESCRIPTION_BY_TYPE = Object.freeze({
-  EXECUTION_STARTED: 'Execution started.',
-  NODE_STARTED: 'Node execution started.',
-  NODE_BYPASSED: 'Node was bypassed.',
-  NODE_DEFAULTED: 'Node used its configured fallback.',
+const DESCRIPTION_KEY_BY_TYPE = Object.freeze({
+  EXECUTION_STARTED: 'executionEvent.executionStarted',
+  NODE_STARTED: 'executionEvent.nodeStarted',
+  NODE_BYPASSED: 'executionEvent.nodeBypassed',
+  NODE_DEFAULTED: 'executionEvent.nodeDefaulted',
   // NOT "successfully". This table is the no-classifier fallback, and a node that routed its
   // `failed` outcome emits NODE_COMPLETED too -- it completed, and the traversal went down the
   // failure route its author declared. Claiming success here was false exactly where the reader was
   // looking to find out what went wrong. Success is asserted only in `describeWithReason` below,
   // which knows the outcome.
-  NODE_COMPLETED: 'Node completed.',
+  NODE_COMPLETED: 'executionEvent.nodeCompleted',
   // Found by the structural check in this module's test, not by review: this arm had been missing
   // since the type was introduced, so every routed edge rendered as generic activity. Same defect
   // class as the cancellation entry below -- a positive allow-list degrades silently when the
   // server's vocabulary grows.
-  EDGE_TRAVERSED: 'Edge was traversed.',
-  NODE_FAILED: 'Node failed. Protected diagnostics may contain more detail.',
+  EDGE_TRAVERSED: 'executionEvent.edgeTraversed',
+  NODE_FAILED: 'executionEvent.nodeFailed',
   // The no-classifier fallback, so it names neither the classification nor the wait. Both are on the
   // event for a reader entitled to them; `describeWithReason` below adds the classification when the
   // server sent one.
-  NODE_RETRY_SCHEDULED: 'Node attempt failed and another attempt was scheduled.',
-  JOIN_SATISFIED: 'Join conditions were satisfied.',
-  JOIN_ITERATION_BACKLOG: 'A join is holding state for several iterations.',
-  JOIN_ARRIVAL_DISCARDED: 'A duplicate or late join arrival was ignored.',
-  JOIN_FAILED: 'Join conditions could not be satisfied.',
+  NODE_RETRY_SCHEDULED: 'executionEvent.retryScheduled',
+  JOIN_SATISFIED: 'executionEvent.joinSatisfied',
+  JOIN_ITERATION_BACKLOG: 'executionEvent.joinBacklog',
+  JOIN_ARRIVAL_DISCARDED: 'executionEvent.joinDiscarded',
+  JOIN_FAILED: 'executionEvent.joinFailed',
   // "Holding" rather than "stopped", matching `PublicExecutionDescription.forType`'s own choice: a
   // paused execution has not stopped -- it keeps its state, it is still listed live and it is still
   // cancellable. A reader told an execution had stopped would go looking for a result that is not
   // coming.
-  EXECUTION_PAUSED: 'Execution was paused and is holding before its next node.',
-  EXECUTION_RESUMED: 'Execution was resumed and is running again.',
-  EXECUTION_COMPLETED: 'Execution completed successfully.',
-  EXECUTION_FAILED: 'Execution failed. Protected diagnostics may contain more detail.',
+  EXECUTION_PAUSED: 'executionEvent.executionPaused',
+  EXECUTION_RESUMED: 'executionEvent.executionResumed',
+  EXECUTION_COMPLETED: 'executionEvent.executionCompleted',
+  EXECUTION_FAILED: 'executionEvent.executionFailed',
   // No "failed", and no pointer to protected diagnostics either -- there are none to read. Matching
   // `PublicExecutionDescription.forType`'s own choice: a cancelled execution stopped because
   // somebody with the authority to stop it did, and copy that sent an operator looking for a fault
@@ -127,17 +127,17 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   // so a classifier branch looks like it belongs; the server's own classifier switch has no arm for
   // this type and falls through to the copy here. Adding one on this side would put a Java type name
   // into a sentence the server never composes.
-  EXECUTION_CANCELLED: 'Execution was cancelled before it produced a result.',
+  EXECUTION_CANCELLED: 'executionEvent.executionCancelled',
   // Durable-journal types. They reach this table only as the fallback for a peer that sent no
   // `description`; the server composes the same sentences from its own source-authored copy. They
   // live here rather than being left to UNKNOWN because a handler event that rendered as generic
   // activity would be indistinguishable from a node event in the one view an operator uses to find
   // out why a process has not moved.
-  HANDLER_REGISTERED: 'A handler was registered and the process is waiting for it.',
-  HANDLER_ESCALATED: 'A waiting handler was escalated and can still be resolved.',
-  HANDLER_EXPIRED: "A handler's wait ended without a trigger.",
-  HANDLER_DENIED: 'A handler was denied and the process continued.',
-  HANDLER_RESOLVED: 'A handler was resolved and the process re-entered.',
+  HANDLER_REGISTERED: 'executionEvent.handlerRegistered',
+  HANDLER_ESCALATED: 'executionEvent.handlerEscalated',
+  HANDLER_EXPIRED: 'executionEvent.handlerExpired',
+  HANDLER_DENIED: 'executionEvent.handlerDenied',
+  HANDLER_RESOLVED: 'executionEvent.handlerResolved',
 });
 
 /**
@@ -154,14 +154,24 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
  * copy that would call a routed failure a success.
  */
 export function publicExecutionDescription(description, type, publicReason) {
-  const candidate = (typeof description === 'string' && description.trim())
+  const fallbackKey = DESCRIPTION_KEY_BY_TYPE[String(type || '')];
+  const supplied = typeof description === 'string' && description.trim()
+    ? normalizePublicDescription(description, '') : '';
+  const englishProductDescription = describeWithReason(type, publicReason, englishText)
+    || (fallbackKey && englishText(fallbackKey)) || '';
+  // Current servers send their English product fallback in `description`, while providers may send
+  // authored public copy in the same bounded field. Translate only the known product sentence;
+  // preserve every distinct authored value literally in every selected locale.
+  const authored = supplied && supplied !== normalizePublicDescription(englishProductDescription, '')
+    ? supplied : '';
+  const candidate = authored
     || describeWithReason(type, publicReason)
-    || DESCRIPTION_BY_TYPE[String(type || '')]
-    || UNKNOWN_EXECUTION_DESCRIPTION;
-  return normalizePublicDescription(candidate);
+    || (fallbackKey && uiText(fallbackKey))
+    || uiText('executionEvent.unknown');
+  return normalizePublicDescription(candidate, uiText('executionEvent.unknown'));
 }
 
-export function normalizePublicDescription(value) {
+export function normalizePublicDescription(value, emptyFallback = UNKNOWN_EXECUTION_DESCRIPTION) {
   let normalized = '';
   let previousSpace = true;
   for (const character of String(value || '')) {
@@ -179,7 +189,7 @@ export function normalizePublicDescription(value) {
     }
   }
   normalized = normalized.trim();
-  if (!normalized) return UNKNOWN_EXECUTION_DESCRIPTION;
+  if (!normalized) return emptyFallback;
 
   const encoder = new TextEncoder();
   if (encoder.encode(normalized).byteLength <= MAX_PUBLIC_DESCRIPTION_UTF8_BYTES) return normalized;
@@ -195,3 +205,6 @@ export function normalizePublicDescription(value) {
   }
   return bounded + PUBLIC_DESCRIPTION_TRUNCATION_MARKER;
 }
+import { createUiText, uiText } from './ui-text.js';
+
+const englishText = createUiText();

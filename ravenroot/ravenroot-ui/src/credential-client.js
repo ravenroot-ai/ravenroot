@@ -1,4 +1,6 @@
+import { productError } from './product-error.js';
 import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
+import { uiText } from './ui-text.js';
 // The credential routes, as this page reaches them (the UI half).
 //
 // ── WHY THIS IS A CLIENT OF ITS OWN AND NOT METHODS ON AN EXISTING ONE ───────────────────────────
@@ -55,7 +57,7 @@ const PERMITTED_PATHS = new Set(Object.values(CREDENTIAL_PATHS));
 
 export function credentialUrl(baseUrl, path) {
   if (!PERMITTED_PATHS.has(path)) {
-    throw new Error(`credential destination is not permitted: ${path}`);
+    throw productError("workspace.error.credential.client.credential.destination.is.not.permitted", new Error(`credential destination is not permitted: ${path}`), { value1: path });
   }
   return `${baseUrl}${path}`;
 }
@@ -68,15 +70,15 @@ export const OAUTH_TOKEN_SCHEME = 'oauth-token';
 
 export const CREDENTIAL_SCHEMES = Object.freeze([API_KEY_SCHEME, BASIC_SCHEME, OAUTH_TOKEN_SCHEME]);
 
-const SCHEME_LABELS = Object.freeze({
-  [API_KEY_SCHEME]: 'API key',
-  [BASIC_SCHEME]: 'Username and password',
-  [OAUTH_TOKEN_SCHEME]: 'OAuth token',
+const SCHEME_LABEL_KEYS = Object.freeze({
+  [API_KEY_SCHEME]: 'workspace.credential.scheme.api-key',
+  [BASIC_SCHEME]: 'workspace.credential.scheme.basic',
+  [OAUTH_TOKEN_SCHEME]: 'workspace.credential.scheme.oauth-token',
 });
 
 /** A scheme this build does not recognise is shown as itself rather than as a guess. */
 export function credentialSchemeLabel(scheme) {
-  return SCHEME_LABELS[scheme] || String(scheme || '');
+  return SCHEME_LABEL_KEYS[scheme] ? uiText(SCHEME_LABEL_KEYS[scheme]) : String(scheme || '');
 }
 
 /** The one scheme that carries a username. The server refuses the pairing in both directions. */
@@ -103,6 +105,7 @@ export class CredentialLeakError extends Error {
       + `so nothing was rendered: “${key}”.`);
     this.name = 'CredentialLeakError';
     this.key = key;
+    productError('workspace.credential.unexpectedField', this, { key });
   }
 }
 
@@ -217,9 +220,9 @@ export class RavenrootCredentialClient {
       body: JSON.stringify(body),
     });
     if (response.status === 404 || response.status === 501) {
-      throw new CredentialError(
+      throw productError("workspace.error.credential.client.this.deployment.does.not.offer.credential.storage.so.nothing.was", new CredentialError(
         'This deployment does not offer credential storage, so nothing was stored.',
-        { status: response.status, reason: 'SURFACE_ABSENT' });
+        { status: response.status, reason: 'SURFACE_ABSENT' }));
     }
     const answer = await readJson(response);
     if (!response.ok) throw failure(readEnvelope(response.status, answer));
@@ -237,7 +240,7 @@ export class RavenrootCredentialClient {
   // gets its own reason and a sentence that enumerates the causes rather than choosing one. The
   // browser's own wording is not a diagnosis and is never passed through as if it were.
   async #send(path, options) {
-    if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
+    if (!this.fetchImpl) throw productError("workspace.error.credential.client.fetch.api.is.not.supported.by.this.browser", new Error('Fetch API is not supported by this browser'));
     const credential = await requestCredential(this.tokenProvider);
     const { token } = credential;
     // OUTSIDE the try on purpose: a refused destination is a defect in this build, not a transport
@@ -253,18 +256,19 @@ export class RavenrootCredentialClient {
       await invalidateRejectedCredential(response, this.tokenProvider, credential);
       return response;
     } catch {
-      throw new CredentialError(
+      throw productError("workspace.error.credential.client.the.service.could.not.be.reached.and.the.browser.does.not.say.why", new CredentialError(
         'The service could not be reached, and the browser does not say why: the request may never '
         + 'have left this page, or it may have arrived and been refused by an origin rule. Nothing '
         + 'was stored.',
-        { status: 0, reason: 'NO_HTTP_STATUS' });
+        { status: 0, reason: 'NO_HTTP_STATUS' }));
     }
   }
 }
 
 function failure(envelope) {
   const message = envelope.detail || `The service answered with HTTP ${envelope.status}.`;
-  return new CredentialError(message, envelope);
+  const error = new CredentialError(message, envelope);
+  return envelope.detail ? error : productError('workspace.credential.responseHttp', error, { status: envelope.status });
 }
 
 async function readJson(response) {
@@ -280,7 +284,7 @@ function normalizeBaseUrl(value) {
   if (!baseUrl) return '';
   const parsed = new URL(baseUrl, globalThis.location?.origin || 'http://localhost');
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Service URL must use HTTP(S)');
+    throw productError("workspace.error.credential.client.service.url.must.use.http.s", new Error('Service URL must use HTTP(S)'));
   }
   return parsed.origin + parsed.pathname.replace(/\/$/, '');
 }

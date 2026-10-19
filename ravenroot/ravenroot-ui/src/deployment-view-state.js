@@ -1,10 +1,11 @@
+import { productError } from './product-error.js';
 const LIFECYCLE = new Set([
   'REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING', 'STOPPED', 'FAILED', 'UNDEPLOYED',
 ]);
 
 export function createDeploymentViewState(binding) {
   if (!binding?.deploymentId || !binding?.graphVersion || !binding?.incarnationId) {
-    throw new TypeError('Deployment viewer requires an immutable deployment binding.');
+    throw productError("workspace.error.deployment.view.state.deployment.viewer.requires.an.immutable.deployment.binding", new TypeError('Deployment viewer requires an immutable deployment binding.'));
   }
   return {
     binding: Object.freeze({

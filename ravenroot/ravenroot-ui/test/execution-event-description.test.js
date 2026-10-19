@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { UI_CATALOG_SCHEMA, createUiLocalization, useUiLocalization } from '../src/ui-text.js';
 
 import {
   MAX_PUBLIC_DESCRIPTION_UTF8_BYTES,
@@ -10,10 +12,29 @@ import {
   publicExecutionDescription,
 } from '../src/execution-event-description.js';
 
+afterEach(() => useUiLocalization(createUiLocalization()));
+
 describe('public execution descriptions', () => {
   it('uses the structured field and preserves ordinary Unicode text', () => {
     expect(publicExecutionDescription('Task completed 日本語', 'NODE_COMPLETED'))
       .toBe('Task completed 日本語');
+  });
+
+  it('preserves authored public copy under another locale while translating product fallbacks', () => {
+    useUiLocalization(createUiLocalization({ locale: 'it', catalogs: { it: {
+      schema: UI_CATALOG_SCHEMA,
+      locale: 'it',
+      messages: {
+        'executionEvent.nodeFailed': 'Il nodo non è riuscito. I dettagli protetti possono contenere ulteriori informazioni.',
+      },
+    } } }));
+
+    expect(publicExecutionDescription(
+      '<img src=x onerror=alert(1)> visit https://example.invalid/path', 'NODE_FAILED',
+    )).toBe('<img src=x onerror=alert(1)> visit https://example.invalid/path');
+    expect(publicExecutionDescription(
+      'Node failed. Protected diagnostics may contain more detail.', 'NODE_FAILED',
+    )).toBe('Il nodo non è riuscito. I dettagli protetti possono contenere ulteriori informazioni.');
   });
 
   it('never falls back to legacy diagnostic detail', () => {

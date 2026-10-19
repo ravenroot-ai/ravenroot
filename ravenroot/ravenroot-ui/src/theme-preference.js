@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import {
   PRODUCT_DEFAULT_THEME,
   THEME_STORAGE_KEY,
@@ -66,7 +67,7 @@ export function createThemePreferenceController({
     get hasUserChoice() { return Boolean(persistedTheme); },
     select(nextTheme) {
       const normalized = normalizeTheme(nextTheme);
-      if (!normalized) throw new TypeError(`Unsupported application theme: ${String(nextTheme)}`);
+      if (!normalized) throw productError("workspace.error.theme.preference.unsupported.application.theme", new TypeError(`Unsupported application theme: ${String(nextTheme)}`), { value1: String(nextTheme) });
       persistedTheme = normalized;
       persistTheme(storage, normalized);
       return publish(normalized, 'user');

@@ -1,3 +1,4 @@
+import { uiNumber, uiText } from './ui-text.js';
 import { readVisualGroups, reconcileVisualGroupState } from './visual-groups.js';
 import {
   GRAPH_DESIGN_ARRANGEMENT_PROPERTY,
@@ -235,8 +236,8 @@ export function syncGraphPositionsFromCy(graph, cy) {
 
 export function renderGraphStatistics(container, totalNodes, totalEdges, nodeCounts = {}, edgeCounts = {}) {
   container.replaceChildren();
-  appendStatistic(container, 'Nodes', totalNodes);
-  appendStatistic(container, 'Edges', totalEdges);
+  appendStatistic(container, uiText("workspace.graph.view.state.nodes"), totalNodes);
+  appendStatistic(container, uiText("workspace.graph.view.state.edges"), totalEdges);
   Object.entries(nodeCounts).forEach(([type, count]) => appendStatistic(container, type, count));
   const separator = document.createElement('div');
   separator.className = 'graph-stat-separator';
@@ -251,7 +252,7 @@ function appendStatistic(container, label, value) {
   const name = document.createElement('span');
   name.textContent = `${String(label)}:`;
   const count = document.createElement('span');
-  count.textContent = String(value);
+  count.textContent = uiNumber(value);
   row.append(name, count);
   container.append(row);
 }

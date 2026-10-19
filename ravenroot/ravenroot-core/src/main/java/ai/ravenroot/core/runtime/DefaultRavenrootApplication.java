@@ -128,6 +128,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return programAuthoringLimits;
     }
 
+    @Override
+    public boolean immutableGraphDefinitionsAvailable() {
+        return graphDefinitionStore != null;
+    }
+
     /**
      * Whether a graph naming a behavior the trusted catalog lacks may run (SEC-09).
      *

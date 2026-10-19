@@ -41,6 +41,8 @@ services:
       # Defaults to loopback origins on the *container* port (8080). If RAVENROOT_HOST_PORT below
       # is overridden, set this explicitly to match or the UI's own API calls will get 403.
       RAVENROOT_BROWSER_ALLOWED_ORIGINS: ${RAVENROOT_BROWSER_ALLOWED_ORIGINS:-}
+      # Blank retains framing denial. Set self and/or canonical HTTP(S) portal origins explicitly.
+      RAVENROOT_UI_FRAME_ANCESTORS: ${RAVENROOT_UI_FRAME_ANCESTORS:-}
       RAVENROOT_ENGINE: ${RAVENROOT_ENGINE:-pekko}
       # Execution runtime bounds are resolved once by Java. Blank carriers select its typed defaults.
       RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE: ${RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE:-}

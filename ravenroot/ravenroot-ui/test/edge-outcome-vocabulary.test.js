@@ -28,7 +28,7 @@ describe('canonical outcome edge vocabulary', () => {
       width: 2.5,
       color: palette.edgeType.outcome,
     });
-    expect(APP_SOURCE).toContain(`{ type: 'outcome', label: '*_OUTCOME' }`);
+    expect(APP_SOURCE).toContain(`{ type: 'outcome', labelKey: 'edgeVisualType.outcome' }`);
     expect(APP_SOURCE).toContain(`if (state === 'bypassed') return rendererPalette.edgeType.outcome;`);
 
     expect(getRendererPalette('light').edgeType.outcome).toBe('#8250df');

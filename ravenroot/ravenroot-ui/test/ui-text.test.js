@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { createUiText } from '../src/ui-text.js';
+import {
+  ENGLISH_MESSAGES,
+  UI_CATALOG_SCHEMA,
+  createUiLocalization,
+  createUiText,
+  formatUiDuration,
+  uiErrorReason,
+  uiLocaleDirection,
+  validateUiCatalog,
+} from '../src/ui-text.js';
+import { productError } from '../src/product-error.js';
+import { repositoryReviewMessageKey, validateGraphAuthoringCapability } from '../src/graph-authoring-client.js';
 
 describe('UI text catalogs', () => {
+  it('translates structured product validation reasons while preserving unknown diagnostics', () => {
+    expect(uiErrorReason(productError('humanTasks.validation.failed', 'developer detail')))
+      .toBe('The Human Task response failed client validation.');
+    expect(uiErrorReason(new Error('service diagnostic'))).toBe('service diagnostic');
+  });
   it('prefers an exact locale, then its base language, then English', () => {
     const catalogs = {
       fr: { 'commands.file.new.label': 'Nouveau document' },
@@ -12,6 +28,29 @@ describe('UI text catalogs', () => {
     expect(text('commands.file.open.label')).toBe('Ouvrir…');
     expect(text('commands.file.new.label')).toBe('Nouveau document');
     expect(text('commands.file.save.label')).toBe('Save GraphML');
+  });
+
+  it('localizes provider-specific review nouns while preserving opaque repository URLs', () => {
+    const url = 'https://gitlab.example/group/project/-/merge_requests/17';
+    const text = createUiText({ locale: 'fr', catalogs: { fr: {
+      'workspace.app.existing': 'Existant',
+      'workspace.app.pull.request': 'demande de tirage',
+      'workspace.app.merge.request': 'demande de fusion',
+      'workspace.notice.graph.review': '{detail1} {reviewType} : {url}',
+    } } });
+
+    const gitlab = validateGraphAuthoringCapability({
+      mode: 'git', provider: 'gitlab', operations: ['RELEASE_PROPOSAL'],
+    });
+    const github = validateGraphAuthoringCapability({
+      mode: 'git', provider: 'github', operations: ['RELEASE_PROPOSAL'],
+    });
+    expect(text('workspace.notice.graph.review', {
+      detail1: text('workspace.app.existing'),
+      reviewType: text(repositoryReviewMessageKey(gitlab.provider)),
+      url,
+    })).toBe(`Existant demande de fusion : ${url}`);
+    expect(text(repositoryReviewMessageKey(github.provider))).toBe('demande de tirage');
   });
 
   it('canonicalizes locale casing and underscore separators', () => {
@@ -30,14 +69,107 @@ describe('UI text catalogs', () => {
     expect(text('commands.view.keyboardShortcuts.label')).toBe('Keyboard Shortcuts');
   });
 
-  it('interpolates named values and fails when a key or parameter is absent', () => {
+  it('interpolates named values and reports safe fallbacks for invalid lookups', () => {
+    const diagnostics = [];
     const text = createUiText({
-      locale: 'en',
-      catalogs: { en: { example: 'Open {count} documents' } },
+      locale: 'en', onDiagnostic: detail => diagnostics.push(detail),
     });
 
-    expect(text('example', { count: 3 })).toBe('Open 3 documents');
-    expect(() => text('example')).toThrow(/Missing UI text parameter "count"/);
-    expect(() => text('not.registered')).toThrow(/Missing English UI text/);
+    expect(text('closeAll.sessions.item.many', { name: 'Orders', count: 3 }))
+      .toBe('Orders — 3 inbound source nodes · scope LOCAL_PROCESS');
+    expect(text('closeAll.sessions.item.many')).toBe('Unavailable');
+    expect(text('not.registered')).toBe('Unavailable');
+    expect(diagnostics.map(item => item.code)).toEqual([
+      'INVALID_MESSAGE_PARAMETERS', 'MISSING_SOURCE_MESSAGE',
+    ]);
+  });
+
+  it('validates keys, directions and placeholder parity at the catalog boundary', () => {
+    const input = { schema: UI_CATALOG_SCHEMA, locale: 'ar', direction: 'rtl', messages: {
+      'commands.file.open.label': 'افتح…',
+      'closeAll.sessions.item.many': '{name} — {count} عناصر',
+    } };
+    expect(validateUiCatalog(input)).toMatchObject({ locale: 'ar', direction: 'rtl' });
+    expect(() => validateUiCatalog({ ...input, messages: { unknown: 'No' } }))
+      .toThrow(/Invalid UI text key|Unknown UI text key/);
+    expect(() => validateUiCatalog({ ...input, messages: {
+      'closeAll.sessions.item.many': '{name}',
+    } })).toThrow(/incompatible named parameters/);
+    expect(() => validateUiCatalog({ ...input, direction: 'sideways' })).toThrow(/direction/);
+    const omitted = validateUiCatalog({ ...input, direction: undefined });
+    expect(omitted).not.toHaveProperty('direction');
+    expect(validateUiCatalog(JSON.parse(JSON.stringify(omitted)))).not.toHaveProperty('direction');
+  });
+
+  it('uses the selected exact or base catalog direction without English fallback leakage', () => {
+    const messages = { 'commands.file.open.label': 'Aç' };
+    const catalog = (locale, direction) => ({ schema: UI_CATALOG_SCHEMA, locale,
+      ...(direction ? { direction } : {}), messages });
+    const base = createUiLocalization({ locale: 'az-IR', catalogs: { az: catalog('az', 'rtl') } });
+    expect(base.text('commands.file.open.label')).toBe('Aç');
+    expect(base.direction).toBe('rtl');
+
+    const exact = createUiLocalization({ locale: 'az-IR', catalogs: {
+      az: catalog('az', 'rtl'), 'az-IR': catalog('az-IR', 'ltr'),
+    } });
+    expect(exact.direction).toBe('ltr');
+
+    const partialExact = createUiLocalization({ locale: 'az-IR', catalogs: {
+      az: catalog('az', 'ltr'), 'az-IR': { schema: UI_CATALOG_SCHEMA, locale: 'az-IR', messages: {} },
+    } });
+    expect(partialExact.text('commands.file.open.label')).toBe('Aç');
+    expect(partialExact.direction).toBe('rtl');
+
+    expect(createUiLocalization({ locale: 'az-Arab-IR', catalogs: {
+      az: catalog('az'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'az-IR', catalogs: {
+      az: catalog('az'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'ar-Latn', catalogs: {
+      ar: catalog('ar'),
+    } }).direction).toBe('ltr');
+    expect(createUiLocalization({ locale: 'ar-Latn', catalogs: {
+      ar: catalog('ar', 'rtl'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'ff-Adlm', catalogs: {
+      ff: catalog('ff'),
+    } }).direction).toBe('rtl');
+    expect(createUiLocalization({ locale: 'zz-ZZ', catalogs: {
+      en: catalog('en', 'rtl'),
+    } }).direction).toBe('ltr');
+    expect(createUiLocalization({ locale: 'en-GB', catalogs: {
+      en: catalog('en', 'rtl'),
+    } }).direction).toBe('rtl');
+  });
+
+  it('supports plurals and locale-aware number, date, direction and duration formatting', () => {
+    const sourceMessages = { ...ENGLISH_MESSAGES,
+      'test.items': { one: '{count} item', other: '{count} items' } };
+    const catalog = validateUiCatalog({ schema: UI_CATALOG_SCHEMA, locale: 'fr', messages: {
+      'test.items': { one: '{count} élément', other: '{count} éléments' },
+    } }, { sourceMessages });
+    const text = createUiText({ locale: 'de-DE' });
+    expect(catalog.messages['test.items'].other).toBe('{count} éléments');
+    expect(text.number(1234.5)).toMatch(/1[.\s]234,5/);
+    expect(text.dateTime(new Date('2026-10-17T00:00:00Z'), { timeZone: 'UTC', year: 'numeric' }))
+      .toContain('2026');
+    expect(formatUiDuration(65_000, 'en')).toBe('1 min 5 sec');
+    expect(uiLocaleDirection('ar')).toBe('rtl');
+  });
+
+  it('switches a live localization context without replacing application state', () => {
+    const localization = createUiLocalization({ locale: 'en', catalogs: { fr: {
+      'commands.file.open.label': 'Ouvrir…',
+    } } });
+    const state = { selectedNode: 'n1' };
+    let notices = 0;
+    localization.subscribe(() => { notices += 1; });
+
+    expect(localization.setLocale('fr-CA')).toBe(true);
+    expect(localization.text('commands.file.open.label')).toBe('Ouvrir…');
+    expect(localization.text('commands.file.save.label')).toBe('Save GraphML');
+    expect(state).toEqual({ selectedNode: 'n1' });
+    expect(notices).toBe(1);
   });
 });

@@ -76,12 +76,12 @@ published prerelease is `0.6.1-alpha.1`:
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-core</artifactId>
-    <version>0.7.0-alpha.1</version>
+    <version>0.8.0-alpha.1</version>
   </dependency>
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-pekko</artifactId>
-    <version>0.7.0-alpha.1</version>
+    <version>0.8.0-alpha.1</version>
     <scope>runtime</scope>
   </dependency>
 </dependencies>
@@ -135,7 +135,8 @@ operational responsibilities and recovery paths.*
   [authoring assistant](docs/operator-guide/authoring-assistant.md), and
   [command-line tools](docs/reference/command-line-tools.md)
 - **Architects and reviewers:** [product boundaries](docs/architecture/product-boundaries.md),
-  [architecture and concepts](docs/architecture/index.md), and
+  [architecture and concepts](docs/architecture/index.md),
+  [UI internationalization](docs/architecture/ui-internationalization.md),
   [architecture decision records](adr/README.md), and
   [primary-source platform comparison](docs/reference/platform-comparison.md)
 - **Teachers and learners:** [education pathway](docs/education/index.md),

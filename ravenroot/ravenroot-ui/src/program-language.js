@@ -1,3 +1,4 @@
+import { ENGLISH_MESSAGES, uiText } from './ui-text.js';
 // Pure, testable helpers for the artifact workbench's language selector.
 //
 // The defect this file exists to close: the workbench used to hard-code `language: 'javascript'`
@@ -30,8 +31,7 @@ function escapeAttribute(value) {
  * constant so the wording lives in exactly one place and a test can pin it.
  */
 export const ARTIFACT_DURABILITY_NOTICE =
-  'This artifact lives only in the running server’s memory. A server restart discards it, '
-  + 'along with every other program artifact -- there is no durable store yet.';
+  ENGLISH_MESSAGES["workspace.program.language.this.artifact.lives.only.in.the.running.server.s"];
 
 /**
  * Renders `<option>` elements for the language `<select>`, in the order the runtime declared them.

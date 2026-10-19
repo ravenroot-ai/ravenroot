@@ -53,6 +53,8 @@ public final class EmbedBrowserHttpHandler {
     public static final String START_EXECUTION_PATH = "/v1/embed/executions";
     public static final String BOOTSTRAP_SCRIPT_PATH = "/embed-bootstrap.js";
     private static final int MAX_BODY_BYTES = 8 * 1024;
+    // Each UTF-16 catalog code unit may use six ASCII bytes as an outer JSON unicode escape.
+    public static final int MAX_SESSION_BODY_BYTES = MAX_BODY_BYTES + 6 * EmbedPresentation.MAX_CATALOG_CHARACTERS;
 
     private final EmbedBrowserConfiguration configuration;
     private final EmbedLaunchTicketAuthority tickets;
@@ -110,8 +112,19 @@ public final class EmbedBrowserHttpHandler {
         if (!method(exchange, "POST") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
         Map<String, String> body = bodyOneOf(exchange, Set.of(
                 Set.of("registrationId"),
-                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin")));
+                Set.of("registrationId", "locale"),
+                Set.of("registrationId", "locale", "catalog"),
+                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin"),
+                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin", "locale"),
+                Set.of("deploymentId", "incarnationId", "graphVersion", "parentOrigin", "locale", "catalog")), MAX_SESSION_BODY_BYTES);
         if (body == null) return;
+        final EmbedPresentation presentation;
+        try {
+            presentation = new EmbedPresentation(body.getOrDefault("locale", "en"),
+                    body.getOrDefault("catalog", ""));
+        } catch (IllegalArgumentException invalidPresentation) {
+            invalid(exchange); return;
+        }
         RequestContext context = requestContext.get();
         EmbedSessionAuthorization authorization;
         String dynamicGrantId = null;
@@ -155,7 +168,7 @@ public final class EmbedBrowserHttpHandler {
             return;
         }
         try {
-            var issued = tickets.issue(authorization);
+            var issued = tickets.issue(authorization, presentation);
             audit(requestId.get(), authorization, EmbedSecurityAuditSink.Phase.SESSION_CREATED);
             String launchUrl = configuration.viewerOrigin().value() + LAUNCH_PATH + "?ticket=" + issued.value();
             String grant = dynamicGrantId == null ? ""
@@ -313,6 +326,8 @@ public final class EmbedBrowserHttpHandler {
                     + "\",\"expiresAt\":\"" + bootstrap.expiresAt()
                     + "\",\"viewerOrigin\":\"" + JsonStrings.escape(configuration.viewerOrigin().value())
                     + "\",\"parentOrigin\":\"" + JsonStrings.escape(parentOrigin)
+                    + "\",\"locale\":\"" + JsonStrings.escape(available.presentation().locale())
+                    + "\",\"catalog\":\"" + JsonStrings.escape(available.presentation().catalogJson())
                     + "\",\"theme\":" + authorization.themeOverride()
                     .map(theme -> "\"" + theme.wireValue() + "\"").orElse("null")
                     + (viewerV2 ? ",\"viewerSourceVersion\":\"2\",\"showStartExecution\":"
@@ -320,65 +335,69 @@ public final class EmbedBrowserHttpHandler {
             String themeAttribute = authorization.themeOverride()
                     .map(theme -> " data-theme=\"" + theme.wireValue() + "\"").orElse("");
             String viewControls = viewerV2
-                    ? "<label class=\"embed-mode-label\">View <select data-viewer-mode>"
-                    + "<option value=\"design\">Design</option>"
-                    + "<option value=\"monitoring\">Monitoring</option></select></label>"
+                    ? "<label class=\"embed-mode-label\"><span data-i18n=\"embed.controls.view\">View</span> <select data-viewer-mode>"
+                    + "<option value=\"design\" data-i18n=\"embed.mode.design\">Design</option>"
+                    + "<option value=\"monitoring\" data-i18n=\"embed.mode.monitoring\">Monitoring</option></select></label>"
                     + "<button type=\"button\" data-viewer-command=\"render\" "
-                    + "aria-label=\"Render\" title=\"Render layout\">&#8635;</button>"
-                    : "<label class=\"embed-mode-label\">View <select data-viewer-mode>"
-                    + "<option value=\"cyto\">Cyto</option><option value=\"n8n\">N8N</option>"
-                    + "<option value=\"elastic\">Elastic</option></select></label>";
+                    + "aria-label=\"Render\" data-i18n-aria-label=\"embed.controls.render\" title=\"Render layout\" data-i18n-title=\"embed.controls.render.title\">&#8635;</button>"
+                    : "<label class=\"embed-mode-label\"><span data-i18n=\"embed.controls.view\">View</span> <select data-viewer-mode>"
+                    + "<option value=\"cyto\" data-i18n=\"embed.mode.cyto\">Cyto</option><option value=\"n8n\" data-i18n=\"embed.mode.n8n\">N8N</option>"
+                    + "<option value=\"elastic\" data-i18n=\"embed.mode.elastic\">Elastic</option></select></label>";
             String runControls = viewerV2
-                    ? "<label class=\"embed-run-label\">Run <select data-viewer-run "
-                    + "aria-label=\"Live run\" disabled><option value=\"\">No runs</option>"
+                    ? "<label class=\"embed-run-label\"><span data-i18n=\"embed.controls.run\">Run</span> <select data-viewer-run "
+                    + "aria-label=\"Live run\" data-i18n-aria-label=\"embed.controls.liveRun\" disabled><option value=\"\" data-i18n=\"embed.runs.none\">No runs</option>"
                     + "</select></label><span class=\"embed-visually-hidden\" data-viewer-run-empty "
-                    + "role=\"status\">No authorized runs.</span>"
+                    + "role=\"status\" data-i18n=\"embed.runs.noneAuthorized\">No authorized runs.</span>"
                     + (showStartExecution
-                    ? "<button type=\"button\" data-viewer-start>Start execution</button>" : "")
+                    ? "<button type=\"button\" data-viewer-start data-i18n=\"embed.controls.startExecution\">Start execution</button>" : "")
                     : "";
             String html = "<!doctype html><html lang=\"en\"" + themeAttribute
                     + "><head><meta charset=\"utf-8\">"
                     + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                     + "<meta name=\"referrer\" content=\"no-referrer\">"
-                    + "<title>Ravenroot embedded graph</title>"
+                    + "<title data-i18n=\"embed.document.title\">Ravenroot embedded graph</title>"
                     + "<link rel=\"stylesheet\" href=\"/embed-viewer.css\"></head><body>"
                     + "<span class=\"embed-focus-sentinel\" tabindex=\"0\" role=\"navigation\" "
-                    + "aria-label=\"Start of embedded graph\"></span>"
-                    + "<a class=\"embed-skip-link\" href=\"#ravenroot-embed-canvas\">Skip to graph</a>"
+                    + "aria-label=\"Start of embedded graph\" data-i18n-aria-label=\"embed.boundary.start\"></span>"
+                    + "<a class=\"embed-skip-link\" href=\"#ravenroot-embed-canvas\" data-i18n=\"embed.skip\">Skip to graph</a>"
                     + "<main id=\"ravenroot-embed-viewer\" class=\"embed-viewer\" "
                     + "data-viewer-state=\"loading\" aria-labelledby=\"ravenroot-embed-title\">"
                     + "<header class=\"embed-viewer-header\"><h1 id=\"ravenroot-embed-title\" "
-                    + "class=\"embed-viewer-title\">Graph</h1><p class=\"embed-viewer-metadata\" "
+                    + "class=\"embed-viewer-title\" data-i18n=\"embed.title\">Graph</h1><p class=\"embed-viewer-metadata\" "
                     + "data-viewer-metadata hidden></p><nav class=\"embed-viewer-controls\" "
-                    + "aria-label=\"Graph view controls\">" + viewControls + runControls
-                    + "<span class=\"embed-zoom-controls\" role=\"group\" aria-label=\"Zoom controls\">"
+                    + "aria-label=\"Graph view controls\" data-i18n-aria-label=\"embed.controls.label\">" + viewControls + runControls
+                    + "<span class=\"embed-zoom-controls\" role=\"group\" aria-label=\"Zoom controls\" data-i18n-aria-label=\"embed.controls.zoom\">"
                     + "<button type=\"button\" data-viewer-command=\"zoom-out\" "
-                    + "aria-label=\"Zoom out\" title=\"Zoom out\">&minus;</button>"
+                    + "aria-label=\"Zoom out\" data-i18n-aria-label=\"embed.controls.zoomOut\" title=\"Zoom out\" data-i18n-title=\"embed.controls.zoomOut\">&minus;</button>"
                     + "<button type=\"button\" data-viewer-command=\"fit\" "
-                    + "aria-label=\"Fit\" title=\"Fit graph\">"
+                    + "aria-label=\"Fit\" data-i18n-aria-label=\"embed.controls.fit\" title=\"Fit graph\" data-i18n-title=\"embed.controls.fit.title\">"
                     + "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\">"
                     + "<path d=\"M8 3H3v5m0-5 6 6m7-6h5v5m0-5-6 6M3 16v5h5m-5 0 6-6m12 1v5h-5m5 0-6-6\"/>"
                     + "</svg></button>"
                     + "<button type=\"button\" data-viewer-command=\"zoom-in\" "
-                    + "aria-label=\"Zoom in\" title=\"Zoom in\">+</button></span>"
+                    + "aria-label=\"Zoom in\" data-i18n-aria-label=\"embed.controls.zoomIn\" title=\"Zoom in\" data-i18n-title=\"embed.controls.zoomIn\">+</button></span>"
                     + "<button type=\"button\" class=\"embed-maximize\" data-viewer-maximize "
-                    + "aria-pressed=\"false\" aria-label=\"Maximize embedded graph\" "
-                    + "title=\"Maximize embedded graph\"><span aria-hidden=\"true\"></span></button>"
+                    + "aria-pressed=\"false\" aria-label=\"Maximize embedded graph\" data-i18n-aria-label=\"embed.controls.maximize\" "
+                    + "title=\"Maximize embedded graph\" data-i18n-title=\"embed.controls.maximize\"><span aria-hidden=\"true\"></span></button>"
                     + "</nav></header>"
                     + "<div id=\"ravenroot-embed-canvas\" class=\"embed-viewer-canvas\" "
                     + "data-viewer-canvas role=\"application\" tabindex=\"0\" "
                     + "aria-label=\"Read-only graph. Arrow keys pan, plus and minus zoom, "
-                    + "and zero fits the graph.\"></div>"
+                    + "and zero fits the graph.\" data-i18n-aria-label=\"embed.canvas.label\"></div>"
                     + "<canvas class=\"embed-viewer-minimap\" data-viewer-minimap width=\"160\" "
                     + "height=\"104\" tabindex=\"0\" role=\"application\" "
-                    + "aria-label=\"Graph overview. Arrow keys pan, Home fits, Escape returns to graph.\">"
+                    + "aria-label=\"Graph overview. Arrow keys pan, Home fits, Escape returns to graph.\" data-i18n-aria-label=\"embed.minimap.label\" data-i18n=\"embed.minimap.fallback\">"
                     + "Graph overview</canvas>"
-                    + "<section class=\"embed-viewer-alternative\" aria-label=\"Graph contents\">"
-                    + "<h2>Graph contents</h2><ol data-viewer-alternative></ol></section>"
+                    + "<section class=\"embed-viewer-alternative\" aria-label=\"Graph contents\" data-i18n-aria-label=\"embed.contents.label\">"
+                    + "<h2 data-i18n=\"embed.contents.label\">Graph contents</h2><ol data-viewer-alternative></ol></section>"
                     + "<p class=\"embed-viewer-status\" data-viewer-status role=\"status\" "
-                    + "aria-live=\"polite\">Loading graph&hellip;</p></main>"
+                    + "aria-live=\"polite\" data-i18n=\"embed.state.loading\" "
+                    + "data-i18n-error=\"The graph could not be displayed.\" "
+                    + "data-i18n-expired=\"This viewing session has expired.\" "
+                    + "data-i18n-offline=\"The graph service is unavailable.\" "
+                    + "data-i18n-incompatible=\"This graph requires a newer viewer.\">Loading graph&hellip;</p></main>"
                     + "<span class=\"embed-focus-sentinel\" tabindex=\"0\" role=\"navigation\" "
-                    + "aria-label=\"End of embedded graph\"></span>"
+                    + "aria-label=\"End of embedded graph\" data-i18n-aria-label=\"embed.boundary.end\"></span>"
                     + "<script id=\"ravenroot-embed-bootstrap\" type=\"application/json\">"
                     + bootstrapJson.replace("<", "\\u003c") + "</script>"
                     + "<script src=\"" + BOOTSTRAP_SCRIPT_PATH + "\"></script></body></html>";
@@ -1200,14 +1219,26 @@ public final class EmbedBrowserHttpHandler {
 
     private static Map<String, String> bodyOneOf(HttpExchange exchange, Set<Set<String>> schemas)
             throws IOException {
+        return bodyOneOf(exchange, schemas, MAX_BODY_BYTES);
+    }
+
+    private static Map<String, String> bodyOneOf(HttpExchange exchange, Set<Set<String>> schemas,
+                                               int maximumBytes) throws IOException {
         String contentType = optionalSingleHeader(exchange, "Content-Type");
         if (contentType == null || !contentType.toLowerCase(java.util.Locale.ROOT).startsWith("application/json")) {
             invalid(exchange); return null;
         }
         byte[] bytes;
-        try (var input = exchange.getRequestBody()) { bytes = input.readNBytes(MAX_BODY_BYTES + 1); }
-        if (bytes.length > MAX_BODY_BYTES) { error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null; }
-        try { return EmbedRequestJson.parseOneOf(bytes, schemas); }
+        try (var input = exchange.getRequestBody()) { bytes = input.readNBytes(maximumBytes + 1); }
+        if (bytes.length > maximumBytes) { error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null; }
+        try {
+            var parsed = EmbedRequestJson.parseOneOf(bytes, schemas);
+            // The extra allowance belongs exclusively to catalog-bearing session creation.
+            if (!parsed.containsKey("catalog") && bytes.length > MAX_BODY_BYTES) {
+                error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null;
+            }
+            return parsed;
+        }
         catch (IllegalArgumentException invalid) { invalid(exchange); return null; }
     }
 

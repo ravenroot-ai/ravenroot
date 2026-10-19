@@ -20,7 +20,7 @@ class AmqpNodePackageTest {
                 .findFirst().orElseThrow().descriptor();
         assertEquals("amqp.publish", descriptor.behavior());
         var names = descriptor.properties().stream().map(property -> property.name()).collect(java.util.stream.Collectors.toSet());
-        assertEquals(java.util.Set.of("brokerProfile", "exchange", "routingKey", "mandatory", "contentType",
+        assertEquals(java.util.Set.of("brokerProfile", "mode", "queue", "exchange", "routingKey", "mandatory", "contentType",
                 "contentEncoding", "persistent", "priority", "expirationMs", "messageId", "correlationId",
                 "replyTo", "type", "appId", "headers", "confirmTimeoutMs", "maxConcurrency", "retries",
                 // The publish offers the recovery contract, because a consumer keyed on
@@ -30,10 +30,27 @@ class AmqpNodePackageTest {
         assertTrue(descriptor.capabilities().containsAll(java.util.Set.of("network", "credential-reference", "side-effect")));
         assertTrue(descriptor.capabilities().contains("saga-adapter:ravenroot.amqp-inbox.v1"));
         assertFalse(names.stream().anyMatch(name -> name.matches("(?i).*(host|port|password|credential|tls|vhost).*")));
+        var mode = descriptor.properties().stream().filter(property -> property.name().equals("mode"))
+                .findFirst().orElseThrow();
+        var queue = descriptor.properties().stream().filter(property -> property.name().equals("queue"))
+                .findFirst().orElseThrow();
+        var exchange = descriptor.properties().stream().filter(property -> property.name().equals("exchange"))
+                .findFirst().orElseThrow();
+        assertEquals("Producer", mode.defaultValue());
+        assertEquals(java.util.List.of("Producer", "Publisher"), mode.allowedValues());
+        assertEquals("mode", queue.visibleWhen().property());
+        assertEquals(java.util.List.of("Producer"), queue.visibleWhen().values());
+        assertEquals("queue", exchange.visibleWhen().property());
+        assertEquals(ai.ravenroot.api.catalog.PropertyConditionOperator.BLANK, exchange.visibleWhen().operator());
+        assertEquals(null, exchange.requiredWhen());
         var consume = nodePackage.behaviors().stream()
                 .filter(behavior -> behavior.descriptor().behavior().equals(AmqpConsumeNodeBehavior.BEHAVIOR))
                 .findFirst().orElseThrow().descriptor();
         assertTrue(consume.capabilities().contains("inbound-source"));
+        var consumeMode = consume.properties().stream().filter(property -> property.name().equals("mode"))
+                .findFirst().orElseThrow();
+        assertEquals("Consumer", consumeMode.defaultValue());
+        assertEquals(java.util.List.of("Consumer", "Subscriber"), consumeMode.allowedValues());
     }
 
     @Test
@@ -77,5 +94,7 @@ class AmqpNodePackageTest {
         assertTrue(resolver.resolve("other", "p").isEmpty());
         assertTrue(new EnvironmentAmqpProfileResolver(Map.of(key, value.replace(";true;/", ";TRUE;/")))
                 .resolve("t", "p").isEmpty());
+        assertTrue(new EnvironmentAmqpProfileResolver(Map.of(key, value + ";orders"))
+                .resolve("t", "p").orElseThrow().allowsTopicExchange("orders"));
     }
 }

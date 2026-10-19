@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1276,8 +1276,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Production image declares JVM, port, and healthcheck defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Production image declares JVM, port, and healthcheck defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1309,8 +1309,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1344,8 +1344,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "844047483832c9676cdbd3941c8df1536ad11e5779edd1555164869f8c553824",
-          "assertion": "Empty values deliberately select application defaults for declared carriers."
+          "digest": "7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b",
+          "assertion": "Empty values deliberately select application defaults for declared carriers. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 81,
@@ -1447,13 +1447,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57",
-          "assertion": "Compose carries supported environment key identities."
+          "digest": "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
+          "assertion": "Compose carries supported environment key identities. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "844047483832c9676cdbd3941c8df1536ad11e5779edd1555164869f8c553824",
-          "assertion": "Kubernetes carries supported environment key identities."
+          "digest": "7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b",
+          "assertion": "Kubernetes carries supported environment key identities. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 90,
@@ -1605,8 +1605,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1675,8 +1675,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "Dockerfile",
-          "digest": "5b035c5f0fdc5c051220fd13e463e98487dafe5d110808b0bb8c94eb81f895ff",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "1b361be6539ab74647b9ad3f2cffd317b0a1faae9ab0b5f2bcb87422aeb8a48b",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. The 0.8.0-alpha.1 build-context repair only makes the localization-audited server embed source available during the UI build and leaves this reviewed production authority unchanged."
         },
         {
           "path": "Dockerfile.ci",
@@ -1704,13 +1704,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "3b56a9909d287332769b8914ae4f85d7a5a2633c06dee58605307fd517c78f57",
-          "assertion": "Compose declares explicit local runtime defaults and external carriers."
+          "digest": "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
+          "assertion": "Compose declares explicit local runtime defaults and external carriers. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "844047483832c9676cdbd3941c8df1536ad11e5779edd1555164869f8c553824",
-          "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes."
+          "digest": "7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b",
+          "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 20,
@@ -1788,7 +1788,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1813,8 +1813,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5bd540a48cd4a57d1b90b4006249285ac8aede7b788fcf849374aa0c4c2c0b7b",
-          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2b43c321a85e988706a51d289722ddb9fc262116d8958f32065f4cd14b49e5df",
+          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 5,
@@ -5472,8 +5472,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5bd540a48cd4a57d1b90b4006249285ac8aede7b788fcf849374aa0c4c2c0b7b",
-          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2b43c321a85e988706a51d289722ddb9fc262116d8958f32065f4cd14b49e5df",
+          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 44,
@@ -5658,12 +5658,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8",
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "fae29e482c8e398c9c8987d4bac9d3caa128f51243853b406c1d816a4bf6f3a6",
+          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8",
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities."
         },
         {
@@ -5761,13 +5761,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8",
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13",
           "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities."
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5bd540a48cd4a57d1b90b4006249285ac8aede7b788fcf849374aa0c4c2c0b7b",
-          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2b43c321a85e988706a51d289722ddb9fc262116d8958f32065f4cd14b49e5df",
+          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 95,
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8",
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "65eeff43621aaab49fb56575a141d3a548c39eb9876572ee11d812b7f6c372a8",
+          "digest": "cc1c4e8ae987095736a80fa86ff1005e16e1b02257b3d2bd920fd9b8156ecd13",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities."
         }
       ],
@@ -8378,8 +8378,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "eb23759a29725c98b7b3481c62a9330b05613eb71e0602b908c0418104378857",
-          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "33c990d111d4ab8182dbf3786e307c4531aca7bf6bf67f7e8819788bf2fc616b",
+          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -8504,7 +8504,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/monitoring-runtime-state.js",
-          "digest": "6ef4886814fc320fc66ace8561eb91dbaa2b3cb4f5d180858db4e096a442bec1",
+          "digest": "f900705c32fb6499cee9b69d671ce2474f71524a4ce6c26320ec8089d55dbb26",
           "assertion": "Consumer selects the bound by scope and evicts oldest cursors after insertion."
         },
         {
@@ -8533,12 +8533,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
-          "digest": "e829dd80ba416cf6bf28760abe347134470367e1a090a5d83efa7703fe1a9bab",
+          "digest": "4032eff88e6171c8a18bd5fecef39b1dfd405d5e4045935fc747397e4e505a58",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -8669,7 +8669,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "ca72fbaa3b0a386b577c257052fcc816bcd27fb312d04b6d88a14923b0fd18e3",
+          "digest": "1ec7ae05690e1796a57f0810df40a02058645e276c2f04c793d80617de11aa06",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         }
       ],
@@ -8824,13 +8824,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "ca72fbaa3b0a386b577c257052fcc816bcd27fb312d04b6d88a14923b0fd18e3",
+          "digest": "1ec7ae05690e1796a57f0810df40a02058645e276c2f04c793d80617de11aa06",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
-          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
+          "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         }
       ],
       "candidateCount": 131,
@@ -8982,13 +8982,13 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "9300ab52a466bff77bc331f805e99ea697254d4eff7efe3e6482dbbbf1d36cf2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         }
       ],
       "candidateCount": 43,
@@ -9052,7 +9052,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "9300ab52a466bff77bc331f805e99ea697254d4eff7efe3e6482dbbbf1d36cf2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -10766,12 +10766,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
-          "digest": "f441abc77df5d04d81f0affbec17f4078ec7e4044cbc7b699028caa9e3e01f00",
+          "digest": "edb3aa8fcfdd78a3bd86e463fa4f9e0ed740f314e8a67bb5bc6440f889138779",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -10901,7 +10901,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/public/embed-bootstrap.js",
-          "digest": "3cb45f00d24d4087babead825962f1be1c4a8068e18fd8052acedfa46e6f1ee6",
+          "digest": "9300ab52a466bff77bc331f805e99ea697254d4eff7efe3e6482dbbbf1d36cf2",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,12 +11429,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "0ccd22a1cba43fc04fd0634eec3c1f710b54ced1f813c4ba52dec8fc80830369",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "6df44d68f94bbaf6ca4dba2a37a3529dce7ca976de8b45199b56c9c8bbe55ca1",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #458 preserves this reviewed authority while adding the Activity panel's Output, Nodes and Trace observation levels. Issue #460 preserves it while sharing native Design presentation and routing with the read-only embed. Issue #469 preserves this reviewed authority while stabilizing the Monitoring graph settle behavior and decoupling runtime node resizes from reheating. Issue #493 preserves this reviewed authority while keeping the graph maximize control in the documented pane keyboard route and while fencing maximize transitions and resizing the owned Monitoring renderer. Issue #494 preserves this reviewed authority while resetting Monitoring runtime paint in place instead of remounting the elastic renderer. Issue #527 preserves this reviewed authority while adding an isolated declarative frontend drawing-model SDK and Workbench package controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Issue #554 preserves this reviewed authority while making startup URL imports readiness-gated, replacement-safe for empty untouched drafts, and fail-closed before following redirects. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #568 source review preserves this existing authority while adding GitLab graph-authoring configuration and provider-neutral review presentation. Issue #567 preserves each reviewed UI cohort while adding AMQP destination modes and scoped conditional-field normalization alongside provider-neutral graph review labels; established generic field retention, catalog, presentation, timing, resource, and rendering semantics remain unchanged."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
-          "digest": "32aa18811fd68f0ae9a3482c800a33d30b4f51104882b7fecbe20f79cc438ef2",
+          "digest": "f13660588415ec600c4bb987754343c1a583840718e0001497451d586dae7f73",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -11498,13 +11498,13 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5bd540a48cd4a57d1b90b4006249285ac8aede7b788fcf849374aa0c4c2c0b7b",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2b43c321a85e988706a51d289722ddb9fc262116d8958f32065f4cd14b49e5df",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "3fcc3abffb8c2fe0949895f6535beda9f86bf688d6ac1de846ad5ea1fca8ca70",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "48a354baa2c27101855f1b0a175b66bd7c5df9a5be8d5c86513d9eb1208929dc",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 4,
@@ -11572,13 +11572,13 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5bd540a48cd4a57d1b90b4006249285ac8aede7b788fcf849374aa0c4c2c0b7b",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2b43c321a85e988706a51d289722ddb9fc262116d8958f32065f4cd14b49e5df",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "3fcc3abffb8c2fe0949895f6535beda9f86bf688d6ac1de846ad5ea1fca8ca70",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "48a354baa2c27101855f1b0a175b66bd7c5df9a5be8d5c86513d9eb1208929dc",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 1,
@@ -11643,13 +11643,13 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5bd540a48cd4a57d1b90b4006249285ac8aede7b788fcf849374aa0c4c2c0b7b",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls."
+          "digest": "2b43c321a85e988706a51d289722ddb9fc262116d8958f32065f4cd14b49e5df",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "3fcc3abffb8c2fe0949895f6535beda9f86bf688d6ac1de846ad5ea1fca8ca70",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged."
+          "digest": "48a354baa2c27101855f1b0a175b66bd7c5df9a5be8d5c86513d9eb1208929dc",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 1,

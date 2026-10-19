@@ -1,9 +1,10 @@
+import { uiText } from './ui-text.js';
 // The catalog is server-driven, but its interaction contract is entirely local: every descriptor
 // remains one native button in response order. Keeping this small view separate from app.js makes
 // that contract testable without booting the graph renderer or duplicating production markup.
 
 function catalogIdentity(type) {
-  const displayName = String(type.displayName || type.behavior || 'Unnamed node');
+  const displayName = String(type.displayName || type.behavior || uiText('catalog.node.unnamed'));
   const category = String(type.category || '');
   return { displayName, category };
 }
@@ -14,8 +15,8 @@ export function renderNodeCatalogItems(container, types, { iconFor, onActivate, 
   container.classList.add('node-catalog--items');
 
   const origins = [
-    { id: 'CORE', label: 'Core nodes' },
-    { id: 'BUNDLE', label: 'Installed bundles' },
+    { id: 'CORE', labelKey: 'catalog.origin.core' },
+    { id: 'BUNDLE', labelKey: 'catalog.origin.bundle' },
   ];
   for (const origin of origins) {
     const matching = types.filter(type => String(type.origin || 'BUNDLE').toUpperCase() === origin.id);
@@ -25,12 +26,12 @@ export function renderNodeCatalogItems(container, types, { iconFor, onActivate, 
     toolbox.dataset.catalogOrigin = origin.id;
     const heading = document.createElement('h3');
     heading.className = 'catalog-toolbox-title';
-    heading.textContent = origin.label;
+    heading.textContent = uiText(origin.labelKey);
     toolbox.append(heading);
 
     const categories = new Map();
     for (const type of matching) {
-      const category = String(type.category || 'Other');
+      const category = String(type.category || uiText('catalog.category.other'));
       if (!categories.has(category)) categories.set(category, []);
       categories.get(category).push(type);
     }
@@ -72,9 +73,11 @@ function catalogButton(document, type, iconFor, onActivate, onDragStart, selecte
     button.draggable = true;
     button.setAttribute('aria-pressed', String(button.dataset.catalogAdd === selectedBehavior));
     button.classList.toggle('selected', button.dataset.catalogAdd === selectedBehavior);
-    button.setAttribute('aria-label', `Add ${displayName} node${category ? `, category ${category}` : ''}`);
+    button.setAttribute('aria-label', uiText("workspace.node.catalog.view.add.node", { displayName: displayName, detail: category ? uiText('workspace.catalog.categoryDetail', { category }) : '' }));
 
-    button.dataset.tooltip = category ? `Add ${displayName} · ${category}` : `Add ${displayName}`;
+    button.dataset.tooltip = uiText(category
+      ? "workspace.node.catalog.view.add.node.category.tooltip"
+      : "workspace.node.catalog.view.add.node.tooltip", { displayName, category });
 
     const icon = document.createElement('span');
     icon.className = 'catalog-item-icon';

@@ -1,5 +1,7 @@
-import { assertStableEdgeId, stableEdgeIdViolation } from './stable-edge-id.js';
+import { productError } from './product-error.js';
+import { assertStableEdgeId, stableEdgeIdFinding } from './stable-edge-id.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups } from './visual-groups.js';
+import { uiText } from './ui-text.js';
 
 const GRAPHML_NS = 'http://graphml.graphdrawing.org/xmlns';
 
@@ -16,14 +18,14 @@ export const NODE_KINDS = ['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR'];
 // lives here, next to NODE_KINDS, because `graph-document.js` has no imports of its own and both the
 // parser and the app can therefore read it without a cycle.
 export const NODE_VISUAL_TYPES = Object.freeze([
-  { type: 'start', label: 'Start' }, { type: 'end', label: 'End' },
-  { type: 'terminal', label: 'Terminal' }, { type: 'error', label: 'Error' },
-  { type: 'consumer', label: 'Consumer' }, { type: 'handler', label: 'Handler' },
-  { type: 'agent', label: 'Agent' }, { type: 'flow', label: 'Flow' },
-  { type: 'actor', label: 'Actor' }, { type: 'system', label: 'System' },
-  { type: 'trace', label: 'Trace' }, { type: 'human-task', label: 'Human task' },
-  { type: 'workspace', label: 'Workspace' },
-].map(Object.freeze));
+  'start', 'end', 'terminal', 'error', 'consumer', 'handler', 'agent', 'flow', 'actor',
+  'system', 'trace', 'human-task', 'workspace',
+].map(type => Object.freeze({
+  type,
+  labelKey: `nodeVisualType.${type}`,
+  // `type` is the persisted machine value. The key is presentation metadata and is resolved only
+  // at the UI boundary, so changing language can never rewrite a graph document.
+})));
 
 const NODE_VISUAL_TYPE_NAMES = new Set(NODE_VISUAL_TYPES.map(entry => entry.type));
 
@@ -106,23 +108,26 @@ export const GRAPH_DESIGN_ARRANGEMENT_PROPERTY = 'ravenroot.designArrangement';
 const JOIN_EACH_POLICY = 'each';
 const JOIN_PROPERTY_NAMES = [JOIN_POLICY_PROPERTY, JOIN_QUORUM_PROPERTY, JOIN_TIMEOUT_PROPERTY];
 
+const localizedField = (name, labelKey, type) => Object.freeze(Object.defineProperty({ name, type },
+  'label', { enumerable: true, get: () => uiText(labelKey) }));
+
 export const KNOWN_NODE_FIELDS = [
-  { name: 'name', label: 'Name', type: 'string' },
-  { name: 'kind', label: 'Ravenroot kind', type: 'string' },
-  { name: 'behavior', label: 'Behavior', type: 'string' },
-  { name: 'classname', label: 'Class name', type: 'string' },
-  { name: 'classification', label: 'Visual classification', type: 'string' },
-  { name: 'description', label: 'Description', type: 'string' },
+  localizedField('name', 'graphField.name', 'string'),
+  localizedField('kind', 'graphField.kind', 'string'),
+  localizedField('behavior', 'graphField.behavior', 'string'),
+  localizedField('classname', 'graphField.classname', 'string'),
+  localizedField('classification', 'graphField.classification', 'string'),
+  localizedField('description', 'graphField.description', 'string'),
 ];
 
 export const KNOWN_EDGE_FIELDS = [
-  { name: 'outcome', label: 'Outcome', type: 'string' },
-  { name: 'command', label: 'Command', type: 'string' },
-  { name: 'name', label: 'Name', type: 'string' },
-  { name: 'status', label: 'Status', type: 'int' },
-  { name: 'parallel', label: 'Parallel', type: 'boolean' },
-  { name: 'trafficWeight', label: 'Traffic weight', type: 'double' },
-  { name: 'description', label: 'Description', type: 'string' },
+  localizedField('outcome', 'graphField.outcome', 'string'),
+  localizedField('command', 'graphField.command', 'string'),
+  localizedField('name', 'graphField.name', 'string'),
+  localizedField('status', 'graphField.status', 'int'),
+  localizedField('parallel', 'graphField.parallel', 'boolean'),
+  localizedField('trafficWeight', 'graphField.trafficWeight', 'double'),
+  localizedField('description', 'graphField.description', 'string'),
 ];
 
 const NODE_KNOWN_NAMES = new Set([
@@ -334,6 +339,7 @@ export function createWorkflowDocument() {
   // is one of the outcomes the renderer already colors (red, dashed); `error` is not, and this reuses
   // that instead of introducing new render styling.
   const edgeToError = createEdge('edge-dosomething-error', 'dosomething', 'error', 'failed');
+  // i18n-audit-exempt: authored-content - This persisted node-id map's error member is the authored ERROR node, not an error presentation record.
   const nodeMap = { start, dosomething: doSomething, end, error };
   const graph = createEmptyWorkflowDocument();
   graph.nodes.push(start, doSomething, error, end);
@@ -400,6 +406,7 @@ export function outcomeToEdgeType(outcome) {
 
 export function createEdge(id, source, target, outcome = 'continue') {
   assertStableEdgeId(id);
+  // i18n-audit-exempt: authored-content - the default is a persisted edge outcome token.
   const normalizedOutcome = outcome || 'continue';
   return {
     id,
@@ -407,6 +414,7 @@ export function createEdge(id, source, target, outcome = 'continue') {
     target,
     outcome: normalizedOutcome,
     command: '',
+    // i18n-audit-exempt: protocol-token - Persisted edge labels mirror the authored outcome token; translation must not change graph identity.
     label: normalizedOutcome,
     edgeType: outcomeToEdgeType(normalizedOutcome),
     color: '#8b949e',
@@ -540,11 +548,11 @@ export function hasDeclaredJoinSemantics(graph) {
 // because a boolean hides machinery that is already there and buys a
 // second migration the day a third policy arrives.
 export const JOIN_KIND_OPTIONS = [
-  { value: 'none', label: 'No join — each arrival runs independently' },
-  { value: 'all', label: 'Wait for all branches' },
-  { value: 'first', label: 'First arrival wins' },
-  { value: 'quorum', label: 'K of N branches' },
-];
+  ['none', 'joinKind.none'], ['all', 'joinKind.all'], ['first', 'joinKind.first'],
+  ['quorum', 'joinKind.quorum'],
+].map(([value, labelKey]) => Object.freeze(Object.defineProperty({ value }, 'label', {
+  enumerable: true, get: () => uiText(labelKey),
+})));
 
 // The Kind-of-arrival `<select>`'s fifth, non-vocabulary option -- selected
 // whenever `declaredJoinKind` reports `recognized: false`, and never written by this control itself
@@ -688,19 +696,20 @@ export function planJoinSemanticsMigration(graph) {
   return { alreadyDeclared: false, changes };
 }
 
-export function validateWorkflow(graph) {
+export function validateWorkflowFindings(graph) {
   const violations = [];
+  const finding = (key, params = {}) => ({ key, params });
   if (!graph || graph.format === 'graphify') {
-    return ['Graphify JSON is a knowledge graph view, not an executable Ravenroot workflow'];
+    return [finding('workspace.workflow.validation.graphify')];
   }
   const ids = new Set();
   for (const node of graph.nodes || []) {
-    if (!node.id || !String(node.id).trim()) violations.push('Every node needs an ID');
-    if (ids.has(node.id)) violations.push(`Duplicate node ID: ${node.id}`);
+    if (!node.id || !String(node.id).trim()) violations.push(finding('workspace.workflow.validation.nodeIdRequired'));
+    if (ids.has(node.id)) violations.push(finding('workspace.workflow.validation.duplicateNodeId', { id: node.id }));
     ids.add(node.id);
-    if (!NODE_KINDS.includes(node.kind)) violations.push(`Node ${node.id} has an invalid kind`);
+    if (!NODE_KINDS.includes(node.kind)) violations.push(finding('workspace.workflow.validation.invalidNodeKind', { id: node.id }));
     if (node.kind === 'BEHAVIOR' && !String(node.behavior || '').trim()) {
-      violations.push(`Behavior node ${node.id} needs a behavior name`);
+      violations.push(finding('workspace.workflow.validation.behaviorRequired', { id: node.id }));
     }
   }
   const starts = (graph.nodes || []).filter(node => node.kind === 'START');
@@ -710,24 +719,22 @@ export function validateWorkflow(graph) {
   // node kind remains available, and the default document from "New" still includes the recommended
   // error terminal.
   const errors = (graph.nodes || []).filter(node => node.kind === 'ERROR');
-  if (starts.length !== 1) violations.push('The graph must contain exactly one START node');
-  if (ends.length !== 1) violations.push('The graph must contain exactly one END node');
+  if (starts.length !== 1) violations.push(finding('workspace.workflow.validation.oneStart'));
+  if (ends.length !== 1) violations.push(finding('workspace.workflow.validation.oneEnd'));
   // The comparison is a CEILING, not an equality, and the shape of it is load-bearing:
   // MinimalStructureParityTest reads the operator as written and refuses to absorb a change of form,
   // so `>` here and MIN_ERROR_NODES=0 in GraphDefinition are two halves of one statement. A second
   // ERROR node is still refused, on both sides, for the payload-writer reason recorded on the
   // constant above. Removing the minimum does not change the maximum.
   if (errors.length > MAX_ERROR_NODE_COUNT) {
-    violations.push(MAX_ERROR_NODE_COUNT === 1
-      ? 'The graph must contain at most one ERROR node'
-      : `The graph must contain at most ${MAX_ERROR_NODE_COUNT} ERROR nodes`);
+    violations.push(finding('workspace.workflow.validation.maximumErrors', { count: MAX_ERROR_NODE_COUNT }));
   }
   for (const edge of graph.edges || []) {
-    const edgeIdViolation = stableEdgeIdViolation(edge.id);
-    if (edgeIdViolation) violations.push(`Edge id ${edgeIdViolation}`);
-    if (!ids.has(edge.source)) violations.push(`Edge ${edge.id} has an unknown source`);
-    if (!ids.has(edge.target)) violations.push(`Edge ${edge.id} has an unknown target`);
-    if (!String(edge.outcome || '').trim()) violations.push(`Edge ${edge.id} needs an outcome`);
+    const edgeIdFinding = stableEdgeIdFinding(edge.id);
+    if (edgeIdFinding) violations.push(finding('workspace.workflow.validation.edgeId', { edgeIdFinding }));
+    if (!ids.has(edge.source)) violations.push(finding('workspace.workflow.validation.unknownSource', { id: edge.id }));
+    if (!ids.has(edge.target)) violations.push(finding('workspace.workflow.validation.unknownTarget', { id: edge.id }));
+    if (!String(edge.outcome || '').trim()) violations.push(finding('workspace.workflow.validation.outcomeRequired', { id: edge.id }));
     // Mirrors GraphDefinition.validate(): an edge is a failure route OR an outcome edge,
     // never both, and the only signal that tells the two apart is the outcome still being the
     // default. The edge inspector is built so that it cannot produce this combination -- it parks
@@ -737,12 +744,54 @@ export function validateWorkflow(graph) {
     // instead of in the editor, which is the error relocation exists to close.
     if (edgeDeclaresFailureRoute(edge)
         && String(edge.outcome || DEFAULT_EDGE_OUTCOME).trim() !== DEFAULT_EDGE_OUTCOME) {
-      violations.push(`Edge ${edge.id} declares ${FAILURE_ROUTE_PROPERTY}=${FAILURE_ROUTE_TRUE}`
-        + ` together with the explicit outcome '${edge.outcome}';`
-        + ' an edge is a failure route or an outcome edge, never both');
+      violations.push(finding('workspace.workflow.validation.failureRouteOutcome', {
+        id: edge.id, property: FAILURE_ROUTE_PROPERTY, value: FAILURE_ROUTE_TRUE, outcome: edge.outcome,
+      }));
     }
   }
   return violations;
+}
+
+export function workflowFindingText(finding, text = uiText) {
+  const params = { ...(finding?.params || {}) };
+  if (params.edgeIdFinding) {
+    const edgeFinding = params.edgeIdFinding;
+    params.reason = text(`workspace.edge.validation.stableId.${edgeFinding.kind}`, edgeFinding.params);
+    delete params.edgeIdFinding;
+  }
+  return text(finding.key, params);
+}
+
+export function validateWorkflow(graph) {
+  return validateWorkflowFindings(graph).map(finding => {
+    if (finding.params?.edgeIdFinding) {
+      const edgeFinding = finding.params.edgeIdFinding;
+      const reason = edgeFinding.kind === 'nonblank' ? 'must be a nonblank string'
+        : edgeFinding.kind === 'unicode' ? 'must be well-formed Unicode'
+          : `uses ${edgeFinding.params.bytes} UTF-8 bytes; maximum is ${edgeFinding.params.maximum}`;
+      return `Edge id ${reason}`;
+    }
+    return workflowFindingText(finding, (key, params = {}) => {
+      const messages = {
+        'workspace.workflow.validation.graphify': 'Graphify JSON is a knowledge graph view, not an executable Ravenroot workflow',
+        'workspace.workflow.validation.nodeIdRequired': 'Every node needs an ID',
+        'workspace.workflow.validation.duplicateNodeId': `Duplicate node ID: ${params.id}`,
+        'workspace.workflow.validation.invalidNodeKind': `Node ${params.id} has an invalid kind`,
+        'workspace.workflow.validation.behaviorRequired': `Behavior node ${params.id} needs a behavior name`,
+        'workspace.workflow.validation.oneStart': 'The graph must contain exactly one START node',
+        'workspace.workflow.validation.oneEnd': 'The graph must contain exactly one END node',
+        'workspace.workflow.validation.maximumErrors': params.count === 1
+          ? 'The graph must contain at most one ERROR node'
+          : `The graph must contain at most ${params.count} ERROR nodes`,
+        'workspace.workflow.validation.unknownSource': `Edge ${params.id} has an unknown source`,
+        'workspace.workflow.validation.unknownTarget': `Edge ${params.id} has an unknown target`,
+        'workspace.workflow.validation.outcomeRequired': `Edge ${params.id} needs an outcome`,
+        'workspace.workflow.validation.failureRouteOutcome': `Edge ${params.id} declares ${params.property}=${params.value}`
+          + ` together with the explicit outcome '${params.outcome}'; an edge is a failure route or an outcome edge, never both`,
+      };
+      return messages[key];
+    });
+  });
 }
 
 export function serializeGraphML(graph) {
@@ -751,16 +800,16 @@ export function serializeGraphML(graph) {
     ? graph.sourceXml
     : `<?xml version="1.0" encoding="UTF-8"?><graphml xmlns="${GRAPHML_NS}"><graph id="ravenroot-workflow" edgedefault="directed"/></graphml>`;
   const doc = parser.parseFromString(base, 'application/xml');
-  if (doc.querySelector('parsererror')) throw new Error('Cannot serialize an invalid GraphML source document');
+  if (doc.querySelector('parsererror')) throw productError("workspace.error.graph.document.cannot.serialize.an.invalid.graphml.source.document", new Error('Cannot serialize an invalid GraphML source document'));
   const root = doc.documentElement;
   if (!root || root.localName !== 'graphml' || root.namespaceURI !== GRAPHML_NS) {
-    throw new Error(`GraphML root must be {${GRAPHML_NS}}graphml`);
+    throw productError("workspace.error.graph.document.graphml.root.must.be.graphml", new Error(`GraphML root must be {${GRAPHML_NS}}graphml`), { value1: GRAPHML_NS });
   }
   const namespace = root.namespaceURI;
   const graphElements = Array.from(root.children)
     .filter(element => element.localName === 'graph' && element.namespaceURI === GRAPHML_NS);
   if (graphElements.length !== 1) {
-    throw new Error(`GraphML must contain exactly one top-level graph; found ${graphElements.length}`);
+    throw productError("workspace.error.graph.document.graphml.must.contain.exactly.one.top.level.graph.found", new Error(`GraphML must contain exactly one top-level graph; found ${graphElements.length}`), { value1: graphElements.length });
   }
   const graphElement = graphElements[0];
 
@@ -921,7 +970,7 @@ export function serializeGraphML(graph) {
       if (defaultElement && defaultElement.textContent.trim() === String(value).trim()) return;
     }
     if (data && data.children.length > 0) {
-      throw new Error(`Cannot overwrite complex GraphML data for key '${keyId}'`);
+      throw productError("workspace.error.graph.document.cannot.overwrite.complex.graphml.data.for.key", new Error(`Cannot overwrite complex GraphML data for key '${keyId}'`), { value1: keyId });
     }
     if (data && data.textContent.trim() === String(value).trim()) return;
     if (!data) {
@@ -942,7 +991,7 @@ export function serializeGraphML(graph) {
         && child.getAttribute('key') === definition.id)
       .forEach(child => {
         if (child.children.length > 0) {
-          throw new Error(`Cannot remove complex GraphML data for key '${definition.id}'`);
+          throw productError("workspace.error.graph.document.cannot.remove.complex.graphml.data.for.key", new Error(`Cannot remove complex GraphML data for key '${definition.id}'`), { value1: definition.id });
         }
         child.remove();
       });
@@ -1094,7 +1143,7 @@ export function serializeGraphML(graph) {
 function normalizeType(type) {
   const normalized = type || 'string';
   if (!['boolean', 'int', 'long', 'float', 'double', 'string'].includes(normalized)) {
-    throw new Error(`Unsupported GraphML scalar type '${normalized}'`);
+    throw productError("workspace.error.graph.document.unsupported.graphml.scalar.type", new Error(`Unsupported GraphML scalar type '${normalized}'`), { value1: normalized });
   }
   return normalized;
 }

@@ -1,10 +1,11 @@
+import { productError } from './product-error.js';
 import { viewerNodeType } from './viewer-presentation.js';
 
 const KINDS = new Set(['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR']);
 
 function required(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new TypeError(`Invalid deployment viewer projection: ${field}`);
+    throw productError("workspace.error.deployment.viewer.document.invalid.deployment.viewer.projection", new TypeError(`Invalid deployment viewer projection: ${field}`), { value1: field });
   }
   return value;
 }
@@ -15,18 +16,18 @@ function required(value, field) {
  */
 export function deploymentProjectionDocument(envelope) {
   if (envelope?.viewerSourceVersion !== '1' || envelope?.source?.kind !== 'deployment') {
-    throw new TypeError('Invalid deployment viewer source.');
+    throw productError("workspace.error.deployment.viewer.document.invalid.deployment.viewer.source", new TypeError('Invalid deployment viewer source.'));
   }
   const projection = envelope.projection;
   if (projection?.viewerContractVersion !== '1.0'
       || !Array.isArray(projection.nodes) || !Array.isArray(projection.edges)) {
-    throw new TypeError('Invalid deployment viewer projection.');
+    throw productError("workspace.error.deployment.viewer.document.invalid.deployment.viewer.projection.2", new TypeError('Invalid deployment viewer projection.'));
   }
   const nodeIds = new Set();
   const nodes = projection.nodes.map(node => {
     const id = required(node?.id, 'node.id');
     const kind = required(node?.kind, 'node.kind');
-    if (!KINDS.has(kind) || nodeIds.has(id)) throw new TypeError('Invalid deployment viewer node.');
+    if (!KINDS.has(kind) || nodeIds.has(id)) throw productError("workspace.error.deployment.viewer.document.invalid.deployment.viewer.node", new TypeError('Invalid deployment viewer node.'));
     nodeIds.add(id);
     const layout = node.layout || {};
     return {
@@ -46,7 +47,7 @@ export function deploymentProjectionDocument(envelope) {
     const source = required(edge?.source, 'edge.source');
     const target = required(edge?.target, 'edge.target');
     if (!nodeIds.has(source) || !nodeIds.has(target)) {
-      throw new TypeError('Invalid deployment viewer topology.');
+      throw productError("workspace.error.deployment.viewer.document.invalid.deployment.viewer.topology", new TypeError('Invalid deployment viewer topology.'));
     }
     const id = typeof edge.id === 'string' && edge.id ? edge.id : `viewer-edge-${index}`;
     const label = typeof edge.label === 'string' ? edge.label : '';

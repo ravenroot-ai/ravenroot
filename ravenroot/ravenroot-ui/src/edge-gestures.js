@@ -1,3 +1,5 @@
+import { uiMessage, renderUiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
+import { productError } from './product-error.js';
 // Edge authoring gestures and their validation (UI-02).
 //
 // One state machine serves all three input routes — pointer drag, keyboard, and the inspector form
@@ -10,7 +12,8 @@
 // edges undo exactly like nodes do.
 
 import { NODE_KINDS } from './graph-document.js';
-import { stableEdgeIdViolation } from './stable-edge-id.js';
+import { stableEdgeIdFinding } from './stable-edge-id.js';
+import { uiText } from './ui-text.js';
 
 export const EDGE_ENDPOINTS = ['source', 'target'];
 
@@ -32,10 +35,12 @@ export const EDGE_POINTER_HOLD_MS = 300;
 // invalid StableEdgeId is refused.
 export function validateEdgeId(graph, candidate, { existingId = null } = {}) {
   const id = candidate;
-  const violation = stableEdgeIdViolation(id);
-  if (violation) return refuse(`Edge ID ${violation}`);
+  const finding = stableEdgeIdFinding(id);
+  if (finding) return refuse(uiMessage('workspace.edge.validation.id', {
+    reason: uiMessage(`workspace.edge.validation.stableId.${finding.kind}`, finding.params),
+  }));
   const clash = (graph?.edges || []).some(edge => edge.id === id && edge.id !== existingId);
-  if (clash) return refuse(`Edge ID '${id}' already exists`);
+  if (clash) return refuse(uiMessage('workspace.edge.validation.idExists', { id }));
   return { ok: true, reason: '' };
 }
 
@@ -49,14 +54,14 @@ export function validateEdgeId(graph, candidate, { existingId = null } = {}) {
 export function validateEdgeConnection(graph, { source, target, edgeId = null } = {}) {
   const sourceNode = lookupNode(graph, source);
   const targetNode = lookupNode(graph, target);
-  if (!source) return refuse('Choose a source node');
-  if (!target) return refuse('Choose a target node');
-  if (!sourceNode) return refuse(`Unknown source node '${source}'`);
-  if (!targetNode) return refuse(`Unknown target node '${target}'`);
-  if (targetNode.kind === 'START') return refuse(`${nodeLabel(targetNode)} is the START node and takes no incoming edge`);
-  if (sourceNode.kind === 'END') return refuse(`${nodeLabel(sourceNode)} is the END node and takes no outgoing edge`);
+  if (!source) return refuse(uiMessage('workspace.edge.validation.chooseSource'));
+  if (!target) return refuse(uiMessage('workspace.edge.validation.chooseTarget'));
+  if (!sourceNode) return refuse(uiMessage('workspace.edge.validation.unknownSource', { source }));
+  if (!targetNode) return refuse(uiMessage('workspace.edge.validation.unknownTarget', { target }));
+  if (targetNode.kind === 'START') return refuse(uiMessage('workspace.edge.validation.startIncoming', { node: nodeLabel(targetNode) }));
+  if (sourceNode.kind === 'END') return refuse(uiMessage('workspace.edge.validation.endOutgoing', { node: nodeLabel(sourceNode) }));
   if (edgeId !== null && !(graph?.edges || []).some(edge => edge.id === edgeId)) {
-    return refuse(`Unknown edge '${edgeId}'`);
+    return refuse(uiMessage('workspace.edge.validation.unknownEdge', { id: edgeId }));
   }
   return { ok: true, reason: '' };
 }
@@ -76,8 +81,12 @@ function nodeLabel(node) {
   return node?.name ? `${node.name} (${node.id})` : `'${node?.id}'`;
 }
 
-function refuse(reason) {
-  return { ok: false, reason };
+function edgeRole(role) {
+  return uiText(role === 'source' ? 'workspace.edge.role.source' : 'workspace.edge.role.target');
+}
+
+function refuse(message) {
+  return withUiMessage({ ok: false, reason: renderUiMessage(message, uiText) }, message);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -105,12 +114,12 @@ export function createEdgeGestureSession({
   layoutMode,
   fontSize,
 } = {}) {
-  if (documentId == null) throw new TypeError('An edge gesture session requires a documentId.');
+  if (documentId == null) throw productError("workspace.error.edge.gestures.an.edge.gesture.session.requires.a.documentid", new TypeError('An edge gesture session requires a documentId.'));
   if (!owner || !renderer || !cy || !graph || !history || !ghost) {
-    throw new TypeError('An edge gesture session requires its owner, renderer, graph, history, Cytoscape instance, and ghost.');
+    throw productError("workspace.error.edge.gestures.an.edge.gesture.session.requires.its.owner.renderer.graph.history", new TypeError('An edge gesture session requires its owner, renderer, graph, history, Cytoscape instance, and ghost.'));
   }
   if (!gesture || gesture.mode === 'idle') {
-    throw new TypeError('An edge gesture session requires a non-idle gesture.');
+    throw productError("workspace.error.edge.gestures.an.edge.gesture.session.requires.a.non.idle.gesture", new TypeError('An edge gesture session requires a non-idle gesture.'));
   }
   return {
     documentId: String(documentId),
@@ -236,20 +245,25 @@ export function beginReconnectGesture(graph, edgeId, endpoint) {
 // What the gesture would produce if it were completed on `candidateId`, and why it may not be.
 // The renderer asks this on every hover and every cursor move, so it must stay side-effect free.
 export function edgeGestureCandidate(state, graph, candidateId) {
-  if (!state || state.mode === 'idle') return { ok: false, reason: 'No edge gesture is in progress' };
+  if (!state || state.mode === 'idle') return refuse(uiMessage('workspace.edge.gesture.none'));
   if (state.mode === 'connect') {
     const proposal = { source: state.sourceId, target: candidateId };
-    return { ...validateEdgeConnection(graph, proposal), ...proposal };
+    const result = validateEdgeConnection(graph, proposal);
+    return withUiMessage({ ...result, ...proposal }, uiMessageOf(result));
   }
   const edge = (graph?.edges || []).find(candidate => candidate.id === state.edgeId);
-  if (!edge) return { ok: false, reason: `Unknown edge '${state.edgeId}'` };
+  if (!edge) return refuse(uiMessage('workspace.edge.validation.unknownEdge', { id: state.edgeId }));
   const proposal = state.endpoint === 'source'
     ? { source: candidateId, target: edge.target }
     : { source: edge.source, target: candidateId };
   if (candidateId === edge[state.endpoint]) {
-    return { ...proposal, ok: false, reason: `Already the ${state.endpoint} of ${edge.id}` };
+    const result = refuse(uiMessage('workspace.edge.gesture.alreadyEndpoint', {
+      endpoint: uiMessage(state.endpoint === 'source' ? 'workspace.edge.role.source' : 'workspace.edge.role.target'), id: edge.id,
+    }));
+    return withUiMessage({ ...proposal, ...result }, uiMessageOf(result));
   }
-  return { ...validateEdgeConnection(graph, { ...proposal, edgeId: state.edgeId }), ...proposal };
+  const result = validateEdgeConnection(graph, { ...proposal, edgeId: state.edgeId });
+  return withUiMessage({ ...result, ...proposal }, uiMessageOf(result));
 }
 
 // The endpoint a pointer grabbed, decided by which end of the edge it started nearer to. Grabbing
@@ -276,30 +290,37 @@ export function describeEdgeGesture(state, graph, candidateId = null) {
   if (!state || state.mode === 'idle') return '';
   if (state.mode === 'connect') {
     const source = lookupNode(graph, state.sourceId);
-    const opening = `Connecting from ${nodeLabel(source)}.`;
+    const opening = uiText('workspace.edge.gesture.connectingFrom', { node: nodeLabel(source) });
     return `${opening} ${describeCandidate(state, graph, candidateId, 'target')}`;
   }
   const edge = (graph?.edges || []).find(candidate => candidate.id === state.edgeId);
   if (!edge) return '';
   const pinnedEnd = state.endpoint === 'source' ? 'target' : 'source';
   const pinned = lookupNode(graph, edge[pinnedEnd]);
-  const opening = `Reconnecting the ${state.endpoint} of edge ${edge.id}, `
-    + `${pinnedEnd} stays ${nodeLabel(pinned)}.`;
+  const opening = uiText('workspace.edge.gesture.reconnecting', {
+    endpoint: edgeRole(state.endpoint), id: edge.id, pinnedEnd: edgeRole(pinnedEnd), node: nodeLabel(pinned),
+  });
   return `${opening} ${describeCandidate(state, graph, candidateId, state.endpoint)}`;
 }
 
 function describeCandidate(state, graph, candidateId, role) {
-  if (!candidateId) return `Choose a ${role} node, then press Enter. Escape cancels.`;
+  if (!candidateId) return uiText('workspace.edge.gesture.chooseCandidate', { role: edgeRole(role) });
   const candidate = edgeGestureCandidate(state, graph, candidateId);
   const node = lookupNode(graph, candidateId);
-  if (!candidate.ok) return `${nodeLabel(node)} cannot be the ${role}: ${candidate.reason}.`;
-  return `Press Enter to make ${nodeLabel(node)} the ${role}.`;
+  if (!candidate.ok) return uiText('workspace.edge.gesture.cannotCandidate', { node: nodeLabel(node), role: edgeRole(role), reason: candidate.reason });
+  return uiText('workspace.edge.gesture.acceptCandidate', { node: nodeLabel(node), role: edgeRole(role) });
 }
 
 export function describeEdge(edge, graph) {
+  return renderUiMessage(describeEdgeMessage(edge, graph), uiText);
+}
+
+export function describeEdgeMessage(edge, graph) {
   if (!edge) return '';
   const source = lookupNode(graph, edge.source);
   const target = lookupNode(graph, edge.target);
   const outcome = edge.outcome || 'continue';
-  return `Edge ${edge.id}, from ${nodeLabel(source)} to ${nodeLabel(target)}, outcome ${outcome}.`;
+  return uiMessage('workspace.edge.description', {
+    id: edge.id, source: nodeLabel(source), target: nodeLabel(target), outcome,
+  });
 }

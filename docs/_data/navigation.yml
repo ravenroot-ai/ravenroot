@@ -89,7 +89,7 @@
       url: /integrator-guide/application-http.html
     - title: Activity archive client
       url: /integrator-guide/activity-archive-client.html
-    - title: Embed the read-only viewer quickstart
+    - title: Embed the Workbench or read-only viewer
       url: /integrator-guide/embed-viewer-quickstart.html
     - title: Embedded-viewer protocol
       url: /integrator-guide/embed-protocol.html
@@ -108,6 +108,8 @@
   items:
     - title: Architecture overview
       url: /architecture/
+    - title: UI internationalization
+      url: /architecture/ui-internationalization.html
     - title: Operational configuration audit
       url: /architecture/operational-configuration-audit.html
     - title: Product boundaries and authority
@@ -287,6 +289,8 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.8.0-alpha.1 release notes
+      url: /releases/v0.8.0-alpha.1.html
     - title: Ravenroot 0.7.0-alpha.1 release notes
       url: /releases/v0.7.0-alpha.1.html
     - title: Ravenroot 0.6.1-alpha.1 release notes

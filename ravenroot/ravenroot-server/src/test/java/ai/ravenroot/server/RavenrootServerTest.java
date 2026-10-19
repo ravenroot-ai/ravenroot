@@ -325,6 +325,7 @@ class RavenrootServerTest {
         Files.writeString(uiDirectory.resolve("index.html"), "<html><body>Ravenroot UI</body></html>");
         Files.createDirectory(uiDirectory.resolve("assets"));
         Files.writeString(uiDirectory.resolve("assets/app.js"), "export const ready = true;");
+        Files.writeString(uiDirectory.resolve("embed-localization.js"), "export const localization = true;");
         Files.writeString(uiDirectory.resolve("embed-viewer.js"), "export const viewer = true;");
         Files.writeString(uiDirectory.resolve("embed-viewer.css"), ".embed-viewer{}");
         Files.writeString(uiDirectory.resolve("frontend-plugin-sandbox.html"), "<!doctype html><title>Plugin sandbox</title>");
@@ -355,6 +356,7 @@ class RavenrootServerTest {
             assertTrue(pluginCsp.contains("connect-src 'none'"), pluginCsp);
             assertTrue(pluginCsp.contains("frame-ancestors 'self'"), pluginCsp);
             assertTrue(pluginCsp.contains("worker-src 'none'"), pluginCsp);
+            assertTrue(pluginCsp.contains("sandbox allow-scripts"), pluginCsp);
             assertEquals(java.util.List.of(), pluginSandbox.headers().allValues("X-Frame-Options"));
 
             var asset = client.send(HttpRequest.newBuilder(
@@ -363,7 +365,8 @@ class RavenrootServerTest {
             assertEquals(200, asset.statusCode());
             assertTrue(asset.headers().firstValue("Cache-Control").orElse("").contains("immutable"));
 
-            for (String stableEmbedAsset : java.util.List.of("embed-viewer.js", "embed-viewer.css")) {
+            for (String stableEmbedAsset : java.util.List.of(
+                    "embed-localization.js", "embed-viewer.js", "embed-viewer.css")) {
                 var embedAsset = client.send(HttpRequest.newBuilder(
                         URI.create("http://localhost:" + server.port() + "/" + stableEmbedAsset)).GET().build(),
                         HttpResponse.BodyHandlers.ofString());
@@ -384,6 +387,46 @@ class RavenrootServerTest {
     }
 
     @Test
+    void servesTheWorkbenchWithOptInAncestorsWithoutRelaxingThePluginSandbox() throws Exception {
+        Files.writeString(uiDirectory.resolve("index.html"), "<html><body>Framed Workbench</body></html>");
+        Files.writeString(uiDirectory.resolve("frontend-plugin-sandbox.html"),
+                "<!doctype html><title>Plugin sandbox</title>");
+        var httpSecurity = HttpSecurityConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_UI_FRAME_ANCESTORS",
+                "self,https://portal.example,http://localhost:4173"), 8080);
+
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-framed-ui-test");
+             var server = new RavenrootServer(
+                     new DefaultRavenrootApplication(engine, new ExecutionMonitor()),
+                     new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), uiDirectory, false,
+                     new DisabledLoopbackAuthenticator(), httpSecurity)) {
+            server.start();
+            var client = HttpClient.newHttpClient();
+
+            for (String path : java.util.List.of("/", "/v1/not-a-route")) {
+                var response = client.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + server.port() + path)).GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                String csp = response.headers().firstValue("Content-Security-Policy").orElseThrow();
+                assertTrue(csp.contains(
+                        "frame-ancestors 'self' http://localhost:4173 https://portal.example"), csp);
+                assertEquals(java.util.List.of(), response.headers().allValues("X-Frame-Options"));
+                assertEquals("nosniff", response.headers().firstValue("X-Content-Type-Options").orElseThrow());
+            }
+
+            var sandbox = client.send(HttpRequest.newBuilder(URI.create(
+                            "http://localhost:" + server.port() + "/frontend-plugin-sandbox.html"))
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+            String sandboxCsp = sandbox.headers().firstValue("Content-Security-Policy").orElseThrow();
+            assertTrue(sandboxCsp.contains(
+                    "frame-ancestors 'self' http://localhost:4173 https://portal.example"), sandboxCsp);
+            assertTrue(sandboxCsp.contains("connect-src 'none'"), sandboxCsp);
+            assertTrue(sandboxCsp.contains("sandbox allow-scripts"), sandboxCsp);
+            assertEquals(java.util.List.of(), sandbox.headers().allValues("X-Frame-Options"));
+        }
+    }
+
+    @Test
     void workbenchFramePolicyPreservesRegisteredPresentationOrigins() {
         String configured = "default-src 'self'; frame-src https://a.example https://z.example";
         assertEquals("default-src 'self'; frame-src https://a.example https://z.example 'self'",
@@ -393,6 +436,13 @@ class RavenrootServerTest {
         assertEquals("default-src 'self'; frame-src 'self' https://a.example",
                 StaticUiHandler.allowSameOriginFrames(
                         "default-src 'self'; frame-src 'self' https://a.example"));
+        assertEquals("'self'",
+                StaticUiHandler.nestedWorkbenchFrameAncestors(
+                        "default-src 'self'; frame-ancestors 'none'; frame-src 'self'"));
+        assertEquals("'self' https://portal.example http://localhost:4173",
+                StaticUiHandler.nestedWorkbenchFrameAncestors(
+                        "default-src 'self'; frame-ancestors 'self' https://portal.example "
+                                + "http://localhost:4173; frame-src 'self'"));
     }
 
     @Test

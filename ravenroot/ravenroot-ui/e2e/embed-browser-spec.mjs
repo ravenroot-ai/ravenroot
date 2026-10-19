@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
+import { ENGLISH_MESSAGES } from '../src/ui-text.js';
+
+const viewerCatalog = (locale, marker) => ({ schema: 'ravenroot.ui-catalog/v1', locale, messages: Object.fromEntries(
+  Object.entries(ENGLISH_MESSAGES).filter(([key]) => key.startsWith('embed.') || key.startsWith('common.')
+    || key.startsWith('visualGroup.') || key === 'workspace.node.bypassed.suffix')
+    .map(([key, value]) => [key, typeof value === 'string' ? marker + value
+      : Object.fromEntries(Object.entries(value).map(([plural, text]) => [plural, marker + text]))])),
+});
+async function readyViewer(page, route) {
+  await page.goto(route);
+  await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId))).toBe(true);
+  expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+  await page.evaluate(() => window.postViewerAcknowledgement());
+  await expect.poll(() => page.evaluate(() => window.embedMessages.some(message => message.type === 'READY'))).toBe(true);
+  return page.frames().find(frame => frame.url().startsWith(viewerOrigin));
+}
+
 
 const parentOrigin = process.env.RR_EMBED_PARENT_ORIGIN;
 const viewerOrigin = process.env.RR_EMBED_VIEWER_ORIGIN;
@@ -17,6 +34,96 @@ const contrast = (foreground, background) => {
   const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
   return (values[0] + 0.05) / (values[1] + 0.05);
 };
+
+test('localizes a real server session and accepts only the authenticated locale channel', async ({ page }) => {
+  await page.goto('/localized');
+  await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId))).toBe(true);
+  const viewer = page.frames().find(frame => frame.url().startsWith(viewerOrigin));
+  expect(viewer).toBeDefined();
+  expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+  await page.evaluate(() => window.postViewerAcknowledgement());
+  await expect.poll(() => page.evaluate(() => window.embedMessages.some(
+    message => message.type === 'READY'))).toBe(true);
+
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('⟦Graph⟧');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('⟦Fit⟧');
+  const otherPage = await page.context().newPage();
+  const otherViewer = await readyViewer(otherPage, '/localized');
+  const compact = viewerCatalog('en-XB', '⟦B⟧');
+  expect(JSON.stringify(compact).length).toBeLessThanOrEqual(49_152);
+  await page.evaluate(catalog => window.postViewerLocale('en-XB', catalog), compact);
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XB');
+  const bypassLabel = frame => frame.locator('[data-viewer-canvas]').evaluate(canvas =>
+    canvas._cyreg.cy.getElementById('behavior').data('cardLabel'));
+  await expect.poll(() => bypassLabel(viewer)).toBe('behavior⟦B⟧ · bypassed');
+  expect(await bypassLabel(otherViewer)).toBe('behavior · bypassed');
+  if (evidencePath('server-embed-isolated-bypass.png')) await viewer.locator('#ravenroot-embed-viewer').screenshot({ path: evidencePath('server-embed-isolated-bypass.png') });
+  await expect(otherViewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await page.evaluate(() => window.postViewerLocale('en-XA', null));
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await otherPage.close();
+  const before = await page.evaluate(() => window.embedMessages.length);
+
+  await page.evaluate(() => window.postViewerLocale('en', null, { channelId: 'wrong-channel' }));
+  await page.evaluate(() => window.postViewerLocale('en', null, { protocolVersion: 999 }));
+  await page.evaluate(() => window.postViewerLocale('en', null, { unexpected: true }));
+  await page.evaluate(catalog => window.postViewerLocale('it-IT', catalog), {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'fr',
+    messages: { 'embed.controls.fit': 'Adapter' },
+  });
+  await page.evaluate(() => window.relayViewerLocale('sibling', 'en', null));
+  await page.evaluate(() => window.relayViewerLocale('foreign', 'en', null));
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => window.embedMessages.length)).toBe(before);
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+
+  await page.evaluate(catalog => window.postViewerLocale('it-IT', catalog), {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'it',
+    messages: { 'embed.controls.fit': 'Adatta' },
+  });
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('it-IT');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'it-IT');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Adatta');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+
+  await page.evaluate(() => window.postViewerLocale('en', null));
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('en');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Fit');
+  await expect(viewer.locator('#ravenroot-embed-viewer')).toHaveAttribute('data-viewer-state', 'ready');
+});
+
+test('keeps a regional locale while applying base direction on the real server channel', async ({ page }) => {
+  const viewer = await readyViewer(page, '/localized-regional');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'az-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Sığdır');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+
+  await page.evaluate(() => window.postViewerLocale('az-IR', {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'az-IR', direction: 'ltr',
+    messages: { 'embed.controls.fit': 'Dəqiq sığdır' },
+  }));
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('az-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('dir', 'ltr');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Dəqiq sığdır');
+
+  await page.evaluate(() => window.postViewerLocale('az-Arab-IR', {
+    schema: 'ravenroot.ui-catalog/v1', locale: 'az',
+    messages: { 'embed.controls.fit': 'Ərəb qrafikası' },
+  }));
+  await expect.poll(() => page.evaluate(() => window.embedMessages.filter(
+    message => message.type === 'LOCALE_CHANGED').at(-1)?.locale)).toBe('az-Arab-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('lang', 'az-Arab-IR');
+  await expect(viewer.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(viewer.locator('[data-viewer-command="fit"]')).toHaveAccessibleName('Ərəb qrafikası');
+  await expect(viewer.locator('[data-viewer-mode] option').first()).toHaveText('Cyto');
+});
 
 for (const scenario of [
   { path: '/theme-light', system: 'dark', expected: 'light' },
@@ -222,6 +329,23 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     await expect(memberTooltip).toContainText('Processing duration:');
     await expect(memberTooltip).toContainText('Fallback:');
     await expect(memberTooltip).toContainText('Bypassed:');
+    const otherPage = await page.context().newPage();
+    const otherViewer = await readyViewer(otherPage, '/deployment');
+    await page.evaluate(catalog => window.postViewerLocale('en-XA', catalog), viewerCatalog('en-XA', '⟦A⟧'));
+    await expect(viewer.locator('html')).toHaveAttribute('lang', 'en-XA');
+    await expect(viewer.getByRole('button', { name: /⟦A⟧.*Pipeline/ })).toBeVisible();
+    await viewer.locator('.d3-nodes circle[data-node-id="worker"]').hover();
+    await expect(memberTooltip).toContainText('⟦A⟧ID: worker');
+    await expect(memberTooltip).toContainText('⟦A⟧Bypassed:');
+    if (evidencePath('server-embed-localized-shared-tooltip.png')) await shell.screenshot({ path: evidencePath('server-embed-localized-shared-tooltip.png') });
+    await expect(otherViewer.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(otherViewer.locator('[data-viewer-mode] option').first()).toHaveText('Design');
+    await page.evaluate(() => window.postViewerLocale('en', null));
+    await expect(viewer.locator('html')).toHaveAttribute('lang', 'en');
+    await viewer.locator('.d3-nodes circle[data-node-id="worker"]').hover();
+    await expect(memberTooltip).toContainText('ID: worker');
+    await expect(memberTooltip).not.toContainText('⟦A⟧');
+    await otherPage.close();
     const tooltipBox = await memberTooltip.boundingBox();
     const canvasBox = await viewer.locator('[data-viewer-canvas]').boundingBox();
     expect(tooltipBox.x).toBeGreaterThanOrEqual(canvasBox.x);
@@ -269,7 +393,9 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
 
     const messagesBeforeRevocation = await page.evaluate(() => structuredClone(window.embedMessages));
     expect(messagesBeforeRevocation.every(message => Object.keys(message).sort().join(',')
-      === 'channelId,correlationId,direction,protocolVersion,type')).toBe(true);
+      === (message.type === 'LOCALE_CHANGED'
+        ? 'channelId,correlationId,direction,locale,protocolVersion,type'
+        : 'channelId,correlationId,direction,protocolVersion,type'))).toBe(true);
     expect(JSON.stringify(messagesBeforeRevocation)).not.toContain('browser-secret-topology');
     expect(JSON.stringify(messagesBeforeRevocation)).not.toContain('browser-secret-runtime-payload');
     expect(await page.locator('body').innerText()).not.toContain('browser-secret-topology');

@@ -1,3 +1,4 @@
+import { productError } from './product-error.js';
 import { DESIGN_ARRANGEMENTS } from './design-arrangements.js';
 import { isLayeredMode } from './layered-drawing.js';
 import { applyLayeredEdgeRoutes, layeredDrawingOf } from './layered-layout.js';
@@ -86,7 +87,7 @@ export function applyViewerDesignRoutes(instance, arrangement) {
 /** Maps the persisted Design arrangement vocabulary to the editor's layout engines. */
 export function viewerDesignLayoutOptions(arrangement, { prepareLabels } = {}) {
   if (arrangement != null && !Object.hasOwn(DESIGN_ARRANGEMENTS, arrangement)) {
-    throw new TypeError('Unsupported Design arrangement.');
+    throw productError("workspace.error.viewer.design.layout.unsupported.design.arrangement", new TypeError('Unsupported Design arrangement.'));
   }
   if (arrangement === 'keep') return { name: 'preset', fit: false };
   if (arrangement === 'flow') return { name: 'dagre', rankDir: 'LR', fit: false, animate: false };

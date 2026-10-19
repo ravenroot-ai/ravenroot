@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 import { getRendererPalette } from './theme-palette.js';
 import { COMMON_NODE_GLYPHS, nodeTypeCardShape } from './catalog-node-icon.js';
 import { CATALOG_NODE_SYMBOLS, catalogNodeSymbol } from './catalog-node-symbol.js';
@@ -60,6 +61,7 @@ export function viewerCardImage(nodeType, palette) {
  * The image is a packaged inline SVG, including the deterministic initial used for unknown types.
  */
 export function viewerDesignNodeStyle(nodeType, palette, {
+  // i18n-audit-exempt: protocol-token - Cytoscape's data expression selects an authored label; it is renderer syntax rather than visible copy.
   label = 'data(cardLabel)', fontSize = 20, bypassed = false, labelSide = 'bottom',
 } = {}) {
   const type = String(nodeType || 'node').toLowerCase();
@@ -99,6 +101,7 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     { selector: 'node', style: {
       shape: 'roundrectangle', width: 'data(nw)', height: 'data(nh)',
       'background-color': palette.nodeSurface, 'border-width': 2,
+      // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
       'border-color': palette.nodeBorder, label: 'data(label)', color: palette.nodeText,
       'font-size': '20px',
       'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -139,6 +142,7 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
       { selector: 'node', style: {
         shape: 'roundrectangle', width: 80, height: 80,
         'border-width': 2.5,
+        // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
         label: 'data(cardLabel)',
         'text-valign': 'bottom', 'text-halign': 'center',
         'text-margin-x': 0, 'text-margin-y': 10,
@@ -182,6 +186,7 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     { selector: 'node:active', style: { 'overlay-opacity': 0.1 } },
     { selector: 'edge', style: {
       width: 1.5, 'line-color': edge.default, 'target-arrow-shape': 'triangle',
+      // i18n-audit-exempt: protocol-token - Cytoscape data() expression reads authored graph labels; this is renderer syntax.
       'target-arrow-color': edge.default, 'curve-style': 'bezier', label: 'data(label)',
       'font-size': '10px', color: palette.edgeLabel, 'text-background-opacity': 1,
       'text-background-color': palette.edgeLabelSurface, 'text-background-padding': '2px',
@@ -268,28 +273,28 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
   ];
 }
 
-export function viewerNodeLabel(node) {
+export function viewerNodeLabel(node, t = uiText) {
   const type = viewerNodeType(node);
   const label = String(node?.label || node?.name || node?.id || '');
   const bypassed = Boolean(node?.bypassed);
-  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? ' · bypassed' : ''}`;
+  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? t("workspace.node.bypassed.suffix") : ''}`;
 }
 
-export function viewerCardLabel(node) {
+export function viewerCardLabel(node, t = uiText) {
   const label = String(node?.label || node?.name || node?.id || '');
-  return `${label}${node?.bypassed ? ' · bypassed' : ''}`;
+  return `${label}${node?.bypassed ? t("workspace.node.bypassed.suffix") : ''}`;
 }
 
 /** Closed mapping from the allowlisted wire projection into renderer data. */
-export function viewerProjectionElements(nodes, edges) {
+export function viewerProjectionElements(nodes, edges, t = uiText) {
   return [
     ...nodes.map(node => ({
       // Kept here instead of each caller so static snapshots and deployment views compute the same
       // fallback bounds when a capture has no authored layout.
       data: {
         id: node.id,
-        label: viewerNodeLabel(node),
-        cardLabel: viewerCardLabel(node),
+        label: viewerNodeLabel(node, t),
+        cardLabel: viewerCardLabel(node, t),
         name: node.label || node.name || node.id,
         nodeType: viewerNodeType(node),
         bypassed: Boolean(node.bypassed),

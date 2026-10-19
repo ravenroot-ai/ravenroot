@@ -33,16 +33,18 @@
 // each declared the string, a rename in one would silently turn admitted turns into `notice` in the
 // other — which is the disclosure being dropped, expressed as a typo.
 import { DISCLOSURE_ROLE } from './assistant-disclosure.js';
+import { uiErrorReason, uiText } from './ui-text.js';
 
 export const INERT = 'inert';
 export const READY = 'ready';
 export const DEGRADED = 'degraded';
 export const ERROR = 'error';
 
-export const SERVICE_UNAVAILABLE = 'service-unavailable';
-export const NO_PROFILE = 'no-profile';
-export const INSECURE_REFUSED = 'insecure-refused';
-export const HOST_NOT_ALLOWLISTED = 'host-not-allowlisted';
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
+export const SERVICE_UNAVAILABLE = 'service-unavailable'; export const NO_PROFILE = 'no-profile';
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
+export const INSECURE_REFUSED = 'insecure-refused'; export const HOST_NOT_ALLOWLISTED = 'host-not-allowlisted';
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
 export const NOT_SIGNED_IN = 'not-signed-in';
 
 // ── THE FIFTH REASON, AND WHY IT IS NOT THE FOURTH WEARING A NEW NAME ─────────────────────
@@ -58,6 +60,7 @@ export const NOT_SIGNED_IN = 'not-signed-in';
 // missing. Before the server projected both onto the same wire state, so an author in this
 // state read "Sign in to Ravenroot and try again" while already signed in to Ravenroot — a sentence
 // that is not merely unhelpful but false, and one that names a remedy that changes nothing.
+// i18n-audit-exempt: protocol-token - Assistant reason values are wire/state tokens resolved through keyed presentation.
 export const NOT_LINKED = 'not-linked';
 
 // Most fundamental first. See the header — this order is a contract.
@@ -97,24 +100,26 @@ export const INERT_REASON_ORDER = Object.freeze([
 // RAVENROOT session is not authenticated — not that they have failed to sign in to a provider — and
 // it now says that. Every reason below is provoked from a concrete server response in the tests,
 // because a state nobody can provoke is a state nobody has tested.
-export const INERT_REASON_TEXT = Object.freeze({
-  [SERVICE_UNAVAILABLE]:
-    'This deployment does not provide the assistant service. Nothing is configured to answer, so nothing is sent.',
-  [NO_PROFILE]:
-    'No model provider is configured. An operator registers a provider profile before this panel can be used.',
-  [INSECURE_REFUSED]:
-    'The configured provider uses plaintext outside the credential-free local exception. Only an operator can replace it with HTTPS or explicitly permit an eligible local endpoint.',
-  [HOST_NOT_ALLOWLISTED]:
-    'The configured provider is not permitted by this deployment’s outbound policy. Only an operator can widen it.',
-  [NOT_SIGNED_IN]:
-    'Your Ravenroot session is not authenticated, so the assistant cannot be reached. Sign in to Ravenroot and try again.',
+function localizedLookup(keys) {
+  const result = {};
+  for (const [token, key] of Object.entries(keys)) {
+    Object.defineProperty(result, token, { enumerable: true, get: () => uiText(key) });
+  }
+  return Object.freeze(result);
+}
+
+export const INERT_REASON_TEXT = localizedLookup({
+  [SERVICE_UNAVAILABLE]: 'assistant.inert.serviceUnavailable',
+  [NO_PROFILE]: 'assistant.inert.noProfile',
+  [INSECURE_REFUSED]: 'assistant.inert.insecureRefused',
+  [HOST_NOT_ALLOWLISTED]: 'assistant.inert.hostNotAllowlisted',
+  [NOT_SIGNED_IN]: 'assistant.inert.notSignedIn',
   // The one sentence here that describes something the reader can do from this panel, and it says
   // so. It names no credential, no storage and no protocol: see the custody note above — the panel
   // still cannot observe where anything is kept, and this state does not change that. What it CAN
   // observe is that the deployment asked for this author's connection, because the deployment said
   // so on the wire.
-  [NOT_LINKED]:
-    'This deployment expects each author to connect to the model provider themselves, and this account is not connected yet. You can start that from here.',
+  [NOT_LINKED]: 'assistant.inert.notLinked',
 });
 
 // ── NAMED SEND FAILURES AS THEY CROSS THE WIRE ──────────────────────────────────────────────────
@@ -147,25 +152,16 @@ export const INERT_REASON_TEXT = Object.freeze({
 // And, as with the inert reasons: NONE OF THEM SAYS WHERE THE PROVIDER CREDENTIAL LIVES. The panel
 // still cannot observe custody, and `assistant-session.test.js` applies the same custody rule to
 // this table — the hole that rule would otherwise have acquired the moment new sentences arrived.
-export const ASSISTANT_FAILURE_TEXT = Object.freeze({
-  ASSISTANT_PROVIDER_REFUSED:
-    'The model declined to answer this request. Rephrasing the question may help — nothing is wrong with the graph or with Ravenroot.',
-  ASSISTANT_PROVIDER_UNREADABLE:
-    'The model provider returned a response this build cannot read, so nothing was answered. Trying again may succeed.',
-  ASSISTANT_PROVIDER_REJECTED:
-    'The model provider rejected this request. That is a configuration problem an operator has to resolve, so retrying will not clear it.',
-  ASSISTANT_PROVIDER_UNAVAILABLE:
-    'The model provider could not be reached, or did not answer in time. Trying again may succeed.',
-  ASSISTANT_EGRESS_REFUSED:
-    'This deployment’s outbound policy refused the provider destination. Only an operator can change that, so retrying will not help.',
-  ASSISTANT_TOOL_LOOP_EXHAUSTED:
-    'The model kept requesting context without reaching an answer, so the turn was stopped. A narrower question usually resolves this.',
-  ASSISTANT_INVALID_TURN:
-    'The message could not be read, so nothing was sent to the model. Sending it again unchanged will fail the same way — try rewording it.',
-  ASSISTANT_MODEL_PROPOSAL_INVALID:
-    'The request reached the model, but its graph proposal was still invalid after Ravenroot asked it to correct the proposal. Nothing was applied. Retrying will not help unless the request changes — rephrase it or add more graph detail.',
-  ASSISTANT_ADAPTER_DEFECT:
-    'Ravenroot’s assistant connection failed because of a defect in Ravenroot itself, not in the provider. Retrying will do the same thing. This needs a fix in Ravenroot — please report it.',
+export const ASSISTANT_FAILURE_TEXT = localizedLookup({
+  ASSISTANT_PROVIDER_REFUSED: 'assistant.failure.providerRefused',
+  ASSISTANT_PROVIDER_UNREADABLE: 'assistant.failure.providerUnreadable',
+  ASSISTANT_PROVIDER_REJECTED: 'assistant.failure.providerRejected',
+  ASSISTANT_PROVIDER_UNAVAILABLE: 'assistant.failure.providerUnavailable',
+  ASSISTANT_EGRESS_REFUSED: 'assistant.failure.egressRefused',
+  ASSISTANT_TOOL_LOOP_EXHAUSTED: 'assistant.failure.toolLoopExhausted',
+  ASSISTANT_INVALID_TURN: 'assistant.failure.invalidTurn',
+  ASSISTANT_MODEL_PROPOSAL_INVALID: 'assistant.failure.modelProposalInvalid',
+  ASSISTANT_ADAPTER_DEFECT: 'assistant.failure.adapterDefect',
 });
 
 // The exact vocabulary this build understands. Exported so a test can assert it against the
@@ -240,17 +236,12 @@ export function inertReason(availability) {
 // AND NONE OF THESE SENTENCES SAYS WHERE THE CREDENTIAL LIVES. That rule does not relax because the
 // subject is a sign-in; it is at its most tempting here, which is why `assistant-connection.test.js`
 // applies the same matchers to this table that `assistant-session.test.js` applies to the two above.
-export const CONNECTION_FAILURE_TEXT = Object.freeze({
-  AUTHORIZATION_PENDING:
-    'Waiting for you to finish on the provider’s page. This panel will notice on its own — nothing else is needed here.',
-  SLOW_DOWN:
-    'The provider asked for fewer checks, so this panel is now asking less often. Nothing has gone wrong and there is nothing to retry.',
-  ACCESS_DENIED:
-    'The request was declined on the provider’s page, so no connection was made. Nothing further will happen unless you start again.',
-  EXPIRED_TOKEN:
-    'The code ran out before it was used, so this attempt is over. Starting again issues a new code.',
-  UNAVAILABLE:
-    'The provider could not be reached, or answered something this build cannot read, so the attempt stopped. Starting again may succeed.',
+export const CONNECTION_FAILURE_TEXT = localizedLookup({
+  AUTHORIZATION_PENDING: 'assistant.connection.authorizationPending',
+  SLOW_DOWN: 'assistant.connection.slowDown',
+  ACCESS_DENIED: 'assistant.connection.accessDenied',
+  EXPIRED_TOKEN: 'assistant.connection.expiredToken',
+  UNAVAILABLE: 'assistant.connection.unavailable',
 });
 
 // The exact vocabulary this build understands, exported so a test can pin it against the server's
@@ -281,13 +272,13 @@ export function offersConnection(panelState) {
 
 // The panel's whole state in one value, so a renderer never has to combine three flags and get the
 // precedence wrong. ERROR outranks everything: a failed exchange is what the user is looking at.
-export function deriveState({ availability, context, error } = {}) {
+export function deriveState({ availability, context, error } = {}, t = uiText) {
   if (error) {
     return {
       state: ERROR,
       reason: error.reason || null,
       // Sanitized upstream by the client; carried, never interpreted, and never rendered as HTML.
-      message: String(error.message || 'The assistant request failed.'),
+      message: uiErrorReason(error) || t('assistant.request.failed'),
       canCompose: false,
     };
   }
@@ -299,7 +290,7 @@ export function deriveState({ availability, context, error } = {}) {
     return {
       state: DEGRADED,
       reason: null,
-      message: 'Some context is unavailable. Check the chips below before relying on the answer.',
+      message: t('assistant.context.degraded'),
       canCompose: true,
     };
   }
@@ -354,12 +345,12 @@ function normalizeTurn(turn, index) {
 // Why a send is refused, in the words shown next to the composer. Returned rather than thrown: the
 // caller associates the message with the control through `aria-errormessage`, and an exception has
 // nowhere to be associated to.
-export function validateDraft(draft, panelState) {
+export function validateDraft(draft, panelState, t = uiText) {
   if (!panelState?.canCompose) {
-    return { ok: false, message: 'The assistant is not available, so nothing can be sent.' };
+    return { ok: false, message: t('assistant.draft.unavailable') };
   }
   const text = String(draft ?? '').trim();
-  if (!text) return { ok: false, message: 'Type a question before sending.' };
+  if (!text) return { ok: false, message: t('assistant.draft.empty') };
   return { ok: true, message: '', text };
 }
 

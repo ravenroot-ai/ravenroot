@@ -39,6 +39,8 @@ Environment:
                        Long-lived SSE credential revalidation interval, 1-300 (default: 30)
   RAVENROOT_UI_CONNECT_ORIGINS
                        Exact CSP connect destinations for confirmed external UI targets (default: self only)
+  RAVENROOT_UI_FRAME_ANCESTORS
+                       self and/or exact HTTP(S) origins allowed to frame the Workbench (default: denied)
   RAVENROOT_TRUSTED_TLS_TERMINATOR
                        Set true only behind a trusted TLS terminator; requires HTTPS RAVENROOT_PUBLIC_ORIGIN
   RAVENROOT_ARTIFACT_DUAL_CONTROL

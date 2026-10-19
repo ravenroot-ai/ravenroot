@@ -1157838,6 +1157838,18 @@
         }
       ],
       "semanticReviews": []
+    },
+    {
+      "id": "release-080-promotion-security-correction-v1",
+      "issue": "#578",
+      "sourceRevision": "705549544881ae3aac27ce7467bd971c9e8fdb55",
+      "targetRevision": "a056b8a3e3b42fe4ea59878d5dbdd422f06fc595",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "50f1824578bd0f098b4e3b8ad18ffce39b74331d72ae652f737d7710ffd9ecb3",
+      "targetCandidateDigest": "7d124ba32c7a9a9f05a3d0a12c21ed5416d40b1b7f469858ec95d27948f15540",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createServer as createHttpServer, request as httpRequest } from 'node:http';
+import { createServer as createHttpServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +7,8 @@ import { configuration, createServer as createUiServer } from '../../../ui-serve
 
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
 const TOKEN = 'framed-workbench-server-token';
+const SAME_ORIGIN_PORTAL = `<!doctype html><html lang="en"><title>Portal</title>
+  <iframe id="workbench" title="Ravenroot Workbench" allow="fullscreen" src="/"></iframe>`;
 
 const listen = (server, address = '127.0.0.1', advertisedHost = address) => new Promise(resolve => {
   server.listen(0, address, () => {
@@ -53,27 +55,6 @@ function portalServer(target) {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end(`<!doctype html><html lang="en"><title>Portal</title>
       <iframe id="workbench" title="Ravenroot Workbench" allow="fullscreen" src="${target()}/"></iframe>`);
-  });
-}
-
-function sameOriginFacade(target) {
-  return createHttpServer((request, response) => {
-    if (new URL(request.url, 'http://127.0.0.1').pathname === '/portal.html') {
-      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      response.end(`<!doctype html><html lang="en"><title>Portal</title>
-        <iframe id="workbench" title="Ravenroot Workbench" allow="fullscreen" src="/"></iframe>`);
-      return;
-    }
-    const upstream = new URL(request.url, target());
-    const forwarded = httpRequest(upstream, {
-      method: request.method,
-      headers: { ...request.headers, host: upstream.host },
-    }, upstreamResponse => {
-      response.writeHead(upstreamResponse.statusCode, upstreamResponse.headers);
-      upstreamResponse.pipe(response);
-    });
-    forwarded.on('error', error => response.destroy(error));
-    request.pipe(forwarded);
   });
 }
 
@@ -204,14 +185,16 @@ test('self allows a same-origin host page to load the built Workbench', async ({
     RAVENROOT_UI_FRAME_ANCESTORS: 'self',
   }));
   const uiOrigin = await listen(ui);
-  const facade = sameOriginFacade(() => uiOrigin);
-  const facadeOrigin = await listen(facade);
+  const portalUrl = `${uiOrigin}/portal.html`;
+  await page.route(portalUrl, route => route.fulfill({
+    contentType: 'text/html; charset=utf-8',
+    body: SAME_ORIGIN_PORTAL,
+  }));
 
   try {
-    await framedWorkbench(page, `${facadeOrigin}/portal.html`, facadeOrigin);
+    await framedWorkbench(page, portalUrl, uiOrigin);
     expect(requests.some(request => request.path === '/v1/configuration')).toBe(true);
   } finally {
-    await close(facade);
     await close(ui);
     await close(backend);
   }
@@ -228,14 +211,16 @@ test('self allows a same-origin IPv6 host page to load the built Workbench', asy
     RAVENROOT_UI_FRAME_ANCESTORS: 'self',
   }));
   const uiOrigin = await listen(ui, '::1');
-  const facade = sameOriginFacade(() => uiOrigin);
-  const facadeOrigin = await listen(facade, '::1');
+  const portalUrl = `${uiOrigin}/portal.html`;
+  await page.route(portalUrl, route => route.fulfill({
+    contentType: 'text/html; charset=utf-8',
+    body: SAME_ORIGIN_PORTAL,
+  }));
 
   try {
-    await framedWorkbench(page, `${facadeOrigin}/portal.html`, facadeOrigin);
+    await framedWorkbench(page, portalUrl, uiOrigin);
     expect(requests.some(request => request.path === '/v1/configuration')).toBe(true);
   } finally {
-    await close(facade);
     await close(ui);
     await close(backend);
   }

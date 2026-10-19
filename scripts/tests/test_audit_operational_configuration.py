@@ -9442,13 +9442,49 @@ def normalize_authoritative_version_history(root: Path) -> str:
     return released_version
 
 
+def ensure_release_fixture_source_tag(
+        root: Path, source_version: str, source_ref: str) -> str:
+    """Create or reuse a coherent source tag in a remote-free release fixture."""
+    def git(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *arguments], cwd=root, check=check,
+            capture_output=True, text=True,
+        )
+
+    if git("remote").stdout.strip():
+        raise AssertionError("release fixture source tag requires a remote-free repository")
+    source_tag = "v" + source_version
+    tag_ref = "refs/tags/" + source_tag
+    existing = git("show-ref", "--verify", "--quiet", tag_ref, check=False)
+    if existing.returncode == 1:
+        git("tag", source_tag, source_ref)
+    elif existing.returncode == 0:
+        tagged_commit = git("rev-parse", tag_ref + "^{commit}").stdout.strip()
+        if revision_product_version(root, tagged_commit) != source_version:
+            raise AssertionError(
+                f"release fixture source tag {source_tag} has mismatched product bytes")
+        relation = git(
+            "merge-base", "--is-ancestor", tagged_commit, source_ref, check=False)
+        if relation.returncode == 1:
+            raise AssertionError(
+                f"release fixture source tag {source_tag} is not reachable from its source")
+        if relation.returncode != 0:
+            relation.check_returncode()
+    else:
+        existing.check_returncode()
+    if str(latest_release(root)) != source_version:
+        raise AssertionError("release fixture has an unrelated newer release tag")
+    return source_tag
+
+
 class VersionHistoryTopologyTest(unittest.TestCase):
     def setUp(self):
         self.location = tempfile.TemporaryDirectory()
         self.addCleanup(self.location.cleanup)
         self.root = Path(self.location.name) / "source"
         subprocess.run(
-            ["git", "clone", "--quiet", "--no-local", str(ROOT), str(self.root)], check=True)
+            ["git", "clone", "--quiet", "--no-local", "--no-tags", str(ROOT), str(self.root)],
+            check=True)
         self.git("remote", "remove", "origin")
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.invalid")
@@ -9559,8 +9595,9 @@ class VersionHistoryTopologyTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "non-version content"):
             reachable_version_transition(self.root, self.target_version, later)
 
-    def test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum(self):
-        self.git("tag", f"v{self.source_version}", self.parent)
+    def assert_valid_release_preparation_is_selected(self):
+        ensure_release_fixture_source_tag(
+            self.root, self.source_version, self.parent)
         fragment = self.root / ".changes" / "fixture.fix.md"
         fragment.write_text("Exact release preparation fixture.\n", encoding="utf-8")
         self.git("add", fragment.relative_to(self.root).as_posix())
@@ -9580,6 +9617,48 @@ class VersionHistoryTopologyTest(unittest.TestCase):
         self.assertFalse(
             (self.root / f"docs/releases/v{self.target_version}.md").exists())
         self.assertTrue(fragment.exists())
+
+    def test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum(self):
+        self.assert_valid_release_preparation_is_selected()
+
+    def test_valid_release_preparation_reuses_a_reachable_source_tag(self):
+        source_tag = f"v{self.source_version}"
+        self.git("tag", "-a", source_tag, "-m", "published source fixture", self.parent)
+        tagged_commit = self.git("rev-parse", f"refs/tags/{source_tag}^{{commit}}")
+        self.assert_valid_release_preparation_is_selected()
+        self.assertEqual(
+            tagged_commit, self.git("rev-parse", f"refs/tags/{source_tag}^{{commit}}"))
+
+    def test_release_preparation_rejects_an_unreachable_source_tag(self):
+        unreachable = self.git(
+            "commit-tree", self.parent + "^{tree}", "-m", "unreachable release fixture")
+        self.git("tag", f"v{self.source_version}", unreachable)
+        with self.assertRaisesRegex(AssertionError, "not reachable from its source"):
+            ensure_release_fixture_source_tag(
+                self.root, self.source_version, self.parent)
+
+    def test_release_preparation_rejects_a_mismatched_source_tag(self):
+        mismatched = self.transition("mismatched tagged product bytes")
+        self.git("tag", f"v{self.source_version}", mismatched)
+        with self.assertRaisesRegex(AssertionError, "mismatched product bytes"):
+            ensure_release_fixture_source_tag(
+                self.root, self.source_version, mismatched)
+
+    def test_release_preparation_propagates_tag_relationship_errors(self):
+        source_tag = f"v{self.source_version}"
+        self.git("tag", source_tag, self.parent)
+        run = subprocess.run
+
+        def fail_relationship(arguments, **kwargs):
+            if arguments[:3] == ["git", "merge-base", "--is-ancestor"]:
+                return subprocess.CompletedProcess(
+                    arguments, 128, "", "synthetic relationship failure")
+            return run(arguments, **kwargs)
+
+        with mock.patch("subprocess.run", side_effect=fail_relationship), \
+                self.assertRaises(subprocess.CalledProcessError):
+            ensure_release_fixture_source_tag(
+                self.root, self.source_version, self.parent)
 
     def test_two_exact_alignment_candidates_are_ambiguous(self):
         first = self.transition("first exact alignment")

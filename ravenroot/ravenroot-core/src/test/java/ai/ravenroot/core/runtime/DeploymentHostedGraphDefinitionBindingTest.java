@@ -509,14 +509,12 @@ class DeploymentHostedGraphDefinitionBindingTest {
             deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var repairedService = manifestService(engine, executions, behaviors, realManifests);
+            var handoff = new QueuedExecutor();
             var repairedDeployment = boundedDeployment(deploymentId, engine, executions, realDefinitions,
                     repairedService, fixedIdentities(processInstanceId),
-                    DefaultGraphDeployment.DEFAULT_STORE_CALL_BOUND, behaviors);
+                    DefaultGraphDeployment.DEFAULT_STORE_CALL_BOUND, behaviors, handoff);
             repairedDeployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            int spawnedBeforeRedelivery = engine.spawnCount();
-            assertEquals(0, spawnedBeforeRedelivery,
-                    "the injection phases must not have dispatched a traversal");
             var repaired = repairedDeployment.ingress().offerDurably(
                     IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.Duplicate.class, repaired,
@@ -529,9 +527,26 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     .toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertEquals(1, page.items().size());
             assertEquals(processInstanceId, page.items().getFirst().key().processInstanceId());
-            assertEquals(spawnedBeforeRedelivery, engine.spawnCount(),
-                    "the repaired duplicate must not start a second traversal");
+            assertTrue(handoff.submitted.await(10, TimeUnit.SECONDS),
+                    "the repaired delivery must submit its one durable traversal handoff");
+            assertEquals(1, handoff.submissionCount(),
+                    "the single repaired delivery must submit exactly one durable traversal handoff");
+            assertEquals(0, engine.spawnCount(),
+                    "the deterministic executor must hold the intended traversal until its explicit boundary");
+            handoff.runSubmitted();
+            awaitExecutionStarted(executions, IDENTITY.tenantId(), 1,
+                    "the repaired delivery must record exactly one execution start");
+            awaitSpawnCount(engine, 2,
+                    "the repaired delivery must run the start and end nodes exactly once");
             repairedDeployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(1, executionStartedCount(executions, IDENTITY.tenantId()),
+                    "orderly stop must leave exactly one execution start");
+            assertEquals(2, engine.spawnCount(),
+                    "orderly stop must leave exactly one completed start-to-end traversal");
+            assertEquals(1, handoff.submissionCount(),
+                    "the repaired delivery must not submit an additional traversal handoff");
+            assertFalse(handoff.hasPendingCommand(),
+                    "the one submitted traversal handoff must have been consumed");
         }
     }
 
@@ -674,6 +689,34 @@ class DeploymentHostedGraphDefinitionBindingTest {
             assertInstanceOf(ExecutionStoreFailure.NotFound.class, failure.failure());
             return false;
         }
+    }
+
+    private static long executionStartedCount(ExecutionStore executions, String tenantId) throws Exception {
+        return executions.readJournal(tenantId, 0, 100).toCompletableFuture().get(10, TimeUnit.SECONDS)
+                .stream()
+                .filter(record -> ExecutionEventType.EXECUTION_STARTED.name()
+                        .equals(record.envelope().eventType()))
+                .count();
+    }
+
+    private static void awaitExecutionStarted(ExecutionStore executions, String tenantId, long expected,
+            String message) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long observed = executionStartedCount(executions, tenantId);
+        while (observed < expected && System.nanoTime() < deadline) {
+            Thread.sleep(2);
+            observed = executionStartedCount(executions, tenantId);
+        }
+        assertEquals(expected, observed, message);
+    }
+
+    private static void awaitSpawnCount(JoinTestEngine engine, int expected, String message)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (engine.spawnCount() < expected && System.nanoTime() < deadline) {
+            Thread.sleep(2);
+        }
+        assertEquals(expected, engine.spawnCount(), message);
     }
 
     private DefaultGraphDeployment deployment(DeploymentId deploymentId, JoinTestEngine engine, ExecutionStore executions,
@@ -930,10 +973,20 @@ class DeploymentHostedGraphDefinitionBindingTest {
     private static final class QueuedExecutor implements Executor {
         private final AtomicReference<Runnable> command = new AtomicReference<>();
         private final CountDownLatch submitted = new CountDownLatch(1);
+        private final AtomicInteger submissions = new AtomicInteger();
 
         @Override public void execute(Runnable submittedCommand) {
+            submissions.incrementAndGet();
             assertTrue(command.compareAndSet(null, submittedCommand));
             submitted.countDown();
+        }
+
+        private int submissionCount() {
+            return submissions.get();
+        }
+
+        private boolean hasPendingCommand() {
+            return command.get() != null;
         }
 
         private void runSubmitted() {

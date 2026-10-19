@@ -282,6 +282,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "controlled second integration alignment")
             normalize_authoritative_version_history(source_fixture)
             self.assertEqual(source_version, product_version(source_fixture))
+            self.assertFalse(
+                (source_fixture / f"docs/releases/v{first_alignment}.md").exists())
             self.assertEqual(
                 [f"normalize {first_alignment} to {source_version}",
                  f"normalize {second_alignment} to {first_alignment}"],
@@ -8973,6 +8975,21 @@ class ReleaseFixtureDevelopmentNormalizationTest(unittest.TestCase):
                 normalize_release_fixture_source(root)
 
 
+def release_preparation_shaped(changes: list[str], target_version: str) -> bool:
+    """Classify a transition from its own diff before applying strict evidence checks."""
+    target_notes = f"docs/releases/v{target_version}.md"
+    for line in changes:
+        fields = line.split("\t")
+        status, paths = fields[0], fields[1:]
+        if target_notes in paths or any(path.startswith("docs/releases/") for path in paths):
+            return True
+        if status == "D" and any(
+                path.startswith(".changes/") and path.endswith(".md")
+                and path != ".changes/README.md" for path in paths):
+            return True
+    return False
+
+
 def normalize_release_fixture_source(root: Path) -> str:
     """Normalize an isolated source fixture; never authorize a production version transition."""
     from scripts.check_product_version import errors as version_surface_errors
@@ -9004,75 +9021,19 @@ def normalize_release_fixture_source(root: Path) -> str:
             or current.semantic_key() <= previous.semantic_key():
         raise AssertionError("source fixture requires a coherent forward development prerelease")
 
-    # Inspect the actual version-changing commit, not every unrelated source commit. A genuine
-    # preparation must still pass its existing exact inverse, including notes and fragment rules.
-    transition = None
-    transition_parent = None
-    transition_source_version = None
-    changes = []
-    for revision in git("log", "--format=%H", "HEAD", "--", "ravenroot/pom.xml").splitlines():
-        ancestry = git("rev-list", "--parents", "-n", "1", revision).split()
-        if len(ancestry) != 2:
-            continue
-        parent = ancestry[1]
-        prepared = _revision_product_version(root, revision)
-        original = _revision_product_version(root, parent)
-        if prepared != current_version or original == current_version:
-            continue
-        if parse_tag("v" + original).semantic_key() >= current.semantic_key():
-            raise AssertionError("development fixture transition must move forward")
-        transition = revision
-        transition_parent = parent
-        transition_source_version = original
-        changes = [line.split("\t") for line in git("diff", "--name-status", parent, revision).splitlines()]
-        has_preparation_evidence = (root / f"docs/releases/v{current_version}.md").exists() or any(
-            len(row) != 2 or row[1].startswith("docs/releases/")
-            or row[0] == "D" and row[1].startswith(".changes/") for row in changes)
-        if original == source_version and has_preparation_evidence:
-            reverse_release_preparation_delta(root, revision, current_version)
-            for path, contents in bump_ui_examples(root, current_version, source_version).items():
-                path.write_text(contents, encoding="utf-8")
-            if version_surface_errors(source_version, root):
-                raise AssertionError("release inverse left inconsistent fixture version surfaces")
-            return source_version
-        break
-    if transition is None:
-        raise AssertionError("no exact version transition is reachable from the source fixture")
-    notes = f"docs/releases/v{current_version}.md"
-    if (root / notes).exists() or any(
-            len(row) != 2 or row[1].startswith("docs/releases/")
-            or row[0] == "D" and row[1].startswith(".changes/") for row in changes):
-        raise AssertionError("development normalization cannot bypass release-preparation evidence")
-
-    # A development alignment may share its commit with feature work, but every coordinated version
-    # surface must still be the exact output of bump_surfaces for the source and target versions.
-    # Compare only that generated path set, so unrelated feature files neither authorize nor block
-    # the fixture-only normalization.
-    assert transition_parent is not None and transition_source_version is not None
-    with tempfile.TemporaryDirectory() as location:
-        expected = Path(location) / "expected-version-surfaces"
-        subprocess.run(
-            ["git", "clone", "--quiet", "--no-local", str(root), str(expected)], check=True,
-        )
-        subprocess.run(["git", "checkout", "--quiet", transition_parent], cwd=expected, check=True)
-        bump_surfaces(expected, transition_source_version, current_version)
-        expected_changes = [line.split("\t") for line in subprocess.run(
-            ["git", "diff", "--name-status"], cwd=expected,
-            check=True, capture_output=True, text=True,
-        ).stdout.splitlines()]
-        actual_status = {row[1]: row[0] for row in changes if len(row) == 2}
-        for row in expected_changes:
-            if len(row) != 2 or row[0] != "M" or actual_status.get(row[1]) != "M":
-                raise AssertionError(
-                    f"development alignment omitted or reshaped a version surface: {row}")
-            committed = subprocess.run(
-                ["git", "show", f"{transition}:{row[1]}"], cwd=root,
-                check=True, capture_output=True,
-            ).stdout
-            if committed != (expected / row[1]).read_bytes():
-                raise AssertionError(
-                    f"development alignment changed non-version content: {row[1]}")
-
+    transition, transition_parent, transition_source_version = reachable_version_transition(
+        root, current_version, "HEAD", mode="initial-normalization")
+    changes = git("diff", "--name-status", transition_parent, transition).splitlines()
+    if release_preparation_shaped(changes, current_version):
+        if transition_source_version != source_version:
+            raise AssertionError(
+                "development normalization cannot bypass release-preparation evidence")
+        reverse_release_preparation_delta(root, transition, current_version)
+        for path, contents in bump_ui_examples(root, current_version, source_version).items():
+            path.write_text(contents, encoding="utf-8")
+        if version_surface_errors(source_version, root):
+            raise AssertionError("release inverse left inconsistent fixture version surfaces")
+        return source_version
     # The clone may retain immutable notes for an earlier, still untagged preparation. Moving
     # mirrors backwards would collide with those notes when testing a minor preparation. Give
     # this isolated fixture a local released baseline at its coherent development version instead.
@@ -9116,9 +9077,10 @@ def _revision_product_version(root: Path, revision: str) -> str:
     return str(parse_tag("v" + version.text.strip()))
 
 
-def reverse_release_preparation_delta(
-        root: Path, preparation_revision: str, target_version: str) -> None:
-    """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
+def release_preparation_evidence(
+        root: Path, preparation_revision: str, target_version: str,
+) -> tuple[str, str, set[str], list[str], str]:
+    """Validate one release preparation without changing the authoritative fixture."""
     ancestry = subprocess.run(
         ["git", "rev-list", "--parents", "-n", "1", preparation_revision], cwd=root,
         check=True, capture_output=True, text=True,
@@ -9179,6 +9141,15 @@ def reverse_release_preparation_delta(
     source_version = revision_product_version(parent)
     if prepared_version != target_version or prepared_version == source_version:
         raise AssertionError("release preparation versions do not match the requested inverse")
+    return parent, source_version, pom_paths, inverse_paths, notes
+
+
+def reverse_release_preparation_delta(
+        root: Path, preparation_revision: str, target_version: str) -> None:
+    """Reverse only the validated release-preparation surfaces in an authoritative fixture."""
+    parent, source_version, pom_paths, inverse_paths, notes = release_preparation_evidence(
+        root, preparation_revision, target_version)
+    prepared_version = target_version
 
     # A module may be added after the historical preparation while the branch still carries the
     # prepared product version. It is absent from the preparation diff, so reconstruct only its
@@ -9229,8 +9200,13 @@ def revision_product_version(root: Path, revision: str) -> str:
 
 
 def reachable_version_transition(
-        root: Path, target_version: str, source_ref: str) -> tuple[str, str, str]:
-    """Select one proven inverse across every parent, independent of merge simplification."""
+        root: Path, target_version: str, source_ref: str, *,
+        mode: str = "authoritative-inverse") -> tuple[str, str, str]:
+    """Select the unique causally latest proven inverse across every reachable parent."""
+    if mode not in {"authoritative-inverse", "initial-normalization"}:
+        raise AssertionError(f"unknown version transition mode: {mode}")
+    retain_mixed_alignments = mode == "initial-normalization"
+    target = parse_tag("v" + target_version)
     candidates = []
     mixed_features = []
     for revision in subprocess.run(
@@ -9250,24 +9226,46 @@ def reachable_version_transition(
         source_version = revision_product_version(root, parent)
         if source_version == target_version:
             continue
+        if retain_mixed_alignments \
+                and parse_tag("v" + source_version).semantic_key() >= target.semantic_key():
+            raise AssertionError("development fixture transition must move forward")
         changes = subprocess.run(
             ["git", "diff", "--name-status", parent, revision], cwd=root,
             check=True, capture_output=True, text=True,
         ).stdout.splitlines()
-        if f"A\tdocs/releases/v{target_version}.md" not in changes:
-            # Every candidate must contain the exact generated version surfaces. A mixed feature
-            # commit may have additional paths, but is never itself an inverse candidate. Missing
-            # or altered version bytes are errors, not reasons to try another commit until one passes.
+        if release_preparation_shaped(changes, target_version):
+            release_preparation_evidence(root, revision, target_version)
+        else:
+            # Validate every generated surface before excluding an unrelated mixed feature.
             _, _, _, unexpected = version_alignment_evidence(root, revision, target_version)
             if unexpected:
                 mixed_features.append(revision)
-                continue
+                if not retain_mixed_alignments:
+                    continue
         candidates.append((revision, parent, source_version))
-    if len(candidates) != 1:
+    maxima = []
+    for candidate in candidates:
+        dominated = False
+        for other in candidates:
+            if candidate == other:
+                continue
+            relation = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", candidate[0], other[0]], cwd=root,
+                capture_output=True, text=True,
+            )
+            if relation.returncode not in {0, 1}:
+                relation.check_returncode()
+            if relation.returncode == 0:
+                dominated = True
+                break
+        if not dominated:
+            maxima.append(candidate)
+    if len(maxima) != 1:
         raise AssertionError(
             f"expected one bounded version transition to {target_version}; "
-            f"found {len(candidates)}; mixed feature transitions: {mixed_features}")
-    return candidates[0]
+            f"found {len(maxima)} maximal of {len(candidates)} validated candidates; "
+            f"mixed feature transitions: {mixed_features}")
+    return maxima[0]
 
 
 def version_alignment_evidence(
@@ -9411,13 +9409,49 @@ def normalize_authoritative_version_history(root: Path) -> str:
     return released_version
 
 
+def ensure_release_fixture_source_tag(
+        root: Path, source_version: str, source_ref: str) -> str:
+    """Create or reuse a coherent source tag in a remote-free release fixture."""
+    def git(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *arguments], cwd=root, check=check,
+            capture_output=True, text=True,
+        )
+
+    if git("remote").stdout.strip():
+        raise AssertionError("release fixture source tag requires a remote-free repository")
+    source_tag = "v" + source_version
+    tag_ref = "refs/tags/" + source_tag
+    existing = git("show-ref", "--verify", "--quiet", tag_ref, check=False)
+    if existing.returncode == 1:
+        git("tag", source_tag, source_ref)
+    elif existing.returncode == 0:
+        tagged_commit = git("rev-parse", tag_ref + "^{commit}").stdout.strip()
+        if revision_product_version(root, tagged_commit) != source_version:
+            raise AssertionError(
+                f"release fixture source tag {source_tag} has mismatched product bytes")
+        relation = git(
+            "merge-base", "--is-ancestor", tagged_commit, source_ref, check=False)
+        if relation.returncode == 1:
+            raise AssertionError(
+                f"release fixture source tag {source_tag} is not reachable from its source")
+        if relation.returncode != 0:
+            relation.check_returncode()
+    else:
+        existing.check_returncode()
+    if str(latest_release(root)) != source_version:
+        raise AssertionError("release fixture has an unrelated newer release tag")
+    return source_tag
+
+
 class VersionHistoryTopologyTest(unittest.TestCase):
     def setUp(self):
         self.location = tempfile.TemporaryDirectory()
         self.addCleanup(self.location.cleanup)
         self.root = Path(self.location.name) / "source"
         subprocess.run(
-            ["git", "clone", "--quiet", "--no-local", str(ROOT), str(self.root)], check=True)
+            ["git", "clone", "--quiet", "--no-local", "--no-tags", str(ROOT), str(self.root)],
+            check=True)
         self.git("remote", "remove", "origin")
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.invalid")
@@ -9451,6 +9485,121 @@ class VersionHistoryTopologyTest(unittest.TestCase):
             arguments.extend(["-p", parent])
         return self.git(*arguments, "-m", "isolated merge topology")
 
+    def test_initial_normalization_finds_preparation_across_pr_parent_orders_and_queue(self):
+        ensure_release_fixture_source_tag(
+            self.root, self.source_version, self.parent)
+        mixed = self.transition("mixed development alignment", extra=True)
+        bump_surfaces(self.root, self.target_version, self.source_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "restore source version before preparation")
+        fragment = self.root / ".changes" / "fixture.fix.md"
+        fragment.write_text("Exact release preparation fixture.\n", encoding="utf-8")
+        self.git("add", fragment.relative_to(self.root).as_posix())
+        self.git("commit", "-qm", "release fragment")
+        preparation_parent = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.target_version, prepare(self.root, "patch")["version"])
+        self.git("add", ".")
+        self.git("commit", "-qm", "canonical release preparation")
+        preparation = self.git("rev-parse", "HEAD")
+
+        base_first = self.merge(preparation, mixed, preparation)
+        head_first = self.merge(preparation, preparation, mixed)
+        self.git("checkout", "--quiet", "--detach", mixed)
+        (self.root / "queue-base.txt").write_text(
+            "Later base content stays intact.\n", encoding="utf-8")
+        self.git("add", "queue-base.txt")
+        self.git("commit", "-qm", "advance queue base")
+        queue_base = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--quiet", "--detach", preparation)
+        self.git("checkout", queue_base, "--", "queue-base.txt")
+        self.git("commit", "-qm", "build synthetic queue result tree")
+        queue_tree = self.git("rev-parse", "HEAD")
+        queue = self.merge(queue_tree, queue_base, preparation)
+
+        for name, revision in (
+                ("direct branch", preparation),
+                ("pull request base first", base_first),
+                ("pull request head first", head_first),
+                ("advanced-base merge queue", queue),
+        ):
+            with self.subTest(topology=name):
+                self.git("checkout", "--quiet", "--detach", revision)
+                self.assertEqual("", self.git("status", "--porcelain"))
+                self.assertEqual(
+                    (preparation, preparation_parent, self.source_version),
+                    reachable_version_transition(
+                        self.root, self.target_version, revision,
+                        mode="initial-normalization"),
+                )
+        simplified = self.git(
+            "rev-list", "--topo-order", base_first, "--", "ravenroot/pom.xml",
+        ).splitlines()
+        self.assertIn(mixed, simplified)
+        self.assertNotIn(preparation, simplified)
+        self.git("checkout", "--quiet", "--detach", queue)
+        queue_bytes = (self.root / "queue-base.txt").read_bytes()
+        inventory = (self.root / "scripts/operational-configuration-inventory.json").read_bytes()
+        self.assertEqual(self.source_version, normalize_release_fixture_source(self.root))
+        self.assertEqual(queue_bytes, (self.root / "queue-base.txt").read_bytes())
+        self.assertEqual(
+            inventory,
+            (self.root / "scripts/operational-configuration-inventory.json").read_bytes(),
+        )
+
+    def test_initial_normalization_retains_validated_mixed_alignment_bytes(self):
+        ensure_release_fixture_source_tag(
+            self.root, self.source_version, self.parent)
+        mixed = self.transition("mixed development alignment", extra=True)
+        self.git("checkout", "--quiet", "--detach", mixed)
+        feature = (self.root / "feature.txt").read_bytes()
+        inventory = (self.root / "scripts/operational-configuration-inventory.json").read_bytes()
+        self.assertEqual(
+            (mixed, self.parent, self.source_version),
+            reachable_version_transition(
+                self.root, self.target_version, mixed,
+                mode="initial-normalization"),
+        )
+        self.assertEqual(self.target_version, normalize_release_fixture_source(self.root))
+        self.assertEqual(feature, (self.root / "feature.txt").read_bytes())
+        self.assertEqual(
+            inventory,
+            (self.root / "scripts/operational-configuration-inventory.json").read_bytes(),
+        )
+        self.assertEqual("", self.git("status", "--porcelain"))
+        self.assertEqual("", self.git("remote"))
+
+    def test_inherited_notes_do_not_reclassify_later_mixed_alignment(self):
+        ensure_release_fixture_source_tag(
+            self.root, self.source_version, self.parent)
+        fragment = self.root / ".changes" / "fixture.fix.md"
+        fragment.write_text("Earlier preparation.\n", encoding="utf-8")
+        self.git("add", fragment.relative_to(self.root).as_posix())
+        self.git("commit", "-qm", "earlier release fragment")
+        self.assertEqual(self.target_version, prepare(self.root, "patch")["version"])
+        self.git("add", ".")
+        self.git("commit", "-qm", "earlier canonical preparation")
+        bump_surfaces(self.root, self.target_version, self.source_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "restore source version while retaining notes")
+        bump_surfaces(self.root, self.source_version, self.target_version)
+        feature = self.root / "later-feature.txt"
+        feature.write_text("Later feature bytes.\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "later mixed development alignment")
+        mixed = self.git("rev-parse", "HEAD")
+        notes = self.root / f"docs/releases/v{self.target_version}.md"
+        notes_bytes = notes.read_bytes()
+        self.assertEqual(
+            (mixed, self.git("rev-parse", "HEAD^"), self.source_version),
+            reachable_version_transition(
+                self.root, self.target_version, mixed,
+                mode="initial-normalization"),
+        )
+        self.assertEqual(self.target_version, normalize_release_fixture_source(self.root))
+        self.assertEqual(notes_bytes, notes.read_bytes())
+        self.assertEqual(b"Later feature bytes.\n", feature.read_bytes())
+        self.assertEqual("", self.git("status", "--porcelain"))
+
     def test_branch_pr_and_queue_find_the_same_bounded_inverse(self):
         pure = self.transition("standalone generated alignment")
         mixed = self.transition("feature and generated alignment", extra=True)
@@ -9462,7 +9611,13 @@ class VersionHistoryTopologyTest(unittest.TestCase):
         self.git("commit", "-qm", "advance queue base")
         queue_base = self.git("rev-parse", "HEAD")
         queue = self.merge(queue_base, queue_base, branch)
-        for name, revision in (("branch", branch), ("pull request", pr), ("merge queue", queue)):
+        reverse = self.merge(mixed, mixed, pure)
+        for name, revision in (
+                ("branch", branch),
+                ("reversed parents", reverse),
+                ("pull request", pr),
+                ("merge queue", queue),
+        ):
             with self.subTest(topology=name):
                 # Prove this fixture reproduces the parent-order/TREESAME trap: ordinary
                 # path-limited history hides the pure sibling in PR and queue checkouts.
@@ -9509,12 +9664,179 @@ class VersionHistoryTopologyTest(unittest.TestCase):
                     reverse_version_alignment_delta(self.root, invalid, self.target_version)
                 self.assertEqual("", self.git("status", "--porcelain"))
 
-    def test_two_exact_alignment_candidates_are_ambiguous(self):
+    def test_invalid_dominated_ancestor_is_validated_before_causal_selection(self):
+        invalid = self.transition("invalid dominated alignment", corrupted=True)
+        self.git("checkout", "--quiet", "--detach", invalid)
+        bump_surfaces(self.root, self.target_version, self.source_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "restore source version after invalid alignment")
+        bump_surfaces(self.root, self.source_version, self.target_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "later exact alignment")
+        later = self.git("rev-parse", "HEAD")
+        for mode in ("authoritative-inverse", "initial-normalization"):
+            with self.subTest(mode=mode), \
+                    self.assertRaisesRegex(AssertionError, "non-version content"):
+                reachable_version_transition(
+                    self.root, self.target_version, later, mode=mode)
+
+    def test_invalid_dominated_preparation_shapes_fail_before_causal_selection(self):
+        ensure_release_fixture_source_tag(
+            self.root, self.source_version, self.parent)
+        cases = (
+            ("missing notes", "did not add its release notes"),
+            ("non-deleted fragment", "unexpected preparation status"),
+            ("unexpected path", "changed an unexpected path"),
+            ("other release notes", "changed an unexpected path"),
+        )
+        for shape, expected in cases:
+            with self.subTest(shape=shape):
+                self.git("checkout", "--quiet", "--detach", self.parent)
+                fragment = self.root / ".changes" / "fixture.fix.md"
+                fragment.write_text("Exact release preparation fixture.\n", encoding="utf-8")
+                self.git("add", fragment.relative_to(self.root).as_posix())
+                self.git("commit", "-qm", f"{shape} source fragment")
+                bump_surfaces(self.root, self.source_version, self.target_version)
+                notes = self.root / f"docs/releases/v{self.target_version}.md"
+                unexpected = self.root / "unexpected-preparation-path.txt"
+                other_notes = self.root / "docs/releases/unrelated.md"
+                if shape == "missing notes":
+                    fragment.unlink()
+                elif shape == "non-deleted fragment":
+                    fragment.write_text("Modified instead of consumed.\n", encoding="utf-8")
+                    notes.write_text("# Target release\n", encoding="utf-8")
+                elif shape == "unexpected path":
+                    fragment.unlink()
+                    notes.write_text("# Target release\n", encoding="utf-8")
+                    unexpected.write_text("Unexpected preparation byte.\n", encoding="utf-8")
+                else:
+                    other_notes.write_text("# Unrelated release\n", encoding="utf-8")
+                self.git("add", "-A")
+                self.git("commit", "-qm", f"invalid {shape} preparation")
+
+                bump_surfaces(self.root, self.target_version, self.source_version)
+                for path in (notes, unexpected, other_notes):
+                    if path.exists():
+                        path.unlink()
+                fragment.write_text("Exact release preparation fixture.\n", encoding="utf-8")
+                self.git("add", "-A")
+                self.git("commit", "-qm", f"restore source after {shape}")
+                self.assertEqual(self.target_version, prepare(self.root, "patch")["version"])
+                self.git("add", ".")
+                self.git("commit", "-qm", f"valid preparation after {shape}")
+                later = self.git("rev-parse", "HEAD")
+                with self.assertRaisesRegex(AssertionError, expected):
+                    reachable_version_transition(
+                        self.root, self.target_version, later,
+                        mode="initial-normalization")
+
+    def test_initial_normalization_rejects_a_non_forward_transition(self):
+        higher = str(expected_next(parse_tag("v" + self.target_version), "patch"))
+        bump_surfaces(self.root, self.source_version, higher)
+        self.git("add", ".")
+        self.git("commit", "-qm", "move beyond the fixture target")
+        bump_surfaces(self.root, higher, self.target_version)
+        self.git("add", ".")
+        self.git("commit", "-qm", "move backwards to the fixture target")
+        with self.assertRaisesRegex(AssertionError, "must move forward"):
+            reachable_version_transition(
+                self.root, self.target_version, "HEAD",
+                mode="initial-normalization")
+
+    def assert_valid_release_preparation_is_selected(self):
+        ensure_release_fixture_source_tag(
+            self.root, self.source_version, self.parent)
+        fragment = self.root / ".changes" / "fixture.fix.md"
+        fragment.write_text("Exact release preparation fixture.\n", encoding="utf-8")
+        self.git("add", fragment.relative_to(self.root).as_posix())
+        self.git("commit", "-qm", "release fragment")
+        preparation_parent = self.git("rev-parse", "HEAD")
+        prepared = prepare(self.root, "patch")
+        self.assertEqual(self.target_version, prepared["version"])
+        self.git("add", ".")
+        self.git("commit", "-qm", "canonical release preparation")
+        revision = self.git("rev-parse", "HEAD")
+        self.assertEqual(
+            (revision, preparation_parent, self.source_version),
+            reachable_version_transition(self.root, self.target_version, revision),
+        )
+        reverse_release_preparation_delta(self.root, revision, self.target_version)
+        self.assertEqual(self.source_version, product_version(self.root))
+        self.assertFalse(
+            (self.root / f"docs/releases/v{self.target_version}.md").exists())
+        self.assertTrue(fragment.exists())
+
+    def test_valid_release_preparation_is_selected_when_it_is_the_unique_maximum(self):
+        self.assert_valid_release_preparation_is_selected()
+
+    def test_valid_release_preparation_reuses_a_reachable_source_tag(self):
+        source_tag = f"v{self.source_version}"
+        self.git("tag", "-a", source_tag, "-m", "published source fixture", self.parent)
+        tagged_commit = self.git("rev-parse", f"refs/tags/{source_tag}^{{commit}}")
+        self.assert_valid_release_preparation_is_selected()
+        self.assertEqual(
+            tagged_commit, self.git("rev-parse", f"refs/tags/{source_tag}^{{commit}}"))
+
+    def test_release_preparation_rejects_an_unreachable_source_tag(self):
+        unreachable = self.git(
+            "commit-tree", self.parent + "^{tree}", "-m", "unreachable release fixture")
+        self.git("tag", f"v{self.source_version}", unreachable)
+        with self.assertRaisesRegex(AssertionError, "not reachable from its source"):
+            ensure_release_fixture_source_tag(
+                self.root, self.source_version, self.parent)
+
+    def test_release_preparation_rejects_a_mismatched_source_tag(self):
+        mismatched = self.transition("mismatched tagged product bytes")
+        self.git("tag", f"v{self.source_version}", mismatched)
+        with self.assertRaisesRegex(AssertionError, "mismatched product bytes"):
+            ensure_release_fixture_source_tag(
+                self.root, self.source_version, mismatched)
+
+    def test_release_preparation_propagates_tag_relationship_errors(self):
+        source_tag = f"v{self.source_version}"
+        self.git("tag", source_tag, self.parent)
+        run = subprocess.run
+
+        def fail_relationship(arguments, **kwargs):
+            if arguments[:3] == ["git", "merge-base", "--is-ancestor"]:
+                return subprocess.CompletedProcess(
+                    arguments, 128, "", "synthetic relationship failure")
+            return run(arguments, **kwargs)
+
+        with mock.patch("subprocess.run", side_effect=fail_relationship), \
+                self.assertRaises(subprocess.CalledProcessError):
+            ensure_release_fixture_source_tag(
+                self.root, self.source_version, self.parent)
+
+    def test_two_exact_alignment_candidates_are_ambiguous_in_both_parent_orders(self):
+        first = self.transition("first exact alignment")
+        second = self.transition("second exact alignment")
+        for mode in ("authoritative-inverse", "initial-normalization"):
+            for name, parents in (("first-second", (first, second)),
+                                  ("second-first", (second, first))):
+                with self.subTest(mode=mode, parent_order=name):
+                    merged = self.merge(first, *parents)
+                    with self.assertRaisesRegex(AssertionError, "found 2"):
+                        reachable_version_transition(
+                            self.root, self.target_version, merged, mode=mode)
+
+    def test_version_transition_propagates_relationship_errors(self):
         first = self.transition("first exact alignment")
         second = self.transition("second exact alignment")
         merged = self.merge(first, first, second)
-        with self.assertRaisesRegex(AssertionError, "found 2"):
-            reachable_version_transition(self.root, self.target_version, merged)
+        run = subprocess.run
+
+        def fail_relationship(arguments, **kwargs):
+            if arguments[:3] == ["git", "merge-base", "--is-ancestor"]:
+                return subprocess.CompletedProcess(
+                    arguments, 128, "", "synthetic relationship failure")
+            return run(arguments, **kwargs)
+
+        with mock.patch("subprocess.run", side_effect=fail_relationship), \
+                self.assertRaises(subprocess.CalledProcessError):
+            reachable_version_transition(
+                self.root, self.target_version, merged,
+                mode="initial-normalization")
 
 
 if __name__ == "__main__":

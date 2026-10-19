@@ -482,24 +482,56 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     fixedIdentities(processInstanceId), Duration.ofMillis(120), behaviors);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            assertInstanceOf(IngressReceipt.Ambiguous.class, deployment.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+            var first = assertInstanceOf(IngressReceipt.Ambiguous.class,
+                    deployment.ingress().offerDurably(
+                            IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+            assertFalse(first.acknowledgeable(), () -> "ambiguous definition result: " + first.reason());
+            assertEquals(1, executions.inboxRecordCount(IDENTITY.tenantId())
+                    .toCompletableFuture().get(10, TimeUnit.SECONDS),
+                    "the first ambiguous attempt must already have committed the inbox record");
+            assertFalse(instanceExists(executions, IDENTITY.tenantId(), processInstanceId),
+                    "an execution cannot exist before the definition becomes visible");
+            assertEquals(0, engine.spawnCount(),
+                    "the unresolved definition must prevent traversal dispatch");
             definitions.release();
-            assertInstanceOf(IngressReceipt.Ambiguous.class, deployment.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+            var second = assertInstanceOf(IngressReceipt.Ambiguous.class,
+                    deployment.ingress().offerDurably(
+                            IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+            assertFalse(second.acknowledgeable(), () -> "ambiguous manifest result: " + second.reason());
+            assertEquals(1, executions.inboxRecordCount(IDENTITY.tenantId())
+                    .toCompletableFuture().get(10, TimeUnit.SECONDS),
+                    "redelivery must reuse the first attempt's durable inbox record");
+            assertFalse(instanceExists(executions, IDENTITY.tenantId(), processInstanceId),
+                    "an execution cannot exist before the manifest becomes visible");
+            assertEquals(0, engine.spawnCount(),
+                    "the unresolved manifest must prevent traversal dispatch");
             manifests.release();
+            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var repaired = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
-                    "poller-1", "key-A");
+            var repairedService = manifestService(engine, executions, behaviors, realManifests);
+            var repairedDeployment = boundedDeployment(deploymentId, engine, executions, realDefinitions,
+                    repairedService, fixedIdentities(processInstanceId),
+                    DefaultGraphDeployment.DEFAULT_STORE_CALL_BOUND, behaviors);
+            repairedDeployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            int spawnedBeforeRedelivery = engine.spawnCount();
+            assertEquals(0, spawnedBeforeRedelivery,
+                    "the injection phases must not have dispatched a traversal");
+            var repaired = repairedDeployment.ingress().offerDurably(
+                    IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.Duplicate.class, repaired,
-                    "the inbox committed on the first attempt, while idempotent late prerequisite writes "
-                            + "allow the same deterministic execution to be created once");
+                    () -> "the inbox and prerequisites committed before the single repaired redelivery; "
+                            + "actual receipt: " + repaired
+                            + (repaired instanceof IngressReceipt.Ambiguous ambiguous
+                                    ? "; ambiguous reason: " + ambiguous.reason() : ""));
             var page = executions.listProcessInstances(IDENTITY.tenantId(),
                             ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(10))
                     .toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertEquals(1, page.items().size());
             assertEquals(processInstanceId, page.items().getFirst().key().processInstanceId());
-            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(spawnedBeforeRedelivery, engine.spawnCount(),
+                    "the repaired duplicate must not start a second traversal");
+            repairedDeployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -850,15 +882,15 @@ class DeploymentHostedGraphDefinitionBindingTest {
             this.delegate = delegate;
         }
 
-        void release() {
+        void release() throws Exception {
             CompletionStage<StoredGraphDefinition> write = actual.get();
             CompletableFuture<StoredGraphDefinition> visible = gate.get();
             assertNotNull(write, "the delayed definition write was never entered");
             assertNotNull(visible, "the delayed definition gate was never installed");
-            write.whenComplete((stored, failure) -> {
-                if (failure == null) visible.complete(stored);
-                else visible.completeExceptionally(failure);
-            });
+            StoredGraphDefinition stored = write.toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertTrue(visible.complete(stored), "the delayed definition gate was already completed");
+            assertEquals(stored, visible.get(10, TimeUnit.SECONDS),
+                    "the committed definition must be visible before release returns");
         }
 
         @Override public Set<StoreCapability> capabilities() { return delegate.capabilities(); }
@@ -978,15 +1010,15 @@ class DeploymentHostedGraphDefinitionBindingTest {
             this.operation = operation;
         }
 
-        void release() {
+        void release() throws Exception {
             CompletionStage<StoredExecutionManifest> result = actual.get();
             CompletableFuture<StoredExecutionManifest> visible = gate.get();
             assertNotNull(result, "the delayed manifest operation was never entered");
             assertNotNull(visible, "the delayed manifest gate was never installed");
-            result.whenComplete((stored, failure) -> {
-                if (failure == null) visible.complete(stored);
-                else visible.completeExceptionally(failure);
-            });
+            StoredExecutionManifest stored = result.toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertTrue(visible.complete(stored), "the delayed manifest gate was already completed");
+            assertEquals(stored, visible.get(10, TimeUnit.SECONDS),
+                    "the committed manifest result must be visible before release returns");
         }
 
         private CompletionStage<StoredExecutionManifest> maybeDelay(DelayOperation candidate,

@@ -12,12 +12,12 @@ WORKDIR /workspace/ravenroot-ui
 COPY ravenroot/ravenroot-ui/package.json ravenroot/ravenroot-ui/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY ravenroot/ravenroot-ui/ ./
-# UI tests run independently against a full repository checkout
-# checkout, because the suite reads shared fixtures from ../ravenroot-core (see
-# ravenroot/ravenroot-ui/test/graphml-corpus.test.js). This stage only builds the UI; it does not
-# have that sibling directory in its build context and must not re-run the suite here. A previous
-# version copied that fixture subtree here so `npm test` could run inside this stage; now that the
-# suite no longer runs here, the bridge is gone with it.
+COPY ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserHttpHandler.java \
+    /workspace/ravenroot-server/src/main/java/ai/ravenroot/server/embed/
+# UI tests run independently against a full repository checkout because the suite reads shared
+# fixtures from ../ravenroot-core (see ravenroot/ravenroot-ui/test/graphml-corpus.test.js). This stage
+# supplies the one production sibling source audited by the build-time localization check, but it
+# does not copy the test fixtures or re-run the suite here.
 RUN npm run build
 
 FROM ${MAVEN_IMAGE} AS java-build

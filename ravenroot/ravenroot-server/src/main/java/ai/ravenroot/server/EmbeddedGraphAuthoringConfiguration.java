@@ -16,10 +16,10 @@ import java.util.function.Consumer;
 /**
  * Explicit embedded-server opt-in for the shipped Git graph-authoring composition.
  *
- * <p>{@link #fromEnvironment} reads the same repository, provider, artifact and credential-reference
- * settings as {@link RavenrootServerMain}. Credential material remains behind the supplied resolver;
- * this object never stores it. A local-mode configuration is inert, preserving the behavior of every
- * existing {@link RavenrootServer} constructor.</p>
+ * <p>{@link #fromEnvironment} reads the same repository, provider, artifact and
+ * credential-reference settings as {@link RavenrootServerMain}. Credential material remains behind
+ * the supplied resolver; this object never stores it. A local-mode configuration is inert,
+ * preserving the behavior of every existing {@link RavenrootServer} constructor.
  */
 public final class EmbeddedGraphAuthoringConfiguration {
     private static final CredentialResolver NO_CREDENTIALS = ignored -> Optional.empty();
@@ -52,15 +52,42 @@ public final class EmbeddedGraphAuthoringConfiguration {
      */
     public static EmbeddedGraphAuthoringConfiguration fromEnvironment(Map<String, String> environment,
             CredentialResolver credentials) {
-        return gitOrLocal(GraphAuthoringConfiguration.fromEnvironment(environment), credentials,
-                GraphAuthoringRepositories::create, PublishedGraphArtifactCatalog::new);
+        Map<String, String> deployment = Map.copyOf(environment);
+        return gitOrLocal(
+                GraphAuthoringConfiguration.fromEnvironment(deployment),
+                credentials,
+                (configuration, resolver, publications, admission) ->
+                        GraphAuthoringRepositories.create(
+                                configuration, resolver, publications, admission, deployment),
+                PublishedGraphArtifactCatalog::new);
     }
 
-    /** Uses an already validated authoring configuration with the host's trusted credential resolver. */
+    /**
+     * Uses an already validated authoring configuration with the host's trusted credential
+     * resolver.
+     */
     public static EmbeddedGraphAuthoringConfiguration of(GraphAuthoringConfiguration configuration,
             CredentialResolver credentials) {
         return gitOrLocal(configuration, credentials, GraphAuthoringRepositories::create,
                 PublishedGraphArtifactCatalog::new);
+    }
+
+    /**
+     * Decorates the managed archive while retaining admission, publication and resource ownership.
+     * The decorator receives a non-owning view; its own close hook and the archive close run once.
+     */
+    public EmbeddedGraphAuthoringConfiguration decorateRepository(
+            java.util.function.UnaryOperator<GraphAuthoringRepository> decorator) {
+        Objects.requireNonNull(decorator, "decorator");
+        return gitOrLocal(
+                configuration,
+                credentials,
+                (configuration, resolver, publications, admission) ->
+                        ai.ravenroot.server.authoring.ForwardingGraphAuthoringRepository.managed(
+                                repositories.create(
+                                        configuration, resolver, publications, admission),
+                                decorator),
+                catalogs);
     }
 
     static EmbeddedGraphAuthoringConfiguration forTest(GraphAuthoringConfiguration configuration,

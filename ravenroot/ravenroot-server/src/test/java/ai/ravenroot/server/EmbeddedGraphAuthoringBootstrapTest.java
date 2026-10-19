@@ -1,18 +1,24 @@
 package ai.ravenroot.server;
 
-import ai.ravenroot.api.authoring.GraphAuthoringRepository;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.authoring.GraphAuthoringRepository;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
-import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
+import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.UnknownBehaviorPolicy;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
-import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
 import ai.ravenroot.server.authoring.EmptyPublishedGraphArtifactCatalogFixture;
+import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
 import ai.ravenroot.server.security.DisabledLoopbackAuthenticator;
 import ai.ravenroot.server.support.ForwardingRavenrootApplication;
 import org.junit.jupiter.api.Test;
@@ -41,26 +47,21 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 class EmbeddedGraphAuthoringBootstrapTest {
-    private static final String GRAPH = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
-              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
-              <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
-              <graph id="embedded-authoring" edgedefault="directed">
-                <node id="error"><data key="kind">ERROR</data></node>
-                <node id="start"><data key="kind">START</data></node>
-                <node id="end"><data key="kind">END</data></node>
-                <edge id="e1" source="start" target="end"><data key="outcome">continue</data></edge>
-              </graph>
-            </graphml>
-            """;
+    private static final String GRAPH =
+            """
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="embedded-authoring" edgedefault="directed">
+    <node id="error"><data key="kind">ERROR</data></node>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="e1" source="start" target="end"><data key="outcome">continue</data></edge>
+  </graph>
+</graphml>
+""";
 
     @TempDir
     Path temporaryDirectory;
@@ -107,6 +108,63 @@ class EmbeddedGraphAuthoringBootstrapTest {
             assertEquals(200, artifactRoute.statusCode(), artifactRoute.body());
             assertTrue(artifactRoute.body().contains("\"items\":[]"), artifactRoute.body());
         }
+    }
+
+    @Test
+    void publicDecorationRetainsAdmissionAndClosesOwnedDelegateOnce() throws Exception {
+        var directory = temporaryDirectory.resolve("decorated-repository");
+        initGit(directory);
+        var closed = new java.util.concurrent.atomic.AtomicInteger();
+        var configured =
+                EmbeddedGraphAuthoringConfiguration.forTest(
+                                configuration(),
+                                ignored ->
+                                        Optional.of(new SecretValue("fixture-token".toCharArray())),
+                                (configuration, credentials, publications, admission) ->
+                                        new LocalGitRepository(directory, configuration, admission),
+                                EmptyPublishedGraphArtifactCatalogFixture::create)
+                        .decorateRepository(
+                                delegate ->
+                                        new ai.ravenroot.server.authoring
+                                                .ForwardingGraphAuthoringRepository(delegate) {
+                                            @Override
+                                            public void close() {
+                                                closed.incrementAndGet();
+                                                super.close();
+                                            }
+                                        });
+        try (var engine = new PekkoExecutionEngine("embedded-decoration-" + UUID.randomUUID());
+                var server =
+                        new RavenrootServer(
+                                        application(engine, true),
+                                        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
+                                        null,
+                                        new DisabledLoopbackAuthenticator())
+                                .configureGraphAuthoring(configured)) {
+            server.start();
+            var invalid =
+                    HttpClient.newHttpClient()
+                            .send(
+                                    HttpRequest.newBuilder(
+                                                    URI.create(
+                                                            "http://localhost:"
+                                                                    + server.port()
+                                                                    + "/v1/graph-authoring/invalid.graphml"))
+                                            .header("Idempotency-Key", "invalid-graph-key-0001")
+                                            .header("X-Ravenroot-Expected-Draft", "absent")
+                                            .header("X-Ravenroot-Expected-Release", "absent")
+                                            .header("X-Ravenroot-Expected-Publication", "absent")
+                                            .PUT(
+                                                    HttpRequest.BodyPublishers.ofString(
+                                                            GRAPH.replace(
+                                                                    "source=\"start\"",
+                                                                    "source=\"missing\"")))
+                                            .build(),
+                                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(invalid.statusCode() >= 400, invalid.body());
+            assertFalse(Files.exists(directory.resolve("graphs/customers/local/invalid.graphml")));
+        }
+        assertEquals(1, closed.get());
     }
 
     @Test

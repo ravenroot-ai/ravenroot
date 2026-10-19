@@ -6987,6 +6987,28 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                 finally:
                     path.write_text(original, encoding="utf-8")
 
+    def test_read_index_bounds_and_digest_admission_cannot_be_rebaselined_away(self) -> None:
+        for name, before, after in (
+                ("AuthoringAdmission.java", "if (isCancelled() && state.compareAndSet(0, 2)) admission.release();", "if (isCancelled()) admission.release();"),
+                ("ReadObjects.java", "if (loading.size() >= 64)", "if (loading.size() >= 64000)"),
+                ("ReadObjects.java", "verifyBlob(identity, value);", "// missing digest admission"),
+                ("AuthoringIndexReader.java", "outstanding.size() < 16", "outstanding.size() < 100000"),
+                ("JdbcGraphAuthoringReadIndex.java", "private static final int GENERATIONS = 16;", "private static final int GENERATIONS = 16000;")):
+            relative = next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.name == name)
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=name, guard=before):
+                self.assertEqual(1, original.count(before))
+                mutated = original.replace(before, after, 1)
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_FILE_PROOFS,
+                                         {relative: audit._source_digest(mutated)}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(
+                            self.root, self.discovered))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
     def test_redirect_policy_cannot_be_weakened_by_only_refreshing_the_method_digest(self) -> None:
         path = self.root / audit.GRAPH_AUTHORING_UI_PATH
         original = path.read_text(encoding="utf-8")

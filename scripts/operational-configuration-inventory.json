@@ -1156059,6 +1156059,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "release-080-integrated-preparation-v1",
+      "issue": "#578",
+      "sourceRevision": "7437814da16e0da08fa589596bc73b9c231de564",
+      "targetRevision": "7100b55fbaf417320e02b820a1512ac427cb3616",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "2a297ba9cc089d6d0d40b4ce5dbbcef9d9f3edb0e116443ff5ed4ab4cbf2eefa",
+      "targetCandidateDigest": "31ff6d2c39e5623df280a9c2233c94bab16bcefd369dd7f9d33e0b60447ddd45",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

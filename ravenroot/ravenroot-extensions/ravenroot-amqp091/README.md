@@ -218,6 +218,15 @@ redelivery produces the same key, while accidental producer reuse of one ID for 
 content cannot be mistaken for `Duplicate`. The digest is a collision guard, never a replacement for
 producer identity; correlation id, delivery tag and redelivery state are not identity inputs.
 
+Listener health describes its current ability to consume and admit work. A delivery with missing
+stable identity, invalid metadata or an oversized body is rejected with `basic.nack(requeue=false)`
+and leaves an otherwise healthy listener `READY` (source session `LISTENING`). The rejection is
+reported on logger `ai.ravenroot.amqp.delivery.rejected` with token
+`ravenroot_amqp_delivery_rejected` and a fixed reason code, without message content or identity.
+Broker disconnects and durable-ingress refusal or ambiguity still report degraded health; reconnect
+readiness or a durably accepted, broker-acknowledged delivery restores healthy service. Rejected
+input alone never removes a healthy deployment from READY-only embedded discovery.
+
 The broker's unacked delivery is the sole resume state. Ravenroot's source checkpoint is used only as
 a startup durability-capability probe and is never advanced. `DurablyCommitted` and `Duplicate` are
 the only receipts that permit `basic.ack`. `Ambiguous` re-offers the same idempotency key while leaving

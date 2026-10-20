@@ -520460,7 +520460,22 @@
       "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7125 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"paneIsDirty\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence."
     },
     {
-      "id": "oc-b39d48730cd8bc8ff8d7",
+      "id": "oc-db3895c4850fe427f5fd",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 7126,
+      "symbol": "test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"activeAuthoring?.localChanges\"",
+      "expressionDigest": "97c7eb188f30ce2099432adb620ec9d0a2aabe2dc257b33e1f29a3c40982dcdd",
+      "evidenceDigest": "02b96d1cffe0855681e0400b1af09657dd6f5b64074f5d54659ef6015a6d5438",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"activeAuthoring?.localChanges\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence."
+    },
+    {
+      "id": "oc-35637cab753600a89ea4",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 7126,
       "symbol": "test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away",
@@ -520468,14 +520483,18 @@
       "role": "inline",
       "expression": "\"false\"",
       "expressionDigest": "076de6e730df0b4c3860877a0f619c6ac11f8aefd78313ac793a2a703c026869",
-      "evidenceDigest": "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2",
+      "evidenceDigest": "02b96d1cffe0855681e0400b1af09657dd6f5b64074f5d54659ef6015a6d5438",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"false\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence."
+      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"false\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence.",
+      "identityMigration": {
+        "history": "issue-588-authoring-working-view-reconciliation",
+        "fromId": "oc-b39d48730cd8bc8ff8d7"
+      }
     },
     {
-      "id": "oc-db0286524bf9aec2b8cb",
+      "id": "oc-ec4d7ae11ace6f709903",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 7126,
       "symbol": "test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away",
@@ -520483,26 +520502,15 @@
       "role": "inline",
       "expression": "\"updateHistoryUi\"",
       "expressionDigest": "23fc0979f8b10b04fba48c8b966a59cf2fdbbbcba309c07434c2bcf3338029e5",
-      "evidenceDigest": "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2",
+      "evidenceDigest": "02b96d1cffe0855681e0400b1af09657dd6f5b64074f5d54659ef6015a6d5438",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"updateHistoryUi\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence."
-    },
-    {
-      "id": "oc-35b7e254a5c16dde55c0",
-      "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 7126,
-      "symbol": "test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away",
-      "kind": "inline-script-operational",
-      "role": "inline",
-      "expression": "\"workspace.active?.authoring?.localChanges\"",
-      "expressionDigest": "4c56bdfb48512c0f1936daae3df40cbe239cc4e3008eeb8be26f8390a898e0d4",
-      "evidenceDigest": "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2",
-      "surface": "test-fixture",
-      "status": "retained",
-      "classification": "test-fixture",
-      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"workspace.active?.authoring?.localChanges\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence."
+      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"updateHistoryUi\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence.",
+      "identityMigration": {
+        "history": "issue-588-authoring-working-view-reconciliation",
+        "fromId": "oc-db0286524bf9aec2b8cb"
+      }
     },
     {
       "id": "oc-aeb3f2e58224db04b3b1",
@@ -658571,6 +658579,23 @@
       "rationale": "Negative executable authoring-index audit fixture verifies that bounded admission and digest guards cannot be weakened by refreshing a source proof.",
       "retirementRationale": "Issue #588 replaces this exact closed RouteTable count fixture with the canonical 122-route/846-atom shape after adding one authenticated successor descriptor; typed role partition and negative publication checks remain strict.",
       "evidence": "{\"methods\": 134, \"path\": 121, \"summary\": 462, \"successStatuses\": 125},"
+    },
+    {
+      "id": "oc-35b7e254a5c16dde55c0",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 7126,
+      "symbol": "test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"workspace.active?.authoring?.localChanges\"",
+      "expressionDigest": "4c56bdfb48512c0f1936daae3df40cbe239cc4e3008eeb8be26f8390a898e0d4",
+      "evidenceDigest": "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"workspace.active?.authoring?.localChanges\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence.",
+      "retirementRationale": "Issue #588 attempt5 replaces this obsolete direct workspace.active authoring read in the managed dirty-marker negative mutation fixture with the existing synchronized activeAuthoring view. The same false-substitution mutation still fails the independent semantic boundary and full authority; no guard is removed. The replacement source atom is explicitly classified as a test fixture.",
+      "evidence": "(ui_path, \"updateHistoryUi\", \"workspace.active?.authoring?.localChanges\", \"false\"),"
     }
   ],
   "evidenceRecords": {
@@ -658691,6 +658716,7 @@
     "02a7c77b32a117471d312636e3e791e2fb969811f6e1b5f9a36a058aa562bd06": "\"event\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"version\",\"event\",\"action\",\"deliveryId\",\"repositoryId\",\"installationId\",\"body\"],\"properties\":{\"version\":{\"const\":\"github.event.v1\"},\"event\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":64},\"action\":{\"type\":\"string\",\"maxLength\":64},\"deliveryId\":{\"type\":\"string\",\"pattern\":\"^[A-Za-z0-9-]{1,128}$\"},\"repositoryId\":{\"type\":\"integer\",\"minimum\":1},\"installationId\":{\"type\":\"integer\",\"minimum\":1},\"body\":{\"type\":\"object\"}}},",
     "02b12e26246f4dd3ce37d4e151a8985e2c47d6035752e50416f169a80ca48473": "\"\"\"Maintain the non-Java web-server boundary separately, refusing unclassified runtime names.\"\"\"",
     "02b4f15bae4f31deda9c683acef415d35a6dd71d65eda1e17140ffcc5768da13": "try { expires = Instant.parse(string(body, \"expires_at\"));",
+    "02b96d1cffe0855681e0400b1af09657dd6f5b64074f5d54659ef6015a6d5438": "(ui_path, \"updateHistoryUi\", \"activeAuthoring?.localChanges\", \"false\"),",
     "02b9da772d96f142c27c22e81c3625d62cb19abb912b0ebbdc226e6662599ac6": "public static final int HARD_MAX_QUERY_BYTES = 16 * 1024;",
     "02c20124f46daa93875ef8b9d375d17e34b0e440cbca1eb47a7df01ddddb3a43": "\"$PROJECT_DIR/plugin.sh\" install \"$BUNDLE_DIR\" --dir \"$PLUGINS_DIR\"",
     "02c2f46fc7a22b074fa8f48079890feb60b2a501b741c888d0f8c8bdb9935dfd": "public final class ActiveExecutionRegistry implements AutoCloseable { public static final String TENANT_LIMIT_CODE = \"TENANT_ACTIVE_EXECUTION_LIMIT_REACHED\";",
@@ -659961,7 +659987,6 @@
     "1ffaf173156c18084e9e3621c3f507672a33c16adbfa39ee48e85e019fc6de46": "MAX_AUTHORED_RELEASE_VERSION = 9_007_199_254_740_991",
     "1ffc2908e2416082b7edccef5cdfe861d4c260d96d3e92fe588685a9128ea16f": "installInput.addEventListener('change', async () => { try { const package_ = await packageFromFiles(installInput.files);",
     "20046d8efab23e34ae0c8f1ca830a2505a5326ee32775b443f8d2011257b5668": "try { maxConcurrency = Integer.parseInt(p[8]);",
-    "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2": "(ui_path, \"updateHistoryUi\", \"workspace.active?.authoring?.localChanges\", \"false\"),",
     "201b4828e693c1eb48967401d76d48e1838a43cb09e6bc99f8f68eb210625e14": "(ui_path, \"saveRepositoryGraph\", \"if (target.history === history && history.revision() === submittedRevision)\", \"if (true)\"),",
     "201cf89a18f73449f7ea111077fe4ad3d57dfd65e5c13592ae350d2bee302252": "(\"guide\", \"Minikube 1.38.1\", \"Minikube 1.39.0\"),",
     "20248e31f198949950c71ba5d31b2ef50378f0dfa9390edeb045855f948a5d55": "} private synchronized void release(String tenant) { int remaining = tenantActive.getOrDefault(tenant, 0) - 1;",
@@ -1243853,6 +1243878,56 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-588-authoring-working-view-reconciliation",
+      "issue": "#588",
+      "sourceRevision": "91d7594349841ce5f9d92f743f6155668bbf64a6",
+      "targetRevision": "871ef15314d148f12bfef746d80941e57b5c8fd2",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "3fc70b9cdf9563d8f2082e7bda8792a89f527ea5ef9d0406dff47da0365182f9",
+      "targetCandidateDigest": "4cda752e4d5fcbc12996f1f9f0bafa75f55d024e9dea58f41eb6f4921c901999",
+      "mappings": [
+        {
+          "fromId": "oc-b39d48730cd8bc8ff8d7",
+          "toId": "oc-35637cab753600a89ea4",
+          "approved": true,
+          "rationale": "Issue #588 preserves this exact inline-script-operational atom in scripts/tests/test_audit_operational_configuration.py#test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline). There is exactly one remaining endpoint with this exact path, symbol, kind, role and expression.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2",
+            "afterEvidenceDigest": "02b96d1cffe0855681e0400b1af09657dd6f5b64074f5d54659ef6015a6d5438"
+          }
+        },
+        {
+          "fromId": "oc-db0286524bf9aec2b8cb",
+          "toId": "oc-ec4d7ae11ace6f709903",
+          "approved": true,
+          "rationale": "Issue #588 preserves this exact inline-script-operational atom in scripts/tests/test_audit_operational_configuration.py#test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline). There is exactly one remaining endpoint with this exact path, symbol, kind, role and expression.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "2009c07e178775d50ffdf3eee81bff4bdc36fbb07c750a429d389e98de3598b2",
+            "afterEvidenceDigest": "02b96d1cffe0855681e0400b1af09657dd6f5b64074f5d54659ef6015a6d5438"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-35b7e254a5c16dde55c0",
+          "approved": true,
+          "rationale": "Issue #588 attempt5 replaces this obsolete direct workspace.active authoring read in the managed dirty-marker negative mutation fixture with the existing synchronized activeAuthoring view. The same false-substitution mutation still fails the independent semantic boundary and full authority; no guard is removed. The replacement source atom is explicitly classified as a test fixture."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-db3895c4850fe427f5fd",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "Issue #588 source review of scripts/tests/test_audit_operational_configuration.py:7126 #test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away (inline) atom \"activeAuthoring?.localChanges\": negative source mutation or assertion fixture proving explicit managed-source and successor guards cannot be weakened by refreshing exact evidence."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [
@@ -1318517,7 +1318592,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "35eaba541bd52dd4f3d7d421be416a7f5c40b97ea22fd673c35218ef203730fd"
+          "digest": "7d9a4fdc6823bb97b0def486ad7a86f6f7a37b08620b6b11ef4eeed795c0698e"
         },
         {
           "path": "ravenroot/ravenroot-ui/src/program-language.js",
@@ -1320582,7 +1320657,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "6dfbc909a6a5b4f78ba4048e695aaebdc385004d09b31ec09612622f96561bcf"
+    "digest": "53f735171a2796441b11097b6f2768a68f485af6a770f28f35162603d947390c"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {
@@ -1325707,7 +1325782,7 @@
       },
       "uiSupportSpanDigests": {
         "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
-        "updateHistoryUi": "c3d7803dc76d48fc860316aac24617fa5dbc08e2270999ec74115a04164b413c",
+        "updateHistoryUi": "59437d046a615c053834b4b9d36f30fafba3312f00dd1c382cd410061f5011d6",
         "completeReplaceActiveDocument": "5f048a87c67189014d16a0cee8d9af2ce0ddf81f95cc709a992e4841c18a9ca5",
         "bootApplication": "9a21d4cd04d3f43b387e7f0b97581629e29710b4b68dd7c9c3f422be1432e16d",
         "syncGraphModeLabel": "a205d6a872ef979883261fb8c43ff376231456941c05321787ac53ef789faef9"

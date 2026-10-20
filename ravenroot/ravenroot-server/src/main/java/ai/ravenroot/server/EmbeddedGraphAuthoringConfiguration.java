@@ -4,6 +4,8 @@ import ai.ravenroot.api.authoring.GraphAuthoringRepository;
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
 import ai.ravenroot.server.authoring.GraphAuthoringRepositories;
+import ai.ravenroot.server.authoring.GraphAuthoringWebhookConfiguration;
+import ai.ravenroot.server.authoring.GraphAuthoringWebhookHttpApi;
 import ai.ravenroot.server.authoring.PublicationEvidence;
 import ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog;
 import ai.ravenroot.server.persistence.ExecutionStoreConfiguration;
@@ -29,9 +31,17 @@ public final class EmbeddedGraphAuthoringConfiguration {
     private final CredentialResolver credentials;
     private final RepositoryFactory repositories;
     private final CatalogFactory catalogs;
+    private final GraphAuthoringWebhookConfiguration webhooks;
 
     private EmbeddedGraphAuthoringConfiguration(GraphAuthoringConfiguration configuration,
             CredentialResolver credentials, RepositoryFactory repositories, CatalogFactory catalogs) {
+        this(configuration, credentials, repositories, catalogs, GraphAuthoringWebhookConfiguration.disabled());
+    }
+
+    private EmbeddedGraphAuthoringConfiguration(GraphAuthoringConfiguration configuration,
+            CredentialResolver credentials, RepositoryFactory repositories, CatalogFactory catalogs,
+            GraphAuthoringWebhookConfiguration webhooks) {
+        this.webhooks = Objects.requireNonNull(webhooks, "webhooks");
         this.configuration = Objects.requireNonNull(configuration, "configuration");
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.repositories = Objects.requireNonNull(repositories, "repositories");
@@ -60,13 +70,15 @@ public final class EmbeddedGraphAuthoringConfiguration {
                         ? null
                         : ExecutionStoreConfiguration.fromSystem(
                                 System.getProperties(), environment);
+        if (authoring.mode() == GraphAuthoringConfiguration.Mode.LOCAL) return disabled();
         return gitOrLocal(
                 authoring,
                 credentials,
                 (configuration, resolver, publications, admission) ->
                         GraphAuthoringRepositories.create(
                                 configuration, resolver, publications, admission, persistence),
-                PublishedGraphArtifactCatalog::new);
+                PublishedGraphArtifactCatalog::new)
+                .withWebhooks(GraphAuthoringWebhookConfiguration.fromEnvironment(environment));
     }
 
     /**
@@ -94,7 +106,18 @@ public final class EmbeddedGraphAuthoringConfiguration {
                                 repositories.create(
                                         configuration, resolver, publications, admission),
                                 decorator),
-                catalogs);
+                catalogs).withWebhooks(webhooks);
+    }
+
+    /** Enables the shipped provider-authenticated receiver; credential material is resolved per delivery. */
+    public EmbeddedGraphAuthoringConfiguration withWebhooks(GraphAuthoringWebhookConfiguration webhooks) {
+        Objects.requireNonNull(webhooks, "webhooks");
+        if (!enabled() && webhooks.enabled()) throw new IllegalArgumentException("Webhooks require Git authoring");
+        return new EmbeddedGraphAuthoringConfiguration(configuration, credentials, repositories, catalogs, webhooks);
+    }
+
+    GraphAuthoringWebhookHttpApi createWebhook(GraphAuthoringRepository repository) {
+        return webhooks.enabled() ? new GraphAuthoringWebhookHttpApi(configuration, webhooks, credentials, repository) : null;
     }
 
     static EmbeddedGraphAuthoringConfiguration forTest(GraphAuthoringConfiguration configuration,

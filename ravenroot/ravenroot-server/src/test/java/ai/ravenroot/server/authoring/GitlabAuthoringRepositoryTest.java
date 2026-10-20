@@ -834,6 +834,10 @@ class GitlabAuthoringRepositoryTest {
                 symlink,
                 failTransport;
         volatile boolean oversizedResponse, malformedResponse, infiniteTree, slowResponse;
+        volatile String expectedToken = "server-secret", headBlobOverride, headCommitOverride;
+        volatile boolean headMissingLast, headMissingCommit, headDuplicateBlob;
+        volatile int headStatus;
+        final AtomicInteger retryHeadResponses = new AtomicInteger();
         volatile int treeRequests, totalRequests, postRequests, retryGetResponses;
         volatile boolean retryPostResponses;
         volatile Runnable beforeSend;
@@ -846,6 +850,12 @@ class GitlabAuthoringRepositoryTest {
         volatile Runnable beforeRequest;
         final AtomicInteger benchmarkRequests = new AtomicInteger(),
                 benchmarkBlobs = new AtomicInteger();
+        final java.util.concurrent.atomic.AtomicLong benchmarkResponseBytes =
+                new java.util.concurrent.atomic.AtomicLong();
+        final java.util.concurrent.atomic.AtomicLong benchmarkDocumentBytes =
+                new java.util.concurrent.atomic.AtomicLong();
+        final AtomicInteger benchmarkFileGets = new AtomicInteger(),
+                benchmarkFileHeads = new AtomicInteger();
 
         synchronized void seed(int count) {
             var files = new HashMap<String, byte[]>();
@@ -890,7 +900,7 @@ class GitlabAuthoringRepositoryTest {
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler)
                 throws IOException {
             assertEquals(
-                    "server-secret", request.headers().firstValue("PRIVATE-TOKEN").orElseThrow());
+                    expectedToken, request.headers().firstValue("PRIVATE-TOKEN").orElseThrow());
             if (beforeRequest != null) beforeRequest.run();
             benchmarkRequests.incrementAndGet();
             if (transientResponses.getAndUpdate(value -> Math.max(0, value - 1)) > 0)
@@ -900,7 +910,6 @@ class GitlabAuthoringRepositoryTest {
                                 transientStatus,
                                 new byte[0],
                                 rateHeaders ? Map.of("Retry-After", List.of("0")) : Map.of());
-            if (request.uri().getPath().contains("/blobs/")) benchmarkBlobs.incrementAndGet();
             totalRequests++;
             if (beforeSend != null) {
                 var action = beforeSend;
@@ -987,7 +996,23 @@ class GitlabAuthoringRepositoryTest {
                 loseMr = false;
                 throw new IOException("lost accepted MR response");
             }
-            return (HttpResponse<T>) new FakeResponse(request, result.status, result.body);
+            byte[] transferred = request.method().equals("HEAD") ? new byte[0] : result.body;
+            benchmarkResponseBytes.addAndGet(transferred.length);
+            if (result.status == 200 && endpoint.startsWith("/repository/files/")) {
+                if (request.method().equals("HEAD")) benchmarkFileHeads.incrementAndGet();
+                else if (request.method().equals("GET")) benchmarkFileGets.incrementAndGet();
+            }
+            if (result.status == 200
+                    && request.method().equals("GET")
+                    && (endpoint.startsWith("/repository/blobs/")
+                            || endpoint.startsWith("/repository/files/"))) {
+                benchmarkBlobs.incrementAndGet();
+                var content = map(PayloadJson.read(transferred, JSON).toJava()).get("content");
+                benchmarkDocumentBytes.addAndGet(
+                        Base64.getDecoder().decode(content.toString()).length);
+            }
+            return (HttpResponse<T>)
+                    new FakeResponse(request, result.status, transferred, result.headers);
         }
 
         private synchronized Response dispatch(
@@ -1074,14 +1099,51 @@ class GitlabAuthoringRepositoryTest {
                                 "content",
                                 Base64.getEncoder().encodeToString(blobs.get(blob))));
             }
-            if (method.equals("GET") && endpoint.startsWith("/repository/files/")) {
+            if ((method.equals("GET") || method.equals("HEAD"))
+                    && endpoint.startsWith("/repository/files/")) {
                 Commit commit = commits.get(param(query, "ref"));
                 String path = endpoint.substring("/repository/files/".length());
                 if (!commit.files.containsKey(path)) return response(404, Map.of());
                 String blob = digest(commit.files.get(path));
                 blobs.put(blob, commit.files.get(path));
+                if (method.equals("HEAD")) {
+                    if (headStatus != 0) return new Response(headStatus, new byte[0], Map.of());
+                    if (retryHeadResponses.getAndUpdate(value -> Math.max(0, value - 1)) > 0)
+                        return new Response(429, new byte[0], Map.of("Retry-After", List.of("0")));
+                    var headers = new HashMap<String, List<String>>();
+                    headers.put(
+                            "X-Gitlab-Blob-Id",
+                            List.of(headBlobOverride == null ? blob : headBlobOverride));
+                    if (!headMissingLast)
+                        headers.put("X-Gitlab-Last-Commit-Id", List.of(commit.modified.get(path)));
+                    headers.put(
+                            "X-Gitlab-Commit-Id",
+                            List.of(
+                                    headCommitOverride == null
+                                            ? param(query, "ref")
+                                            : headCommitOverride));
+                    headers.put(
+                            "X-Gitlab-Size",
+                            List.of(Integer.toString(commit.files.get(path).length)));
+                    if (headMissingCommit) headers.remove("X-Gitlab-Commit-Id");
+                    if (headDuplicateBlob) headers.put("X-Gitlab-Blob-Id", List.of(blob, blob));
+                    return new Response(200, new byte[0], Map.copyOf(headers));
+                }
                 return response(
-                        200, Map.of("blob_id", blob, "last_commit_id", commit.modified.get(path)));
+                        200,
+                        Map.of(
+                                "blob_id",
+                                blob,
+                                "last_commit_id",
+                                commit.modified.get(path),
+                                "commit_id",
+                                param(query, "ref"),
+                                "encoding",
+                                "base64",
+                                "content",
+                                Base64.getEncoder().encodeToString(commit.files.get(path)),
+                                "size",
+                                commit.files.get(path).length));
             }
             if (method.equals("POST") && endpoint.equals("/repository/commits")) {
                 if (beforeCommit != null) {
@@ -1352,7 +1414,11 @@ class GitlabAuthoringRepositoryTest {
                 Map<String, byte[]> files,
                 Map<String, String> modified) {}
 
-        private record Response(int status, byte[] body) {}
+        private record Response(int status, byte[] body, Map<String, List<String>> headers) {
+            Response(int status, byte[] body) {
+                this(status, body, Map.of());
+            }
+        }
     }
 
     private record FakeResponse(

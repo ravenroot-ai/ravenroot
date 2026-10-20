@@ -744,6 +744,14 @@ class AuthoringReadIndexIntegrationTest {
             return github ? gh.benchmarkBlobs.get() : gl.benchmarkBlobs.get();
         }
 
+        long responseBytes() {
+            return github ? gh.benchmarkResponseBytes.get() : gl.benchmarkResponseBytes.get();
+        }
+
+        long documentBytes() {
+            return github ? gh.benchmarkDocumentBytes.get() : gl.benchmarkDocumentBytes.get();
+        }
+
         String provider() {
             return github ? "github" : "gitlab";
         }
@@ -822,6 +830,8 @@ class AuthoringReadIndexIntegrationTest {
             try (var readersExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
                 var tasks = new ArrayList<CompletableFuture<Long>>();
                 int calls = fixture.calls(), bodies = fixture.blobs();
+                long responseBytes = fixture.responseBytes(),
+                        documentBytes = fixture.documentBytes();
                 long cpu = processCpu();
                 for (int i = 0; i < readers; i++)
                     tasks.add(
@@ -853,8 +863,9 @@ class AuthoringReadIndexIntegrationTest {
                 long[] times = tasks.stream().mapToLong(CompletableFuture::join).sorted().toArray();
                 System.out.printf(
                         "INDEX_FIXTURE db=%s provider=%s graphs=%d phase=concurrent operation=%s"
-                                + " readers=%d samples=%d p50_ms=%.3f p95_ms=%.3f provider_calls=%d"
-                                + " bodies=%d process_cpu_ms=%.3f%n",
+                            + " readers=%d samples=%d p50_ms=%.3f p95_ms=%.3f provider_calls=%d"
+                            + " bodies=%d process_cpu_ms=%.3f response_body_bytes=%d"
+                            + " document_bytes=%d%n",
                         database,
                         fixture.provider(),
                         graphs,
@@ -865,7 +876,9 @@ class AuthoringReadIndexIntegrationTest {
                         times[(int) Math.ceil(times.length * .95) - 1] / 1e6,
                         fixture.calls() - calls,
                         fixture.blobs() - bodies,
-                        (processCpu() - cpu) / 1e6);
+                        (processCpu() - cpu) / 1e6,
+                        fixture.responseBytes() - responseBytes,
+                        fixture.documentBytes() - documentBytes);
             }
         }
     }
@@ -879,6 +892,7 @@ class AuthoringReadIndexIntegrationTest {
         for (String operation : List.of("list", "open", "history")) {
             long[] times = new long[10];
             int calls = fixture.calls(), blobs = fixture.blobs();
+            long responseBytes = fixture.responseBytes(), documentBytes = fixture.documentBytes();
             for (int i = 0; i < times.length; i++) {
                 long start = System.nanoTime();
                 switch (operation) {
@@ -900,7 +914,7 @@ class AuthoringReadIndexIntegrationTest {
             System.out.printf(
                     "INDEX_FIXTURE db=%s provider=%s graphs=%d phase=%s operation=%s samples=10"
                             + " p50_ms=%.3f p95_ms=%.3f provider_calls=%d bodies=%d"
-                            + " catalog_entries=0%n",
+                            + " catalog_entries=0 response_body_bytes=%d document_bytes=%d%n",
                     database,
                     fixture.provider(),
                     graphs,
@@ -909,7 +923,9 @@ class AuthoringReadIndexIntegrationTest {
                     times[4] / 1e6,
                     times[9] / 1e6,
                     fixture.calls() - calls,
-                    fixture.blobs() - blobs);
+                    fixture.blobs() - blobs,
+                    fixture.responseBytes() - responseBytes,
+                    fixture.documentBytes() - documentBytes);
         }
     }
 

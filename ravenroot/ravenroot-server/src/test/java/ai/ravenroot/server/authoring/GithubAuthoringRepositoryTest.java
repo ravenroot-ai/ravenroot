@@ -691,6 +691,10 @@ class GithubAuthoringRepositoryTest {
         volatile Runnable beforeRequest;
         final AtomicInteger benchmarkRequests = new AtomicInteger(),
                 benchmarkBlobs = new AtomicInteger();
+        final java.util.concurrent.atomic.AtomicLong benchmarkResponseBytes =
+                new java.util.concurrent.atomic.AtomicLong();
+        final java.util.concurrent.atomic.AtomicLong benchmarkDocumentBytes =
+                new java.util.concurrent.atomic.AtomicLong();
 
         synchronized void seed(int count) {
             var files = new HashMap<String, byte[]>();
@@ -821,6 +825,13 @@ class GithubAuthoringRepositoryTest {
             if ("POST".equals(request.method()) && path.endsWith("/pulls") && losePull) {
                 losePull = false;
                 throw new IOException("scripted lost response after pull creation");
+            }
+            benchmarkResponseBytes.addAndGet(response.body.length);
+            if (response.status == 200 && request.method().equals("GET")) {
+                Object decoded = decode(response.body);
+                if (decoded instanceof Map<?, ?> object
+                        && object.get("content") instanceof String content)
+                    benchmarkDocumentBytes.addAndGet(Base64.getDecoder().decode(content).length);
             }
             return (HttpResponse<T>) new FakeResponse(request, response.status, response.body);
         }

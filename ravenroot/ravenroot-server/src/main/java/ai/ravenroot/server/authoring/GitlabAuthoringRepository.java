@@ -929,40 +929,40 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
                                         || fullPath.contains("/.ravenroot-authoring/requests/")
                                 ? 1024 * 1024
                                 : configuration.maxDocumentBytes());
-        // Blob reads preserve exact bytes; file metadata supplies the last file commit for CAS.
-        var metadata =
-                object(
-                        json(
-                                request(
-                                                "GET",
-                                                projectApi()
-                                                        + "/repository/files/"
-                                                        + query(fullPath)
-                                                        + "?ref="
-                                                        + query(commit),
-                                                null,
-                                                Set.of(200))
-                                        .body()));
-        if (!entry.sha().equals(string(metadata, "blob_id"))) throw unavailable();
+        // HEAD supplies immutable file/CAS metadata without retransferring Base64 content.
+        Response metadata = fileMetadata(fullPath, commit, Set.of(200));
+        if (!entry.sha().equals(fileHeader(metadata, "X-Gitlab-Blob-Id"))) throw unavailable();
         return new FileSnapshot(
-                commit, entry.sha(), bytes, validateRevision(string(metadata, "last_commit_id")));
+                commit,
+                entry.sha(),
+                bytes,
+                validateRevision(fileHeader(metadata, "X-Gitlab-Last-Commit-Id")));
+    }
+
+    private Response fileMetadata(String path, String commit, Set<Integer> expected) {
+        Response response =
+                request(
+                        "HEAD",
+                        projectApi() + "/repository/files/" + query(path) + "?ref=" + query(commit),
+                        null,
+                        expected);
+        if (response.status() == 200
+                && (!commit.equals(fileHeader(response, "X-Gitlab-Commit-Id"))
+                        || response.body().length != 0)) throw unavailable();
+        return response;
+    }
+
+    private String fileHeader(Response response, String name) {
+        List<String> values = response.headers().allValues(name);
+        if (values.size() != 1 || values.getFirst().length() > 128) throw unavailable();
+        return validateRevision(values.getFirst());
     }
 
     /** Direct lookup keeps lifetime replay records independent of directory pagination ceilings. */
     private FileSnapshot requestRecord(String fullPath, String commit) {
-        Response response =
-                request(
-                        "GET",
-                        projectApi()
-                                + "/repository/files/"
-                                + query(fullPath)
-                                + "?ref="
-                                + query(commit),
-                        null,
-                        Set.of(200, 404));
+        Response response = fileMetadata(fullPath, commit, Set.of(200, 404));
         if (response.status() == 404) return null;
-        Map<String, Object> metadata = object(json(response.body()));
-        String blob = validateRevision(string(metadata, "blob_id"));
+        String blob = fileHeader(response, "X-Gitlab-Blob-Id");
         Map<String, Object> body =
                 object(
                         json(
@@ -982,7 +982,7 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         }
         if (bytes.length > 4096) throw failure(GraphAuthoringException.Failure.LIMIT_EXCEEDED);
         return new FileSnapshot(
-                commit, blob, bytes, validateRevision(string(metadata, "last_commit_id")));
+                commit, blob, bytes, fileHeader(response, "X-Gitlab-Last-Commit-Id"));
     }
 
     private DirectorySnapshot directory(String ref, boolean exact, String directoryPath) {
@@ -1371,7 +1371,7 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         }
         Response response = send(method, uri, token, body);
         for (int attempt = 0;
-                "GET".equals(method)
+                ("GET".equals(method) || "HEAD".equals(method))
                         && attempt < configuration.retryLimit()
                         && AuthoringRetry.retryable(response.status(), response.headers());
                 attempt++) {

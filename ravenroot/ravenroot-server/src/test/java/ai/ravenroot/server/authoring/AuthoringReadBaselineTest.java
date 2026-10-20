@@ -21,7 +21,9 @@ class AuthoringReadBaselineTest {
                         "github",
                         size,
                         () -> github.benchmarkRequests.get(),
-                        () -> github.benchmarkBlobs.get());
+                        () -> github.benchmarkBlobs.get(),
+                        () -> github.benchmarkResponseBytes.get(),
+                        () -> github.benchmarkDocumentBytes.get());
             }
             var gitlab = new GitlabAuthoringRepositoryTest.Gitlab();
             gitlab.seed(size);
@@ -34,7 +36,9 @@ class AuthoringReadBaselineTest {
                         "gitlab",
                         size,
                         () -> gitlab.benchmarkRequests.get(),
-                        () -> gitlab.benchmarkBlobs.get());
+                        () -> gitlab.benchmarkBlobs.get(),
+                        () -> gitlab.benchmarkResponseBytes.get(),
+                        () -> gitlab.benchmarkDocumentBytes.get());
             }
         }
     }
@@ -45,10 +49,14 @@ class AuthoringReadBaselineTest {
             String provider,
             int size,
             java.util.function.IntSupplier calls,
-            java.util.function.IntSupplier blobs) {
+            java.util.function.IntSupplier blobs,
+            java.util.function.LongSupplier responseBytes,
+            java.util.function.LongSupplier documentBytes) {
         for (String operation : new String[] {"list", "open", "history"}) {
             long[] times = new long[10];
             int start = calls.getAsInt(), bodyStart = blobs.getAsInt();
+            long responseStart = responseBytes.getAsLong(),
+                    documentStart = documentBytes.getAsLong();
             for (int i = 0; i < times.length; i++) {
                 long before = System.nanoTime();
                 switch (operation) {
@@ -69,14 +77,16 @@ class AuthoringReadBaselineTest {
             java.util.Arrays.sort(times);
             System.out.printf(
                     "FIXTURE provider=%s graphs=%d operation=%s samples=10 p50_ms=%.3f p95_ms=%.3f"
-                            + " calls=%d blobs=%d%n",
+                            + " calls=%d blobs=%d response_body_bytes=%d document_bytes=%d%n",
                     provider,
                     size,
                     operation,
                     times[4] / 1e6,
                     times[9] / 1e6,
                     calls.getAsInt() - start,
-                    blobs.getAsInt() - bodyStart);
+                    blobs.getAsInt() - bodyStart,
+                    responseBytes.getAsLong() - responseStart,
+                    documentBytes.getAsLong() - documentStart);
         }
     }
 }

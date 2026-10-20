@@ -382,6 +382,7 @@ public final class RavenrootServer implements AutoCloseable {
     private ai.ravenroot.server.authoring.GraphAuthoringHttpApi graphAuthoring;
     private ai.ravenroot.server.authoring.PublishedGraphArtifactHttpApi publishedGraphArtifacts;
     private boolean graphAuthoringConfigured;
+    private ai.ravenroot.server.authoring.GraphAuthoringWebhookHttpApi graphAuthoringWebhooks;
 
     public RavenrootServer(RavenrootApplication application, int port) {
         this(application, new InetSocketAddress(InetAddress.getLoopbackAddress(), port), null,
@@ -793,6 +794,13 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
         apiContext("/v1/graph-authoring", this::graphAuthoring);
+        server.createContext(ai.ravenroot.server.authoring.GraphAuthoringWebhookHttpApi.PATH,
+                publicContext((exchange, context) -> {
+                    if (graphAuthoringWebhooks == null) {
+                        exchange.sendResponseHeaders(404, -1);
+                        exchange.close();
+                    } else graphAuthoringWebhooks.handle(exchange);
+                }));
         apiContext("/v1/graph-artifacts", this::publishedGraphArtifacts);
         apiContext("/v1/executions", this::startExecution);
         apiContext("/v1/processes", this::processLifecycle);
@@ -1065,6 +1073,7 @@ public final class RavenrootServer implements AutoCloseable {
         }
         ai.ravenroot.api.authoring.GraphAuthoringRepository repository = null;
         ai.ravenroot.server.authoring.GraphAuthoringHttpApi authoringApi = null;
+        ai.ravenroot.server.authoring.GraphAuthoringWebhookHttpApi webhookApi = null;
         try {
             embedded = java.util.Objects.requireNonNull(embedded, "embedded");
             graphAuthoringConfigured = true;
@@ -1085,11 +1094,14 @@ public final class RavenrootServer implements AutoCloseable {
                     embedded.configuration(), repository, authorization, System.out::println);
             var artifactApi = new ai.ravenroot.server.authoring.PublishedGraphArtifactHttpApi(
                     catalog, authorizedApplication, authorization);
+            webhookApi = embedded.createWebhook(repository);
+            graphAuthoringWebhooks = webhookApi;
             graphAuthoring = authoringApi;
             publishedGraphArtifacts = artifactApi;
             return this;
         } catch (RuntimeException | Error failure) {
             try {
+                if (webhookApi != null) webhookApi.close();
                 if (authoringApi != null) authoringApi.close();
                 else if (repository != null) repository.close();
             } catch (RuntimeException | Error closeFailure) {
@@ -7044,6 +7056,7 @@ public final class RavenrootServer implements AutoCloseable {
         }
         if (interactionWebSockets != null) interactionWebSockets.close();
         if (durableDeploymentControl != null) durableDeploymentControl.close();
+        if (graphAuthoringWebhooks != null) graphAuthoringWebhooks.close();
         if (graphAuthoring != null) graphAuthoring.close();
         if (!listenerStarted.get()) {
             // HttpServer.create(address, backlog) binds immediately, but HttpServer.stop() does not

@@ -62,7 +62,10 @@ public final class OpenApiSpecGenerator {
         json.append("\n  },\n");
         json.append("  \"components\": {\n");
         json.append("    \"securitySchemes\": {\n");
-        json.append("      \"bearerAuth\": {\"type\": \"http\", \"scheme\": \"bearer\"}\n");
+        json.append("      \"bearerAuth\": {\"type\": \"http\", \"scheme\": \"bearer\"},\n");
+        json.append("      \"githubWebhookSignature\": {\"type\": \"apiKey\", \"in\": \"header\", \"name\": \"X-Hub-Signature-256\", \"description\": \"HMAC-SHA256 of the exact request bytes using the configured GitHub webhook secret.\"},\n");
+        json.append("      \"gitlabWebhookSignature\": {\"type\": \"apiKey\", \"in\": \"header\", \"name\": \"webhook-signature\", \"description\": \"Standard Webhooks signature over webhook-id, webhook-timestamp and raw body; timestamp within 300 seconds.\"},\n");
+        json.append("      \"gitlabWebhookToken\": {\"type\": \"apiKey\", \"in\": \"header\", \"name\": \"X-Gitlab-Token\", \"description\": \"Legacy token mode only when explicitly configured; TLS required.\"}\n");
         json.append("    },\n");
         String existingSchemas = humanTaskSchemas();
         json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\n    }"));
@@ -103,6 +106,11 @@ public final class OpenApiSpecGenerator {
         if (route.authenticated()) {
             entry.append("        \"security\": [{\"bearerAuth\": []}],\n");
         }
+        if ("/v1/graph-authoring-webhooks".equals(route.path())) {
+            entry.append("        \"security\": [{\"githubWebhookSignature\": []}, {\"gitlabWebhookSignature\": []}, {\"gitlabWebhookToken\": []}],\n");
+            entry.append("        \"x-default-disabled\": true,\n");
+            entry.append("        \"requestBody\": {\"required\": true, \"description\": \"Raw provider JSON, at most 262144 bytes. Only configured repository and branch refs can signal configured tenants. Ambient Authorization and Cookie headers are refused.\", \"content\": {\"application/json\": {\"schema\": {\"type\": \"object\"}}}},\n");
+        }
         String parameters = operationParameters(route, method);
         if (!parameters.isEmpty()) {
             entry.append(parameters);
@@ -134,6 +142,10 @@ public final class OpenApiSpecGenerator {
         route.wireErrorCodes().forEach(code ->
                 responses.add("          \"" + statusOrDefault(code) + "\": {\"description\": \""
                         + JsonStrings.escape(code) + "\"}"));
+        if ("/v1/graph-authoring-webhooks".equals(route.path())) {
+            for (int status : new int[] {400, 403, 404, 405, 413, 415, 429, 503})
+                responses.add("          \"" + status + "\": {\"description\": \"provider delivery refused\"}");
+        }
         entry.append(String.join(",\n", dedupeByKey(responses)));
         entry.append("\n        }\n");
         entry.append("      }");

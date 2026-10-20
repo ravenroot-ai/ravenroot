@@ -10582,7 +10582,7 @@ function confirmDiscardChanges() {
 function updateHistoryUi() {
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
-  const dirty = state.dirty || Boolean(workspace.active?.authoring?.localChanges)
+  const dirty = state.dirty || Boolean(activeAuthoring?.localChanges)
     || (documentIsEditable(workspace.active) && presentationDirty);
   const indicator = document.getElementById('dirty-state');
   if (indicator) {

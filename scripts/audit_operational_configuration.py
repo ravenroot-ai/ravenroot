@@ -14967,7 +14967,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 # their existing classifications rather than being absorbed by the authoring cohort.
 GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
     "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
-    "updateHistoryUi": "c3d7803dc76d48fc860316aac24617fa5dbc08e2270999ec74115a04164b413c",
+    "updateHistoryUi": "59437d046a615c053834b4b9d36f30fafba3312f00dd1c382cd410061f5011d6",
     "completeReplaceActiveDocument": "5f048a87c67189014d16a0cee8d9af2ce0ddf81f95cc709a992e4841c18a9ca5",
     "bootApplication": '9a21d4cd04d3f43b387e7f0b97581629e29710b4b68dd7c9c3f422be1432e16d',
     "syncGraphModeLabel": 'a205d6a872ef979883261fb8c43ff376231456941c05321787ac53ef789faef9',
@@ -15216,7 +15216,7 @@ def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> 
         and "document_.authoring?.localChanges" in close \
         and "Boolean(document_.authoring?.localChanges)" in workspace \
         and "document_?.authoring?.localChanges" in body("paneIsDirty") \
-        and "workspace.active?.authoring?.localChanges" in body("updateHistoryUi")
+        and "activeAuthoring?.localChanges" in body("updateHistoryUi")
 
 
 def graph_authoring_successor_boundary(sources: dict[Path, str], ui: str, routes: str) -> bool:

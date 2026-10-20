@@ -7123,7 +7123,7 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             (Path("ravenroot/ravenroot-ui/src/workspace.js"), "hasUnsavedWork",
              "Boolean(document_.authoring?.localChanges)", "false"),
             (ui_path, "paneIsDirty", "document_?.authoring?.localChanges", "false"),
-            (ui_path, "updateHistoryUi", "workspace.active?.authoring?.localChanges", "false"),
+            (ui_path, "updateHistoryUi", "activeAuthoring?.localChanges", "false"),
         ]
         for relative, method, before, after in mutations:
             path = self.root / relative

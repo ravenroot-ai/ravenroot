@@ -14824,7 +14824,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'da9806558b3759c4adaa407c763b776b0bf6cb62cb0c72de6e8efb98ff10f606',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): 'e24c600adcaaf488faee29e22ef751b99f9c3a0a4d9dd15b61ff8b63c044d82a',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): 'a8404e632535cd0efcd03f633f90bfbea2847bcfa90fadcc920212edb68529fb',
     Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '330eee9236cb1498466010ef2515c592885cdb68d72a080d9413f1948b9c010a',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
@@ -14929,6 +14929,8 @@ GRAPH_AUTHORING_CANDIDATE_JAVA_METHODS = (
      "registerPublishedLocalDeployment"),
 )
 GRAPH_AUTHORING_UI_METHOD_PROOFS = {
+    "repositoryOperationBinding": "c080a886d57aa3ca8cd787e59db8aaeef6e3d625d74b6f880c4a18a7de5bc6cf",
+    "requireRepositoryOperationBinding": "f70159f27a004e17b205a08cbc35e1e90b88da44760515ccadfb9242f0e08e60",
     "repositoryScope": "b1d565af51b48c26f3950067f8a1230c16844e44eed616c92dc144f18f9685bb",
     "repositoryDocumentBindingIsCurrent": "079d4c99e87c164ce8c33f863c15e6d31b1a2101666c1da1accf6dc09600e5a1",
     "openRepositorySource": "da2f1bf487fba2bdac1235d213a7aeeb4ef33ae24adea5dbc059078d3fc9fa51",
@@ -14944,10 +14946,10 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
     "openRepositoryGraph": 'dfe5d91cf5dd0f5d5a31f876441830b26e9e2e0e7d6744cb72bbb5d452931d75',
     "saveRepositoryGraph": '0a66154234cccc41169d326bcd1b6a64f9481f8ad43d04a02c0804b9486e22c2',
-    "repositoryHistory": "92abfc0c89003901a2ef6c9b5c1cb7644038e8ff7aeb02d1bbc0127dcc45bbd8",
-    "repositoryDiscard": "a6b23b0b5513525e6700bc36782bb5c13a22e114507b05aa845dd8e4cb87fdc2",
-    "repositoryDelete": "854e0b91d59662e7c0db2dcd55db997f4c67f8605fd0c54862d755fafaa8a1e5",
-    "repositoryRelease": "ddd789dd3bb45aed6c9de23c597f72519bae358cba3fc18ef1f8ed0cb79a6664",
+    "repositoryHistory": "23a4f3610446b3e1e16e327b73f2401ad0dad4f27f614dbf423242059a914c8d",
+    "repositoryDiscard": "1399bd3fda6a09e40903bd0b166d606c1e64fc7524d559390924f74c6faf7be6",
+    "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
+    "repositoryRelease": "a9b86fc3444a43d92970402b2c14b0d3d6d58a7e84ec1b235c281543829b20cc",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
     "connectRuntime": '710c799c350b3a4e52f5f6c81546824341c7a89fc1e1b6c29364a4776ae3401c',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
@@ -15172,6 +15174,33 @@ def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> 
     for method in ("saveRepositoryGraph", "createRepositorySuccessor", "repositoryHistory",
                    "repositoryDiscard", "repositoryDelete", "repositoryRelease"):
         if "!repositoryDocumentBindingIsCurrent(target)" not in body(method):
+            return False
+    if not includes(body("repositoryOperationBinding"),
+                    "client: graphAuthoringClient", "authority: workspaceAuthority", "scope: repositoryScope()",
+                    "incarnation: target.incarnation", "history: target.history",
+                    "historyRevision: target.history.revision()", "expected: structuredClone(target.authoring.revision)"):
+        return False
+    if not includes(body("requireRepositoryOperationBinding"),
+                    "requireRepositoryBinding(binding.client, binding.authority)",
+                    "binding.scope !== repositoryScope()", "!repositoryDocumentBindingIsCurrent(target, binding.scope)",
+                    "workspace.find(target.id) !== target", "target.incarnation !== binding.incarnation",
+                    "target.history !== binding.history", "target.history.revision() !== binding.historyRevision",
+                    "['draft', 'release', 'publication'].some(key => target.authoring.revision?.[key] !== binding.expected[key])"):
+        return False
+    for method, mutation in (("repositoryHistory", "restore"), ("repositoryDiscard", "discard"),
+                             ("repositoryDelete", "delete"), ("repositoryRelease", "release")):
+        operation = body(method)
+        guard = "requireRepositoryOperationBinding(target, binding);"
+        if not includes(operation, "const binding = repositoryOperationBinding(target);",
+                        "const { client } = binding;") or "graphAuthoringClient." in operation:
+            return False
+        call = ("await client.restore(id, revision, binding.expected);" if mutation == "restore"
+                else f"await client.{mutation}(id, binding.expected);")
+        if call not in operation or not re.search(
+                re.escape(guard) + r"\s+(?:const result = )?" + re.escape(call), operation):
+            return False
+        calls = list(re.finditer(r"await client\.[^;]+;", operation))
+        if not calls or any(not operation[call.end():].lstrip().startswith(guard) for call in calls):
             return False
     saved = body("saveRepositoryGraph")
     if not includes(saved, "if (target.history === history && history.revision() === submittedRevision)",

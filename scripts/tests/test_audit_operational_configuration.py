@@ -7090,6 +7090,14 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
     def test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away(self) -> None:
         ui_path = audit.GRAPH_AUTHORING_UI_PATH
         mutations = [
+            (ui_path, "requireRepositoryOperationBinding", "requireRepositoryBinding(binding.client, binding.authority);", ";"),
+            (ui_path, "requireRepositoryOperationBinding", "binding.scope !== repositoryScope()", "false"),
+            (ui_path, "requireRepositoryOperationBinding", "target.incarnation !== binding.incarnation", "false"),
+            (ui_path, "requireRepositoryOperationBinding", "target.history.revision() !== binding.historyRevision", "false"),
+            (ui_path, "requireRepositoryOperationBinding", "target.authoring.revision?.[key] !== binding.expected[key]", "false"),
+            (ui_path, "repositoryHistory", "const page = await client.history(id);\n    requireRepositoryOperationBinding(target, binding);", "const page = await client.history(id);"),
+            (ui_path, "repositoryHistory", "await client.restore(id, revision, binding.expected)", "await graphAuthoringClient.restore(id, revision, binding.expected)"),
+            (ui_path, "repositoryDiscard", "const result = await client.discard(id, binding.expected);\n    requireRepositoryOperationBinding(target, binding);", "const result = await client.discard(id, binding.expected);"),
             (ui_path, "repositoryScope", "workspaceAuthority.scope?.tenantId ?? null", "null"),
             (ui_path, "repositoryScope", "configuration.provider", "null"),
             (ui_path, "repositoryScope", "configuration.repositoryDisplay", "null"),

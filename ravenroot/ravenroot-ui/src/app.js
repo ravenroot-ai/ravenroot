@@ -15922,44 +15922,73 @@ async function saveRepositoryGraph() {
   }
 }
 
+function repositoryOperationBinding(target) {
+  return { client: graphAuthoringClient, authority: workspaceAuthority, scope: repositoryScope(),
+    incarnation: target.incarnation, history: target.history, historyRevision: target.history.revision(),
+    expected: structuredClone(target.authoring.revision) };
+}
+
+function requireRepositoryOperationBinding(target, binding) {
+  requireRepositoryBinding(binding.client, binding.authority);
+  if (binding.scope !== repositoryScope() || !repositoryDocumentBindingIsCurrent(target, binding.scope)
+      || workspace.find(target.id) !== target || target.incarnation !== binding.incarnation
+      || target.history !== binding.history || target.history.revision() !== binding.historyRevision
+      || ['draft', 'release', 'publication'].some(key => target.authoring.revision?.[key] !== binding.expected[key]))
+    throw new Error(uiText('repository.error.operationChanged'));
+}
+
 async function repositoryHistory() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
-  if (!gitAuthoringEnabled() || !id) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
   try {
-    const page = await graphAuthoringClient.history(id);
+    const page = await client.history(id);
+    requireRepositoryOperationBinding(target, binding);
     const lines = page.items.map(item => `${item.revision.slice(0, 12)} · ${item.summary} · ${item.author}`);
     const revision = globalThis.prompt(uiText("workspace.app.history.for.enter.a.full.revision.to.restore.or", { id: id, value: lines.join('\n') }), '')?.trim();
     if (!revision) return true;
     if (!globalThis.confirm(uiText("workspace.app.restore.this.revision.as.a.new.draft"))) return false;
-    const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
+    requireRepositoryOperationBinding(target, binding);
+    const result = await client.restore(id, revision, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
     if (!completeReplaceActiveDocument(target, graph, id)) return false;
     applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.repository.history.is.unavailable")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.repository.history.is.unavailable")); return false; }
 }
 
 async function repositoryDiscard() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
-  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.discard.draft.changes.and.restore.the.reviewed"))) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || !globalThis.confirm(uiText("workspace.app.discard.draft.changes.and.restore.the.reviewed"))) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
   try {
-    const result = await graphAuthoringClient.discard(id, target.authoring.revision);
+    requireRepositoryOperationBinding(target, binding);
+    const result = await client.discard(id, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
     if (!completeReplaceActiveDocument(target, graph, id)) return false;
     applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.draft.changes.could.not.be.discarded")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.draft.changes.could.not.be.discarded")); return false; }
 }
 
 async function repositoryDelete() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
-  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.delete.the.draft.git.history.is.retained", { id: id }))) return false;
-  try { await graphAuthoringClient.delete(id, target.authoring.revision);
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || !globalThis.confirm(uiText("workspace.app.delete.the.draft.git.history.is.retained", { id: id }))) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
+  try {
+    requireRepositoryOperationBinding(target, binding);
+    await client.delete(id, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     if (target.authoring.released) {
-      const result = await graphAuthoringClient.open(id, 'release');
+      const result = await client.open(id, 'release');
+      requireRepositoryOperationBinding(target, binding);
       const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
       if (!completeReplaceActiveDocument(target, graph, id)) return false;
       applyAuthoringDocument(target, result, id);
@@ -15967,22 +15996,26 @@ async function repositoryDelete() {
     } else target.authoring.providerDocumentId = null;
     addActivityMessage(uiMessage("workspace.notice.editor.22"), uiMessage("workspace.notice.deleted.the.draft.git.history.remains.available", { id: id }), 'completed');
     updateHistoryUi(); refreshCommands(); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.draft.could.not.be.deleted")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.the.draft.could.not.be.deleted")); return false; }
 }
 
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
-  if (!gitAuthoringEnabled() || !id) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
   const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
-  try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
+  try {
+    requireRepositoryOperationBinding(target, binding);
+    const result = await client.release(id, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     const reviewType = uiMessage(reviewKey);
     addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
       detail1: uiMessage(result.reused ? "workspace.app.existing" : "workspace.app.new"),
       reviewType,
       url: result.url,
     }), 'completed'); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
 }
 
 async function publishedArtifacts() {

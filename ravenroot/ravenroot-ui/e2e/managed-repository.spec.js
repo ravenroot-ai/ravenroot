@@ -488,3 +488,84 @@ test('restored clean source refreshes to the current remote successor on direct 
   expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
   await restored.close();
 });
+
+test('delayed history cannot restore an old source through a changed repository connection', async ({ page }) => {
+  const configuration = { repositoryDisplay: 'example/graphs' };
+  const requests = await setup(page, { initialVersion: 2, configuration });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await addUnsavedNode(page);
+  const before = await activeManagedState(page);
+  let releaseHistory, historyEntered, dialogs = 0;
+  const gate = new Promise(resolve => { releaseHistory = resolve; });
+  const entered = new Promise(resolve => { historyEntered = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml/history', async route => {
+    historyEntered(); await gate;
+    await route.fulfill({ json: { items: [{ revision: 'a'.repeat(40), summary: 'Original repository revision', author: 'Author' }], nextCursor: '' } });
+  });
+  page.on('dialog', dialog => {
+    dialogs++;
+    // Complete only the exact history flow if a regression lets it escape the scope fence.
+    // This also exposes an unintended restore at the changed destination; other dialogs fail.
+    if (dialog.type() === 'prompt' && dialog.message().startsWith('History for orders.graphml:'))
+      return dialog.accept('a'.repeat(40));
+    if (dialog.type() === 'confirm' && dialog.message() === 'Restore this revision as a new draft commit?')
+      return dialog.accept();
+    throw new Error(`Unexpected ${dialog.type()} dialog: ${dialog.message()}`);
+  });
+  page.on('download', () => { throw new Error('History inspection must not export a document'); });
+  try {
+    await page.locator('#menu-file').click();
+    await page.getByRole('menuitem', { name: 'Repository history…', exact: true }).click();
+    await entered;
+    const generation = await page.evaluate(() => window.ravenroot.workspacePersistence().authority.generation);
+    configuration.repositoryDisplay = 'example/other-graphs';
+    await page.locator('#access-token').fill('changed-history-token');
+    await page.locator('#btn-authenticate').click();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.generation)).toBeGreaterThan(generation);
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.state)).toBe('ready');
+    releaseHistory();
+    await expect(page.locator('#repository-notice')).toContainText('The service or authenticated workspace changed');
+    expect(dialogs).toBe(0);
+    expect(requests.filter(r => r.path.endsWith('/restore'))).toHaveLength(0);
+    expect(requests.filter(r => r.method !== 'GET')).toHaveLength(0);
+    expect(await activeManagedState(page)).toEqual(before);
+  } finally { releaseHistory(); }
+});
+
+test('a delayed discard response cannot replace local work after the configured repository changes', async ({ page }) => {
+  const configuration = { repositoryDisplay: 'example/graphs' };
+  const requests = await setup(page, { initialVersion: 2, configuration });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await addUnsavedNode(page);
+  const before = await activeManagedState(page);
+  let releaseDiscard, discardEntered;
+  const gate = new Promise(resolve => { releaseDiscard = resolve; });
+  const entered = new Promise(resolve => { discardEntered = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml/discard', async route => {
+    discardEntered(); await gate; await route.fallback();
+  });
+  page.once('dialog', dialog => {
+    expect(dialog.type()).toBe('confirm');
+    expect(dialog.message()).toBe('Discard draft changes and restore the reviewed release?');
+    return dialog.accept();
+  });
+  try {
+    await page.locator('#menu-file').click();
+    await page.getByRole('menuitem', { name: 'Discard draft changes', exact: true }).click();
+    await entered;
+    forbidUnexpectedSideEffects(page);
+    const generation = await page.evaluate(() => window.ravenroot.workspacePersistence().authority.generation);
+    configuration.repositoryDisplay = 'example/other-graphs';
+    await page.locator('#access-token').fill('changed-discard-token');
+    await page.locator('#btn-authenticate').click();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.generation)).toBeGreaterThan(generation);
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.state)).toBe('ready');
+    releaseDiscard();
+    await expect(page.locator('#repository-notice')).toContainText('The service or authenticated workspace changed');
+    expect(await activeManagedState(page)).toEqual(before);
+    expect(requests.filter(r => r.path.endsWith('/discard'))).toHaveLength(1);
+    expect(requests.filter(r => r.method !== 'GET' && !r.path.endsWith('/discard'))).toHaveLength(0);
+  } finally { releaseDiscard(); }
+});

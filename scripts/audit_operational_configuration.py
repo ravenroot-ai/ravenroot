@@ -14534,22 +14534,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-eb1599122f22f1eaf9c5": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-6d907b4584819bbac604":
+    "oc-79f74da23d4a94c27444": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-e76c63ce9b899f426c40":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-b779c4363bc53577d747": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-ceafcb9676ed07881f02": (
+    "oc-185de3db1cf1278d2ceb": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-609f930fe8603b3d96e9": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-ca2e3b2fb9f34fab4771": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-826452c756f4b6f3cb91": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-eb1599122f22f1eaf9c5": "/v1/events",
-    "oc-6d907b4584819bbac604": "/v1/events",
-    "oc-b779c4363bc53577d747": "/v1/events",
-    "oc-ceafcb9676ed07881f02": "/v1/events/recent",
-    "oc-ca2e3b2fb9f34fab4771": "/v1/events/recent",
+    "oc-79f74da23d4a94c27444": "/v1/events",
+    "oc-e76c63ce9b899f426c40": "/v1/events",
+    "oc-185de3db1cf1278d2ceb": "/v1/events",
+    "oc-609f930fe8603b3d96e9": "/v1/events/recent",
+    "oc-826452c756f4b6f3cb91": "/v1/events/recent",
 }
 
 
@@ -16363,9 +16363,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 134, "path": 121, "summary": 462, "successStatuses": 125}
-    if len(details) != 121 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 121/842 positional shape")
+    expected_counts = {"methods": 135, "path": 122, "summary": 463, "successStatuses": 126}
+    if len(details) != 122 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 122/846 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

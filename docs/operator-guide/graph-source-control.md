@@ -242,8 +242,9 @@ request admission is retained until it exits. Platform readers avoid JDK21 virtu
 pinning in HTTP request streams. A single reconciliation worker and at most one pending signal per
 configured tenant coalesce deliveries; a delivery during reconciliation causes another fresh
 observation. Per-address request controls still apply. At most 1024 authenticated delivery IDs and
-payload digests are expire logically after 300 seconds and are pruned on the next delivery; an identical duplicate returns 202 without scheduling
-more work, and conflicting content for the same ID is refused. This retention is process-local;
+payload digests are retained, expire logically after 300 seconds and are pruned on the next delivery.
+An identical duplicate returns 202 without scheduling more work, and conflicting content for the
+same ID is refused. This retention is process-local;
 multiple replicas can each validate a duplicate. GitHub has no signed delivery timestamp, so its ID
 retention is a bounded replay suppression window, not cryptographic expiry. GitLab signed timestamp
 validation rejects stale or future replays; legacy tokens have no signed timestamp.

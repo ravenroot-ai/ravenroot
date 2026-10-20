@@ -8038,7 +8038,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  '3da9dcec77fd23ed8906261c49dfe509e86215015d09ff2584bb73278e0239b2',
+  '2e731a62b3dcdce2c595e1a3caad81285c2763857c03e86f7c15fe62cd3d686d',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',

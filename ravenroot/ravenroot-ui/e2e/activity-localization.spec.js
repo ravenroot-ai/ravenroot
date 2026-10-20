@@ -64,7 +64,8 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
         return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reused, url: opaqueUrl }) });
       }
       if (url.pathname === '/v1/graph-authoring') return route.fulfill({ contentType: 'application/json',
-        body: JSON.stringify({ items: [{ documentId: 'authored.graphml', releaseVersion: 7, draftDeleted: false }] }) });
+        body: JSON.stringify({ items: [{ documentId: 'authored.graphml', displayPath: 'authored.graphml',
+          releaseVersion: 7, releasedVersion: 0, released: false, published: false, draftDeleted: false }], nextCursor: '' }) });
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
         documentId: 'authored.graphml', graphId: 'authored-graph', releaseVersion: 7,
         released: false, published: false, draftDeleted: false,
@@ -75,8 +76,11 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
     await page.goto('/');
     await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
     await expect(page.locator('#btn-open')).toContainText('Open from repository');
-    page.once('dialog', dialog => dialog.accept('authored.graphml [draft]'));
     await page.locator('#btn-open').click();
+    const picker = page.getByRole('dialog', { name: 'Open from repository' });
+    await expect(picker).toBeVisible();
+    await picker.getByRole('button', { name: /authored.graphml · Editable draft v7/ }).click();
+    await expect(picker).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().authoring.providerDocumentId))
       .toBe('authored.graphml');
     const otherDocument = await page.evaluate(() => {

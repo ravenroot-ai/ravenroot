@@ -51,7 +51,10 @@ test('authenticated managed draft launch saves the same identity without prompts
   await page.locator('#btn-authenticate').click();
   await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
   await expect(page.locator('#repository-next-version')).toBeHidden();
-  page.on('dialog', () => { throw new Error('Managed saves must not prompt for a filename'); });
+  page.on('dialog', dialog => {
+    expect(dialog.type(), 'Managed saves must not prompt for a filename').not.toBe('prompt');
+    throw new Error(`Unexpected ${dialog.type()} dialog after an acknowledged managed save`);
+  });
   await page.locator('#btn-modify').click();
   await page.locator('#btn-add-node').click();
   await page.locator('#node-editor input[name="name"]').fill('Saved managed edit');
@@ -60,6 +63,10 @@ test('authenticated managed draft launch saves the same identity without prompts
   await expect.poll(() => requests.filter(r => r.method === 'PUT').length).toBe(1);
   expect(requests.find(r => r.method === 'PUT').headers['x-ravenroot-expected-release']).toBe('r1');
   expect(requests.find(r => r.method === 'PUT').body).toContain('Saved managed edit');
+  await expect.poll(() => page.evaluate(() => ({
+    dirty: window.ravenroot.workspace.active.history.isDirty(),
+    saving: window.ravenroot.workspace.active.authoring.saveFlight,
+  }))).toEqual({ dirty: false, saving: null });
   await page.reload();
   await page.locator('#access-token').fill('managed-token');
   await page.locator('#btn-authenticate').click();

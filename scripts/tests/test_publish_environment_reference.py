@@ -48,8 +48,35 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertIn("defaults to `LOCAL`", section)
         self.assertIn("defaults to `10485760`", section)
         self.assertIn("maximum `120000` milliseconds", section)
-        self.assertIn("eligible GitHub and GitLab `GET` failures", section)
+        self.assertIn("eligible GitHub `GET` and GitLab `GET`/`HEAD` read failures", section)
         self.assertIn("mutations are never retried blindly", section)
+
+        webhook_names = {
+            "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH",
+            "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF",
+        }
+        self.assertEqual(webhook_names, {
+            name for name in GRAPH_AUTHORING_VARIABLES
+            if name.startswith("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_")
+        })
+        for name in webhook_names:
+            with self.subTest(webhook=name):
+                self.assertIn(f"`{name}`", section)
+                self.assertIn(
+                    "../operator-guide/graph-source-control.md#provider-webhook-delivery",
+                    boundary(name),
+                )
+        credential = boundary("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF")
+        self.assertIn("separate repository-specific webhook secret", credential)
+        self.assertIn("unset disables the receiver", credential)
+        self.assertIn("resolved fresh", credential)
+        self.assertIn("including duplicates", credential)
+        authentication = boundary("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH")
+        self.assertIn("defaults to `SIGNATURE`", authentication)
+        self.assertIn("300-second timestamp window", authentication)
+        self.assertIn("`TOKEN` selects GitLab legacy token authentication only", authentication)
+        self.assertIn("no automatic fallback", authentication)
+        self.assertIn("bearer and cookie credentials confer no authority", authentication)
 
     def test_independent_ui_mapping_tracks_runtime_and_shared_java_setting(self):
         names = publisher.ui_settings()

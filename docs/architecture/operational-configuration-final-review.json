@@ -8378,7 +8378,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "33c990d111d4ab8182dbf3786e307c4531aca7bf6bf67f7e8819788bf2fc616b",
+          "digest": "0488d901c11ffa30b78c75f8e5ac2ace3c4c2ef2795b4ea26d2bb42e3f5d9009",
           "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {

@@ -28,7 +28,7 @@ Git mode supports GitHub, GitHub Enterprise, GitLab.com and GitLab Self-Managed 
 | `RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES` | GraphML request, Git blob, and downloaded artifact ceiling. Default `10485760`; accepted Git-mode range 1–`104857600` bytes. |
 | `RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE` | Document and history page size. Default `50`; accepted range 1–200 for GitHub, 1–100 for GitLab. |
 | `RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS` | Positive connect, request, and complete response-body deadline. Default `15000`; maximum `120000` milliseconds. |
-| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | Additional retries for eligible provider `GET` failures. Default `1`; accepted range 0–3. Mutations are never retried blindly. |
+| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | Additional retries for eligible GitHub `GET` and GitLab `GET`/`HEAD` read failures. Default `1`; accepted range 0–3. Mutations are never retried blindly. |
 
 For a GitHub App, also set the App and installation IDs. Store the PKCS#8/PKCS#1 private key at the credential reference. The adapter mints a short-lived installation token scoped to the configured repository with contents, pull-request, and metadata permissions. A PAT is resolved through the same server-only credential chain. The Helm chart uses the fixed reference `git-authoring` and reads its encoded environment binding from a Kubernetes Secret.
 
@@ -201,6 +201,8 @@ rewrites. A tenant retains up to 16 generations; publication prunes superseded g
 separate, on-demand paginated operation; immutable history pages and explicit-commit differences
 have independent bounded caches.
 
+### Provider webhook delivery
+
 The composition reconciles each configured tenant every 60 seconds as recovery for external edits
 and missed notifications. Reads keep fresh remote authorization and validation between scheduled
 runs. The shipped server also accepts opt-in provider deliveries at
@@ -259,6 +261,8 @@ same receiver and ownership. Standalone trusted hosts may still call
 own delivery. Shutdown cancels owned delivery readers/work, stops scheduled recovery and closes
 the archive/index/pool. Receiver statistics use fixed accepted/duplicate/rejected/failure, pending,
 admitted-request and queue counts, without event, tenant, path or credential labels.
+
+### Read observability and limits
 
 The archive exposes coarse `readStatistics()` counters for hit, miss, eviction, bypass, retained
 in-memory blob bytes, parsed tree/commit/history/diff retained bytes, in-flight loads, provider calls, total and per-operation nanoseconds,

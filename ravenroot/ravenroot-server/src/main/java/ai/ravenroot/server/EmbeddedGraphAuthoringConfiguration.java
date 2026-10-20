@@ -4,8 +4,11 @@ import ai.ravenroot.api.authoring.GraphAuthoringRepository;
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
 import ai.ravenroot.server.authoring.GraphAuthoringRepositories;
+import ai.ravenroot.server.authoring.GraphAuthoringWebhookConfiguration;
+import ai.ravenroot.server.authoring.GraphAuthoringWebhookHttpApi;
 import ai.ravenroot.server.authoring.PublicationEvidence;
 import ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog;
+import ai.ravenroot.server.persistence.ExecutionStoreConfiguration;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -16,10 +19,10 @@ import java.util.function.Consumer;
 /**
  * Explicit embedded-server opt-in for the shipped Git graph-authoring composition.
  *
- * <p>{@link #fromEnvironment} reads the same repository, provider, artifact and credential-reference
- * settings as {@link RavenrootServerMain}. Credential material remains behind the supplied resolver;
- * this object never stores it. A local-mode configuration is inert, preserving the behavior of every
- * existing {@link RavenrootServer} constructor.</p>
+ * <p>{@link #fromEnvironment} reads the same repository, provider, artifact and
+ * credential-reference settings as {@link RavenrootServerMain}. Credential material remains behind
+ * the supplied resolver; this object never stores it. A local-mode configuration is inert,
+ * preserving the behavior of every existing {@link RavenrootServer} constructor.
  */
 public final class EmbeddedGraphAuthoringConfiguration {
     private static final CredentialResolver NO_CREDENTIALS = ignored -> Optional.empty();
@@ -28,9 +31,17 @@ public final class EmbeddedGraphAuthoringConfiguration {
     private final CredentialResolver credentials;
     private final RepositoryFactory repositories;
     private final CatalogFactory catalogs;
+    private final GraphAuthoringWebhookConfiguration webhooks;
 
     private EmbeddedGraphAuthoringConfiguration(GraphAuthoringConfiguration configuration,
             CredentialResolver credentials, RepositoryFactory repositories, CatalogFactory catalogs) {
+        this(configuration, credentials, repositories, catalogs, GraphAuthoringWebhookConfiguration.disabled());
+    }
+
+    private EmbeddedGraphAuthoringConfiguration(GraphAuthoringConfiguration configuration,
+            CredentialResolver credentials, RepositoryFactory repositories, CatalogFactory catalogs,
+            GraphAuthoringWebhookConfiguration webhooks) {
+        this.webhooks = Objects.requireNonNull(webhooks, "webhooks");
         this.configuration = Objects.requireNonNull(configuration, "configuration");
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.repositories = Objects.requireNonNull(repositories, "repositories");
@@ -50,17 +61,63 @@ public final class EmbeddedGraphAuthoringConfiguration {
      * @param credentials trusted resolver for the configured opaque credential reference
      * @return an inert configuration for LOCAL mode or an explicit Git composition for GIT mode
      */
-    public static EmbeddedGraphAuthoringConfiguration fromEnvironment(Map<String, String> environment,
-            CredentialResolver credentials) {
-        return gitOrLocal(GraphAuthoringConfiguration.fromEnvironment(environment), credentials,
-                GraphAuthoringRepositories::create, PublishedGraphArtifactCatalog::new);
+    public static EmbeddedGraphAuthoringConfiguration fromEnvironment(
+            Map<String, String> environment, CredentialResolver credentials) {
+        GraphAuthoringConfiguration authoring =
+                GraphAuthoringConfiguration.fromEnvironment(environment);
+        ExecutionStoreConfiguration persistence =
+                authoring.mode() == GraphAuthoringConfiguration.Mode.LOCAL
+                        ? null
+                        : ExecutionStoreConfiguration.fromSystem(
+                                System.getProperties(), environment);
+        if (authoring.mode() == GraphAuthoringConfiguration.Mode.LOCAL) return disabled();
+        return gitOrLocal(
+                authoring,
+                credentials,
+                (configuration, resolver, publications, admission) ->
+                        GraphAuthoringRepositories.create(
+                                configuration, resolver, publications, admission, persistence),
+                PublishedGraphArtifactCatalog::new)
+                .withWebhooks(GraphAuthoringWebhookConfiguration.fromEnvironment(environment));
     }
 
-    /** Uses an already validated authoring configuration with the host's trusted credential resolver. */
+    /**
+     * Uses an already validated authoring configuration with the host's trusted credential
+     * resolver.
+     */
     public static EmbeddedGraphAuthoringConfiguration of(GraphAuthoringConfiguration configuration,
             CredentialResolver credentials) {
         return gitOrLocal(configuration, credentials, GraphAuthoringRepositories::create,
                 PublishedGraphArtifactCatalog::new);
+    }
+
+    /**
+     * Decorates the managed archive while retaining admission, publication and resource ownership.
+     * The decorator receives a non-owning view; its own close hook and the archive close run once.
+     */
+    public EmbeddedGraphAuthoringConfiguration decorateRepository(
+            java.util.function.UnaryOperator<GraphAuthoringRepository> decorator) {
+        Objects.requireNonNull(decorator, "decorator");
+        return gitOrLocal(
+                configuration,
+                credentials,
+                (configuration, resolver, publications, admission) ->
+                        ai.ravenroot.server.authoring.ForwardingGraphAuthoringRepository.managed(
+                                repositories.create(
+                                        configuration, resolver, publications, admission),
+                                decorator),
+                catalogs).withWebhooks(webhooks);
+    }
+
+    /** Enables the shipped provider-authenticated receiver; credential material is resolved per delivery. */
+    public EmbeddedGraphAuthoringConfiguration withWebhooks(GraphAuthoringWebhookConfiguration webhooks) {
+        Objects.requireNonNull(webhooks, "webhooks");
+        if (!enabled() && webhooks.enabled()) throw new IllegalArgumentException("Webhooks require Git authoring");
+        return new EmbeddedGraphAuthoringConfiguration(configuration, credentials, repositories, catalogs, webhooks);
+    }
+
+    GraphAuthoringWebhookHttpApi createWebhook(GraphAuthoringRepository repository) {
+        return webhooks.enabled() ? new GraphAuthoringWebhookHttpApi(configuration, webhooks, credentials, repository) : null;
     }
 
     static EmbeddedGraphAuthoringConfiguration forTest(GraphAuthoringConfiguration configuration,

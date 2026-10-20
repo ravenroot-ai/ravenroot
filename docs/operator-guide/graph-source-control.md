@@ -28,7 +28,7 @@ Git mode supports GitHub, GitHub Enterprise, GitLab.com and GitLab Self-Managed 
 | `RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES` | GraphML request, Git blob, and downloaded artifact ceiling. Default `10485760`; accepted Git-mode range 1–`104857600` bytes. |
 | `RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE` | Document and history page size. Default `50`; accepted range 1–200 for GitHub, 1–100 for GitLab. |
 | `RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS` | Positive connect, request, and complete response-body deadline. Default `15000`; maximum `120000` milliseconds. |
-| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | Additional retries for eligible provider `GET` failures. Default `1`; accepted range 0–3. Mutations are never retried blindly. |
+| `RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT` | Additional retries for eligible GitHub `GET` and GitLab `GET`/`HEAD` read failures. Default `1`; accepted range 0–3. Mutations are never retried blindly. |
 
 For a GitHub App, also set the App and installation IDs. Store the PKCS#8/PKCS#1 private key at the credential reference. The adapter mints a short-lived installation token scoped to the configured repository with contents, pull-request, and metadata permissions. A PAT is resolved through the same server-only credential chain. The Helm chart uses the fixed reference `git-authoring` and reads its encoded environment binding from a Kubernetes Secret.
 
@@ -120,6 +120,13 @@ not a GitLab credential mode. Configure `graphAuthoring.provider: gitlab`, `gitl
 `gitlabApiBase`, `credentialMode: PAT`, tenant mappings and the credential Secret in Helm.
 The same repository operations and artifact import/deploy actions remain available.
 
+GitLab file metadata uses the documented [metadata-only HEAD endpoint](https://docs.gitlab.com/api/repository_files/#get-file-metadata-only).
+The adapter verifies the returned commit, blob and last-file-commit headers against the pinned
+selection; missing or mismatched metadata fails closed. Warm and restarted opens reuse verified
+content without a content-bearing file GET. Mutation preconditions still obtain remote metadata and
+preserve `last_commit_id` checks. A file GET includes Base64 content in the faithful transport
+fixtures and is counted as a document transfer, as are blob GETs.
+
 GitLab `last_commit_id` protects files, not a globally selected branch parent. Each authoring
 commit therefore atomically updates the tenant's `.ravenroot-authoring.json` coordination file,
 creates a hashed per-request record in `.ravenroot-authoring/requests/`, and changes the GraphML.
@@ -154,3 +161,241 @@ a reviewed full tooling commit, and the immutable catalog predecessor. MR pipeli
 publication credentials. The publisher validates admission, conditionally creates immutable bytes,
 manifests and catalog snapshots, and verifies existing bytes on rerun. Import and deployment verify
 the exact immutable selection through the existing catalog boundary; registration remains stopped.
+
+## Persistent authoring read index
+
+The shipped Git composition keeps a disposable authoring projection separate from executable graph
+admission. `RAVENROOT_EXECUTION_STORE=sqlite` selects a separate SQLite/WAL file,
+`ravenroot-authoring-read-index.db`, under `RAVENROOT_EXECUTION_STORE_DIR`, or
+`./data/execution-store` when unset. PostgreSQL deployments use an owned pool with the existing
+shared-database connection settings and bounds, with dedicated `authoring_read_*` tables. Account for
+this pool separately from execution persistence when budgeting database connections. The existing
+execution persistence selector and system-property precedence are reused. Embedded environment
+composition snapshots only the resolved persistence settings when configured; it does not retain
+unrelated environment values. Both providers work with either
+backend; GitHub PAT and App credentials retain their existing configuration.
+
+The schema is additive and versioned independently of execution persistence. A future index schema
+is refused. To rebuild, stop all servers sharing the projection, preserve any evidence needed for
+investigation, and remove only the SQLite authoring-index file and its WAL/SHM sidecars, or the
+PostgreSQL `authoring_read_*` tables. Never remove execution-definition, manifest or execution-state
+tables. Restart rebuilds authoring summaries from remote source and verified publication evidence.
+An interrupted synchronization leaves the preceding complete generation visible; it never publishes
+half an inventory. A failed rebuild fails the read and can be retried after the cause is repaired.
+
+Every operation checks current repository access, including cache hits and continuation pages.
+First-page reads freshly validate draft/release refs and the independent artifact catalog. An
+unchanged indexed generation needs no remote GraphML bodies. A changed document reuses unchanged
+blob metadata and downloads only changed content. Publication-only changes reconcile independently.
+Provider and document response limits remain in force: GitHub truncated trees are refused, and
+GitLab enumerates all bounded non-recursive tree pages or fails rather than returning a truncated
+inventory. The publication catalog still admits at most 200 entries. No implicit offline or stale
+fallback is provided.
+
+New list continuation cursors are opaque, generation-bound strings. Pass `nextCursor` unchanged;
+the response shape and page size are unchanged. Existing nonnegative numeric cursors through 100000
+remain accepted with their previous meaning (page number against a fresh observation). Returned
+opaque cursors retain deterministic document-ID ordering across insertions, deletions and branch
+rewrites. A tenant retains up to 16 generations; publication prunes superseded generations older than
+15 minutes. A pruned or foreign cursor is invalid: restart at the first page. History remains a
+separate, on-demand paginated operation; immutable history pages and explicit-commit differences
+have independent bounded caches.
+
+### Provider webhook delivery
+
+The composition reconciles each configured tenant every 60 seconds as recovery for external edits
+and missed notifications. Reads keep fresh remote authorization and validation between scheduled
+runs. The shipped server also accepts opt-in provider deliveries at
+`POST /v1/graph-authoring-webhooks`; the packaged server and embedded `fromEnvironment` composition
+use the same receiver. Configure a provider push webhook to this HTTPS endpoint through the
+existing trusted TLS ingress; Ravenroot does not create remote hooks or request additional provider
+permissions.
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| `RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF` | Unset, receiver disabled | Opaque reference for a separate repository-specific webhook secret, resolved fresh at startup and on every delivery, including duplicates. |
+| `RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH` | `SIGNATURE` | GitHub raw-body HMAC-SHA256; GitLab Standard Webhooks signing token. `TOKEN` explicitly enables GitLab's legacy `X-Gitlab-Token` mode. GitHub refuses token mode. |
+
+GitHub validates `X-Hub-Signature-256` against the exact request bytes. GitLab signature mode uses
+`webhook-id`, `webhook-timestamp` and `webhook-signature`, decodes the configured `whsec_` signing
+key, and accepts timestamps within 300 seconds in either direction. It supports multiple `v1,`
+signatures and never falls back to a plain token. GitLab signing tokens require GitLab 19.1 or
+later; GitLab 17.7 deployments can explicitly select `TOKEN` and configure a high-entropy legacy
+secret. Follow the official [GitHub delivery validation](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
+and [GitLab webhook authentication](https://docs.gitlab.com/user/project/integrations/webhooks/#signing-tokens)
+contracts. Bearer and cookie credentials confer no webhook authority and are refused even with a
+valid provider signature. Webhook secrets must contain at least 16 UTF-8 bytes; decoded signing
+keys must contain 16–128 bytes. Provision unique secrets per configured repository and use trusted
+TLS, especially for the explicitly selected legacy token mode.
+
+Only the configured provider repository/project and exact tenant draft refs or shared release ref
+can signal reconciliation. Draft refs map to their configured tenant; the shared release ref maps
+to all configured tenants. Tenant fields, changed-file paths, commit IDs and revisions in a payload
+never grant authority or become index state. GitHub branch deletion and both providers' push/deleted
+branch notifications are hints; unrelated refs are refused. An opted-in receiver supports at most
+256 configured tenants. Existing configuration rejects normalized draft-ref collisions and any
+release/draft collision. GitHub setup pings authenticate and validate the repository but do not
+schedule reconciliation.
+
+The receiver bounds the raw JSON to 256 KiB before parsing, admits at most 16 requests through actual
+handler termination, and uses 16 owned platform readers with a bounded 16-slot queue (running plus
+queued admitted requests remain at most 16). A deadline interrupts and closes the owned socket reader;
+request admission is retained until it exits. Platform readers avoid JDK21 virtual-thread carrier
+pinning in HTTP request streams. A single reconciliation worker and at most one pending signal per
+configured tenant coalesce deliveries; a delivery during reconciliation causes another fresh
+observation. Per-address request controls still apply. At most 1024 authenticated delivery IDs and
+payload digests are retained, expire logically after 300 seconds and are pruned on the next delivery.
+An identical duplicate returns 202 without scheduling more work, and conflicting content for the
+same ID is refused. This retention is process-local;
+multiple replicas can each validate a duplicate. GitHub has no signed delivery timestamp, so its ID
+retention is a bounded replay suppression window, not cryptographic expiry. GitLab signed timestamp
+validation rejects stale or future replays; legacy tokens have no signed timestamp.
+
+202 acknowledges a bounded reconciliation hint, not completed synchronization or durable event
+storage. A failed synchronization or lost/evicted delivery is repaired by the periodic path and fresh
+reads. Endpoint 404 means it is unconfigured; 403 rejects authentication or configured scope, 413
+rejects excessive bytes, and 429/503 indicate bounded admission or shutdown refusal. Embedded hosts
+can opt in with `withWebhooks(GraphAuthoringWebhookConfiguration)`; repository decorators retain the
+same receiver and ownership. Standalone trusted hosts may still call
+`GraphAuthoringRepositories.signal(repository, tenantId)` after authenticating and mapping their
+own delivery. Shutdown cancels owned delivery readers/work, stops scheduled recovery and closes
+the archive/index/pool. Receiver statistics use fixed accepted/duplicate/rejected/failure, pending,
+admitted-request and queue counts, without event, tenant, path or credential labels.
+
+### Read observability and limits
+
+The archive exposes coarse `readStatistics()` counters for hit, miss, eviction, bypass, retained
+in-memory blob bytes, parsed tree/commit/history/diff retained bytes, in-flight loads, provider calls, total and per-operation nanoseconds,
+synchronization duration and validation lag. The managed reconciler exposes completion, failure and
+lag counters, and the publication catalog exposes call count and retained artifact bytes. Export
+these through the embedding application's metrics system using fixed operation labels; never label
+metrics with tenant IDs, document paths, subjects or credential values. SQL retained-content bytes
+are available through `GraphAuthoringReadIndex.retainedBytes()`.
+
+Each adapter admits at most 128 operations with at most 64 executing concurrently. Cancellation
+retains admission until underlying work terminates; cancellation before start and submission rejection
+release the slot exactly once. Immutable blob
+loads admit at most 64 distinct identities and execute at most 16 loaders. Blob caches retain at
+most 2048 entries/64 MiB in memory and separately 2048 entries/64 MiB in SQL. Parsed immutable
+trees retain at most 2048 entries/64 MiB per adapter; GitHub commit-to-tree mappings retain at most
+2048 entries/1 MiB. These caches are separate from optional HTTP validators and are used only by
+reads; mutation tree and compare-and-swap checks remain remote. Each synchronization retains at
+most 16 metadata futures at a time, with at most 16 running and 64 queued loads across the adapter,
+and cancels unfinished work on failure or deadline. Conditional response
+representations retain at most 1024 entries/16 MiB; parsed list snapshot objects are scoped to one
+operation, with response bytes capped at 64 MiB. History and diff caches each retain at most 512
+entries/8 MiB; verified publication artifacts retain at most 200 entries/64 MiB. Oversized optional
+cache entries bypass retention. Failed loads are never cached. Content admission verifies the Git
+blob identity and stored SHA-256; authorization and mutation revision checks remain remote.
+Eligible GET and GitLab metadata HEAD retries honor `Retry-After` and rate-limit headers. A rate-limit 403 is unavailable,
+not an authorization failure. Delays beyond the request timeout or 30 seconds fail promptly rather
+than retrying before the provider permits. Ordinary authorization failures are not retried as rate
+limits. Conditional responses are accepted only with the exact previously validated representation.
+
+Remote writes still use the provider's original expected-revision and validation checks. The index
+is never write authority. Optional content-retention failures increment bypass counters and do not
+turn a successful remote mutation into a reported write failure. The next fresh read reconciles a
+remote success, an ambiguous write, or an external branch change before using its projection.
+
+Embedded hosts may use `EmbeddedGraphAuthoringConfiguration.decorateRepository(...)` with
+`ForwardingGraphAuthoringRepository` to add application behavior without copying server bootstrap.
+The supplied delegate is a non-owning view of the admitted archive. The composition invokes the
+decorator's close hook and the owned archive close exactly once, including construction failures;
+normal writes still pass through admission and publication checks. Directly constructed provider
+adapters use a bounded volatile projection; use the shipped composition or supply a persistent
+index through the supported composition factory for restart reuse.
+
+
+## Reproducing the local fixture measurements
+
+The [measurement artifact](../benchmarks/authoring-read-index.json) records deterministic fixture
+results on an Apple M1 Max, 32 GiB RAM, Java 21.0.11, SQLite/WAL and local Docker PostgreSQL 17.
+The provider fixtures add no artificial latency and make no live GitHub/GitLab requests. These
+numbers describe implementation cost and call counts; they do not predict production network
+latency or substantiate the original report of tens of seconds. The benchmark job ran serially;
+existing editor/server processes remained present, without dedicated hardware isolation.
+
+Run the indexed benchmark and correctness assertions from the repository root:
+
+```shell
+mvn -f ravenroot/pom.xml -pl ravenroot-server -am \
+  -Dtest=AuthoringReadIndexIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+Docker must be available: the test starts `postgres:17-alpine` and fails if it cannot. Each index
+uses four PostgreSQL connections with a five-second pool wait; production configuration retains
+its existing defaults (ten connections and a ten-second pool wait). GitHub fixture pages contain
+50 summaries; GitLab pages contain two. The 10/100/1000 datasets contain unique canonical draft
+documents of approximately 600 bytes, zero release documents and zero publications. A separate
+`AuthoringPublicationIndexTest` verifies catalog-only publication/unpublication, one fresh catalog
+validation per unchanged first page, and no provider-body reload. The established 200-publication
+catalog cap remains in force; the 1000-document fixture does not claim 1000 admitted publications.
+
+The baseline was captured against production revision
+`f1c24ec3ce6165a109f1754cb4681d66a35e59a1`, using the seeded provider fixtures and
+`AuthoringReadBaselineTest` from this change. To repeat it, use a separate checkout at that revision,
+copy only `AuthoringReadBaselineTest.java`, `GithubAuthoringRepositoryTest.java` and
+`GitlabAuthoringRepositoryTest.java` from this change into their matching test paths, then run the
+same command with `-Dtest=AuthoringReadBaselineTest`. The baseline invocation ran that single
+benchmark test. It was not a full baseline test-suite run. Running that harness on the new production
+source measures the new implementation instead.
+
+Warm/restart latency uses ten samples per operation; p50/p95 use nearest-rank samples 5/10.
+Cold initialization and one-document update each have one sample. Concurrent runs record one
+list/open/history operation per reader, separately at 1/10/50 readers. The artifact contains all
+samples' aggregate percentiles and call counts. Process CPU is measured with the JVM operating-system
+bean; heap is used-heap change across a case, can decrease after GC, and is not allocation or peak
+RSS. The `retained_bytes` counter measures cached SQL content. The separate `index_storage_bytes`
+measurement includes the live SQLite DB/WAL/SHM files without forcing a checkpoint, or PostgreSQL
+table/index/TOAST relation sizes for all authoring tables in the fixture schema. Storage is sampled
+after warm/concurrent verification while the index remains open. `process_rss_bytes` records the
+instantaneous test-JVM resident set at that point using `ps`; it is not a peak or per-operation cost.
+Cold-row CPU/heap deltas include the case's warm/concurrent verification; cold wall time and provider
+calls stop at its first returned page. Additional tests cover mixed writes, isolated tenants,
+independent PostgreSQL instances, restart, cancellation and interrupted synchronization.
+
+| Database/provider | Drafts | Cold first page ms | Warm list p50/p95 ms | One-document ms | New bodies |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| sqlite/github | 10 | 62.840 | 1.521/2.048 | 7.035 | 1 |
+| sqlite/github | 100 | 87.048 | 1.451/2.011 | 9.358 | 1 |
+| sqlite/github | 1000 | 829.452 | 1.295/1.778 | 28.841 | 1 |
+| sqlite/gitlab | 10 | 34.790 | 1.190/1.484 | 6.168 | 1 |
+| sqlite/gitlab | 100 | 134.764 | 1.337/4.204 | 9.352 | 1 |
+| sqlite/gitlab | 1000 | 859.771 | 1.011/1.618 | 32.216 | 1 |
+| postgresql/github | 10 | 48.741 | 2.999/5.369 | 9.791 | 1 |
+| postgresql/github | 100 | 166.354 | 2.182/2.431 | 11.838 | 1 |
+| postgresql/github | 1000 | 1647.374 | 2.117/2.427 | 35.517 | 1 |
+| postgresql/gitlab | 10 | 38.138 | 1.425/1.912 | 6.461 | 1 |
+| postgresql/gitlab | 100 | 150.752 | 2.140/2.625 | 11.649 | 1 |
+| postgresql/gitlab | 1000 | 1437.748 | 1.865/2.106 | 43.658 | 1 |
+
+Every unchanged indexed first page made three provider calls (repository authorization and two
+refs) and downloaded zero document bodies at every size and backend. At 1000 drafts, the original
+GitHub first-page list used 509 provider calls and 50 bodies per request (p50/p95 231.721/244.011 ms);
+the GitLab fixture used 55 calls and 4 bodies (39.895/54.597 ms). Cold indexed builds validate the complete
+inventory. A one-document change downloaded exactly one body. Restart reused persisted content
+and required three validation calls for the first indexed list page.
+
+The refreshed transport counters include successful GitLab file GET content as well as blob GET
+content. Ten original GitLab opens transferred 20 document-bearing responses and 12060 decoded
+source bytes at every dataset size. Indexed warm, restart and concurrent opens transferred zero
+source bytes; GitLab metadata uses HEAD with fresh authorization. `response_body_bytes` counts
+serialized HTTP response bodies; `document_bytes` counts decoded source content in those responses.
+Neither counter includes headers, TLS or transport framing. These are deterministic fixture results.
+
+At 1000 drafts, measured storage and instantaneous process RSS were:
+
+| Database/provider | Cached SQL content bytes | Complete index bytes | Test-JVM RSS bytes |
+| --- | ---: | ---: | ---: |
+| sqlite/github | 606780 | 1511424 | 413794304 |
+| sqlite/gitlab | 606780 | 1511424 | 420216832 |
+| postgresql/github | 606780 | 1851392 | 404488192 |
+| postgresql/gitlab | 606780 | 1851392 | 400048128 |
+
+The separate publication workload contains 20 drafts, 20 released documents and 20 verified
+publications, measured for both providers with both databases. Ten unchanged warm or restart lists
+made 30 provider calls and ten catalog calls, with zero provider document-body downloads. The first
+page immediately after reopening also asserted three provider calls, one catalog call and zero
+bodies. Unpublishing through a catalog-only change required one catalog validation and zero provider
+bodies. The artifact records those list latencies and physical index sizes separately from the
+zero-publication scaling dataset. No live-provider measurements were run.

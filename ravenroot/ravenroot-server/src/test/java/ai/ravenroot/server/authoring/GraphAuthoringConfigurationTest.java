@@ -53,7 +53,8 @@ class GraphAuthoringConfigurationTest {
         assertTrue(configuration.capabilitiesJson().contains("\"provider\":\"gitlab\""));
         try (var repository = GraphAuthoringRepositories.create(configuration, ignored -> java.util.Optional.empty(),
                 (tenant, graph, version, source, bytes) -> "absent", ignored -> { })) {
-            assertInstanceOf(GitlabAuthoringRepository.class, repository);
+            var managed = assertInstanceOf(ReconciledGraphAuthoringRepository.class, repository);
+            assertInstanceOf(GitlabAuthoringRepository.class, managed.delegate);
         }
     }
 

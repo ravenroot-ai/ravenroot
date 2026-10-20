@@ -1,15 +1,12 @@
 package ai.ravenroot.server.authoring;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import ai.ravenroot.api.authoring.GraphAuthoringException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
 import org.junit.jupiter.api.Test;
-
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.Authenticator;
 import java.net.CookieHandler;
@@ -30,7 +27,9 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
-import static org.junit.jupiter.api.Assertions.*;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
 
 class PublishedGraphArtifactCatalogTest {
     private static final PayloadLimits JSON = new PayloadLimits(2 * 1024 * 1024, 24, 10_000,
@@ -110,10 +109,12 @@ class PublishedGraphArtifactCatalogTest {
         }
     }
 
-    private static void addRelease(ArtifactClient client, String graphId, long version, String label, String source) {
-        byte[] raw = ("<?xml version=\"1.0\"?><graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">"
-                + "<key id=\"label\" for=\"graph\" attr.name=\"label\" attr.type=\"string\"/>"
-                + "<graph id=\"G\" edgedefault=\"directed\"><data key=\"label\">" + label
+    static void addRelease(ArtifactClient client, String graphId, long version, String label, String source) {
+        byte[] raw = ("<?xml version=\"1.0\"?><graphml"
+                     + " xmlns=\"http://graphml.graphdrawing.org/xmlns\"><key id=\"label\""
+                     + " for=\"graph\" attr.name=\"label\" attr.type=\"string\"/><graph id=\"G\""
+                     + " edgedefault=\"directed\"><data key=\"label\">"
+                                + label
                 + "</data></graph></graphml>").getBytes(StandardCharsets.UTF_8);
         byte[] graph = GraphReleaseMetadata.assign(raw, graphId, version).graphMl();
         String graphHash = digest(graph);
@@ -140,7 +141,7 @@ class PublishedGraphArtifactCatalogTest {
                 "manifestSha256", digest(manifestBytes), "manifestPath", manifestPath)));
     }
 
-    private static GraphAuthoringConfiguration configuration() {
+    static GraphAuthoringConfiguration configuration() {
         var environment = new HashMap<String, String>();
         environment.put("RAVENROOT_GRAPH_AUTHORING_MODE", "GIT");
         environment.put("RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER", "platform");
@@ -161,7 +162,7 @@ class PublishedGraphArtifactCatalogTest {
         catch (Exception impossible) { throw new AssertionError(impossible); }
     }
 
-    private static final class ArtifactClient extends HttpClient {
+    static final class ArtifactClient extends HttpClient {
         final Map<String, byte[]> objects = new HashMap<>();
         final List<Map<String, Object>> entries = new java.util.ArrayList<>();
         boolean failManifest;
@@ -179,6 +180,12 @@ class PublishedGraphArtifactCatalogTest {
                 return (HttpResponse<T>) new Response(request, 503, new byte[0]);
             }
             byte[] bytes = objects.get(path);
+            if (bytes != null
+                    && request.headers()
+                            .firstValue("If-None-Match")
+                            .filter(value -> value.equals("\"" + digest(bytes) + "\""))
+                            .isPresent())
+                return (HttpResponse<T>) new Response(request, 304, new byte[0]);
             return (HttpResponse<T>) new Response(request, bytes == null ? 404 : 200,
                     bytes == null ? new byte[0] : bytes);
         }
@@ -204,7 +211,7 @@ class PublishedGraphArtifactCatalogTest {
     private record Response(HttpRequest request, int statusCode, byte[] body)
             implements HttpResponse<byte[]> {
         @Override public Optional<HttpResponse<byte[]>> previousResponse() { return Optional.empty(); }
-        @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
+        @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of("ETag", List.of("\"" + digest(body) + "\"")), (a, b) -> true); }
         @Override public Optional<SSLSession> sslSession() { return Optional.empty(); }
         @Override public URI uri() { return request.uri(); }
         @Override public HttpClient.Version version() { return HttpClient.Version.HTTP_1_1; }

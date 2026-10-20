@@ -125,6 +125,19 @@ ROW_BOUNDARIES = {
         "required nonblank opaque server credential name; resolves a PAT or GitHub App private key "
         "through the credential store and is never a caller-selected value"
     ),
+    "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF": (
+        "optional opaque reference to a separate repository-specific webhook secret, at most 512 "
+        "characters without control characters; unset disables the receiver; resolved fresh at "
+        "startup and every delivery, including duplicates; see [provider delivery authentication]"
+        "(../operator-guide/graph-source-control.md#provider-webhook-delivery)"
+    ),
+    "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH": (
+        "webhook authentication enum; unset defaults to `SIGNATURE`: GitHub raw-body HMAC-SHA256 "
+        "or GitLab Standard Webhooks signing token with a 300-second timestamp window; explicit "
+        "`TOKEN` selects GitLab legacy token authentication only, with no automatic fallback; "
+        "bearer and cookie credentials confer no authority; see [provider delivery authentication]"
+        "(../operator-guide/graph-source-control.md#provider-webhook-delivery)"
+    ),
     "RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID": (
         "required only for `APP`; positive decimal GitHub App identifier of 1 through 20 digits; "
         "not a credential"
@@ -157,7 +170,7 @@ ROW_BOUNDARIES = {
         "maximum `120000` milliseconds"
     ),
     "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT": (
-        "additional retries for eligible GitHub and GitLab `GET` failures; unset defaults to `1`; accepted "
+        "additional retries for eligible GitHub `GET` and GitLab `GET`/`HEAD` read failures; unset defaults to `1`; accepted "
         "range is 0 through 3 and mutations are never retried blindly"
     ),
     "RAVENROOT_ACTIVITY_CAPTURE_ENABLED": (
@@ -336,6 +349,8 @@ GRAPH_AUTHORING_VARIABLES = frozenset({
     "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS",
     "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT",
     "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES",
+    "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH",
+    "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF",
 })
 
 SYSTEM_ONE_PROFILE_VARIABLES = frozenset({

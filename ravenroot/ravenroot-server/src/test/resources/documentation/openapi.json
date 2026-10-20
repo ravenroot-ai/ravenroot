@@ -1245,6 +1245,30 @@
         }
       }
     },
+    "/v1/graph-authoring-webhooks": {
+      "post": {
+        "summary": "Accepts bounded, default-off GitHub/GitLab push hints authenticated by the configured provider webhook secret. Bearer and cookie credentials are refused; repository/ref-to-tenant authority comes only from deployment configuration. Accepted hints reconcile fresh remote state; no payload revision is trusted.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"githubWebhookSignature": []}, {"gitlabWebhookSignature": []}, {"gitlabWebhookToken": []}],
+        "x-default-disabled": true,
+        "requestBody": {"required": true, "description": "Raw provider JSON, at most 262144 bytes. Only configured repository and branch refs can signal configured tenants. Ambient Authorization and Cookie headers are refused.", "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "202": {"description": "success"},
+          "204": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "provider delivery refused"},
+          "404": {"description": "provider delivery refused"},
+          "413": {"description": "provider delivery refused"},
+          "415": {"description": "provider delivery refused"},
+          "503": {"description": "provider delivery refused"}
+        }
+      }
+    },
     "/v1/graph-authoring/{id}": {
       "delete": {
         "summary": "Deletes one tenant-confined draft after checking draft, release, and publication state while retaining Git history.",
@@ -2271,7 +2295,10 @@
   },
   "components": {
     "securitySchemes": {
-      "bearerAuth": {"type": "http", "scheme": "bearer"}
+      "bearerAuth": {"type": "http", "scheme": "bearer"},
+      "githubWebhookSignature": {"type": "apiKey", "in": "header", "name": "X-Hub-Signature-256", "description": "HMAC-SHA256 of the exact request bytes using the configured GitHub webhook secret."},
+      "gitlabWebhookSignature": {"type": "apiKey", "in": "header", "name": "webhook-signature", "description": "Standard Webhooks signature over webhook-id, webhook-timestamp and raw body; timestamp within 300 seconds."},
+      "gitlabWebhookToken": {"type": "apiKey", "in": "header", "name": "X-Gitlab-Token", "description": "Legacy token mode only when explicitly configured; TLS required."}
     },
     "schemas": {
       "PayloadEnvelope": {"type": "object", "required": ["schema", "schemaVersion", "kind", "value"], "properties": {"schema": {"type": "string"}, "schemaVersion": {"type": "string"}, "kind": {"type": "string"}, "value": {}}},

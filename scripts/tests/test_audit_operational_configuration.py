@@ -2250,16 +2250,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_789_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(120, len(details))
+            self.assertEqual(121, len(details))
             self.assertEqual(
-                {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123},
+                {"methods": 134, "path": 121, "summary": 462, "successStatuses": 125},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(837, len(entries))
+            self.assertEqual(842, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4672,7 +4672,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 461 |",
+                "| Retained published contract descriptions | 462 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4680,7 +4680,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 460 |",
+                "| Retained published contract descriptions | 461 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6871,7 +6871,7 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
 
     def test_exact_boundary_closes_settings_routes_artifacts_ui_and_deployment_carriers(self) -> None:
         authority = self.authority
-        self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS), len(authority["contracts"]))
+        self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS) + len(audit.GRAPH_AUTHORING_WEBHOOK_SETTINGS), len(authority["contracts"]))
         identifiers = [identifier for contract in authority["contracts"]
                        for identifier in contract["candidateIds"]]
         identifiers += [identifier for partition in authority["semanticPartitions"]
@@ -6883,13 +6883,34 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             self.root, {audit.GRAPH_AUTHORING_AUTHORITY_ID: authority},
             self.entries, self.discovered))
         self.assertEqual({
-            "/v1/graph-authoring", "/v1/graph-authoring/{id}",
+            "/v1/graph-authoring-webhooks", "/v1/graph-authoring", "/v1/graph-authoring/{id}",
             "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
             "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
             "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
             "/v1/graph-artifacts/{graphId}/{version}/import",
             "/v1/graph-artifacts/{graphId}/{version}/deploy",
         }, set(authority["routePaths"]))
+
+    def test_webhook_auth_scope_bounds_and_file_identity_cannot_be_rebaselined_away(self) -> None:
+        for name, before, after in (
+                ("GraphAuthoringWebhookHttpApi.java", "private static final int MAX_BYTES = 256 * 1024;", "private static final int MAX_BYTES = 256 * 1024 * 1024;"),
+                ("GraphAuthoringWebhookHttpApi.java", "if (!valid) throw new Rejected(403);", "if (false) throw new Rejected(403);"),
+                ("GraphAuthoringWebhookHttpApi.java", "time < now - REPLAY_SECONDS", "false"),
+                ("GraphAuthoringWebhookHttpApi.java", "Set<String> tenants = refs.get(ref);", "Set<String> tenants = source.tenantNamespaces().keySet();"),
+                ("GraphAuthoringWebhookHttpApi.java", "new Semaphore(16)", "new Semaphore(16000)"),
+                ("GitlabAuthoringRepository.java", '!commit.equals(fileHeader(response, "X-Gitlab-Commit-Id"))', "false")):
+            relative = next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.name == name)
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=name, guard=before):
+                self.assertEqual(1, original.count(before))
+                mutated = original.replace(before, after, 1)
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_FILE_PROOFS, {relative: audit._source_digest(mutated)}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(self.root, self.discovered))
+                finally:
+                    path.write_text(original, encoding="utf-8")
 
     def test_removed_auth_store_tenant_and_limit_guards_or_drifted_carriers_fail_closed(self) -> None:
         mutations = (
@@ -6984,6 +7005,28 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                     refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
                     self.assertIsNone(
                         audit.graph_authoring_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_read_index_bounds_and_digest_admission_cannot_be_rebaselined_away(self) -> None:
+        for name, before, after in (
+                ("AuthoringAdmission.java", "if (isCancelled() && state.compareAndSet(0, 2)) admission.release();", "if (isCancelled()) admission.release();"),
+                ("ReadObjects.java", "if (loading.size() >= 64)", "if (loading.size() >= 64000)"),
+                ("ReadObjects.java", "verifyBlob(identity, value);", "// missing digest admission"),
+                ("AuthoringIndexReader.java", "outstanding.size() < 16", "outstanding.size() < 100000"),
+                ("JdbcGraphAuthoringReadIndex.java", "private static final int GENERATIONS = 16;", "private static final int GENERATIONS = 16000;")):
+            relative = next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.name == name)
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=name, guard=before):
+                self.assertEqual(1, original.count(before))
+                mutated = original.replace(before, after, 1)
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_FILE_PROOFS,
+                                         {relative: audit._source_digest(mutated)}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(
+                            self.root, self.discovered))
                 finally:
                     path.write_text(original, encoding="utf-8")
 

@@ -12937,7 +12937,7 @@ INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/jav
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'close',
-  'e85e56ec94274395713ec4141701749be63ad0a8f8e1392eb72a0cad9fbfd288')]
+  'e3a2d2dce84b079c587ec20ca6e07e41f649bf4fd86246d3d23a2125f25cc42f')]
 
 INTERACTION_WEBSOCKET_TEST_PROOFS = [('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
   'InteractionWebSocketConfigurationTest',

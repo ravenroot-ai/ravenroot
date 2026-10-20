@@ -14808,6 +14808,12 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 # unrelated candidates retain their existing semantic authorities rather than being claimed by
 # graph authoring as a whole file.
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
+    Path("ravenroot/ravenroot-ui/src/workspace.js"): "8a9b087bb2577e8cf1b1c7431e20497fd39e520e0e7c6357474752c18275ba22",
+    Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"): "43a184684a79f7ba7016cd78bccf37dd75dba4887fd9306e0913e535e27f195f",
+    Path("ravenroot/ravenroot-ui/src/document-close-plan.js"): "a795d45f1fd7bcebe3d0a63806700f9f326bc1b6644851ff8c36a43a38ca1872",
+    Path("ravenroot/ravenroot-ui/test/workspace.test.js"): "a96f59730294ed6954ebc324c23d871585de2a772049a7cad2120307413d9cc6",
+    Path("ravenroot/ravenroot-ui/test/workspace-persistence.test.js"): "c1a8f3264720c5ba57f1a03cc0fa324d1c3e0011e9c2d58fb2293b489b4f773b",
+    Path("ravenroot/ravenroot-ui/test/document-close-plan.test.js"): "bf00fb125e359ca7bfc0cfbdf6a32f1226310b3a63746412565090dfff516403",
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
         "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333",
@@ -14818,7 +14824,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'da9806558b3759c4adaa407c763b776b0bf6cb62cb0c72de6e8efb98ff10f606',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '8ebdc4072ac2e19bccba1ae3cb646f38d51f1283548cc6e5519fafc04f3e37f7',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): 'e24c600adcaaf488faee29e22ef751b99f9c3a0a4d9dd15b61ff8b63c044d82a',
     Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '330eee9236cb1498466010ef2515c592885cdb68d72a080d9413f1948b9c010a',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
@@ -14923,20 +14929,25 @@ GRAPH_AUTHORING_CANDIDATE_JAVA_METHODS = (
      "registerPublishedLocalDeployment"),
 )
 GRAPH_AUTHORING_UI_METHOD_PROOFS = {
+    "repositoryScope": "b1d565af51b48c26f3950067f8a1230c16844e44eed616c92dc144f18f9685bb",
+    "repositoryDocumentBindingIsCurrent": "079d4c99e87c164ce8c33f863c15e6d31b1a2101666c1da1accf6dc09600e5a1",
+    "openRepositorySource": "da2f1bf487fba2bdac1235d213a7aeeb4ef33ae24adea5dbc059078d3fc9fa51",
+    "repositoryDocumentHasLocalWork": "04b62ec30fe72dcaeb435e37931495f1cc403e83a4e9910e3f133f70268ea743",
+    "preserveOpenRepositoryGraph": "2369215bbbf76a07956b7b2c91b548b71eeb133bf5f06dfa4c9255c34369988a",
     "requireRepositoryBinding": '737b223a89d251e3348ac954942cb21612b4facc74bb55e901a06c88b3fd78ae',
     "repositoryNotice": '84d6859ede9f5ea9640dd332b3c3cc1dd3cbcdae9cd9bf0c9061907ee39122c6',
     "repositoryFailureMessage": '1dcf8b618d167d03f9a457b74466a15f37f86d7e109036a8716640b6a51d101c',
-    "createRepositorySuccessor": 'a2839b295f132994468057b56e9115a29c14581e711a712df28b6f9f84c9daf6',
+    "createRepositorySuccessor": 'b3e1beb50287d7c0e08faa3cf48a56f0b1b0523505930a3e1234388fcbd96a25',
     "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",
     "primaryPersistenceUnavailable": "342b4fa699e42b1d46930147387078f5799ff3380ef58baa3c39c92ae3d51a48",
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
     "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
-    "openRepositoryGraph": '81aca9b83fa84ce96cd9e5e5b63147509d9a99334dfbae89d52e71e0a5c96843',
-    "saveRepositoryGraph": 'fe488e0308605f34ae795570049663eac7ea959b7a5ec26f31e45c3f7a81017a',
-    "repositoryHistory": "d9e000b1797bcee8c49aafd346a98614ee4ddcdcb82c4e2e379fb09c6e7ab2d0",
-    "repositoryDiscard": "be75ee53c19a19b4bca346023b085d0d1db797bdedd9dc5822bdf5f6b6371186",
-    "repositoryDelete": "9536467e9e5975d388388ecac8fdcce7df2f03fb69647ba17a582dbb1acd800f",
-    "repositoryRelease": "6769678ca585cfb40e137f6ff24b986bc89e8fac92e2db5b4f053f51a4559bda",
+    "openRepositoryGraph": 'dfe5d91cf5dd0f5d5a31f876441830b26e9e2e0e7d6744cb72bbb5d452931d75',
+    "saveRepositoryGraph": '0a66154234cccc41169d326bcd1b6a64f9481f8ad43d04a02c0804b9486e22c2',
+    "repositoryHistory": "92abfc0c89003901a2ef6c9b5c1cb7644038e8ff7aeb02d1bbc0127dcc45bbd8",
+    "repositoryDiscard": "a6b23b0b5513525e6700bc36782bb5c13a22e114507b05aa845dd8e4cb87fdc2",
+    "repositoryDelete": "854e0b91d59662e7c0db2dcd55db997f4c67f8605fd0c54862d755fafaa8a1e5",
+    "repositoryRelease": "ddd789dd3bb45aed6c9de23c597f72519bae358cba3fc18ef1f8ed0cb79a6664",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
     "connectRuntime": '710c799c350b3a4e52f5f6c81546824341c7a89fc1e1b6c29364a4776ae3401c',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
@@ -14953,6 +14964,9 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 # These broad shell functions are supporting evidence only; their unrelated candidates retain
 # their existing classifications rather than being absorbed by the authoring cohort.
 GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
+    "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
+    "updateHistoryUi": "c3d7803dc76d48fc860316aac24617fa5dbc08e2270999ec74115a04164b413c",
+    "completeReplaceActiveDocument": "5f048a87c67189014d16a0cee8d9af2ce0ddf81f95cc709a992e4841c18a9ca5",
     "bootApplication": '9a21d4cd04d3f43b387e7f0b97581629e29710b4b68dd7c9c3f422be1432e16d',
     "syncGraphModeLabel": 'a205d6a872ef979883261fb8c43ff376231456941c05321787ac53ef789faef9',
 }
@@ -14960,9 +14974,9 @@ GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
         "413ae14ef232086fb9a1c0ec233892efc5829de3ebe6e9416a378468fcefbc5d",
     (Path("ravenroot/ravenroot-ui/src/workspace.js"), "createDocumentRecord"):
-        "dce4ad56c2a0f50c9f6c91e45c510bb8f0f9d74267f4f5923d5ea99120e60dda",
+        "4f9fc9eb0d1d9cf209ab76bd5f57e92aea38f53eeb52c5505fbc32c70c38b0ef",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):
-        "6dbd06006ad07b134568f3e0674a8c2426651892260f418eda13a23bae270eed",
+        "5d5f16d7c42fdc0cb3663ae69b43bc1d8a022a169f5781503ffdeecf34ec1e80",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "createEmptyWorkflowDocument"):
         "97767dbd5de84c28e58797c2e3c29c385ebeabaf9f537947014c350366e3bc03",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "isEmptyWorkflowDocument"):
@@ -15109,6 +15123,73 @@ def graph_authoring_cohort_candidate_ids(
     return selected
 
 
+def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> bool:
+    """Keep scoped managed opening and restored unsaved work independent of refreshed hashes."""
+    def body(method: str) -> str:
+        span = _javascript_function_span(ui, method)
+        return normalized(ui[slice(*span)]) if span else ""
+
+    def includes(source: str, *guards: str) -> bool:
+        return all(normalized(guard) in source for guard in guards)
+
+    if not includes(body("repositoryScope"), "workspaceAuthority.state !== 'ready'",
+                    "normalizedWorkspaceServiceUrl(workspaceAuthority.client)",
+                    "workspaceAuthority.scope?.tenantId ?? null", "configuration.provider",
+                    "configuration.repositoryDisplay", "configuration.releaseBranch"):
+        return False
+    if not includes(body("repositoryDocumentBindingIsCurrent"), "!scope || !tenantAuthorityAllows(target)",
+                    "target.authoring.providerDocumentId && target.authoring.repositoryScope !== scope"):
+        return False
+    if not includes(body("openRepositorySource"), "tenantAuthorityAllows(target)",
+                    "target.authoring.repositoryScope === scope",
+                    "target.authoring.providerDocumentId === documentId",
+                    "target.authoring.draftDeleted === (source === 'release')"):
+        return False
+    if not includes(body("repositoryDocumentHasLocalWork"), "paneIsDirty(target)",
+                    "target.authoring.saveFlight", "target.authoring.saveError",
+                    "inspectInspectorDraft(inspectorDraft).changed"):
+        return False
+    preserved = body("preserveOpenRepositoryGraph")
+    if not includes(preserved, "activateDocument(target.id)", "workspace.active !== target",
+                    "target.authoring.saveError", "repositoryNotice(") \
+            or any(operation in preserved for operation in (
+                "markSaved(", "applyAuthoringDocument(", "completeReplaceActiveDocument(", "initLoadedGraph(")):
+        return False
+    opened = body("openRepositoryGraph")
+    before = "if (repositoryDocumentHasLocalWork(existing)) return preserveOpenRepositoryGraph(existing);"
+    fetched = "const result = await client.open(documentId, source);"
+    after = "if (repositoryDocumentHasLocalWork(current)"
+    parsed = "const graph = parsePreparedGraph("
+    if any(marker not in opened for marker in (before, fetched, after, parsed)) \
+            or not opened.index(before) < opened.index(fetched) < opened.index(after) < opened.index(parsed):
+        return False
+    if not includes(opened, "current.history !== observedHistory",
+                    "current.history.revision() !== observedRevision", "current.incarnation !== observedIncarnation",
+                    "if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;",
+                    "openDocument({ name: result.documentId, graph })",
+                    "target.authoring.repositoryScope = scope;"):
+        return False
+    for method in ("saveRepositoryGraph", "createRepositorySuccessor", "repositoryHistory",
+                   "repositoryDiscard", "repositoryDelete", "repositoryRelease"):
+        if "!repositoryDocumentBindingIsCurrent(target)" not in body(method):
+            return False
+    saved = body("saveRepositoryGraph")
+    if not includes(saved, "if (target.history === history && history.revision() === submittedRevision)",
+                    "history.markSaved(); target.visualGroupPresentationDirty = false; target.authoring.localChanges = false;") \
+            or "localChanges = false" in body("applyAuthoringDocument"):
+        return False
+    persistence = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace-persistence.js")])
+    close = normalized(sources[Path("ravenroot/ravenroot-ui/src/document-close-plan.js")])
+    workspace = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace.js")])
+    return includes(persistence, "localChanges: Boolean(localChanges)",
+                    "repositoryScope: nullableString(value.repositoryScope, 'repositoryScope')",
+                    "document_.history.isDirty() || document_.visualGroupPresentationDirty || document_.authoring?.localChanges") \
+        and "document_.authoring?.localChanges" in close \
+        and "Boolean(document_.authoring?.localChanges)" in workspace \
+        and "document_?.authoring?.localChanges" in body("paneIsDirty") \
+        and "workspace.active?.authoring?.localChanges" in body("updateHistoryUi")
+
+
 def graph_authoring_successor_boundary(sources: dict[Path, str], ui: str, routes: str) -> bool:
     """Pin successor semantics independently of refreshable exact-file evidence."""
     def java(name: str, method: str) -> str:
@@ -15237,6 +15318,8 @@ def graph_authoring_authority_from_source(
         if digest != expected:
             return None
         ui_support_digests[method] = digest
+    if not graph_authoring_managed_open_boundary(sources, ui):
+        return None
     if not graph_authoring_successor_boundary(sources, ui, (root / GRAPH_AUTHORING_ROUTE_PATH).read_text(encoding="utf-8")):
         return None
     ui_span_digests: dict[str, str] = {}

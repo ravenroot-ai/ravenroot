@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 
+test.use({ viewport: { width: 1600, height: 1000 } });
+
 const graph = version => `<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
 <key id="gid" for="graph" attr.name="ravenroot.authoring.graphId" attr.type="string"/>
 <key id="ver" for="graph" attr.name="ravenroot.authoring.releaseVersion" attr.type="long"/>
@@ -8,10 +10,11 @@ const graph = version => `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
 <graph id="orders" edgedefault="directed"><data key="gid">orders</data><data key="ver">${version}</data>
 <node id="start"><data key="kind">START</data></node></graph></graphml>`;
 
-async function setup(page, { initialVersion = 1, canWrite = true, supported = true, authenticated = false, legacy = false } = {}) {
+async function setup(page, { initialVersion = 1, canWrite = true, supported = true, authenticated = false, legacy = false, configuration = {} } = {}) {
   await keepAuthenticationInMemory(page);
   let version = initialVersion, draft = legacy ? graph(version).replace('id="start"', 'id="legacy"') : graph(version), revision = 1;
   const requests = [];
+  requests.setDraft = (nextVersion, xml = graph(nextVersion)) => { version = nextVersion; draft = xml; revision++; };
   const envelope = source => ({ documentId: 'orders.graphml', displayPath: 'orders.graphml', graphId: 'orders',
     releaseVersion: source === 'release' ? 1 : version, releasedVersion: 1, releasedGraphId: 'orders',
     released: true, published: false, draftDeleted: source === 'release', canWrite,
@@ -21,13 +24,14 @@ async function setup(page, { initialVersion = 1, canWrite = true, supported = tr
     && route.request().headers().authorization !== 'Bearer managed-token'
     ? { status: 401, json: { error: 'authentication required' } }
     : { json: { schemaVersion: 1, graphDocumentMaxBytes: 1048576,
-      graphAuthoring: { mode: 'git', provider: 'github', operations: ['OPEN', 'SAVE', ...(supported ? ['CREATE_NEXT_VERSION'] : [])],
-        repositoryDisplay: 'example/graphs', releaseBranch: 'main' } } }));
+      ...(configuration.tenantId ? { workspace: { tenantId: configuration.tenantId } } : {}),
+      graphAuthoring: { mode: 'git', provider: configuration.provider || 'github', operations: ['OPEN', 'SAVE', ...(supported ? ['CREATE_NEXT_VERSION'] : [])],
+        repositoryDisplay: configuration.repositoryDisplay || 'example/graphs', releaseBranch: 'main' } } }));
   await page.route('**/v1/node-types', route => route.fulfill({ json: [] }));
   await page.route('**/v1/events**', route => route.fulfill({ status: 204, body: '' }));
   await page.route('**/v1/graph-authoring**', route => {
     const req = route.request(), url = new URL(req.url());
-    requests.push({ method: req.method(), path: url.pathname, headers: req.headers(), body: req.postData() });
+    requests.push({ method: req.method(), path: url.pathname, source: url.searchParams.get('source'), headers: req.headers(), body: req.postData() });
     if (url.pathname.endsWith('/versions')) {
       if (version > 1) return route.fulfill({ status: 409, json: { error: 'CONFLICT' } });
       version = 2; draft = graph(2); revision++;
@@ -181,4 +185,306 @@ test('picker searches all paginated sources and preserves partial failure with r
   await page.getByRole('combobox', { name: 'Source filter' }).selectOption('release');
   await expect(page.getByRole('button', { name: /later.graphml · Read-only release v2/ })).toBeVisible();
   if (process.env.RAVENROOT_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.RAVENROOT_EVIDENCE_DIR}/issue588-picker.png` });
+});
+
+async function addUnsavedNode(page, name = 'Unsaved sentinel') {
+  if (await page.locator('#btn-add-node').isDisabled()) await page.locator('#btn-modify').click();
+  await page.locator('#btn-add-node').click();
+  await page.locator('#node-editor input[name="name"]').fill(name);
+  await page.locator('#node-editor button[type="submit"]').click();
+}
+
+async function selectRepositorySource(page, source = 'draft') {
+  await page.locator('#btn-open').click();
+  await page.getByRole('button', { name: source === 'draft'
+    ? /orders.graphml · Editable draft/ : /orders.graphml · Read-only release/ }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
+}
+
+const activeManagedState = page => page.evaluate(() => {
+  const target = window.ravenroot.activeDocument();
+  return { id: target.id, incarnation: target.incarnation,
+    nodes: target.graph.nodes.map(node => ({ id: node.id, name: node.name })),
+    history: target.history.state(), authoring: structuredClone(target.authoring) };
+});
+
+async function expectUniqueWorkspaceIds(page) {
+  expect(await page.evaluate(() => {
+    const ids = window.ravenroot.workspace.documents.map(document_ => document_.id);
+    return ids.length === new Set(ids).size;
+  })).toBe(true);
+}
+
+function forbidUnexpectedSideEffects(page) {
+  page.on('dialog', dialog => { throw new Error(`Unexpected ${dialog.type()} dialog: ${dialog.message()}`); });
+  page.on('download', () => { throw new Error('Reopening must not download or export a document'); });
+}
+
+for (const entry of ['picker', 'successor', 'refused-save']) {
+  test(`reopening an existing dirty managed draft through ${entry} preserves graph, binding and undo`, async ({ page }) => {
+    const requests = await setup(page, { initialVersion: 2 });
+    let refusedSaves = 0;
+    if (entry === 'refused-save') await page.route('**/v1/graph-authoring/orders.graphml', route =>
+      route.request().method() === 'PUT'
+        ? (refusedSaves++, route.fulfill({ status: 409, json: { error: 'CONFLICT' } })) : route.fallback());
+    await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+    forbidUnexpectedSideEffects(page);
+    await addUnsavedNode(page);
+    if (entry === 'refused-save') {
+      await page.locator('#btn-export').click();
+      await expect(page.locator('#repository-notice')).toContainText('Your edits are intact');
+      await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.active.authoring.saveFlight)).toBe(null);
+    }
+    const before = await activeManagedState(page);
+    expect(before.history.dirty).toBe(true);
+    expect(before.history.canUndo).toBe(true);
+    if (entry === 'successor') {
+      await selectRepositorySource(page, 'release');
+      await expect(page.locator('#repository-next-version')).toHaveText('Open existing draft');
+      await page.locator('#repository-next-version').click();
+    } else await selectRepositorySource(page);
+    await expect(page.locator('#repository-notice')).toContainText('Your local graph and undo history were kept');
+    expect(await activeManagedState(page)).toEqual(before);
+    if (entry === 'refused-save') await expect(page.locator('#repository-notice')).toContainText('previous save is still refused');
+    await expectUniqueWorkspaceIds(page);
+    if (entry === 'picker' && process.env.RAVENROOT_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.RAVENROOT_EVIDENCE_DIR}/issue588-attempt4-preserved-draft.png` });
+    expect(await page.evaluate(() => window.ravenroot.workspace.documents.filter(d =>
+      d.authoring.providerDocumentId === 'orders.graphml' && !d.authoring.draftDeleted).length)).toBe(1);
+    expect(requests.filter(request => ['POST', 'DELETE'].includes(request.method))).toHaveLength(0);
+    expect(refusedSaves).toBe(entry === 'refused-save' ? 1 : 0);
+    expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0); // refused route was handled separately
+    await page.locator('#btn-undo').click();
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodes.some(n => n.name === 'Unsaved sentinel'))).toBe(false);
+    await page.locator('#btn-redo').click();
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodes.some(n => n.name === 'Unsaved sentinel'))).toBe(true);
+  });
+}
+
+test('clean managed reopen refreshes the current external successor in the same workspace record', async ({ page }) => {
+  const requests = await setup(page);
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v1');
+  forbidUnexpectedSideEffects(page);
+  const before = await activeManagedState(page);
+  requests.setDraft(2);
+  await selectRepositorySource(page);
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  const after = await activeManagedState(page);
+  expect(after.id).toBe(before.id);
+  expect(after.authoring.revision.draft).toBe('d2');
+  expect(after.history.dirty).toBe(false);
+  expect(after.history.canUndo).toBe(false);
+  await expectUniqueWorkspaceIds(page);
+  expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
+});
+
+test('local edits made during a clean managed fetch preserve the original revision and undo history', async ({ page }) => {
+  const requests = await setup(page);
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v1');
+  forbidUnexpectedSideEffects(page);
+  requests.setDraft(2);
+  let release, started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml?source=draft', async route => {
+    started(); await gate; await route.fallback();
+  });
+  try {
+    await selectRepositorySource(page);
+    await entered;
+    await addUnsavedNode(page, 'Edited during fetch');
+    const before = await activeManagedState(page);
+    release();
+    await expect(page.locator('#repository-notice')).toContainText('Your local graph and undo history were kept');
+    expect(await activeManagedState(page)).toEqual(before);
+    expect(before.authoring.revision.draft).toBe('d1');
+    await expectUniqueWorkspaceIds(page);
+    expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
+  } finally { release(); }
+});
+
+test('restored unsaved managed source survives a direct startup link without fetching over local work', async ({ page, context }) => {
+  await setup(page, { initialVersion: 2, configuration: { tenantId: 'tenant-a' } });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await addUnsavedNode(page, 'Restored unsaved sentinel');
+  const before = await activeManagedState(page);
+  await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  const restored = await context.newPage();
+  const requests = await setup(restored, { initialVersion: 2, configuration: { tenantId: 'tenant-a' } });
+  forbidUnexpectedSideEffects(restored);
+  await restored.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(restored.locator('#repository-notice')).toContainText('Your local graph and undo history were kept');
+  const after = await activeManagedState(restored);
+  expect(after.id).toBe(before.id);
+  expect(after.nodes).toEqual(before.nodes);
+  expect(after.authoring.revision).toEqual(before.authoring.revision);
+  expect(after.authoring.repositoryScope).toBe(before.authoring.repositoryScope);
+  expect(after.authoring.localChanges).toBe(true);
+  await expect(restored.locator('#graph-mode-label')).toContainText('Unsaved edits');
+  await expectUniqueWorkspaceIds(restored);
+  expect(await restored.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event); return event.defaultPrevented;
+  })).toBe(true);
+  await restored.evaluate(() => window.ravenroot.requestCloseDocument(window.ravenroot.workspace.active.id));
+  await expect(restored.locator('#unsaved-document-dialog')).toBeVisible();
+  await restored.locator('[data-unsaved-action="cancel"]').click();
+  expect(requests).toHaveLength(0);
+  let refuse = true;
+  await restored.route('**/v1/graph-authoring/orders.graphml', route =>
+    route.request().method() === 'PUT' && refuse
+      ? route.fulfill({ status: 409, json: { error: 'CONFLICT' } }) : route.fallback());
+  await restored.locator('#btn-export').click();
+  await expect(restored.locator('#repository-notice')).toContainText('Your edits are intact');
+  expect((await activeManagedState(restored)).authoring.localChanges).toBe(true);
+  await selectRepositorySource(restored);
+  await expect(restored.locator('#repository-notice')).toContainText('previous save is still refused');
+  expect((await activeManagedState(restored)).nodes).toEqual(before.nodes);
+  refuse = false;
+  let releaseSave, saveEntered;
+  const saveGate = new Promise(resolve => { releaseSave = resolve; });
+  const enteredSave = new Promise(resolve => { saveEntered = resolve; });
+  await restored.route('**/v1/graph-authoring/orders.graphml', async route => {
+    if (route.request().method() === 'PUT') { saveEntered(); await saveGate; }
+    await route.fallback();
+  });
+  try {
+    await restored.locator('#btn-export').click();
+    await enteredSave;
+    await addUnsavedNode(restored, 'Changed during restored save');
+    releaseSave();
+    await expect.poll(() => restored.evaluate(() => window.ravenroot.workspace.active.authoring.saveFlight)).toBe(null);
+    expect((await activeManagedState(restored)).history.dirty).toBe(true);
+    expect((await activeManagedState(restored)).authoring.localChanges).toBe(true);
+    await expect(restored.locator('#dirty-state')).toContainText('unsaved changes');
+    await restored.locator('#btn-export').click();
+  } finally { releaseSave(); }
+  await expect.poll(() => restored.evaluate(() => ({
+    dirty: window.ravenroot.workspace.active.history.isDirty(),
+    protected: window.ravenroot.workspace.active.authoring.localChanges,
+    saving: window.ravenroot.workspace.active.authoring.saveFlight,
+  }))).toEqual({ dirty: false, protected: false, saving: null });
+  expect(requests.filter(request => request.method === 'PUT')).toHaveLength(2);
+  await restored.close();
+});
+
+for (const changedAuthority of ['repository', 'provider']) {
+test(`different configured ${changedAuthority} cannot adopt or save an older managed record and legacy sources stay separate`, async ({ page }) => {
+  const configuration = { repositoryDisplay: 'example/graphs' };
+  const requests = await setup(page, { initialVersion: 2, configuration });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await addUnsavedNode(page);
+  const before = await activeManagedState(page);
+  if (changedAuthority === 'repository') configuration.repositoryDisplay = 'example/other-graphs';
+  else configuration.provider = 'gitlab';
+  const authorityGeneration = await page.evaluate(() => window.ravenroot.workspacePersistence().authority.generation);
+  await page.locator('#access-token').fill('other-repository-token');
+  await page.locator('#btn-authenticate').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.generation)).toBeGreaterThan(authorityGeneration);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.state)).toBe('ready');
+  forbidUnexpectedSideEffects(page);
+  await page.locator('#btn-export').click();
+  await expect(page.locator('#repository-notice')).toContainText('earlier or different repository connection');
+  expect(await activeManagedState(page)).toEqual(before);
+  await selectRepositorySource(page);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().id)).not.toBe(before.id);
+  const current = await activeManagedState(page);
+  expect(current.authoring.repositoryScope).not.toBe(before.authoring.repositoryScope);
+  await page.evaluate(id => {
+    window.ravenroot.activateDocument(id);
+    // A pre-binding snapshot is kept intact; it cannot gain the current repository's authority.
+    window.ravenroot.workspace.active.authoring.repositoryScope = null;
+  }, before.id);
+  await page.locator('#btn-export').click();
+  await expect(page.locator('#repository-notice')).toContainText('Download GraphML to protect your work');
+  await selectRepositorySource(page);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().id)).toBe(current.id);
+  expect(await page.evaluate(id => window.ravenroot.workspace.find(id).graph.nodes.some(n => n.name === 'Unsaved sentinel'), before.id)).toBe(true);
+  await expectUniqueWorkspaceIds(page);
+  expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
+});
+}
+
+test('concurrent managed opens resolve one workspace identity after their remote reads complete', async ({ page }) => {
+  const requests = await setup(page, { initialVersion: 2 });
+  await page.goto('/');
+  forbidUnexpectedSideEffects(page);
+  let release, entered = 0, bothEntered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const both = new Promise(resolve => { bothEntered = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml?source=draft', async route => {
+    if (++entered === 2) bothEntered();
+    await gate; await route.fallback();
+  });
+  try {
+    await selectRepositorySource(page);
+    await selectRepositorySource(page);
+    await both;
+    release();
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+    await expect.poll(() => requests.filter(r => r.path.endsWith('/orders.graphml')).length).toBe(2);
+    await expectUniqueWorkspaceIds(page);
+    expect(await page.evaluate(() => window.ravenroot.workspace.documents.filter(d => d.authoring.providerDocumentId).length)).toBe(1);
+    expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
+  } finally { release(); }
+});
+
+test('tenant restoration keeps same-name managed sources scoped and preserves prior local work', async ({ page }) => {
+  const configuration = { tenantId: 'tenant-a' };
+  const requests = await setup(page, { initialVersion: 2, configuration });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await addUnsavedNode(page);
+  const before = await activeManagedState(page);
+  await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  configuration.tenantId = 'tenant-b';
+  await page.locator('#access-token').fill('tenant-b-token');
+  await page.locator('#btn-authenticate').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.tenantId)).toBe('tenant-b');
+  forbidUnexpectedSideEffects(page);
+  await selectRepositorySource(page);
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  const other = await activeManagedState(page);
+  expect(other.id).not.toBe(before.id);
+  expect(other.authoring.repositoryScope).not.toBe(before.authoring.repositoryScope);
+  expect(other.nodes.some(n => n.name === 'Unsaved sentinel')).toBe(false);
+  configuration.tenantId = 'tenant-a';
+  await page.locator('#access-token').fill('tenant-a-token');
+  await page.locator('#btn-authenticate').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.tenantId)).toBe('tenant-a');
+  await selectRepositorySource(page);
+  await expect(page.locator('#repository-notice')).toContainText('Your local graph and undo history were kept');
+  const restored = await activeManagedState(page);
+  expect(restored.id).toBe(before.id);
+  expect(restored.nodes).toEqual(before.nodes);
+  expect(restored.authoring.revision).toEqual(before.authoring.revision);
+  expect(restored.authoring.localChanges).toBe(true);
+  await expectUniqueWorkspaceIds(page);
+  expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
+});
+
+
+test('restored clean source refreshes to the current remote successor on direct managed startup', async ({ page, context }) => {
+  await setup(page, { configuration: { tenantId: 'tenant-a' } });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v1');
+  const before = await activeManagedState(page);
+  await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  const restored = await context.newPage();
+  const requests = await setup(restored, { initialVersion: 2, configuration: { tenantId: 'tenant-a' } });
+  forbidUnexpectedSideEffects(restored);
+  await restored.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(restored.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  const after = await activeManagedState(restored);
+  expect(after.id).toBe(before.id);
+  expect(after.authoring.releaseVersion).toBe(2);
+  expect(after.authoring.localChanges).toBe(false);
+  expect(after.history.dirty).toBe(false);
+  await expectUniqueWorkspaceIds(restored);
+  expect(requests.filter(request => request.method !== 'GET')).toHaveLength(0);
+  await restored.close();
 });

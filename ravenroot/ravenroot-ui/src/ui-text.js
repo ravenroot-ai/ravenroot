@@ -5,6 +5,9 @@ import { DYNAMIC_ENGLISH_MESSAGES } from './ui-dynamic-text.js';
 export const ENGLISH_MESSAGES = Object.freeze({
   ...STATIC_ENGLISH_MESSAGES,
   ...DYNAMIC_ENGLISH_MESSAGES,
+  'repository.open.preserved': 'This source is already open. Your local graph and undo history were kept.',
+  'repository.open.saveFailed': 'The previous save is still refused: {reason}',
+  'repository.error.sourceBinding': 'This open document belongs to an earlier or different repository connection. Your edits are intact. Download GraphML to protect your work, then open the current managed source and reapply your edits.',
   "repository.picker.title": "Open from repository",
   "repository.picker.search": "Search document names or paths",
   "repository.picker.filter": "Source filter",

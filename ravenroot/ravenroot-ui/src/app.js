@@ -2889,7 +2889,7 @@ function paneDisplayName(document_) {
 }
 
 function paneIsDirty(document_) {
-  return Boolean(documentIsEditable(document_) && document_.visualGroupPresentationDirty) || (workspace.activeId === document_.id
+  return Boolean(document_?.authoring?.localChanges) || Boolean(documentIsEditable(document_) && document_.visualGroupPresentationDirty) || (workspace.activeId === document_.id
     ? Boolean(editHistory.state().dirty)
     : Boolean(document_.history?.isDirty()));
 }
@@ -3821,6 +3821,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   target.viewStates = { design: null, monitoring: null };
   target.monitoringForces = normalizedMonitoringForces();
   target.visualGroupPresentationDirty = false;
+  target.authoring.localChanges = false;
   activeDocumentIncarnation = target.incarnation;
   graphName = name;
   graphDisplayName = allocateDocumentDisplayName(name);
@@ -10581,7 +10582,8 @@ function confirmDiscardChanges() {
 function updateHistoryUi() {
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
-  const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
+  const dirty = state.dirty || Boolean(workspace.active?.authoring?.localChanges)
+    || (documentIsEditable(workspace.active) && presentationDirty);
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
     indicator.classList.toggle('dirty', dirty);
@@ -15747,12 +15749,53 @@ function repositoryFailureMessage(error, imported = false) {
   return uiText('repository.error.failed', { reason: uiErrorReason(error) });
 }
 
+// Scope is browser-safe configuration identity, never a credential or a filename-derived authority.
+function repositoryScope() {
+  if (workspaceAuthority.state !== 'ready') return null;
+  const configuration = runtimeConfiguration.configuration.graphAuthoring;
+  return JSON.stringify([normalizedWorkspaceServiceUrl(workspaceAuthority.client),
+    workspaceAuthority.scope?.tenantId ?? null, configuration.provider,
+    configuration.repositoryDisplay, configuration.releaseBranch]);
+}
+
+function repositoryDocumentBindingIsCurrent(target, scope = repositoryScope()) {
+  if (!scope || !tenantAuthorityAllows(target)
+      || (target.authoring.providerDocumentId && target.authoring.repositoryScope !== scope)) {
+    repositoryNotice(uiText('repository.error.sourceBinding'));
+    return false;
+  }
+  return true;
+}
+
+function openRepositorySource(documentId, source, scope) {
+  return workspace.documents.find(target => tenantAuthorityAllows(target)
+    && target.authoring.repositoryScope === scope
+    && target.authoring.providerDocumentId === documentId
+    && target.authoring.draftDeleted === (source === 'release')) || null;
+}
+
+function repositoryDocumentHasLocalWork(target) {
+  return Boolean(target && (paneIsDirty(target) || target.authoring.saveFlight || target.authoring.saveError
+    || (inspectorDraft?.documentId === target.id && inspectorDraft.form.isConnected
+      && inspectInspectorDraft(inspectorDraft).changed)));
+}
+
+function preserveOpenRepositoryGraph(target) {
+  activateDocument(target.id);
+  if (workspace.active !== target) return false;
+  repositoryNotice(uiText('repository.open.preserved') + (target.authoring.saveError
+    ? ` ${uiText('repository.open.saveFailed', { reason: target.authoring.saveError })}` : ''));
+  updateHistoryUi();
+  return true;
+}
+
 async function createRepositorySuccessor() {
   const target = workspace.active;
   const authoring = target?.authoring;
   const client = graphAuthoringClient, authority = workspaceAuthority;
   if (!gitAuthoringEnabled() || !authoring?.draftDeleted || !authoring.canWrite
       || !runtimeConfiguration?.configuration?.graphAuthoring?.operations.includes('CREATE_NEXT_VERSION')) return false;
+  if (!repositoryDocumentBindingIsCurrent(target)) return false;
   if (authoring.successor) return openRepositoryGraph({ documentId: authoring.providerDocumentId, source: 'draft' });
   if (!globalThis.confirm(uiText('repository.version.confirm', {
     current: authoring.releaseVersion, next: authoring.releaseVersion + 1,
@@ -15778,13 +15821,34 @@ async function openRepositoryGraph(requested = null) {
       requireRepositoryBinding(client, authority);
       ({ documentId, source } = choice);
     }
+    const scope = repositoryScope();
+    if (!scope) return false;
+    captureActiveDocument();
+    const existing = openRepositorySource(documentId, source, scope);
+    if (repositoryDocumentHasLocalWork(existing)) return preserveOpenRepositoryGraph(existing);
+    const observedHistory = existing?.history;
+    const observedRevision = observedHistory?.revision();
+    const observedIncarnation = existing?.incarnation;
     const result = await client.open(documentId, source);
     requireRepositoryBinding(client, authority);
+    captureActiveDocument();
+    // Another open or a local edit may have completed while the remote read was pending.
+    const current = openRepositorySource(documentId, source, scope);
+    if (repositoryDocumentHasLocalWork(current) || (current && current === existing
+        && (current.history !== observedHistory || current.history.revision() !== observedRevision
+          || current.incarnation !== observedIncarnation))) return preserveOpenRepositoryGraph(current);
     const graph = parsePreparedGraph(decodeGraphMl(result), result.documentId,
       { maxBytes: currentGraphDocumentByteLimit() });
-    const id = openDocument({ name: result.documentId, graph,
-      documentId: `repository:${result.documentId}:${source}` });
-    const target = workspace.find(id);
+    let target = current;
+    if (target) {
+      activateDocument(target.id);
+      if (workspace.active !== target) return false;
+      if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;
+    } else {
+      target = workspace.find(openDocument({ name: result.documentId, graph }));
+    }
+    target.authoring.repositoryScope = scope;
+    target.authoring.localChanges = false;
     applyAuthoringDocument(target, result, result.documentId);
     target.authoring.canWrite = result.canWrite === true;
     target.authoring.successor = false;
@@ -15817,6 +15881,8 @@ async function saveRepositoryGraph() {
   const target = workspace.active;
   const client = graphAuthoringClient, authority = workspaceAuthority;
   if (!gitAuthoringEnabled() || !target || !documentIsEditable(target) || target.authoring.saveFlight) return false;
+  if (!repositoryDocumentBindingIsCurrent(target)) return false;
+  const scope = repositoryScope();
   const providerDocumentId = target.authoring.providerDocumentId
     || globalThis.prompt(uiText("workspace.app.repository.filename"), target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
   if (!providerDocumentId) return false;
@@ -15836,10 +15902,12 @@ async function saveRepositoryGraph() {
     applyAcceptedGraphMl(target.graph, result, xml => parsePreparedGraph(xml, providerDocumentId,
       { maxBytes: currentGraphDocumentByteLimit() }));
     applyAuthoringDocument(target, result, providerDocumentId);
+    target.authoring.repositoryScope = scope;
     // Edits made while the request was in flight remain dirty. Only the exact submitted history
     // position becomes the save point.
     if (target.history === history && history.revision() === submittedRevision) {
       history.markSaved(); target.visualGroupPresentationDirty = false;
+      target.authoring.localChanges = false;
     }
     repositoryNotice('');
     addActivityMessage(uiMessage("workspace.notice.editor.21"), uiMessage("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
@@ -15856,6 +15924,7 @@ async function saveRepositoryGraph() {
 
 async function repositoryHistory() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
   if (!gitAuthoringEnabled() || !id) return false;
   try {
     const page = await graphAuthoringClient.history(id);
@@ -15865,30 +15934,35 @@ async function repositoryHistory() {
     if (!globalThis.confirm(uiText("workspace.app.restore.this.revision.as.a.new.draft"))) return false;
     const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
-    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    if (!completeReplaceActiveDocument(target, graph, id)) return false;
+    applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
   } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.repository.history.is.unavailable")); return false; }
 }
 
 async function repositoryDiscard() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
   if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.discard.draft.changes.and.restore.the.reviewed"))) return false;
   try {
     const result = await graphAuthoringClient.discard(id, target.authoring.revision);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
-    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    if (!completeReplaceActiveDocument(target, graph, id)) return false;
+    applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
   } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.draft.changes.could.not.be.discarded")); return false; }
 }
 
 async function repositoryDelete() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
   if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.delete.the.draft.git.history.is.retained", { id: id }))) return false;
   try { await graphAuthoringClient.delete(id, target.authoring.revision);
     if (target.authoring.released) {
       const result = await graphAuthoringClient.open(id, 'release');
       const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
-      completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+      if (!completeReplaceActiveDocument(target, graph, id)) return false;
+      applyAuthoringDocument(target, result, id);
       target.history.markSaved();
     } else target.authoring.providerDocumentId = null;
     addActivityMessage(uiMessage("workspace.notice.editor.22"), uiMessage("workspace.notice.deleted.the.draft.git.history.remains.available", { id: id }), 'completed');
@@ -15898,6 +15972,7 @@ async function repositoryDelete() {
 
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
+  if (id && !repositoryDocumentBindingIsCurrent(target)) return false;
   if (!gitAuthoringEnabled() || !id) return false;
   const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
   try { const result = await graphAuthoringClient.release(id, target.authoring.revision);

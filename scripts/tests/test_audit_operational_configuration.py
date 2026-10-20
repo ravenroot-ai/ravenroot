@@ -7087,6 +7087,72 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                 finally:
                     path.write_text(original, encoding="utf-8")
 
+    def test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away(self) -> None:
+        ui_path = audit.GRAPH_AUTHORING_UI_PATH
+        mutations = [
+            (ui_path, "repositoryScope", "workspaceAuthority.scope?.tenantId ?? null", "null"),
+            (ui_path, "repositoryScope", "configuration.provider", "null"),
+            (ui_path, "repositoryScope", "configuration.repositoryDisplay", "null"),
+            (ui_path, "repositoryScope", "configuration.releaseBranch", "null"),
+            (ui_path, "repositoryDocumentBindingIsCurrent", "target.authoring.repositoryScope !== scope", "false"),
+            (ui_path, "openRepositorySource", "target.authoring.repositoryScope === scope", "true"),
+            (ui_path, "openRepositorySource", "tenantAuthorityAllows(target)", "true"),
+            (ui_path, "openRepositorySource", "target.authoring.draftDeleted === (source === 'release')", "true"),
+            (ui_path, "preserveOpenRepositoryGraph", "updateHistoryUi();", "target.history.markSaved(); updateHistoryUi();"),
+            (ui_path, "openRepositoryGraph", "if (repositoryDocumentHasLocalWork(existing))", "if (false)"),
+            (ui_path, "openRepositoryGraph", "if (repositoryDocumentHasLocalWork(current)", "if (false"),
+            (ui_path, "openRepositoryGraph", "current.history.revision() !== observedRevision", "false"),
+            (ui_path, "openRepositoryGraph", "if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;", "openDocument({ name: result.documentId, graph });"),
+            (ui_path, "saveRepositoryGraph", "if (!repositoryDocumentBindingIsCurrent(target)) return false;", ";"),
+            (ui_path, "saveRepositoryGraph", "if (target.history === history && history.revision() === submittedRevision)", "if (true)"),
+            (ui_path, "applyAuthoringDocument", "target.authoring.saveError = null;", "target.authoring.saveError = null; target.authoring.localChanges = false;"),
+            (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring",
+             "localChanges: Boolean(localChanges)", "localChanges: false"),
+            (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring",
+             "repositoryScope: nullableString(value.repositoryScope, 'repositoryScope')", "repositoryScope: null"),
+            (Path("ravenroot/ravenroot-ui/src/document-close-plan.js"), "classifyDocumentCloseTargets",
+             "document_.authoring?.localChanges", "false"),
+            (Path("ravenroot/ravenroot-ui/src/workspace.js"), "hasUnsavedWork",
+             "Boolean(document_.authoring?.localChanges)", "false"),
+            (ui_path, "paneIsDirty", "document_?.authoring?.localChanges", "false"),
+            (ui_path, "updateHistoryUi", "workspace.active?.authoring?.localChanges", "false"),
+        ]
+        for relative, method, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            span = audit._javascript_function_span(original, method)
+            self.assertIsNotNone(span)
+            body = original[slice(*span)]
+            with self.subTest(path=relative, method=method, mutation=after):
+                self.assertEqual(1, body.count(before))
+                mutated = original[:span[0]] + body.replace(before, after, 1) + original[span[1]:]
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    sources = {source: (self.root / source).read_text(encoding="utf-8")
+                               for source in (*audit.GRAPH_AUTHORING_FILE_PROOFS,
+                                              *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS)}
+                    ui = (self.root / ui_path).read_text(encoding="utf-8")
+                    self.assertFalse(audit.graph_authoring_managed_open_boundary(sources, ui),
+                                     "Managed source preservation must fail independently of refreshed digests")
+                    ui_methods = {name: hashlib.sha256(audit.normalized(
+                        ui[slice(*audit._javascript_function_span(ui, name))]).encode()).hexdigest()
+                                  for name in audit.GRAPH_AUTHORING_UI_METHOD_PROOFS}
+                    ui_support = {name: hashlib.sha256(audit.normalized(
+                        ui[slice(*audit._javascript_function_span(ui, name))]).encode()).hexdigest()
+                                  for name in audit.GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS}
+                    spans = {(source, name): hashlib.sha256(audit.normalized(
+                        (self.root / source).read_text()[slice(*audit._javascript_function_span(
+                            (self.root / source).read_text(), name))]).encode()).hexdigest()
+                             for source, name in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS}
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_UI_METHOD_PROOFS, ui_methods), \
+                            mock.patch.dict(audit.GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS, ui_support), \
+                            mock.patch.dict(audit.GRAPH_AUTHORING_UI_SPAN_PROOFS, spans), \
+                            mock.patch.dict(audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+                                            {relative: audit._source_digest(mutated)}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(self.root, self.discovered))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
     def test_read_index_bounds_and_digest_admission_cannot_be_rebaselined_away(self) -> None:
         for name, before, after in (
                 ("AuthoringAdmission.java", "if (isCancelled() && state.compareAndSet(0, 2)) admission.release();", "if (isCancelled()) admission.release();"),

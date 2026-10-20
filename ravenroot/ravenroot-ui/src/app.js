@@ -1,3 +1,4 @@
+import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
@@ -1073,6 +1074,7 @@ let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
 let graphAuthoringClient = null;
+let pendingManagedLaunch = null;
 let activeAuthoring = null;
 let graphAuthoringUnavailable = false;
 let runtimeDisconnect = null;
@@ -2930,7 +2932,20 @@ function syncGraphModeLabel() {
   if (active?.authoring?.providerDocumentId) {
     const revision = active.authoring.revision || {};
     mode.title = uiText("workspace.app.draft.revision.release.revision.publication.revision", { absent: revision.draft || uiText('common.absent'), absent2: revision.release || uiText('common.absent'), absent3: revision.publication || uiText('common.absent') });
+    if (!active.authoring.draftDeleted) mode.title += ` · ${uiText('repository.version.draftExplanation')}`;
   } else mode.removeAttribute('title');
+  let versionAction = document.getElementById('repository-next-version');
+  if (!versionAction) {
+    versionAction = document.createElement('button'); versionAction.id = 'repository-next-version';
+    versionAction.type = 'button'; versionAction.addEventListener('click', createRepositorySuccessor);
+    mode.after(versionAction);
+  }
+  const authoring = active?.authoring;
+  versionAction.hidden = !(authoring?.draftDeleted && authoring.released && authoring.canWrite
+    && (authoring.successor || authoring.versionEligible)
+    && authoring.releaseVersion < 9_007_199_254_740_991
+    && runtimeConfiguration?.configuration?.graphAuthoring?.operations.includes('CREATE_NEXT_VERSION'));
+  versionAction.textContent = uiText(authoring?.successor ? 'repository.version.open' : 'repository.version.create');
 }
 
 let maximizedDocumentId = null;
@@ -12088,6 +12103,12 @@ async function connectRuntime(atBoot = false) {
         || uiText("workspace.import.notReady"); } };
   }
   startupImportController?.updateRuntime(outcome);
+  if (pendingManagedLaunch) {
+    if (outcome.kind === 'ready' && gitAuthoringEnabled()) {
+      const requested = pendingManagedLaunch; pendingManagedLaunch = null;
+      await openRepositoryGraph(requested);
+    } else repositoryNotice(uiText('repository.launch.unavailable'));
+  }
   return outcome;
 }
 
@@ -15704,50 +15725,98 @@ function applyAuthoringDocument(target, result, providerDocumentId = result.docu
   }
 }
 
+function requireRepositoryBinding(client, authority) {
+  if (client !== graphAuthoringClient || authority !== workspaceAuthority)
+    throw new Error(uiText('repository.error.connectionChanged'));
+}
+
+function repositoryNotice(message) {
+  let surface = document.getElementById('repository-notice');
+  if (!surface) {
+    surface = document.createElement('div'); surface.id = 'repository-notice';
+    surface.setAttribute('role', 'alert');
+    document.getElementById('main').before(surface);
+  }
+  surface.textContent = message; surface.hidden = !message;
+}
+
+function repositoryFailureMessage(error, imported = false) {
+  if (error?.status === 409 || error?.code === 'CONFLICT')
+    return uiText(imported ? 'repository.error.importConflict' : 'repository.error.conflict');
+  if ([401, 403].includes(error?.status)) return uiText('repository.error.authorization');
+  return uiText('repository.error.failed', { reason: uiErrorReason(error) });
+}
+
+async function createRepositorySuccessor() {
+  const target = workspace.active;
+  const authoring = target?.authoring;
+  const client = graphAuthoringClient, authority = workspaceAuthority;
+  if (!gitAuthoringEnabled() || !authoring?.draftDeleted || !authoring.canWrite
+      || !runtimeConfiguration?.configuration?.graphAuthoring?.operations.includes('CREATE_NEXT_VERSION')) return false;
+  if (authoring.successor) return openRepositoryGraph({ documentId: authoring.providerDocumentId, source: 'draft' });
+  if (!globalThis.confirm(uiText('repository.version.confirm', {
+    current: authoring.releaseVersion, next: authoring.releaseVersion + 1,
+  }))) return false;
+  // Keep the identity on the source record so an uncertain retry reuses the same request.
+  authoring.versionRequest ||= crypto.randomUUID();
+  try {
+    await client.createNextVersion(authoring.providerDocumentId, authoring.revision, authoring.versionRequest);
+    requireRepositoryBinding(client, authority);
+    return openRepositoryGraph({ documentId: authoring.providerDocumentId, source: 'draft' });
+  } catch (error) { repositoryNotice(repositoryFailureMessage(error)); return false; }
+}
+
 async function openRepositoryGraph(requested = null) {
   if (!gitAuthoringEnabled()) return false;
+  const client = graphAuthoringClient, authority = workspaceAuthority;
   try {
     let documentId = requested?.documentId;
     let source = requested?.source;
     if (!documentId || !['draft', 'release'].includes(source)) {
-      const page = await graphAuthoringClient.list();
-      setGraphAuthoringAvailability(true);
-      if (!page.items.length) return showInspectorMessage(uiText("workspace.notice.this.repository.has.no.graphs.in.your.workspace")) || false;
-      const choices = page.items.flatMap(item => [
-        ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
-          source: 'draft', label: uiText("workspace.repository.draft.choice", { documentId: item.documentId, version: item.releaseVersion })
-            + (item.released ? uiText("workspace.repository.released.choice.suffix", { version: item.releasedVersion,
-              publication: item.published ? uiText("workspace.repository.published.suffix") : uiText("workspace.app.publication.pending.or.failed") }) : '') }] : []),
-        ...(item.released ? [{ key: `${item.documentId} [released]`, documentId: item.documentId,
-          source: 'release', label: uiText("workspace.repository.released.choice", { documentId: item.documentId, version: item.releasedVersion })
-            + (item.published ? uiText("workspace.repository.published.suffix") : uiText("workspace.app.publication.pending.or.failed")) }] : []),
-      ]);
-      const selected = globalThis.prompt(uiText("workspace.app.open.a.repository.graph", { value: choices.map(item => item.label).join('\n') }),
-        choices[0].key)?.trim();
-      const choice = choices.find(item => item.key === selected);
+      const choice = await chooseRepositoryDocument(client);
       if (!choice) return false;
+      requireRepositoryBinding(client, authority);
       ({ documentId, source } = choice);
     }
-    const result = await graphAuthoringClient.open(documentId, source);
+    const result = await client.open(documentId, source);
+    requireRepositoryBinding(client, authority);
     const graph = parsePreparedGraph(decodeGraphMl(result), result.documentId,
       { maxBytes: currentGraphDocumentByteLimit() });
     const id = openDocument({ name: result.documentId, graph,
       documentId: `repository:${result.documentId}:${source}` });
     const target = workspace.find(id);
     applyAuthoringDocument(target, result, result.documentId);
+    target.authoring.canWrite = result.canWrite === true;
+    target.authoring.successor = false;
+    target.authoring.versionEligible = source === 'release' && result.revision.draft === 'absent';
+    if (source === 'release' && result.revision.draft !== 'absent') {
+      try {
+        const draft = await client.open(documentId, 'draft');
+        requireRepositoryBinding(client, authority);
+        target.authoring.successor = draft.graphId === result.graphId
+          && draft.releaseVersion === result.releaseVersion + 1;
+        target.authoring.versionEligible = draft.graphId === result.graphId
+          && draft.releaseVersion === result.releaseVersion && draft.graphMl === result.graphMl;
+        if (!target.authoring.successor && !target.authoring.versionEligible)
+          repositoryNotice(uiText('repository.version.reconcile'));
+      } catch (error) { repositoryNotice(repositoryFailureMessage(error)); }
+    }
+    syncGraphModeLabel();
+    if (source !== 'release' || target.authoring.successor || target.authoring.versionEligible) repositoryNotice('');
     target.history.markSaved();
     updateHistoryUi();
     addActivityMessage(uiMessage("workspace.notice.editor.20"), uiMessage("workspace.notice.opened.from", { documentId: result.documentId, repositoryDisplay: runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay }), 'completed');
     return true;
   } catch (error) {
     setGraphAuthoringAvailability(false);
-    showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.repository.graph.could.not.be.opened")); return false;
+    repositoryNotice(repositoryFailureMessage(error)); return false;
   }
 }
 
 async function saveRepositoryGraph() {
   const target = workspace.active;
-  if (!gitAuthoringEnabled() || !target || target.authoring.saveFlight) return false;
+  const client = graphAuthoringClient, authority = workspaceAuthority;
+  if (!gitAuthoringEnabled() || !target || !documentIsEditable(target) || target.authoring.saveFlight) return false;
   const providerDocumentId = target.authoring.providerDocumentId
     || globalThis.prompt(uiText("workspace.app.repository.filename"), target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
   if (!providerDocumentId) return false;
@@ -15761,7 +15830,8 @@ async function saveRepositoryGraph() {
   target.authoring.saveFlight = flight;
   updateHistoryUi();
   try {
-    const result = await graphAuthoringClient.save(providerDocumentId, prepared.xml, expected, flight);
+    const result = await client.save(providerDocumentId, prepared.xml, expected, flight);
+    requireRepositoryBinding(client, authority);
     if (target.authoring.saveFlight !== flight) return false;
     applyAcceptedGraphMl(target.graph, result, xml => parsePreparedGraph(xml, providerDocumentId,
       { maxBytes: currentGraphDocumentByteLimit() }));
@@ -15771,12 +15841,13 @@ async function saveRepositoryGraph() {
     if (target.history === history && history.revision() === submittedRevision) {
       history.markSaved(); target.visualGroupPresentationDirty = false;
     }
+    repositoryNotice('');
     addActivityMessage(uiMessage("workspace.notice.editor.21"), uiMessage("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
     updateHistoryUi(); return true;
   } catch (error) {
     target.authoring.saveError = uiErrorReason(error) || uiText("workspace.app.the.repository.save.failed");
     setGraphAuthoringAvailability(false);
-    showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.repository.save.failed.refresh.and.retry")); return false;
+    repositoryNotice(repositoryFailureMessage(error, !target.authoring.providerDocumentId)); return false;
   } finally {
     if (target.authoring.saveFlight === flight) target.authoring.saveFlight = null;
     updateHistoryUi();
@@ -16008,7 +16079,7 @@ function commandContext() {
     repositoryDocument: Boolean(activeAuthoring?.providerDocumentId),
     repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
     repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
-      && activeAuthoring?.revision?.draft !== 'absent'),
+      && activeAuthoring?.successor),
     authoringSaveFlight: Boolean(activeAuthoring?.saveFlight),
     hasOpenDocuments: workspace.size > 0,
     // Preserve every existing public format's command behavior. Only the new safe deployment
@@ -17150,7 +17221,11 @@ function bootApplication() {
   const selectedService = rememberedConnection.startup(defaultService, legacyService);
   serviceInput.value = selectedService === connectionService(defaultService, location.origin)
     && !rememberedConnection.hasSavedService ? defaultService : selectedService;
-  const fileParam = params.get('file');
+  let managedLaunch = null;
+  let launchError = null;
+  try { managedLaunch = managedRepositoryLaunch(location.search); }
+  catch (error) { launchError = error; }
+  const fileParam = launchError || managedLaunch ? null : params.get('file');
   // The workspace always holds at least one document; the editor has simply never had a way to open
   // a second one. Creating it here means `initCy` always has a document to draw into.
   addDocumentRecord();
@@ -17167,7 +17242,9 @@ function bootApplication() {
   // ?file=/graphs/project/graph.json
   // ?file=examples/graph.json
   if (fileParam) initializeStartupImport(fileParam);
-  void connectRuntime(true);
+  pendingManagedLaunch = managedLaunch;
+  if (launchError) repositoryNotice(launchError.message);
+  void connectRuntime(true).catch(error => repositoryNotice(repositoryFailureMessage(error)));
   // Composed once at boot so the chips are truthful from the first paint rather than blank
   // until something happens. The connection attempt above is already in flight.
   refreshAssistantContext();

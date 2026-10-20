@@ -20,7 +20,18 @@ A startup `?file=` URL remains a browser import when Git authoring is enabled. I
 repository filename, revision, graph identity, or released-source state. **Save draft to repository**
 therefore asks for a repository filename before its first save and applies the same revision conflict
 checks as any other repository draft. **Open from repository** continues to open managed draft or
-released sources separately; a released source stays read-only and offers **Open repository draft**.
+released sources separately; a released source stays read-only and offers **Open existing draft** when a valid successor exists, or confirmed **Create next version** when eligible.
 The source URL is not used as repository identity or changed by these actions.
 
 “Released” means the exact version exists on the configured reviewed branch. “Published” additionally means release CI validated and placed the immutable GraphML and digest manifest in the operator's artifact store. Only a published version can be deployed from this workflow.
+
+
+Use `?repositoryDocument=orders.graphml&source=draft` to open a managed editable draft, or `source=release` for the read-only release. Omit `source` to select draft. Authenticate to the configured runtime first; opening waits for configuration and authentication. The link cannot select a repository, tenant or credential. Invalid or unavailable managed links show an error. Do not combine them with `?file=`, which remains a content import.
+
+**Open from repository** offers selectable draft/release sources, names and paths, versions and publication state. Search filters loaded documents; **Load more** continues the inventory and the picker explicitly identifies incomplete or failed pages. Use the source filter to focus on drafts or releases. These sources do not indicate another user's live editing presence or locks.
+
+From a released view, **Create next version** appears only with server support and document write permission. Confirm the displayed vN → vN+1 change. This copies the release into the same managed document's editable successor, even while publication is pending or failed. If a successor already exists, **Open existing draft** opens it. Drafts have no increment action. Saving a released vN with changed content is refused; opening a link never creates a version. Repeated saves, reverting content and restoring history keep the successor's version. Explicit discard restores release content while retaining a successor already assigned.
+
+A refused save shows a visible accessible message above the editor and retains your unsaved edits. On a conflict, reopen the managed draft and review changes before reapplying edits. An imported document cannot overwrite an existing filename without its revision: choose a new filename or open the managed document and reapply the changes. For authorization failures, authenticate with permission before retrying.
+
+A legacy divergent draft still numbered like its release needs deliberate reconciliation: download/back up all work, review the diff, explicitly discard to the released baseline, create the successor, then reapply the protected edits. Never discard before protecting work.

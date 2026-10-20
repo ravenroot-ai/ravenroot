@@ -2733,3 +2733,16 @@
 @media (max-width: 720px), (pointer: coarse) {
   .palette-actions button, .palette-create button, .node-template button { min-height: 44px; }
 }
+
+.repository-picker { width: min(760px, 90vw); max-height: 85vh; color: var(--tx-1); background: var(--bg-1); margin: auto; padding: 24px; border: 1px solid currentColor; border-radius: 8px; }
+.repository-picker::backdrop { background: #0008; }
+.repository-picker h2 { margin-bottom: 16px; font-size: 20px; }
+.repository-picker input, .repository-picker select, .repository-picker button { color: var(--tx-1); background: var(--bg-2); border: 1px solid var(--bd); border-radius: 5px; padding: 8px; font: inherit; }
+.repository-picker input { width: 65%; margin-right: 12px; }
+.repository-picker p { margin-top: 12px; color: var(--tx-2); }
+.repository-picker button:hover { background: var(--bg-h); }
+.repository-picker button:focus-visible { outline: 2px solid var(--focus-ring); }
+.repository-picker-list { display: grid; gap: 8px; max-height: 45vh; overflow-y: auto; margin: 16px 0; }
+.repository-picker-list button { text-align: left; padding: 12px; white-space: normal; }
+#repository-notice { padding: 12px 20px; background: #522b20; color: #fff; border: 2px solid #efb17d; }
+#repository-next-version { margin-left: 12px; }

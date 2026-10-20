@@ -171,3 +171,25 @@ transport reports as an error at submission time.
 
 See [Durable execution results](../architecture/execution-results.md),
 [Application and HTTP integration](../integrator-guide/application-http.md) and [Authentication troubleshooting](../troubleshooting/identity-browser.md).
+
+
+## Managed authoring links and successor drafts
+
+Editor launch parameters are `repositoryDocument=<opaque documentId>` and optional `source=draft|release` (default `draft`). Duplicate parameters, invalid source, source without document and combinations with `file` are rejected visibly. `file` retains explicit content-import semantics. Managed links wait for authenticated runtime configuration and open via `GET /v1/graph-authoring/{documentId}?source=draft|release`; GET has no write effect. Authority and destination come exclusively from the configured repository and authenticated tenant namespace. Drafts retain document/graph identity and complete revision on save; releases are read-only. Document GET responses include `canWrite`, an authenticated document-scoped permission hint; the server rechecks every mutation.
+
+Discover `CREATE_NEXT_VERSION` in `GET /v1/configuration` under `graphAuthoring.operations`. Supported GitHub and GitLab providers expose the same operation:
+
+```http
+POST /v1/graph-authoring/orders.graphml/versions
+Idempotency-Key: 4a8b6295-8f50-4df2-9c67-67e641cb7988
+X-Ravenroot-Expected-Draft: <observed revision.draft>
+X-Ravenroot-Expected-Release: <observed revision.release>
+X-Ravenroot-Expected-Publication: <observed revision.publication>
+Authorization: Bearer <access token>
+```
+
+No GraphML request body is needed. `GRAPH_WRITE` is required. A `200` response is the normal managed document envelope: `documentId`, `displayPath`, `graphId`, `releaseVersion`, `releasedGraphId`, `releasedVersion`, `revision` (`draft`, `release`, `publication`), `released`, `published`, `draftDeleted`, and base64 `graphMl`. The successor copies released vN into draft vN+1, with the same documentId and graphId. External clients may create it before launching the editor; saves retain its assigned version, including no-op, further edits and baseline revert.
+
+An identical successful request identity reconciles the same result. Reuse with changed expected state is refused. A competing request, stale draft/release/publication token, existing successor, legacy divergent same-version draft, absent release, inconsistent metadata or maximum authored version receives `409 CONFLICT`; protect local edits and reopen current state. A missing draft with valid release can create vN+1. An initial unreleased v1 cannot increment. Unsupported capability returns `501 UNSUPPORTED_PROVIDER`, denied authorization `403 FORBIDDEN`, and incomplete revision headers `400 INVALID_REQUEST`. Publication observations remain mandatory even though release, independently of publication, makes vN immutable. This operation never publishes or deploys.
+
+Changed saves still representing released vN are refused. Back up legacy divergent vN edits before explicit discard/reconciliation, create vN+1, then reapply protected edits. Explicit discard restores released content but retains an already assigned successor version. Repository inventory `GET /v1/graph-authoring?cursor=<nextCursor>` is authenticated and tenant scoped; continue until `nextCursor` is empty.

@@ -160,9 +160,12 @@ the exact immutable selection through the existing catalog boundary; registratio
 The shipped Git composition keeps a disposable authoring projection separate from executable graph
 admission. `RAVENROOT_EXECUTION_STORE=sqlite` selects a separate SQLite/WAL file,
 `ravenroot-authoring-read-index.db`, under `RAVENROOT_EXECUTION_STORE_DIR`, or
-`./data/execution-store` when unset. PostgreSQL deployments use the existing shared-database connection
-settings and bounded connection pool, with dedicated `authoring_read_*` tables. The existing execution
-persistence selector and system-property precedence are reused. Both providers work with either
+`./data/execution-store` when unset. PostgreSQL deployments use an owned pool with the existing
+shared-database connection settings and bounds, with dedicated `authoring_read_*` tables. Account for
+this pool separately from execution persistence when budgeting database connections. The existing
+execution persistence selector and system-property precedence are reused. Embedded environment
+composition snapshots only the resolved persistence settings when configured; it does not retain
+unrelated environment values. Both providers work with either
 backend; GitHub PAT and App credentials retain their existing configuration.
 
 The schema is additive and versioned independently of execution persistence. A future index schema

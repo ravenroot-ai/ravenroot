@@ -2,6 +2,7 @@ package ai.ravenroot.server.authoring;
 
 import ai.ravenroot.api.authoring.GraphAuthoringRepository;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.server.persistence.ExecutionStoreConfiguration;
 import ai.ravenroot.server.persistence.SharedExecutionStoreDataSource;
 
 import java.nio.file.Path;
@@ -37,7 +38,31 @@ public final class GraphAuthoringRepositories {
             Map<String, String> environment) {
         if (configuration.provider() == GraphAuthoringConfiguration.Provider.NONE)
             throw new IllegalArgumentException("Git authoring requires a provider");
-        return create(configuration, credentials, publications, admission, openIndex(environment));
+        return create(
+                configuration,
+                credentials,
+                publications,
+                admission,
+                ExecutionStoreConfiguration.fromSystem(System.getProperties(), environment));
+    }
+
+    /**
+     * Creates an archive from a resolved deployment snapshot, without retaining its environment.
+     */
+    public static GraphAuthoringRepository create(
+            GraphAuthoringConfiguration configuration,
+            CredentialResolver credentials,
+            PublicationEvidence publications,
+            Consumer<byte[]> admission,
+            ExecutionStoreConfiguration persistence) {
+        if (configuration.provider() == GraphAuthoringConfiguration.Provider.NONE)
+            throw new IllegalArgumentException("Git authoring requires a provider");
+        return create(
+                configuration,
+                credentials,
+                publications,
+                admission,
+                openIndex(Objects.requireNonNull(persistence, "persistence")));
     }
 
     /**
@@ -96,13 +121,8 @@ public final class GraphAuthoringRepositories {
                 new IllegalArgumentException("Repository has no managed reconciliation receiver"));
     }
 
-    private static GraphAuthoringReadIndex openIndex(Map<String, String> environment) {
-        var persistence =
-                ai.ravenroot.server.persistence.ExecutionStoreConfiguration.fromSystem(
-                        System.getProperties(), environment);
-        if (persistence
-                instanceof
-                ai.ravenroot.server.persistence.ExecutionStoreConfiguration.Shared shared) {
+    private static GraphAuthoringReadIndex openIndex(ExecutionStoreConfiguration persistence) {
+        if (persistence instanceof ExecutionStoreConfiguration.Shared shared) {
             var pool = SharedExecutionStoreDataSource.open(shared.connection());
             try {
                 return new PostgresGraphAuthoringReadIndex(pool.dataSource(), pool);
@@ -112,14 +132,9 @@ public final class GraphAuthoringRepositories {
             }
         }
         Path directory =
-                persistence
-                                instanceof
-                                ai.ravenroot.server.persistence.ExecutionStoreConfiguration
-                                                        .SingleHost
-                                                local
+                persistence instanceof ExecutionStoreConfiguration.SingleHost local
                         ? local.location().directory()
-                        : ((ai.ravenroot.server.persistence.ExecutionStoreConfiguration.Disabled)
-                                        persistence)
+                        : ((ExecutionStoreConfiguration.Disabled) persistence)
                                 .location()
                                 .directory();
         return new SqliteGraphAuthoringReadIndex(

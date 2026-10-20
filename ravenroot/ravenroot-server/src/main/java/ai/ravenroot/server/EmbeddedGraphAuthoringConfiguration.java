@@ -6,6 +6,7 @@ import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
 import ai.ravenroot.server.authoring.GraphAuthoringRepositories;
 import ai.ravenroot.server.authoring.PublicationEvidence;
 import ai.ravenroot.server.authoring.PublishedGraphArtifactCatalog;
+import ai.ravenroot.server.persistence.ExecutionStoreConfiguration;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -50,15 +51,21 @@ public final class EmbeddedGraphAuthoringConfiguration {
      * @param credentials trusted resolver for the configured opaque credential reference
      * @return an inert configuration for LOCAL mode or an explicit Git composition for GIT mode
      */
-    public static EmbeddedGraphAuthoringConfiguration fromEnvironment(Map<String, String> environment,
-            CredentialResolver credentials) {
-        Map<String, String> deployment = Map.copyOf(environment);
+    public static EmbeddedGraphAuthoringConfiguration fromEnvironment(
+            Map<String, String> environment, CredentialResolver credentials) {
+        GraphAuthoringConfiguration authoring =
+                GraphAuthoringConfiguration.fromEnvironment(environment);
+        ExecutionStoreConfiguration persistence =
+                authoring.mode() == GraphAuthoringConfiguration.Mode.LOCAL
+                        ? null
+                        : ExecutionStoreConfiguration.fromSystem(
+                                System.getProperties(), environment);
         return gitOrLocal(
-                GraphAuthoringConfiguration.fromEnvironment(deployment),
+                authoring,
                 credentials,
                 (configuration, resolver, publications, admission) ->
                         GraphAuthoringRepositories.create(
-                                configuration, resolver, publications, admission, deployment),
+                                configuration, resolver, publications, admission, persistence),
                 PublishedGraphArtifactCatalog::new);
     }
 

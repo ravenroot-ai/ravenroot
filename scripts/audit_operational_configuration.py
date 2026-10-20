@@ -14762,9 +14762,9 @@ GRAPH_AUTHORING_FILE_PROOFS = {
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/VolatileGraphAuthoringReadIndex.java"): "de6b5b73835425aeb95f42e892e01a109b8b5ae3837b2a9f387a19c494773d68",
 
     GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH:
-        "09e6d3905e5bf473b1825b2e13ec7be73de0cf9036999f1c9d28f2e95c42bcc5",
+        "5f7f5c3973ebe2e47407fd14e775fdf24218af2c17204b4678a9df6592599011",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): "f4d719e63002cf179a70f4cd7d35aade02ad229303c1988825f5e5766c350b7f",
-    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "d566c860e95a8d2509041fa303f74144a255ad54362b58021196dee50ed93538",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "6ac51219d9548e6ea592a851b184b543d587421124aa50b9065eb1577c4b2d4f",
     Path("docs/examples/graph-authoring/gitlab-ci.yml"): "d49fa1887422a5bf726ad2c55e08b9f29185438314b626d9fd7e5feeb9c268b7",
     GRAPH_AUTHORING_CONFIGURATION_PATH:
         "2456dfb6352ec34dbbd3311ef90ef6fbeaa29f7e258d984acab5e9c743215d71",
@@ -14820,7 +14820,7 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadIndexIntegrationTest.java"): "1eb399875fd4218851e8b568eb4362cbe9b56e82b9cc72b1cb6731cca2843028",
 
     GRAPH_AUTHORING_EMBEDDED_TEST_PATH:
-        "2cb64a60ef7ba2ad3087b134dfe8dc07fe20763aa88ea6a4de463dc4cec8a92d",
+        "67e7c7d8f9df192cfddf972b07730ca282a24b69ae5a31651c1ebe78a7fc62b2",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): "e6f74e3192ee0fca33cc7abd8be419b2ecaa041ed3e5fdbef0633711466f0c86",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
         "5f00033d6093669f0dbb8f41ab188eb4e19650eb88e0a4e7ef370f16ad4306e8",
@@ -14856,7 +14856,7 @@ GRAPH_AUTHORING_TEST_PROOFS = {
 GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
      "fromEnvironment"):
-        "8b5bfeaea5de85ca5fed3e505a8ec00bb5d9968a585e20da7eda45a8b57a4c82",
+        "b4fd22a3d55d2a2a1fc40a56a156674b3844b1c08dc47e9e11c2f4160157d24e",
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration", "of"):
         "36b332cb270fea42c7f84b21c22238730456e4a77693c870fddc3edba4e806e7",
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
@@ -15195,7 +15195,7 @@ def graph_authoring_authority_from_source(
          "Resolution is observational: it must not build, activate, admit for execution, or run any"),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphProgramDependency.java")],
          "tenant-owned ACTIVE program artifact"),
-        (embedded, "GraphAuthoringConfiguration.fromEnvironment(deployment)"),
+        (embedded, "GraphAuthoringConfiguration.fromEnvironment(environment)"),
         (embedded, "GraphAuthoringRepositories::create"),
         (embedded, "PublishedGraphArtifactCatalog::new"),
         (embedded, "Git graph authoring credential is unavailable"),

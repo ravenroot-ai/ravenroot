@@ -160,6 +160,11 @@ async function startTimedOutInitialElk(page) {
 test.describe('Design arrangements', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
+    await expect.poll(() => page.evaluate(() => {
+      try { return window.ravenroot.graphDocumentByteLimit(); }
+      catch { return null; }
+    }), { message: 'the connected service configuration must be validated before importing the fixture' })
+      .toBe(10 * 1024 * 1024);
     await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'dense.graphml'), denseGraphMl());
   });
 

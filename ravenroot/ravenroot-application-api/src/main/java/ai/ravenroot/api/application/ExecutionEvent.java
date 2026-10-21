@@ -181,7 +181,23 @@ public record ExecutionEvent(
         OutputProjection authorOutput,
         String edgeId,
         int attemptOrdinal,
-        int connectorAttempts) {
+        int connectorAttempts,
+        ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation) {
+
+    /** Compatibility constructor for events produced before business identity was typed. */
+    public ExecutionEvent(long sequence, Instant occurredAt, String tenantId, String requestId, String engineId,
+                          String graphVersion, UUID processInstanceId, UUID traversalId, UUID invocationId,
+                          UUID attemptId, ExecutionEventType type, String nodeId, int activeInstances,
+                          boolean fallback, String detail, Duration joinWaitDuration,
+                          Duration processingDuration, String nodeCatalogKey, String deploymentId,
+                          String workloadId, int inFlightArrivals, String publicReason,
+                          TextProjection authorMessage, OutputProjection authorOutput, String edgeId,
+                          int attemptOrdinal, int connectorAttempts) {
+        this(sequence, occurredAt, tenantId, requestId, engineId, graphVersion, processInstanceId, traversalId,
+                invocationId, attemptId, type, nodeId, activeInstances, fallback, detail, joinWaitDuration,
+                processingDuration, nodeCatalogKey, deploymentId, workloadId, inFlightArrivals, publicReason,
+                authorMessage, authorOutput, edgeId, attemptOrdinal, connectorAttempts, null);
+    }
 
     /**
  * Bound on {@code detail}, marker included, so an event cannot become an unbounded text sink.
@@ -297,7 +313,7 @@ public ExecutionEvent {
             if (processingDuration.isNegative()) {
                 throw new IllegalArgumentException("processingDuration cannot be negative");
             }
-            if (type != ExecutionEventType.NODE_COMPLETED && type != ExecutionEventType.NODE_BYPASSED
+            if (type != ExecutionEventType.SOURCE_BOUNDARY && type != ExecutionEventType.NODE_COMPLETED && type != ExecutionEventType.NODE_BYPASSED
                     && type != ExecutionEventType.NODE_FAILED
                     // A retried attempt has ENDED -- that is precisely what the event says -- so it
                     // has a processing duration in exactly the sense the other three do. Excluding it

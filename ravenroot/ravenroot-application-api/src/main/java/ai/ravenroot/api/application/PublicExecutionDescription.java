@@ -75,6 +75,7 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             // classifier is absent or was rejected, and a node that routed a failure outcome reaches
             // it too -- so the sentence must be true of that node as well.
             case NODE_COMPLETED -> "Node completed.";
+            case SOURCE_BOUNDARY -> "Traversal stopped at a source boundary; the listener remains active.";
             case EDGE_TRAVERSED -> "Edge was traversed.";
             case NODE_FAILED -> "Node failed. Protected diagnostics may contain more detail.";
             // No count and no delay: this is the classifier-less branch, so it knows neither. The

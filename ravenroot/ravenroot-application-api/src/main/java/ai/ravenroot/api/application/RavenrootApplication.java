@@ -554,7 +554,7 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
-     * Starts one payload-free traversal from an exact immutable local deployment binding.
+     * Accepts or reconciles the single payload-free initial START from an exact deployment binding.
      * Implementations must compare both graph version and incarnation before admitting the request,
      * and must reconcile {@code requestId} through durable ingress rather than dispatch twice.
      * @param security authenticated tenant and principal
@@ -564,6 +564,25 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
      */
+    /**
+     * Accepts or reconciles the one initial START of an exact deployment binding with bounded input.
+     * A retry or a distinct request ID cannot replace the original work. Requires a store supporting
+     * permanent initial-START admission; refusal must happen before effects when unavailable.
+     *
+     * @param security authenticated tenant and principal
+     * @param deploymentId exact tenant-scoped logical deployment
+     * @param incarnationId current admission incarnation
+     * @param graphVersion exact deployed version, never an editor draft
+     * @param requestId bounded caller request identity
+     * @param input bounded structured initial payload
+     * @return admission outcome and original process/traversal identities when available
+     */
+    default EmbedDeploymentStart startLocalDeploymentExecution(SecurityContext security,
+            String deploymentId, String incarnationId, String graphVersion, String requestId,
+            ai.ravenroot.api.payload.PayloadValue input) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
     default EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
                                                                  String deploymentId,
                                                                  String incarnationId,

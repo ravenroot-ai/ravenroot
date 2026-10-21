@@ -206,7 +206,7 @@ public final class TeamsOutgoingWebhookSourceBehavior implements NodeBehavior, I
             payload.put("channelId", channelId); payload.put("senderId", senderId);
             payload.put("recipientId", recipientId); payload.put("conversationId", conversationId);
             payload.put("text", text);
-            IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
+            IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()),
                     Map.copyOf(payload), context.nodeId(), source.profile.name() + ":outgoing-webhook:" + activityId);
             if (!live(window, deadlineNanos)) return empty(503);
             return switch (receipt) {

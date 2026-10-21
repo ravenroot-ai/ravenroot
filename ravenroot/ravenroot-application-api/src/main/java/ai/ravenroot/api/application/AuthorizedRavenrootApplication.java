@@ -989,6 +989,17 @@ public final class AuthorizedRavenrootApplication {
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
      */
+    /** Starts or reconciles initial START under ordinary execution authorization. */
+    public EmbedDeploymentStart startLocalDeploymentExecution(RequestContext context,
+            String deploymentId, String incarnationId, String graphVersion, String requestId,
+            ai.ravenroot.api.payload.PayloadValue input) {
+        require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));
+        return delegate.startLocalDeploymentExecution(SecurityContext.of(context),
+                requireText(deploymentId, "deployment id"), requireText(incarnationId, "incarnation id"),
+                requireText(graphVersion, "graph version"), requireText(requestId, "request id"),
+                java.util.Objects.requireNonNull(input, "input"));
+    }
+
     public EmbedDeploymentStart startEmbedDeploymentExecution(RequestContext context,
                                                                String deploymentId,
                                                                String incarnationId,

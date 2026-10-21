@@ -144,7 +144,7 @@ public final class GithubEventsSourceBehavior implements NodeBehavior, InboundSo
             payload.put("deliveryId", delivery); payload.put("repositoryId", source.profile.repositoryId());
             payload.put("installationId", source.profile.installationId()); payload.put("body", body);
             IngressReceipt receipt;
-            try { receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(), Map.copyOf(payload),
+            try { receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()), Map.copyOf(payload),
                     context.nodeId(), source.profile.name() + ":" + delivery); }
             catch (RuntimeException failure) { return empty(503); }
             return switch (receipt) {

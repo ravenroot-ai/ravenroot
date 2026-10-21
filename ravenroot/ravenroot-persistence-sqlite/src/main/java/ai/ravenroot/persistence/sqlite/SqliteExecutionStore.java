@@ -194,6 +194,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
     private static final Set<StoreCapability> CAPABILITIES = Set.of(
             StoreCapability.DURABLE,
             StoreCapability.TRANSACTIONAL_BATCH,
+            StoreCapability.INITIAL_START_ADMISSION,
+            StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS,
             StoreCapability.CROSS_PROCESS_LEASE,
             StoreCapability.IDEMPOTENCY_PURGE,
             StoreCapability.EVENT_JOURNAL,
@@ -542,9 +544,17 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         ? existing.retainedUntil() : plusClamped(now, config.terminalRetention()))
                 : null;
 
+        if (existing == null) reserveInitialStartExecution(connection, key);
         writeInstanceRow(key, folded.status(), folded.terminationReason(), folded.controlState(), pin, revision, fencingToken,
                 now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
+        // The business summary is a projection of this same committed lifecycle, never a
+        // completion callback that a process crash could omit after effects have finished.
+        for (var traversal : folded.traversals().values()) {
+            if (traversal.status().terminal()) BusinessHistoryStorage.settle(connection, key.tenantId(),
+                    key.processInstanceId(), traversal.traversalId(), traversal.status(),
+                    traversal.terminationReason(), now);
+        }
         writeTimers(key, batch);
         // After the aggregate, because a registration may name an invocation this batch created and a
         // terminal transition must name a traversal this batch added; both are validated against the
@@ -5661,6 +5671,145 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return new JournalCursor(expected.tenantId(), expected.destination(), throughOffset);
             });
         });
+    }
+
+    @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedJoinRecord>> correlatedJoin(
+            ai.ravenroot.api.correlation.CorrelatedJoinKey key) {
+        return async(() -> inWriteTransaction(null, () -> CorrelatedJoinStorage.load(connection, key)));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinRecord> compareAndSetCorrelatedJoin(
+            ai.ravenroot.api.correlation.CorrelatedJoinRecord desired) {
+        return async(() -> inWriteTransaction(null, () -> CorrelatedJoinStorage.write(connection, desired, businessHistoryPolicy(), clock.instant())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinRecord> compareAndSetCorrelatedJoin(
+            ai.ravenroot.api.correlation.CorrelatedJoinRecord desired, LeaseHandle admissionFence) {
+        return async(() -> inWriteTransaction(admissionFence.key(), () -> {
+            requireReplayLease(admissionFence.key(), admissionFence);
+            if (!desired.key().scope().tenantId().equals(admissionFence.key().tenantId()))
+                throw new ai.ravenroot.api.correlation.BusinessHistoryException(
+                        ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+            return CorrelatedJoinStorage.write(connection, desired, businessHistoryPolicy(), clock.instant());
+        }));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinPage> correlatedJoins(
+            ai.ravenroot.api.correlation.BusinessScope scope, String applicationId,
+            Set<ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase> phases, Optional<String> cursor, int limit) {
+        return async(() -> inWriteTransaction(null, () -> CorrelatedJoinStorage.page(connection, scope, applicationId, phases, cursor, limit, businessHistoryPolicy())));
+    }
+    @Override public ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistoryPolicy() {
+        return config.businessHistories();
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.BusinessHistory> recordCorrelatedTraversal(
+            ai.ravenroot.api.correlation.CorrelatedTraversal traversal, ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
+        return async(() -> inWriteTransaction(null, () -> BusinessHistoryStorage.admit(connection, traversal, mode, businessHistoryPolicy(), clock.instant())));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.BusinessHistory>> businessHistory(
+            ai.ravenroot.api.correlation.BusinessScope scope, String applicationId) {
+        return async(() -> inWriteTransaction(null, () -> {
+            BusinessHistoryStorage.expire(connection, scope, clock.instant());
+            return BusinessHistoryStorage.history(connection, scope, applicationId);
+        }));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.BusinessHistoryPage> businessHistories(
+            ai.ravenroot.api.correlation.BusinessScope scope, ai.ravenroot.api.correlation.BusinessHistoryQuery query) {
+        return async(() -> inWriteTransaction(null, () -> BusinessHistoryStorage.histories(connection, scope, query, businessHistoryPolicy(), clock.instant())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedTraversalPage> correlatedTraversals(
+            ai.ravenroot.api.correlation.BusinessScope scope, String applicationId, Optional<String> cursor, int limit) {
+        return async(() -> inWriteTransaction(null, () -> BusinessHistoryStorage.traversals(connection, scope, applicationId, cursor, limit, businessHistoryPolicy())));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedTraversal>> correlatedTraversal(
+            String tenantId, UUID processId, UUID traversalId) {
+        return async(() -> inWriteTransaction(null, () -> BusinessHistoryStorage.traversal(connection, tenantId, processId, traversalId)));
+    }
+    @Override public CompletionStage<Void> settleCorrelatedTraversal(String tenantId, UUID processId, UUID traversalId,
+            ai.ravenroot.api.application.TraversalStatus status, ai.ravenroot.api.application.ExecutionTerminationReason reason) {
+        return async(() -> inWriteTransaction(null, () -> {
+            BusinessHistoryStorage.settle(connection, tenantId, processId, traversalId, status, reason, clock.instant());
+            return null;
+        }));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.BusinessHistory> closeBusinessHistory(
+            ai.ravenroot.api.correlation.BusinessScope scope, String applicationId, long expectedRevision,
+            ai.ravenroot.api.correlation.BusinessHistory.Lifecycle closure) {
+        return async(() -> inWriteTransaction(null, () -> BusinessHistoryStorage.close(connection, scope, applicationId, expectedRevision, closure, clock.instant())));
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
+            ai.ravenroot.api.persistence.InitialStartRecord proposed) {
+        Objects.requireNonNull(proposed, "proposed");
+        return async(() -> {
+            if (proposed.input().size() > maxPayloadBytes()) throw failure(
+                    new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
+            return inWriteTransaction(null, () -> {
+                try (PreparedStatement insert = connection.prepareStatement(
+                        "INSERT INTO deployment_initial_start (tenant_id, deployment_id, graph_version, request_id, "
+                                + "subject, principal_type, issuer, input_content_type, input_bytes, "
+                                + "accepted_at_epoch_second, accepted_at_nano, process_instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                                + "ON CONFLICT DO NOTHING")) {
+                    insert.setString(1, proposed.identity().tenantId());
+                    insert.setString(2, proposed.deploymentId());
+                    insert.setString(3, proposed.graphVersion());
+                    insert.setString(4, proposed.identity().requestId());
+                    insert.setString(5, proposed.identity().subject());
+                    insert.setString(6, proposed.identity().principalType().name());
+                    insert.setString(7, proposed.identity().issuer());
+                    insert.setString(8, proposed.input().contentType());
+                    insert.setBytes(9, proposed.input().bytes());
+                    StoredInstant.bindValue(insert, 10, clock.instant());
+                    insert.setString(12, proposed.processInstanceId().toString());
+                    insert.executeUpdate();
+                }
+                return readInitialStart(proposed.identity().tenantId(), proposed.deploymentId()).orElseThrow();
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.InitialStartRecord>> initialStart(
+            String tenantId, String deploymentId) {
+        requireTenantId(tenantId);
+        if (deploymentId == null || deploymentId.isBlank()) throw new IllegalArgumentException("deploymentId");
+        return async(() -> inWriteTransaction(null, () -> readInitialStart(tenantId, deploymentId)));
+    }
+
+    /** The execution and the non-expiring consumed marker commit in the same transaction. */
+    private static void reserveInitialStartExecution(Connection connection, ExecutionKey key) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE deployment_initial_start SET execution_created = 1 "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND execution_created = 0")) {
+            update.setString(1, key.tenantId());
+            update.setString(2, key.processInstanceId().toString());
+            if (update.executeUpdate() != 0) return;
+        }
+        try (PreparedStatement probe = connection.prepareStatement(
+                "SELECT execution_created FROM deployment_initial_start WHERE tenant_id = ? AND process_instance_id = ?")) {
+            probe.setString(1, key.tenantId());
+            probe.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = probe.executeQuery()) {
+                if (rows.next()) throw failure(new ExecutionStoreFailure.AlreadyExists(key, 0));
+            }
+        }
+    }
+
+    private java.util.Optional<ai.ravenroot.api.persistence.InitialStartRecord> readInitialStart(
+            String tenantId, String deploymentId) throws SQLException {
+        try (PreparedStatement select = connection.prepareStatement(
+                "SELECT * FROM deployment_initial_start WHERE tenant_id = ? AND deployment_id = ?")) {
+            select.setString(1, tenantId);
+            select.setString(2, deploymentId);
+            try (ResultSet rows = select.executeQuery()) {
+                if (!rows.next()) return java.util.Optional.empty();
+                return java.util.Optional.of(new ai.ravenroot.api.persistence.InitialStartRecord(
+                        deploymentId, rows.getString("graph_version"),
+                        new ai.ravenroot.api.security.SecurityContext(rows.getString("request_id"), tenantId,
+                                rows.getString("subject"), ai.ravenroot.api.security.PrincipalType.valueOf(
+                                        rows.getString("principal_type")), rows.getString("issuer")),
+                        OpaquePayload.of(rows.getBytes("input_bytes"), rows.getString("input_content_type")),
+                        StoredInstant.read(rows, "accepted_at"), rows.getInt("execution_created") != 0));
+            }
+        }
     }
 
     @Override

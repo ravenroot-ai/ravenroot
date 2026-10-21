@@ -784,7 +784,9 @@ public final class EmbedBrowserHttpHandler {
                 case RECONCILE -> 503;
             };
             json(exchange, status, "{\"outcome\":\"" + result.outcome()
-                    + "\",\"requestId\":\"" + JsonStrings.escape(result.requestId()) + "\"}");
+                    + "\",\"requestId\":\"" + JsonStrings.escape(result.requestId())
+                    + "\",\"processInstanceId\":" + (result.processInstanceId() == null ? "null" : "\"" + result.processInstanceId() + "\"")
+                    + ",\"traversalId\":" + (result.traversalId() == null ? "null" : "\"" + result.traversalId() + "\"") + "}");
         } catch (IllegalArgumentException invalid) {
             invalid(exchange);
         } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {

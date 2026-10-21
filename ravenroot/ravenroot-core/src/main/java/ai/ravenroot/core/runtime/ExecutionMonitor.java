@@ -302,6 +302,14 @@ public final class ExecutionMonitor {
                 failedOrdinal, connectorAttempts);
     }
 
+    void sourceBoundary(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId) {
+        int arrivals = decrement(nodeId);
+        int ordinal = ordinalOf(attemptId);
+        publish(identity, invocationId, attemptId, ExecutionEventType.SOURCE_BOUNDARY,
+                nodeId, 1, false, "source-boundary", null, finishAttempt(attemptId),
+                arrivals, "source-boundary", null, null, ordinal, ConnectorRetryReport.NOT_REPORTED);
+    }
+
     void nodeCompleted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
                        boolean fallback, String outcome, int liveInstances) {
         nodeCompleted(identity, nodeId, invocationId, attemptId, fallback,
@@ -846,7 +854,8 @@ public final class ExecutionMonitor {
                 // it downstream: every caller below already holds the structured value, and a server
                 // that had to parse "outcome=" back out of detail would be one regex away from
                 // publishing the diagnostic it is forbidden to publish.
-                publicReason, authorMessage, authorOutput, edgeId, attemptOrdinal, connectorAttempts);
+                publicReason, authorMessage, authorOutput, edgeId, attemptOrdinal, connectorAttempts,
+                identity.applicationCorrelation());
         synchronized (history) {
             history.addLast(event);
             while (history.size() > HISTORY_LIMIT) {
@@ -956,7 +965,15 @@ public final class ExecutionMonitor {
     record ExecutionIdentity(ai.ravenroot.api.security.SecurityContext security, String engineId,
                              String graphVersion, UUID processInstanceId, UUID traversalId,
                              java.util.Map<String, String> nodeCatalogKeys, String deploymentId,
-                             String workloadId) {
+                             String workloadId,
+                             ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation) {
+        ExecutionIdentity(ai.ravenroot.api.security.SecurityContext security, String engineId,
+                          String graphVersion, UUID processInstanceId, UUID traversalId,
+                          java.util.Map<String, String> nodeCatalogKeys, String deploymentId, String workloadId) {
+            this(security, engineId, graphVersion, processInstanceId, traversalId, nodeCatalogKeys,
+                    deploymentId, workloadId, null);
+        }
+
         ExecutionIdentity {
             java.util.Objects.requireNonNull(security, "security");
             nodeCatalogKeys = nodeCatalogKeys == null ? java.util.Map.of()

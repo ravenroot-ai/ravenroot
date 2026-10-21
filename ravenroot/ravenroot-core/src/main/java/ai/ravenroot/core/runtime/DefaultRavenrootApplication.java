@@ -3584,7 +3584,19 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                                                String incarnationId,
                                                                String graphVersion,
                                                                String requestId) {
+        return startLocalDeploymentExecution(security, deploymentId, incarnationId, graphVersion,
+                requestId, ai.ravenroot.api.payload.PayloadValue.fromJava(java.util.Map.of(),
+                        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+    }
+
+    @Override
+    public EmbedDeploymentStart startLocalDeploymentExecution(SecurityContext security,
+            String deploymentId, String incarnationId, String graphVersion, String requestId,
+            ai.ravenroot.api.payload.PayloadValue input) {
         java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(input, "input");
+        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.enforce(input);
+        ai.ravenroot.api.payload.PayloadValue.requireNoReservedKeys(input);
         if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) {
             throw new IllegalArgumentException("invalid embed execution request id");
         }
@@ -3596,9 +3608,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 || !record.deployment().graphVersion().equals(graphVersion)) {
             return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
         }
+        if (executionStore == null || !executionStore.supports(
+                ai.ravenroot.api.persistence.StoreCapability.INITIAL_START_ADMISSION)) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        }
         var receipt = record.deployment().ingress().offerDurably(security,
-                ai.ravenroot.api.deployment.IngressTarget.start(), java.util.Map.of(),
-                "embed-viewer", requestId);
+                ai.ravenroot.api.deployment.IngressTarget.start(), input.toJava(),
+                "initial-start-client", requestId);
         var outcome = switch (receipt) {
             case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored ->
                     EmbedDeploymentStart.Outcome.ACCEPTED;
@@ -3611,6 +3627,19 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             case ai.ravenroot.api.deployment.IngressReceipt.VolatileCustody ignored ->
                     EmbedDeploymentStart.Outcome.REFUSED;
         };
+        if (outcome == EmbedDeploymentStart.Outcome.ACCEPTED || outcome == EmbedDeploymentStart.Outcome.DUPLICATE) {
+            try {
+                var initial = executionStore.initialStart(security.tenantId(), record.lifecycleId().value())
+                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                if (initial.isPresent()) return new EmbedDeploymentStart(outcome, requestId,
+                        initial.orElseThrow().processInstanceId(), initial.orElseThrow().traversalId());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+            } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unavailable) {
+                return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+            }
+        }
         return new EmbedDeploymentStart(outcome, requestId);
     }
 

@@ -63,7 +63,7 @@ import java.util.concurrent.CompletionStage;
  * timers, does not model fan-in, and does not make the core durable. Those belong to ARC-02's
  * successor, the runtime, CORE-03 and PERS-04 respectively.</p>
  */
-public interface ExecutionStore extends AutoCloseable {
+public interface ExecutionStore extends AutoCloseable, ai.ravenroot.api.correlation.BusinessHistoryStore, ai.ravenroot.api.correlation.CorrelatedJoinStore {
     /**
      * Lists at most {@code limit} retained evidence records for one exact tenant-scoped source.
      *
@@ -1710,6 +1710,31 @@ public interface ExecutionStore extends AutoCloseable {
      * to keep, not because {@code close()} released anything. The capability differs, so the
      * behaviour differs, and neither may be read as the other's contract.</p>
      */
+    /**
+     * Atomically accepts the first START for a logical deployment, or returns its original record.
+     * This admission has no TTL and survives process/journal compaction. The graph pin and original
+     * input may never be overwritten. Implementations enforce their normal payload-byte bound.
+     *
+     * @param proposed proposed scoped admission from an already authorized caller
+     * @return original accepted record, including stable execution identities
+     */
+    default CompletionStage<InitialStartRecord> acceptInitialStart(InitialStartRecord proposed) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.INITIAL_START_ADMISSION)));
+    }
+
+    /**
+     * Looks up initial admission without accepting new work.
+     * @param tenantId authorized tenant
+     * @param deploymentId logical deployment identity
+     * @return original admission, or empty if none was accepted
+     */
+    default CompletionStage<java.util.Optional<InitialStartRecord>> initialStart(String tenantId,
+                                                                               String deploymentId) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.INITIAL_START_ADMISSION)));
+    }
+
     @Override
     void close();
 }

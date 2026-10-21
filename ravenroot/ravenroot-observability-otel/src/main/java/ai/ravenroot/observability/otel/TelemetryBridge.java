@@ -289,7 +289,7 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
             case EXECUTION_STARTED -> () -> startTraversal(event);
             case EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED -> () -> endTraversal(event);
             case NODE_STARTED -> () -> startNode(event);
-            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> () -> {
+            case SOURCE_BOUNDARY, NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> () -> {
                 endNode(event);
                 recordConnectorRetries(event);
             };

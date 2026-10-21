@@ -196,5 +196,14 @@ public enum StoreCapability {
     RUNNER_JOBS,
 
     /** Versioned saga aggregates and application-command outbox rows share the execution batch. */
-    DURABLE_SAGAS
+    DURABLE_SAGAS,
+
+    /** Non-expiring logical-deployment initial START arbitration and original work retention. */
+    INITIAL_START_ADMISSION,
+
+    /** Durable scoped application histories and immutable traversal relations. */
+    BUSINESS_HISTORIES,
+
+    /** Cross-traversal contribution CAS and atomic continuation outbox. */
+    CORRELATED_JOINS
 }

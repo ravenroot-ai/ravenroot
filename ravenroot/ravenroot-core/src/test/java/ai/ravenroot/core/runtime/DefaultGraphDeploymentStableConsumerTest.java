@@ -62,7 +62,8 @@ class DefaultGraphDeploymentStableConsumerTest {
             assertEquals(0, initial.deliveredThrough());
             assertEquals(DurableIngressStartState.ABSENT,
                     retired.startState(IDENTITY, "mailbox/42", "uid-7").toCompletableFuture().join());
-            String namespace = sourcePart("test.source") + "/" + sourcePart("source") + "/reader";
+            String namespace = sourcePart("stable-consumer") + "/" + sourcePart(deployment.graphVersion()) + "/"
+                    + sourcePart("test.source") + "/" + sourcePart("source") + "/reader";
             String destination = "source-v1:" + sourcePart(namespace) + "." + sourcePart("mailbox/42");
             UUID inboxOnlyId = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + destination + '\0'
                     + "uid-inbox-only").getBytes(StandardCharsets.UTF_8));
@@ -256,7 +257,7 @@ class DefaultGraphDeploymentStableConsumerTest {
             @Override public String sdkContract() { return NodeSdk.CONTRACT; }
             @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
         };
-        return new DefaultGraphDeployment(DeploymentId.of(UUID.randomUUID().toString()), engine,
+        return new DefaultGraphDeployment(DeploymentId.of("stable-consumer"), engine,
                 NodePackages.register(new BehaviorRegistry(), nodePackage), new ExecutionMonitor(),
                 ExecutionIdentitySource.randomUuids(), graph.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,

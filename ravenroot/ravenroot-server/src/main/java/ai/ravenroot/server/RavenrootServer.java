@@ -4358,6 +4358,29 @@ public final class RavenrootServer implements AutoCloseable {
                 json(exchange, 200, view.orElseThrow().toJson());
                 return;
             }
+            if (segments.length == 3 && "initial-start".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                var body = strictJsonMap(boundedBody(exchange, payloadLimits.maxEncodedBytes()),
+                        java.util.Set.of("incarnationId", "graphVersion", "requestId", "input"));
+                if (!(body.entries().get("incarnationId") instanceof PayloadValue.TextValue incarnation)
+                        || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)
+                        || !(body.entries().get("requestId") instanceof PayloadValue.TextValue request)) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                var result = authorizedApplication.startLocalDeploymentExecution(context, deploymentId,
+                        incarnation.value(), version.value(), request.value(), body.entries().get("input"));
+                int responseStatus = switch (result.outcome()) {
+                    case ACCEPTED -> 202;
+                    case DUPLICATE -> 200;
+                    case REFUSED -> 409;
+                    case RECONCILE -> 503;
+                };
+                json(exchange, responseStatus, "{\"outcome\":\"" + result.outcome()
+                        + "\",\"requestId\":\"" + escape(result.requestId())
+                        + "\",\"processInstanceId\":" + (result.processInstanceId() == null ? "null" : "\"" + result.processInstanceId() + "\"")
+                        + ",\"traversalId\":" + (result.traversalId() == null ? "null" : "\"" + result.traversalId() + "\"") + "}");
+                return;
+            }
             if (segments.length == 3 && "events".equals(segments[2])) {
                 if (!method(exchange, httpContext, "GET")) return;
                 String graphVersion = query.get("graphVersion");

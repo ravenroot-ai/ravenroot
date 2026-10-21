@@ -302,7 +302,7 @@ final class ImapConsumerSource implements InboundSource {
                 throw new ImapConsumerProtocol.Failure(false, unavailable.safeReason());
             }
             IngressReceipt receipt = activeIngress.offerDurably(context.identity(),
-                    IngressTarget.start(), projected.payload(), sourceId, projected.idempotentKey());
+                    IngressTarget.node(context.nodeId()), projected.payload(), sourceId, projected.idempotentKey());
             if (!current(sessionGeneration)) return cursor;
             if (receipt.acknowledgeable()) {
                 JournalCursor advanced = advance(context, cursor, item.uid(), settings.timeoutMs);

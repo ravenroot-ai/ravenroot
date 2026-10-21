@@ -221,6 +221,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   'executionEvent.nodeBypassed': 'Node was bypassed.',
   'executionEvent.nodeDefaulted': 'Node used its configured fallback.',
   'executionEvent.nodeCompleted': 'Node completed.',
+  'executionEvent.sourceBoundary': 'Traversal stopped at a source boundary; the listener remains active.',
   'executionEvent.edgeTraversed': 'Edge was traversed.',
   'executionEvent.nodeFailed': 'Node failed. Protected diagnostics may contain more detail.',
   'executionEvent.retryScheduled': 'Node attempt failed and another attempt was scheduled.',

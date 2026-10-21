@@ -35,12 +35,14 @@ import java.util.UUID;
  * @param nodeId the graph node selected as the receiver
  * @param payload the data supplied to the node behavior
  * @param attributes immutable upstream attributes available to the node
+ * @param applicationCorrelation immutable platform-established business identity, absent on historical deliveries
  * @param command the processing directive selected for the target node
  */
 public record NodeMessage(SecurityContext security, UUID processInstanceId, UUID traversalId,
                           UUID invocationId, UUID attemptId, Set<UUID> parentInvocationIds,
                           String nodeId, Object payload, Map<String, Object> attributes,
-                          NodeCommand command) {
+                          NodeCommand command,
+                          ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation) {
 /**
  * Enforces immutable identity and routing invariants before a delivery enters the engine.
  */
@@ -62,6 +64,14 @@ public record NodeMessage(SecurityContext security, UUID processInstanceId, UUID
         }
         attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
         command = command == null ? NodeCommand.PROCESS : command;
+    }
+
+/** Compatibility constructor for deliveries without an established business context. */
+    public NodeMessage(SecurityContext security, UUID processInstanceId, UUID traversalId,
+                       UUID invocationId, UUID attemptId, Set<UUID> parentInvocationIds,
+                       String nodeId, Object payload, Map<String, Object> attributes, NodeCommand command) {
+        this(security, processInstanceId, traversalId, invocationId, attemptId, parentInvocationIds,
+                nodeId, payload, attributes, command, null);
     }
 
 /**
@@ -145,7 +155,7 @@ public record NodeMessage(SecurityContext security, UUID processInstanceId, UUID
      */
     public NodeMessage next(UUID nextInvocationId, UUID nextAttemptId, String nextNodeId, Object nextPayload) {
         return new NodeMessage(security, processInstanceId, traversalId, nextInvocationId, nextAttemptId,
-                Set.of(invocationId), nextNodeId, nextPayload, attributes, command);
+                Set.of(invocationId), nextNodeId, nextPayload, attributes, command, applicationCorrelation);
     }
 
 /**
@@ -160,6 +170,6 @@ public record NodeMessage(SecurityContext security, UUID processInstanceId, UUID
     public NodeMessage next(UUID nextInvocationId, UUID nextAttemptId, String nextNodeId, Object nextPayload,
                             NodeCommand nextCommand) {
         return new NodeMessage(security, processInstanceId, traversalId, nextInvocationId, nextAttemptId,
-                Set.of(invocationId), nextNodeId, nextPayload, attributes, nextCommand);
+                Set.of(invocationId), nextNodeId, nextPayload, attributes, nextCommand, applicationCorrelation);
     }
 }

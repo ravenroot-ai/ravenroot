@@ -52,7 +52,10 @@ public final class ManagedExecutionStore implements InvocationHandler {
     private static final int MIN_CANDIDATE_PAGE = 32;
     private static final int MAX_PAGES_PER_SWEEP = 8;
     private static final java.util.Set<String> SAFE_DELEGATE_METHODS = java.util.Set.of(
-            "capabilities", "supports", "maxLeaseTtl", "maxPayloadBytes", "load", "renew", "release",
+            "businessHistoryPolicy", "recordCorrelatedTraversal", "businessHistory", "businessHistories",
+            "correlatedJoin", "compareAndSetCorrelatedJoin", "correlatedJoins",
+            "correlatedTraversals", "correlatedTraversal", "settleCorrelatedTraversal", "closeBusinessHistory",
+            "acceptInitialStart", "initialStart", "capabilities", "supports", "maxLeaseTtl", "maxPayloadBytes", "load", "renew", "release",
             "leases", "ack", "maxClockSkew", "forgottenBefore", "lookupIdempotency",
             "idempotencyRecordCount", "purgeExpiredIdempotencyRecords", "loadHandler", "findHandler",
             "handlers", "loadToolApproval", "toolApprovals", "loadAgentAuthorityBudget", "loadRunnerWorkspace",

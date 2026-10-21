@@ -86,6 +86,8 @@ public final class ExecutionEventWireJson {
                 // origin. Keeping both here preserves durable re-entry identity across the live SSE
                 // and the ring recent-event endpoint, which share this projection.
                 + ",\"workloadId\":" + nullableEscaped(event.workloadId())
+                + ",\"applicationCorrelationId\":" + nullableEscaped(event.applicationCorrelation() == null
+                        ? null : event.applicationCorrelation().applicationCorrelationId())
                 + ",\"invocationId\":" + nullableUuid(event.invocationId())
                 + ",\"attemptId\":" + nullableUuid(event.attemptId())
                 + ",\"type\":\"" + event.type() + "\""

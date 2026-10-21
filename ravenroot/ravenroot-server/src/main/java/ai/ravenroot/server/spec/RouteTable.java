@@ -486,6 +486,15 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/initial-start",
+                    "Accepts or reconciles the single initial START for the authorized deployment. "
+                            + "Requires exact incarnationId and graphVersion, a bounded requestId and structured input. "
+                            + "Distinct requests reconcile the original processInstanceId and traversalId; "
+                            + "restart, completion, failure and retention never restore eligibility. "
+                            + "A permanent initial-start-capable execution store is required before effects.",
+                    true, false, 202,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/start",
                     "Starts one process-local deployment and answers when it has reached READY, or with "
                             + "the truthful FAILED status if startup failed and rolled back. Idempotent: "

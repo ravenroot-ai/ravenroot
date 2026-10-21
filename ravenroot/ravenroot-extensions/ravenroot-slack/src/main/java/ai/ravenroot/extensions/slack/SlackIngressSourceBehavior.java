@@ -209,7 +209,7 @@ abstract class SlackIngressSourceBehavior implements NodeBehavior, InboundSource
             source.store.bind(context.identity().tenantId(), source.profile.name(), kind,
                     delivery, SlackValues.sha256(body), deadlineNanos, window.cancellation());
             if (!live(window, deadlineNanos) || source.active(generation) == null) return empty(503);
-            IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
+            IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()),
                     Map.copyOf(payload), context.nodeId(), source.profile.name() + ":" + kind + ":" + delivery);
             if (!live(window, deadlineNanos)) return empty(503);
             return switch (receipt) {

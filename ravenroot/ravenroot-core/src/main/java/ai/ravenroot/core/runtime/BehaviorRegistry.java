@@ -288,7 +288,9 @@ public final class BehaviorRegistry {
             return descriptor;
         }
         if (!descriptor.declaresNature()) {
-            return descriptor.withNature(NodeRuntimeNature.SOURCE, java.util.Set.of(NodeRuntimeNature.SOURCE));
+            return descriptor.withNature(NodeRuntimeNature.SOURCE, java.util.Set.of(NodeRuntimeNature.SOURCE))
+                    .withProperties(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(
+                            ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS));
         }
         if (!descriptor.effectiveAllowedNatures().contains(NodeRuntimeNature.SOURCE)) {
             throw new IllegalArgumentException("Behavior '" + descriptor.behavior() + "' implements "
@@ -298,7 +300,8 @@ public final class BehaviorRegistry {
                     + "source anyway, because source discovery reads the interface. Permit SOURCE, or "
                     + "stop implementing InboundSourceCapable.");
         }
-        return descriptor;
+        return descriptor.withProperties(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(
+                ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS));
     }
 
     /**

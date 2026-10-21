@@ -45,6 +45,13 @@ final class RequestReplyCoordinator implements AutoCloseable {
         CompletionStage<GraphExecutionResult> execute(SecurityContext security, UUID processInstanceId,
                                                        UUID traversalId, Object payload);
 
+        default boolean acceptsTarget(IngressTarget target) { return target.nodeId().isEmpty(); }
+
+        default CompletionStage<GraphExecutionResult> execute(SecurityContext security,
+                UUID processInstanceId, UUID traversalId, IngressTarget target, Object payload) {
+            return execute(security, processInstanceId, traversalId, payload);
+        }
+
         void cancel(UUID traversalId);
     }
 
@@ -93,7 +100,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(deadline, "deadline");
-        if (target.nodeId().isPresent()) {
+        if (!control.acceptsTarget(target)) {
             return refused(RequestReplyRefusal.UNSUPPORTED_TARGET);
         }
 
@@ -119,7 +126,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
                 return refused(capacity.get());
             }
             IssuedIdentity issued = issueIdentity();
-            return register(issued, deadline, remaining, boundedPayload);
+            return register(issued, deadline, remaining, target, boundedPayload);
         } finally {
             lifecycle.readLock().unlock();
         }
@@ -156,7 +163,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
         Objects.requireNonNull(sourceNodeId, "sourceNodeId");
         Objects.requireNonNull(projection, "projection");
         Objects.requireNonNull(deadline, "deadline");
-        if (target.nodeId().isPresent()) {
+        if (!control.acceptsTarget(target)) {
             return refused(RequestReplyRefusal.UNSUPPORTED_TARGET);
         }
 
@@ -199,7 +206,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
                 throw projectionFailure;
             }
 
-            return register(issued, deadline, remaining, boundedPayload);
+            return register(issued, deadline, remaining, target, boundedPayload);
         } finally {
             lifecycle.readLock().unlock();
         }
@@ -269,10 +276,10 @@ final class RequestReplyCoordinator implements AutoCloseable {
      * from here on every exit either publishes an exchange or releases capacity through it.
      */
     private RequestReplyAdmission register(IssuedIdentity issued, Instant deadline, Duration remaining,
-                                           Object boundedPayload) {
+                                           IngressTarget target, Object boundedPayload) {
         var key = new SlotKey(identity.tenantId(), deploymentId, generation, issued.correlationId(),
                 issued.traversalId());
-        var state = new ExchangeState(key, issued.processInstanceId(), deadline);
+        var state = new ExchangeState(key, issued.processInstanceId(), deadline, target);
         if (pending.putIfAbsent(key, state) != null) {
             return releaseAndRefuse(RequestReplyRefusal.IDENTITY_COLLISION);
         }
@@ -340,6 +347,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
         private final SlotKey key;
         private final UUID processInstanceId;
         private final Instant deadline;
+        private final IngressTarget target;
         private final CompletableFuture<RequestReplyOutcome> completion = new CompletableFuture<>();
         private final CompletionStage<RequestReplyOutcome> readOnlyCompletion = completion.minimalCompletionStage();
         private final AtomicReference<RequestReplyOutcome> terminal = new AtomicReference<>();
@@ -350,8 +358,9 @@ final class RequestReplyCoordinator implements AutoCloseable {
         private final Object dispatchTerminalLock = new Object();
         private boolean dispatched;
 
-        private ExchangeState(SlotKey key, UUID processInstanceId, Instant deadline) {
+        private ExchangeState(SlotKey key, UUID processInstanceId, Instant deadline, IngressTarget target) {
             this.key = key;
+            this.target = target;
             this.processInstanceId = Objects.requireNonNull(processInstanceId, "processInstanceId");
             this.deadline = deadline;
         }
@@ -428,7 +437,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
                 dispatched = true;
                 try {
                     execution = Objects.requireNonNull(control.execute(identity, processInstanceId,
-                            key.traversalId(), payload), "traversal execution stage");
+                            key.traversalId(), target, payload), "traversal execution stage");
                 } catch (RuntimeException | Error failure) {
                     execution = null;
                     dispatchFailure = failure;

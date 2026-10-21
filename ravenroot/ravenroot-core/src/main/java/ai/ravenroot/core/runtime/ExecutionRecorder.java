@@ -950,6 +950,49 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
     }
 
+    /** Commits a contribution while the same original process fence is checked by the adapter. */
+    ai.ravenroot.api.correlation.CorrelatedJoinRecord contribute(ai.ravenroot.core.graph.GraphNode node,
+            String entryNodeId, ai.ravenroot.api.execution.NodeMessage message, Instant now) {
+        operationLock.lock();
+        try {
+            requireFence();
+            return CorrelatedJoinRuntime.accept(store, lease, node, entryNodeId, message, now, new CorrelatedJoinRuntime.StoreAwait() {
+                @Override public <T> T get(CompletionStage<T> stage) { return awaitCorrelation(stage); }
+            });
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
+    private <T> T awaitCorrelation(CompletionStage<T> stage) {
+        try {
+            return stage.toCompletableFuture().get(Math.max(1, leaseTtl.toNanos() / 3),
+                    java.util.concurrent.TimeUnit.NANOSECONDS);
+        } catch (java.util.concurrent.ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("correlated join persistence failed", cause);
+        } catch (java.util.concurrent.TimeoutException unresolved) {
+            throw new IllegalStateException("correlated join persistence must be reconciled", unresolved);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("correlated join persistence interrupted", interrupted);
+        }
+    }
+
+    /** Restores the immutable business context of an original traversal after recovery. */
+    public ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation(UUID traversalId) {
+        operationLock.lock();
+        try {
+            requireFence();
+            if (!store.supports(ai.ravenroot.api.persistence.StoreCapability.BUSINESS_HISTORIES)) return null;
+            return await(store.correlatedTraversal(key.tenantId(), key.processInstanceId(), traversalId))
+                    .map(ai.ravenroot.api.correlation.CorrelatedTraversal::context).orElse(null);
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
     private void loseFence(ExecutionStoreFailure because) {
         fenceLost = true;
         fenceLostBecause = because;

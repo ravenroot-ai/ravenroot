@@ -13,13 +13,23 @@ import java.util.Objects;
 public record InMemoryExecutionStorePolicy(Duration maximumLeaseTtl, int maximumPayloadBytes,
                                            Duration maximumClockSkew, Duration journalRetention,
                                            int maximumInventoryPageSize, Duration terminalRetention,
-                                           Duration executionResultRetention) {
+                                           Duration executionResultRetention,
+                                           ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistories) {
     /** The reference adapter's shipped programmatic defaults. */
     public static final InMemoryExecutionStorePolicy DEFAULTS = new InMemoryExecutionStorePolicy(
             Duration.ofMinutes(5), 1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100,
             Duration.ofDays(7), Duration.ofDays(7));
 
+    /** Source-compatible policy before explicit business-history budgets. */
+    public InMemoryExecutionStorePolicy(Duration maximumLeaseTtl, int maximumPayloadBytes,
+            Duration maximumClockSkew, Duration journalRetention, int maximumInventoryPageSize,
+            Duration terminalRetention, Duration executionResultRetention) {
+        this(maximumLeaseTtl, maximumPayloadBytes, maximumClockSkew, journalRetention, maximumInventoryPageSize,
+                terminalRetention, executionResultRetention, ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS);
+    }
+
     public InMemoryExecutionStorePolicy {
+        Objects.requireNonNull(businessHistories, "businessHistories");
         maximumLeaseTtl = positive(maximumLeaseTtl, "maximumLeaseTtl");
         if (maximumPayloadBytes < 1) {
             throw new IllegalArgumentException("maximumPayloadBytes must be positive");

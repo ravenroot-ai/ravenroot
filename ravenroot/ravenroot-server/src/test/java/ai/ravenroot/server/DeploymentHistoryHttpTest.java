@@ -181,6 +181,31 @@ class DeploymentHistoryHttpTest {
             assertEquals("DUPLICATE", text(object(second.body()), "outcome"));
         }
     }
+    @Test void correlationPreviewUsesConfiguredBoundAndCatalogAuthorityWithoutHistoryLookup() throws Exception {
+        var defaults = ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS;
+        var limits = new ai.ravenroot.api.correlation.CorrelationLimits(12, 128, 8, 32, PayloadLimits.DEFAULTS);
+        var policy = new ai.ravenroot.api.correlation.BusinessHistoryPolicy(defaults.maxHistoriesPerScope(),
+                defaults.maxOpenJoinsPerHistory(), defaults.maxRetainedJoinsPerHistory(), defaults.maxContributionsPerJoin(),
+                defaults.maxJoinPayloadBytes(), defaults.maxPageSize(), defaults.historyRetention(), defaults.joinDeadline(), limits);
+        try (var fixture = new Fixture(policy)) {
+            fixture.rejectAggregateLoads.set(true);
+            String request = """
+                    {"properties":{"correlation.mode":"REQUIRE_EXISTING","correlation.selector":"/metadata/id"},
+                     "sample":{"metadata":{"id":"operation-42"}}}
+                    """;
+            var response = fixture.preview(request, "tenant");
+            assertEquals(200, response.statusCode(), response.body());
+            assertTrue(response.body().contains("\"valid\":true"));
+            assertTrue(response.body().contains("\"requiresExistingHistory\":true"), "preview must not claim history admission");
+            assertEquals("private, no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+            var rejected = fixture.preview(request.replace("operation-42", "secret-invalid-identifier"), "tenant");
+            assertEquals(200, rejected.statusCode()); assertTrue(rejected.body().contains("INVALID_ID"));
+            assertTrue(rejected.body().contains("/metadata/id")); assertFalse(rejected.body().contains("secret-invalid-identifier"));
+            assertEquals(403, fixture.preview(request, "denied").statusCode());
+            assertEquals(400, fixture.preview(request.replace("\"sample\":", "\"tenant\":\"foreign\",\"sample\":"), "tenant").statusCode());
+        }
+    }
+
     private final class Fixture implements AutoCloseable {
         final PekkoExecutionEngine engine = new PekkoExecutionEngine("history-http");
         final SqliteExecutionStore store;
@@ -218,6 +243,11 @@ class DeploymentHistoryHttpTest {
         HttpResponse<String> history(String query, String tenant, String incarnation) throws Exception {
             return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/deployments/document/history?graphVersion=" + encode(binding.graphVersion()) + "&" + query))
                     .header("X-Test-Tenant", tenant).header("X-Ravenroot-Deployment-Incarnation", incarnation).GET().build(), HttpResponse.BodyHandlers.ofString());
+        }
+        HttpResponse<String> preview(String body, String tenant) throws Exception {
+            return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/correlation/preview"))
+                    .header("X-Test-Tenant", tenant).header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
         }
         HttpResponse<String> initial(String id, String input) throws Exception {
             String body = "{\"incarnationId\":\"" + binding.incarnationId() + "\",\"graphVersion\":\"" + binding.graphVersion() + "\",\"requestId\":\"" + id + "\",\"input\":" + input + "}";

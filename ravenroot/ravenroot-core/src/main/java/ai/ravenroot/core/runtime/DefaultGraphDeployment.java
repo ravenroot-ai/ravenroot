@@ -3113,6 +3113,14 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
+    private static String correlationRefusal(Throwable failure) {
+        if (failure instanceof ai.ravenroot.api.correlation.CorrelationSelector.Invalid invalid)
+            return "correlation selector " + invalid.selector() + ": " + invalid.reason().name();
+        if (failure instanceof ai.ravenroot.api.correlation.BusinessHistoryException invalid)
+            return "correlation admission: " + invalid.reason().name();
+        return "correlation mapping refused";
+    }
+
     private static Throwable unwrapFailure(Throwable failure) {
         Throwable current = failure;
         while ((current instanceof java.util.concurrent.CompletionException
@@ -3488,7 +3496,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                                 ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
                     } catch (ai.ravenroot.api.correlation.BusinessHistoryException | IllegalArgumentException invalidCorrelation) {
                         releaseAdmission(traversalId, permits);
-                        return new ai.ravenroot.api.deployment.IngressReceipt.Refused("initial correlation admission refused");
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Refused(correlationRefusal(invalidCorrelation));
                     } catch (RuntimeException unresolved) {
                         releaseAdmission(traversalId, permits);
                         return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
@@ -3570,7 +3578,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                             "durable traversal prerequisites did not resolve");
                 } catch (ai.ravenroot.api.correlation.BusinessHistoryException | IllegalArgumentException invalidCorrelation) {
                     releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId), deferredEventRelease);
-                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused("source correlation admission refused");
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused(correlationRefusal(invalidCorrelation));
                 } catch (RuntimeException | Error recordFailure) {
                     releaseAdmission(traversalId, permits, () -> activeDurableEvents.remove(eventId),
                             deferredEventRelease);

@@ -163,6 +163,10 @@ public interface CliBackend {
      * caller can tell them apart, by construction.
      */
     /** Exact-bound read-only deployment history; returns the shared public JSON page. */
+    /** Evaluates caller-supplied mapping controls and sample through the connected runtime policy. */
+    default String previewCorrelation(byte[] document) throws IOException {
+        throw new IOException("correlation preview requires a capable backend");
+    }
     default String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
             Map<String, String> query) throws IOException {
         throw new IOException("deployment history requires a capable backend");

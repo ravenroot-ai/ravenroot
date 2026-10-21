@@ -254,6 +254,24 @@ class SourceLocalTraversalTest {
         }
     }
 
+    @Test void invalidSourceMappingReturnsSafeSelectorReasonBeforeAnyEffect() throws Exception {
+        try (var engine = new SameThreadExecutionEngine();
+             var store = new SqliteExecutionStore(directory.resolve("invalid-correlation.db"), Clock.systemUTC())) {
+            var contexts = new ConcurrentHashMap<String, InboundSourceContext>();
+            var effects = new CopyOnWriteArrayList<String>();
+            var monitor = new ExecutionMonitor();
+            var deployment = deployment(engine, store, contexts, effects, monitor, CorrelatedJoinRuntimeRecoveryTest.GRAPH);
+            deployment.start(IDENTITY).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var refusal = assertInstanceOf(IngressReceipt.Refused.class, contexts.get("a").ingress().offerDurably(
+                    IDENTITY, IngressTarget.node("a"), Map.of("operation", Map.of("secret", "do-not-echo"), "partition", "part-1"),
+                    "a", "invalid-input"));
+            assertTrue(refusal.reason().contains("/operation")); assertTrue(refusal.reason().contains("NOT_SCALAR_TEXT"));
+            assertFalse(refusal.reason().contains("do-not-echo")); assertTrue(effects.isEmpty());
+            assertTrue(monitor.eventsAfter(0).stream().noneMatch(event -> event.type() == ExecutionEventType.EXECUTION_STARTED));
+            deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     private static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
             Map<String, InboundSourceContext> contexts, List<String> effects, ExecutionMonitor monitor) {
         return deployment(engine, store, contexts, effects, monitor, GRAPH);

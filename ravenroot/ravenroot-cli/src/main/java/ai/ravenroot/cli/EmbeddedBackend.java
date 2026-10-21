@@ -327,6 +327,10 @@ final class EmbeddedBackend implements CliBackend {
         return deploymentView(status);
     }
 
+    @Override public String previewCorrelation(byte[] document) {
+        var request = ai.ravenroot.api.correlation.CorrelationPreviewRequest.read(document, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
+        return application.previewCorrelation(requestContext, request.properties(), request.sample()).toJson();
+    }
     @Override public String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
             java.util.Map<String, String> query) {
         return new ai.ravenroot.api.history.DeploymentHistoryRequest(query).read(

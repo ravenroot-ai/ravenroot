@@ -3163,6 +3163,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public ai.ravenroot.api.correlation.CorrelationPreview previewCorrelation(Map<String, ?> properties, Object sample) {
+        return ai.ravenroot.api.correlation.CorrelationPreview.evaluate(properties, sample, executionStore == null
+                ? ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS : executionStore.businessHistoryPolicy().selection());
+    }
+
+    @Override
     public List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit) {
         if (!durableEventJournalAvailable()) {
             throw new IllegalStateException(

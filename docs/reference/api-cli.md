@@ -48,6 +48,36 @@ source package declared them at registration; unknown or undeclared failures use
 and an incident handle. Property values, adapter exception messages, profiles, hosts, and stacks are
 never part of this response. `diagnostic` remains for older consumers and stays a fixed bounded text.
 
+## Correlation sample preview
+
+`POST /v1/correlation/preview` evaluates explicit mapping controls against caller-supplied sample
+input under catalog-read authority. It uses the same bounded JSON Pointer extraction as ingress and
+creates no history or execution. A successful `REQUIRE_EXISTING` preview still requires actual
+admission to find an open history in the authorized deployment/version scope.
+
+```json
+{
+  "properties": {
+    "correlation.mode": "ACCEPT_OR_CREATE",
+    "correlation.selector": "/metadata/ingestionId",
+    "correlation.contributionSelector": "/partition"
+  },
+  "sample": {
+    "metadata": {"ingestionId": "ingestion-42"},
+    "partition": "part-3"
+  }
+}
+```
+
+Save that request as `sample.json` and run `ravenroot correlation-preview sample.json`, either
+against an embedded application or with the CLI's normal remote-server option. The ordinary SDK
+exposes the same operation as `authorizedApplication.previewCorrelation(context, properties, sample)`.
+The result includes `valid`, `applicationContext`, `generatedIdentity`, `requiresExistingHistory`,
+`selector` and `reason`. A generated UUID is an illustrative preview placeholder. Invalid IDs,
+missing fields, type mismatches, conflicting mappings and configured bounds produce a fixed failure
+category without echoing the rejected sample value. The selector addresses the actual supplied
+structure; it does not infer connector envelopes, interpret text or evaluate expressions.
+
 ## Initial START and retained deployment history
 
 Activating a deployment starts its eligible SOURCE listeners. It does not dispatch START. An

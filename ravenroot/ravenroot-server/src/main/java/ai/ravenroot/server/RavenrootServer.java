@@ -786,6 +786,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/runtime", this::runtime);
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
+        apiContext("/v1/correlation/preview", this::correlationPreview);
         apiContext("/v1/node-palettes", this::nodePalettes);
         apiContext("/v1/human-tasks", this::humanTasks);
         apiPrefixContext("/v1/runner-plane", this::runnerPlane);
@@ -1958,6 +1959,19 @@ public final class RavenrootServer implements AutoCloseable {
                 throw new ai.ravenroot.api.security.AuthorizationDeniedException(
                         "agent authority control audit unavailable");
             }
+        }
+    }
+
+    private void correlationPreview(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "POST")) return;
+        try {
+            var request = ai.ravenroot.api.correlation.CorrelationPreviewRequest.read(
+                    boundedBody(exchange, payloadLimits.maxEncodedBytes()), payloadLimits);
+            var result = authorizedApplication.previewCorrelation(httpContext.applicationContext(), request.properties(), request.sample());
+            exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+            json(exchange, 200, result.toJson());
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
     }
 

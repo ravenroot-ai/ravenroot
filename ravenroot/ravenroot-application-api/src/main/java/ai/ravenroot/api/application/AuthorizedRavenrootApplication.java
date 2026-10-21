@@ -159,6 +159,19 @@ public final class AuthorizedRavenrootApplication {
         return delegate.nodeTypes();
     }
 
+    /** Evaluates caller-supplied correlation samples under catalog-read authority and audit.
+     * @param context authenticated authoring request context
+     * @param properties explicit correlation mapping controls
+     * @param sample actual exposed connector input or computed structured value
+     * @return non-mutating bounded sample extraction result
+     */
+    public ai.ravenroot.api.correlation.CorrelationPreview previewCorrelation(RequestContext context,
+            Map<String, ?> properties, Object sample) {
+        require(context, AuthorizationAction.CATALOG_READ, collection("node-catalog", context));
+        return delegate.previewCorrelation(properties, sample);
+    }
+
+
 /**
  * Lists trusted node catalog provenance after catalog-read authorization.
  * @param context authenticated request context used for authorization and audit attribution.

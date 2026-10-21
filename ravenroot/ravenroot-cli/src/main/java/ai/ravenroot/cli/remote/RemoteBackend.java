@@ -510,6 +510,9 @@ public final class RemoteBackend implements CliBackend {
         return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(post(path, graphMl, "application/xml"))));
     }
 
+    @Override public String previewCorrelation(byte[] document) throws IOException {
+        return post("/v1/correlation/preview", document, "application/json");
+    }
     @Override public String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
             java.util.Map<String, String> query) throws IOException {
         new ai.ravenroot.api.history.DeploymentHistoryRequest(query);

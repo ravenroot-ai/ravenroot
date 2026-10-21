@@ -136,6 +136,7 @@ public final class OpenApiSpecGenerator {
             entry.append(jsonRequestBody("HumanTaskCapabilityCompletion"));
         }
         if ("/v1/deployments/{id}/initial-start".equals(route.path())) entry.append(jsonRequestBody("InitialStartRequest"));
+        if ("/v1/correlation/preview".equals(route.path())) entry.append(jsonRequestBody("CorrelationPreviewRequest"));
         if ("/v1/embed/executions".equals(route.path())) entry.append(jsonRequestBody("EmbedInitialStartRequest"));
         if ("/v1/embed/history".equals(route.path())) entry.append(jsonRequestBody("EmbedHistoryRequest"));
         entry.append("        \"responses\": {\n");
@@ -380,6 +381,8 @@ public final class OpenApiSpecGenerator {
         } else if (("/v1/deployments".equals(route.path()) && "POST".equals(method))
                 || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))) {
             schema = "LocalDeploymentStatus";
+        } else if ("/v1/correlation/preview".equals(route.path())) {
+            schema = "CorrelationPreviewResponse";
         } else if ("/v1/deployments/{id}/initial-start".equals(route.path()) || "/v1/embed/executions".equals(route.path())) {
             schema = "InitialStartResponse";
         } else if ("/v1/deployments/{id}/history".equals(route.path()) || "/v1/embed/history".equals(route.path())) {

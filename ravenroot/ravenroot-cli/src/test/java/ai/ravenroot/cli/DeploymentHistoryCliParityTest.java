@@ -62,6 +62,35 @@ class DeploymentHistoryCliParityTest {
             }
         }
     }
+    @Test void embeddedRemoteAndCliPreviewUseSameBoundedSampleEvaluation() throws Exception {
+        try (var engine = new PekkoExecutionEngine("preview-cli")) {
+            var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            var context = new RequestContext("preview-request", "operator", PrincipalType.USER, "issuer", "local", Set.of(Role.PLATFORM_ADMIN),
+                    Arrays.stream(AuthorizationAction.values()).filter(AuthorizationAction::available).map(AuthorizationAction::requiredScope).collect(java.util.stream.Collectors.toSet()));
+            var authorized = new AuthorizedRavenrootApplication(app, new DefaultAuthorizationService(event -> {}), event -> {}, true);
+            var embedded = new EmbeddedBackend(authorized, context);
+            try (var server = new RavenrootServer(app, new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, new DisabledLoopbackAuthenticator())) {
+                server.start();
+                var remote = new RemoteBackend(URI.create("http://127.0.0.1:" + server.port()), "local-test", Duration.ofSeconds(10));
+                String sample = """
+                        {"properties":{"correlation.mode":"ACCEPT_OR_CREATE","correlation.selector":"/metadata/ingestionId"},
+                         "sample":{"metadata":{"ingestionId":"ingestion-42"}}}
+                        """;
+                byte[] request = sample.getBytes(StandardCharsets.UTF_8);
+                assertEquals(object(embedded.previewCorrelation(request)), object(remote.previewCorrelation(request)));
+                var file = directory.resolve("sample.json"); java.nio.file.Files.write(file, request);
+                var output = new java.io.ByteArrayOutputStream(); var errors = new java.io.ByteArrayOutputStream();
+                var cli = new RavenrootCli(remote, new java.io.PrintStream(output), new java.io.PrintStream(errors));
+                assertEquals(0, cli.run("correlation-preview", file.toString()), errors.toString(StandardCharsets.UTF_8));
+                assertEquals(object(embedded.previewCorrelation(request)), object(output.toString(StandardCharsets.UTF_8).strip()));
+                output.reset();
+                java.nio.file.Files.writeString(file, sample.replace("\"ingestion-42\"", "{\"secret\":\"do-not-echo\"}"));
+                assertEquals(1, cli.run("correlation-preview", file.toString()));
+                assertTrue(output.toString(StandardCharsets.UTF_8).contains("NOT_SCALAR_TEXT"));
+                assertFalse(output.toString(StandardCharsets.UTF_8).contains("do-not-echo"));
+            }
+        }
+    }
     private static PayloadValue.MapValue object(String json) { return (PayloadValue.MapValue) PayloadJson.read(json.getBytes(StandardCharsets.UTF_8), PayloadLimits.DEFAULTS); }
     private static final String GRAPH = """
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">

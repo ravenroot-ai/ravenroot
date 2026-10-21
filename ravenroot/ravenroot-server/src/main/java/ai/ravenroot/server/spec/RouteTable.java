@@ -165,6 +165,9 @@ public final class RouteTable {
                     + "instance counts.", true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/node-types", "The trusted node-type catalog.", true, true,
                     200, STANDARD_ERRORS, READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/correlation/preview",
+                    "Non-mutating bounded extraction preview over a caller-supplied actual connector sample. Requires catalog-read authority.",
+                    true, true, 200, STANDARD_ERRORS, NEVER, false),
             new RouteDescriptor(Set.of("GET", "POST"), "/v1/node-palettes",
                     "Lists or creates durable personal node palettes for the exact authenticated tenant, issuer, and subject. "
                             + "Palette content is never assistant-visible and responses are private and non-cacheable.",

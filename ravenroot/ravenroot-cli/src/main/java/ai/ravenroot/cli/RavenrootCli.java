@@ -44,6 +44,7 @@ public final class RavenrootCli {
                 case "status" -> status();
                 case "runtime" -> runtime();
                 case "node-types" -> nodeTypes();
+                case "correlation-preview" -> correlationPreview(args);
                 case "inspect" -> inspect(args);
                 // The only command here that does not reach the backend, and
                 // deliberately: validating a local file against the GraphML profile needs no
@@ -138,6 +139,17 @@ public final class RavenrootCli {
             output.println("resume-traversal-id=" + result.resumeTraversalId());
         }
         return 0;
+    }
+
+    private int correlationPreview(String[] args) throws IOException {
+        if (args.length != 2) return invalid("Usage: ravenroot correlation-preview <request.json>");
+        int maximum = ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes();
+        byte[] document;
+        try (var input = Files.newInputStream(Path.of(args[1]))) { document = input.readNBytes(maximum + 1); }
+        if (document.length > maximum) throw new IllegalArgumentException("correlation preview request exceeds payload limit");
+        String response = backend.previewCorrelation(document);
+        output.println(sanitizeForConsole(response));
+        return response.contains("\"valid\":true") ? 0 : 1;
     }
 
     private int derived(String[] args, boolean preview) throws IOException {
@@ -755,6 +767,7 @@ public final class RavenrootCli {
         // Listed separately because it is answered locally whether or not --server is
         // given -- the document is on this machine and so is the profile that reads it.
         output.println("       ravenroot validate <graph.graphml>");
+        output.println("       ravenroot correlation-preview <request.json>");
         output.println("       ravenroot events decode   (decode a captured SSE body from stdin)");
         // Listed separately for the opposite reason to 'validate': this REQUIRES
         // --server, because stored credentials live in a running server's own store, not in anything

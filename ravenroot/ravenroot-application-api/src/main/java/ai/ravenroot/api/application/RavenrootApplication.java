@@ -1220,6 +1220,16 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit);
 
+    /** Previews explicit correlation extraction from a caller-supplied sample without state changes.
+     * @param properties mapping controls from the shared source/context descriptor
+     * @param sample actual exposed connector input or computed structured value
+     * @return bounded sample evaluation; generated identities are illustrative placeholders
+     */
+    default ai.ravenroot.api.correlation.CorrelationPreview previewCorrelation(Map<String, ?> properties, Object sample) {
+        return ai.ravenroot.api.correlation.CorrelationPreview.evaluate(properties, sample,
+                ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS);
+    }
+
     /**
      * Reports whether this application has a durable activity-content archive.
      *

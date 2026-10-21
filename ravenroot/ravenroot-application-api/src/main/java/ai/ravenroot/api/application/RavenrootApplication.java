@@ -595,6 +595,15 @@ public interface RavenrootApplication extends AutoCloseable {
         return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
     }
 
+    /**
+     * Admits or reconciles the permanent original START under the exact embedded deployment binding.
+     * @param security authenticated tenant and principal from the embed authorization boundary
+     * @param deploymentId tenant-scoped logical deployment
+     * @param incarnationId current physical registration incarnation
+     * @param graphVersion immutable version captured by the authorized session
+     * @param requestId bounded client reconciliation identity; another value never grants another START
+     * @return authoritative admission result and original process/traversal identities when established
+     */
     default EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
                                                                  String deploymentId,
                                                                  String incarnationId,

@@ -7,7 +7,15 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Shared deterministic mapping used by ingress, explicit context establishment and author preview. */
+/** Shared deterministic mapping used by ingress, explicit context establishment and author preview.
+ * @param mode explicit policy for generating, accepting or requiring an existing application identity
+ * @param applicationSelectors bounded pointers that must agree when more than one selects an application identity
+ * @param contribution optional pointer selecting a distinct business contribution
+ * @param kind optional pointer selecting an authored contribution category
+ * @param round optional pointer selecting an explicit join generation
+ * @param publicReference optional pointer selecting a bounded non-secret exact lookup reference
+ * @param limits operator-owned extraction and input bounds
+ */
 public record CorrelationMapping(Mode mode, List<CorrelationSelector> applicationSelectors,
                                  Optional<CorrelationSelector> contribution,
                                  Optional<CorrelationSelector> kind,
@@ -15,7 +23,14 @@ public record CorrelationMapping(Mode mode, List<CorrelationSelector> applicatio
                                  Optional<CorrelationSelector> publicReference,
                                  CorrelationLimits limits) {
     /** Creation policy; REQUIRE_EXISTING is atomically enforced by the scoped history store. */
-    public enum Mode { GENERATE_NEW, ACCEPT_OR_CREATE, REQUIRE_EXISTING }
+    public enum Mode {
+        /** Create a new application identity from the supplied stable generator. */
+        GENERATE_NEW,
+        /** Accept a valid selected external identity, or generate only when it is missing. */
+        ACCEPT_OR_CREATE,
+        /** Require a valid selected identity and an already established history in scope. */
+        REQUIRE_EXISTING
+    }
 
     /** Validates mapping shape independently of sample/event values. */
     public CorrelationMapping {

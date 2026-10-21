@@ -8,13 +8,24 @@ import java.util.List;
 /** Versioned scope/filter-bound keyset cursor. It carries no authority and never changes query scope. */
 public final class BusinessCursor {
     private BusinessCursor() { }
-    /** Encodes stable ordering coordinates after hashing the exact scope and filters. */
+    /** Encodes stable ordering coordinates after hashing the exact scope and filters.
+ * @param scope tenant, logical deployment and exact immutable graph version
+ * @param filter canonical query binding; it grants no authorization
+ * @param coordinates stable keyset ordering coordinates from the preceding selected page
+ * @return opaque scope-bound keyset continuation for the same query
+ */
     public static String encode(BusinessScope scope, String filter, List<String> coordinates) {
         String payload = String.join("\0", coordinates);
         return "bh1." + binding(scope, filter) + "." + Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
     }
-    /** Rejects foreign/changed selection, malformed, oversized and wrong-shape cursors. */
+    /** Rejects foreign/changed selection, malformed, oversized and wrong-shape cursors.
+ * @param scope tenant, logical deployment and exact immutable graph version
+ * @param filter canonical query binding; it grants no authorization
+ * @param cursor opaque continuation from the preceding page of the same selection and filters
+ * @param count expected number of decoded cursor coordinates
+ * @return validated ordering coordinates for the same scope and query
+ */
     public static List<String> decode(BusinessScope scope, String filter, String cursor, int count) {
         try {
             if (cursor == null || cursor.length() > 32768) throw new IllegalArgumentException();

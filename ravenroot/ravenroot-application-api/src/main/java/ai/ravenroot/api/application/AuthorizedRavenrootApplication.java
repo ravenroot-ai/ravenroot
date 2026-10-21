@@ -793,12 +793,20 @@ public final class AuthorizedRavenrootApplication {
         return delegate.localDeployment(context.tenantId(), deploymentId);
     }
 
-    /** Read-only history under ordinary authenticated execution-read authority. */
+    /** Read-only history under ordinary authenticated execution-read authority.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param source exact captured logical deployment, physical incarnation and immutable graph version
+ * @return read-only facade that fences the captured source and authorizes every history read
+ */
     public ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(RequestContext context,
             ai.ravenroot.api.history.DeploymentHistorySource source) {
         return historyReader(context, source, AuthorizationAction.EXECUTION_READ);
     }
-    /** Read-only history under the separate deployment embed capability. */
+    /** Read-only history under the separate deployment embed capability.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param source exact captured logical deployment, physical incarnation and immutable graph version
+ * @return read-only facade governed by the separate embed deployment-read action
+ */
     public ai.ravenroot.api.history.DeploymentHistoryReader embedDeploymentHistory(RequestContext context,
             ai.ravenroot.api.history.DeploymentHistorySource source) {
         return historyReader(context, source, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ);
@@ -1038,7 +1046,15 @@ public final class AuthorizedRavenrootApplication {
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
      */
-    /** Starts or reconciles initial START under ordinary execution authorization. */
+    /** Starts or reconciles initial START under ordinary execution authorization.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param deploymentId logical deployment identity; a new incarnation does not change it
+ * @param incarnationId captured physical registration incarnation used as a stale-source fence
+ * @param graphVersion exact immutable graph version admitted for this history
+ * @param requestId client request identity being admitted or reconciled; it does not grant another START
+ * @param input actual bounded ingress or workflow input to select; no implicit envelope is invented
+ * @return authoritative initial START admission or reconciliation with its original process and traversal identities
+ */
     public EmbedDeploymentStart startLocalDeploymentExecution(RequestContext context,
             String deploymentId, String incarnationId, String graphVersion, String requestId,
             ai.ravenroot.api.payload.PayloadValue input) {
@@ -1048,6 +1064,14 @@ public final class AuthorizedRavenrootApplication {
                 requireText(graphVersion, "graph version"), requireText(requestId, "request id"),
                 java.util.Objects.requireNonNull(input, "input"));
     }
+    /** Admits or reconciles initial START under the separate exact-bound embed execution action.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param deploymentId logical deployment identity; a new incarnation does not change it
+ * @param incarnationId captured physical registration incarnation used as a stale-source fence
+ * @param graphVersion exact immutable graph version admitted for this history
+ * @param requestId client request identity being admitted or reconciled; it does not grant another START
+ * @return authoritative initial START admission under the separate embed execution capability, retaining original identities
+ */
 
     public EmbedDeploymentStart startEmbedDeploymentExecution(RequestContext context,
                                                                String deploymentId,

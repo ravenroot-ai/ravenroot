@@ -7,6 +7,12 @@ import static ai.ravenroot.api.correlation.BusinessHistoryException.Reason.*;
 /** Shared adapter validation: CAS cannot erase contributions, change a release or extend a deadline. */
 public final class CorrelatedJoinTransitions {
     private CorrelatedJoinTransitions() { }
+    /** Validates monotone join transitions against the retained checkpoint, policy and current deadline.
+ * @param stored currently retained immutable join checkpoint, absent when creating the first revision
+ * @param desired prospective immutable join state with the next compare-and-set revision
+ * @param policy operator-owned contribution, payload, deadline and revision-retry bounds
+ * @param now operation time used to validate deadlines and record the change
+ */
     public static void require(Optional<CorrelatedJoinRecord> stored, CorrelatedJoinRecord desired,
                                 BusinessHistoryPolicy policy, Instant now) {
         if (desired.expectedIds().size() > policy.maxContributionsPerJoin()

@@ -3,7 +3,13 @@ package ai.ravenroot.api.correlation;
 import ai.ravenroot.api.payload.PayloadLimits;
 import java.util.Objects;
 
-/** Typed, bounded correlation selection and retention budgets supplied by runtime composition. */
+/** Typed, bounded correlation selection and retention budgets supplied by runtime composition.
+ * @param maxIdCharacters finite UTF-16 character ceiling for opaque business, contribution and round identifiers
+ * @param maxSelectorCharacters finite character ceiling for an authored JSON Pointer
+ * @param maxSelectorSegments maximum traversed segments in an authored JSON Pointer
+ * @param maxManifestItems maximum distinct members extracted from an expectation manifest
+ * @param input operator-owned bounds for the actual exposed ingress payload
+ */
 public record CorrelationLimits(int maxIdCharacters, int maxSelectorCharacters, int maxSelectorSegments,
                                 int maxManifestItems, PayloadLimits input) {
     /** Shipped finite defaults; embedders may tighten or raise them within the safety ceilings. */
@@ -19,7 +25,11 @@ public record CorrelationLimits(int maxIdCharacters, int maxSelectorCharacters, 
         Objects.requireNonNull(input, "input");
     }
 
-    /** Validates an opaque application/contribution/round key without coercion or normalization. */
+    /** Validates an opaque application/contribution/round key without coercion or normalization.
+ * @param value candidate opaque identity; values are never echoed in a refusal
+ * @param field safe diagnostic field name; the rejected identifier value is never included
+ * @return validated original text without coercion, normalization or diagnostic value disclosure
+ */
     public String requireId(Object value, String field) {
         if (!(value instanceof String text) || text.isBlank() || text.length() > maxIdCharacters
                 || text.codePoints().anyMatch(Character::isISOControl))

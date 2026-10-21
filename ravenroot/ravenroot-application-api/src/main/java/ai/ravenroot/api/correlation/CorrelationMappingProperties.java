@@ -23,7 +23,11 @@ public final class CorrelationMappingProperties {
 
     private CorrelationMappingProperties() { }
 
-    /** Compiles one shared mapping before listener activation or initial admission. */
+    /** Compiles one shared mapping before listener activation or initial admission.
+ * @param properties authored node properties compiled before source activation or initial admission
+ * @param limits operator-owned extraction and input bounds
+ * @return validated shared mapping compiled from the authored properties
+ */
     public static CorrelationMapping read(Map<String, ?> properties, CorrelationLimits limits) {
         Object rawMode = properties.get(MODE);
         CorrelationMapping.Mode mode;
@@ -39,7 +43,10 @@ public final class CorrelationMappingProperties {
                 selector(properties, REFERENCE, limits), limits);
     }
 
-    /** Descriptor-driven controls; extraction preview uses {@link CorrelationMapping#extract}. */
+    /** Descriptor-driven controls; extraction preview uses {@link CorrelationMapping#extract}.
+ * @param limits operator-owned extraction and input bounds
+ * @return platform authoring controls for explicit application identity and contribution selection
+ */
     public static NodePropertyDescriptor[] descriptors(CorrelationLimits limits) {
         var controls = new ArrayList<NodePropertyDescriptor>();
         controls.add(new NodePropertyDescriptor(MODE, "Application ID policy", NodePropertyType.STRING, false,

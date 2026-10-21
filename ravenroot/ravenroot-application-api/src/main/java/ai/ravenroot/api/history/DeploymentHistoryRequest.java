@@ -11,6 +11,9 @@ public final class DeploymentHistoryRequest {
     private final String view;
     private final int limit;
     private static final Set<String> COMMON = Set.of("view", "cursor", "limit");
+    /** Validates the exact public history view and its allowed text-valued query fields.
+ * @param fields strict text-valued public history query fields; unsupported combinations are refused
+ */
     public DeploymentHistoryRequest(Map<String, String> fields) {
         this.fields = Map.copyOf(fields);
         view = fields.getOrDefault("view", "histories");
@@ -30,7 +33,10 @@ public final class DeploymentHistoryRequest {
                 value.isBlank() || value.length() > 32768 || value.codePoints().anyMatch(Character::isISOControl)))
             throw new IllegalArgumentException("invalid history query");
     }
-    /** Strict text-valued request used inside the proof-protected embed envelope. */
+    /** Strict text-valued request used inside the proof-protected embed envelope.
+ * @param json JSON object whose values are text-valued history query fields
+ * @return validated strict history query with unsupported fields refused
+ */
     public static DeploymentHistoryRequest fromJson(String json) {
         var value = PayloadJson.read(json.getBytes(java.nio.charset.StandardCharsets.UTF_8), PayloadLimits.DEFAULTS);
         if (!(value instanceof PayloadValue.MapValue object)) throw new IllegalArgumentException("invalid history query");
@@ -48,7 +54,11 @@ public final class DeploymentHistoryRequest {
     private Optional<String> optional(String name) { return Optional.ofNullable(fields.get(name)); }
     private UUID uuid(String name) { return UUID.fromString(required(name)); }
     private UUID optionalUuid(String name) { return optional(name).map(UUID::fromString).orElse(null); }
-    /** Executes one bounded read. JSON contains scalar metadata; activity content is separate and policy-governed. */
+    /** Executes one bounded read. JSON contains scalar metadata; activity content is separate and policy-governed.
+ * @param reader already authorized read-only deployment history facade
+ * @param tenantId authenticated tenant owning this history scope
+ * @return bounded JSON page with exact source, explicit availability and continuation
+ */
     public String read(DeploymentHistoryReader reader, String tenantId) {
         Optional<String> cursor = optional("cursor");
         Map<String, Object> result = switch (view) {

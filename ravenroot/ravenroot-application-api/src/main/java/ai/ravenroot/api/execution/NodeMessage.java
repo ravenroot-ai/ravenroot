@@ -66,7 +66,18 @@ public record NodeMessage(SecurityContext security, UUID processInstanceId, UUID
         command = command == null ? NodeCommand.PROCESS : command;
     }
 
-/** Compatibility constructor for deliveries without an established business context. */
+/** Compatibility constructor for deliveries without an established business context.
+ * @param security authenticated identity retained for the original causal admission
+ * @param processInstanceId original owning process identity, independent from a business history
+ * @param traversalId actual traversal identity within the owning process
+ * @param invocationId actual node-visit identity that owns this observation
+ * @param attemptId actual delivery-attempt identity within the visit
+ * @param nodeId actual node identity within the pinned graph
+ * @param payload actual node input carried by this delivery
+ * @param command explicit node command delivered for this visit
+  * @param parentInvocationIds actual causal predecessor visits; no sequential ordering is invented
+ * @param attributes immutable upstream attributes carried by this node delivery
+ */
     public NodeMessage(SecurityContext security, UUID processInstanceId, UUID traversalId,
                        UUID invocationId, UUID attemptId, Set<UUID> parentInvocationIds,
                        String nodeId, Object payload, Map<String, Object> attributes, NodeCommand command) {

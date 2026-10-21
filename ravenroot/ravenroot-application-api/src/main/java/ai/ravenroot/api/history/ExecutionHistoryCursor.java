@@ -6,11 +6,25 @@ import java.util.*;
 /** Opaque keyset position bound to exact tenant/process/traversal/axis/filter/page size; never an authority token. */
 public final class ExecutionHistoryCursor {
     private ExecutionHistoryCursor() { }
-    public static String encode(ExecutionKey key, UUID traversalId, String query, String position) {
+/** Opaque scope-bound keyset continuation for the same query.
+ * @param key authenticated tenant and exact original process identity
+ * @param traversalId actual traversal identity within the owning process
+ * @param query bounded exact selection, filters, page size and continuation
+ * @param position last stable keyset coordinate emitted by the selected page
+ * @return opaque scope-bound keyset continuation for the same query
+ */
+        public static String encode(ExecutionKey key, UUID traversalId, String query, String position) {
         return "eh1." + binding(key, traversalId, query) + "." + Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(position.getBytes(StandardCharsets.UTF_8));
     }
-    public static String decode(ExecutionKey key, UUID traversalId, String query, String cursor) {
+/** Validated ordering coordinates for the same scope and query.
+ * @param key authenticated tenant and exact original process identity
+ * @param traversalId actual traversal identity within the owning process
+ * @param query bounded exact selection, filters, page size and continuation
+ * @param cursor opaque continuation from the preceding page of the same selection and filters
+ * @return validated ordering coordinates for the same scope and query
+ */
+        public static String decode(ExecutionKey key, UUID traversalId, String query, String cursor) {
         try {
             if (cursor == null || cursor.length() > 4096) throw new IllegalArgumentException();
             var parts = cursor.split("\\.", -1);

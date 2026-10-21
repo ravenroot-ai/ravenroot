@@ -8,8 +8,13 @@ import java.util.*;
 
 /** Versioned bounded binary encoding for dedicated join state, with no Java deserialization. */
 public final class CorrelatedJoinCodec {
+    /** Absolute encoded checkpoint ceiling, including bounded causal metadata and contribution data. */
     public static final int MAX_ENCODED_BYTES = 64 * 1024 * 1024;
     private CorrelatedJoinCodec() { }
+    /** Encodes a bounded versioned binary join checkpoint without Java object serialization.
+ * @return bounded versioned binary snapshot of the immutable join checkpoint
+ * @param value immutable join checkpoint to encode
+ */
     public static byte[] encode(CorrelatedJoinRecord value) {
         try {
             var bytes = new ByteArrayOutputStream();
@@ -42,6 +47,10 @@ public final class CorrelatedJoinCodec {
             return bytes.toByteArray();
         } catch (IOException impossible) { throw new UncheckedIOException(impossible); }
     }
+    /** Decodes and validates a bounded join checkpoint without instantiating arbitrary classes.
+ * @param encoded bounded versioned join snapshot bytes; decoding does not instantiate arbitrary classes
+ * @return validated immutable join checkpoint with original contribution causal identities
+ */
     public static CorrelatedJoinRecord decode(byte[] encoded) {
         if (encoded == null || encoded.length > MAX_ENCODED_BYTES) throw new IllegalArgumentException("invalid join encoding");
         try (var in = new DataInputStream(new ByteArrayInputStream(encoded))) {

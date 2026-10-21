@@ -1723,7 +1723,12 @@ public interface ExecutionStore extends AutoCloseable, ai.ravenroot.api.correlat
                 new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.INITIAL_START_ADMISSION)));
     }
 
-    /** Accepts START and its validated business relation atomically; a refused mapping consumes neither. */
+    /** Accepts START and its validated business relation atomically; a refused mapping consumes neither.
+ * @param proposed candidate initial admission; an existing permanent marker wins unchanged
+ * @param correlation established application context admitted atomically with the original initial marker
+ * @param mode explicit policy for generating, accepting or requiring an existing application identity
+ * @return original durable admission marker; a retry never replaces accepted identity or input
+ */
     default CompletionStage<InitialStartRecord> acceptInitialStart(InitialStartRecord proposed,
             ai.ravenroot.api.correlation.CorrelatedTraversal correlation,
             ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {

@@ -3,7 +3,20 @@ package ai.ravenroot.api.correlation;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Operator-owned storage/cursor budgets; graph content cannot raise them. */
+/** Operator-owned storage/cursor budgets; graph content cannot raise them.
+ * @param maxHistoriesPerScope finite ceiling for retained business identities, including closure tombstones
+ * @param maxOpenJoinsPerHistory finite ceiling for simultaneously open join generations in one history
+ * @param maxRetainedJoinsPerHistory finite ceiling for all retained join generations, including terminal summaries
+ * @param maxContributionsPerJoin finite ceiling for distinct contribution identities in one join generation
+ * @param maxJoinPayloadBytes finite byte ceiling for retained contribution data in one join generation
+ * @param maxPageSize largest permitted requested metadata page; each store applies it before projection
+ * @param historyRetention finite history retention window; expiry preserves observable closure metadata
+ * @param joinDeadline finite collection window for a join, no longer than history retention
+ * @param selection operator-owned pointer, identifier and manifest extraction bounds
+ * @param maxJoinCasAttempts maximum revision-conflict retries within one bounded contribution admission
+ * @param readTimeout total wait budget for one SDK history operation
+ * @param response operator-owned encoded-size and tree bounds for public response projection
+ */
 public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
                                     int maxContributionsPerJoin, long maxJoinPayloadBytes,
                                     int maxPageSize, Duration historyRetention, Duration joinDeadline,
@@ -11,7 +24,19 @@ public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPe
     /** Default response tree/encoding ceiling, independent from workflow input payload budgets. */
     public static final ai.ravenroot.api.payload.PayloadLimits DEFAULT_RESPONSE_LIMITS =
             new ai.ravenroot.api.payload.PayloadLimits(4 * 1024 * 1024, 64, 2000, 100_000, 262144, 256);
-    /** Compatibility constructor retaining a finite metadata response projection. */
+    /** Compatibility constructor retaining a finite metadata response projection.
+ * @param maxHistoriesPerScope finite ceiling for retained business identities, including closure tombstones
+ * @param maxOpenJoinsPerHistory finite ceiling for simultaneously open join generations in one history
+ * @param maxRetainedJoinsPerHistory finite ceiling for all retained join generations, including terminal summaries
+ * @param maxContributionsPerJoin finite ceiling for distinct contribution identities in one join generation
+ * @param maxJoinPayloadBytes finite byte ceiling for retained contribution data in one join generation
+ * @param maxPageSize largest permitted requested metadata page; each store applies it before projection
+ * @param historyRetention finite history retention window; expiry preserves observable closure metadata
+ * @param joinDeadline finite collection window for a join, no longer than history retention
+ * @param selection operator-owned pointer, identifier and manifest extraction bounds
+ * @param maxJoinCasAttempts maximum revision-conflict retries within one bounded contribution admission
+ * @param readTimeout total wait budget for one SDK history operation
+ */
     public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
             int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize,
             Duration historyRetention, Duration joinDeadline, CorrelationLimits selection, int maxJoinCasAttempts, Duration readTimeout) {
@@ -21,21 +46,51 @@ public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPe
     /** Finite shipped policy; compact identity tombstones remain within the total scope cap. */
     public static final BusinessHistoryPolicy DEFAULTS = new BusinessHistoryPolicy(100_000, 64, 1024, 1024,
             16L * 1024 * 1024, 100, Duration.ofDays(30), Duration.ofHours(24), CorrelationLimits.DEFAULTS, 128);
-    /** Compatibility constructor with a finite, operator-owned metadata read timeout. */
+    /** Compatibility constructor with a finite, operator-owned metadata read timeout.
+ * @param maxHistoriesPerScope finite ceiling for retained business identities, including closure tombstones
+ * @param maxOpenJoinsPerHistory finite ceiling for simultaneously open join generations in one history
+ * @param maxRetainedJoinsPerHistory finite ceiling for all retained join generations, including terminal summaries
+ * @param maxContributionsPerJoin finite ceiling for distinct contribution identities in one join generation
+ * @param maxJoinPayloadBytes finite byte ceiling for retained contribution data in one join generation
+ * @param maxPageSize largest permitted requested metadata page; each store applies it before projection
+ * @param historyRetention finite history retention window; expiry preserves observable closure metadata
+ * @param joinDeadline finite collection window for a join, no longer than history retention
+ * @param selection operator-owned pointer, identifier and manifest extraction bounds
+ * @param maxJoinCasAttempts maximum revision-conflict retries within one bounded contribution admission
+ */
     public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
             int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize,
             Duration historyRetention, Duration joinDeadline, CorrelationLimits selection, int maxJoinCasAttempts) {
         this(maxHistoriesPerScope, maxOpenJoinsPerHistory, maxRetainedJoinsPerHistory, maxContributionsPerJoin,
                 maxJoinPayloadBytes, maxPageSize, historyRetention, joinDeadline, selection, maxJoinCasAttempts, Duration.ofSeconds(10));
     }
-    /** Compatibility constructor retaining the finite conflict-retry budget. */
+    /** Compatibility constructor retaining the finite conflict-retry budget.
+ * @param maxHistoriesPerScope finite ceiling for retained business identities, including closure tombstones
+ * @param maxOpenJoinsPerHistory finite ceiling for simultaneously open join generations in one history
+ * @param maxRetainedJoinsPerHistory finite ceiling for all retained join generations, including terminal summaries
+ * @param maxContributionsPerJoin finite ceiling for distinct contribution identities in one join generation
+ * @param maxJoinPayloadBytes finite byte ceiling for retained contribution data in one join generation
+ * @param maxPageSize largest permitted requested metadata page; each store applies it before projection
+ * @param historyRetention finite history retention window; expiry preserves observable closure metadata
+ * @param joinDeadline finite collection window for a join, no longer than history retention
+ * @param selection operator-owned pointer, identifier and manifest extraction bounds
+ */
     public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
             int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize,
             Duration historyRetention, Duration joinDeadline, CorrelationLimits selection) {
         this(maxHistoriesPerScope, maxOpenJoinsPerHistory, maxRetainedJoinsPerHistory, maxContributionsPerJoin,
                 maxJoinPayloadBytes, maxPageSize, historyRetention, joinDeadline, selection, 128);
     }
-    /** Compatibility policy with an explicit finite ceiling for retained join tombstones. */
+    /** Compatibility policy with an explicit finite ceiling for retained join tombstones.
+ * @param maxHistoriesPerScope finite ceiling for retained business identities, including closure tombstones
+ * @param maxOpenJoinsPerHistory finite ceiling for simultaneously open join generations in one history
+ * @param maxContributionsPerJoin finite ceiling for distinct contribution identities in one join generation
+ * @param maxJoinPayloadBytes finite byte ceiling for retained contribution data in one join generation
+ * @param maxPageSize largest permitted requested metadata page; each store applies it before projection
+ * @param historyRetention finite history retention window; expiry preserves observable closure metadata
+ * @param joinDeadline finite collection window for a join, no longer than history retention
+ * @param selection operator-owned pointer, identifier and manifest extraction bounds
+ */
     public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory,
             int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize,
             Duration historyRetention, Duration joinDeadline, CorrelationLimits selection) {

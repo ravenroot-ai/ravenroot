@@ -29,19 +29,29 @@ public record InitialStartRecord(String deploymentId, String graphVersion, Secur
         Objects.requireNonNull(acceptedAt, "acceptedAt");
     }
 
-    /** Proposes an admission before its execution has been created. */
+    /** Proposes an admission before its execution has been created.
+ * @param deploymentId logical deployment identity; a new incarnation does not change it
+ * @param graphVersion exact immutable graph version admitted for this history
+ * @param identity original authenticated caller retained for recovery of accepted initial work
+ * @param input actual bounded ingress or workflow input to select; no implicit envelope is invented
+ * @param acceptedAt time the original admission or contribution was accepted
+ */
     public InitialStartRecord(String deploymentId, String graphVersion, SecurityContext identity,
                               OpaquePayload input, Instant acceptedAt) {
         this(deploymentId, graphVersion, identity, input, acceptedAt, false);
     }
 
-    /** Stable process identity; different versions/incarnations cannot reset deployment allowance. */
+    /** Stable process identity; different versions/incarnations cannot reset deployment allowance.
+ * @return stable original initial-START process identity for this tenant and logical deployment
+ */
     public UUID processInstanceId() {
         return UUID.nameUUIDFromBytes((identity.tenantId() + '\0' + deploymentId + "\0initial-start-v1")
                 .getBytes(StandardCharsets.UTF_8));
     }
 
-    /** Stable traversal identity belonging to this admission. */
+    /** Stable traversal identity belonging to this admission.
+ * @return stable original initial START traversal identity derived from its admitted process
+ */
     public UUID traversalId() {
         return UUID.nameUUIDFromBytes((processInstanceId() + "\0traversal")
                 .getBytes(StandardCharsets.UTF_8));

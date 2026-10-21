@@ -9,7 +9,10 @@ package ai.ravenroot.api.application;
  */
 public record EmbedDeploymentStart(Outcome outcome, String requestId,
                                    java.util.UUID processInstanceId, java.util.UUID traversalId) {
-    /** Compatibility result from a producer that does not expose admitted identities. */
+    /** Compatibility result from a producer that does not expose admitted identities.
+ * @param outcome safe recorded outcome classifier, absent when not retained or not representable
+ * @param requestId client request identity being admitted or reconciled; it does not grant another START
+ */
     public EmbedDeploymentStart(Outcome outcome, String requestId) {
         this(outcome, requestId, null, null);
     }

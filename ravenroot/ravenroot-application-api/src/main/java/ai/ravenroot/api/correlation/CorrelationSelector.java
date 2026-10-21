@@ -12,20 +12,45 @@ import java.util.Objects;
  */
 public final class CorrelationSelector {
     /** Bounded reasons for validation and sample-preview failures. */
-    public enum Reason { INVALID_POINTER, LIMIT_EXCEEDED, MISSING, NOT_SCALAR_TEXT, INVALID_ID, NOT_COUNT, NOT_MANIFEST }
+    public enum Reason {
+        /** Pointer syntax is not valid strict RFC 6901. */
+        INVALID_POINTER,
+        /** A pointer, identifier, count or manifest exceeded its configured bound. */
+        LIMIT_EXCEEDED,
+        /** The pointer cannot resolve in the actual exposed input. */
+        MISSING,
+        /** The selected identity is not a JSON text scalar. */
+        NOT_SCALAR_TEXT,
+        /** The selected text is blank, contains controls or exceeds the identifier bound. */
+        INVALID_ID,
+        /** The selected expectation is not a bounded nonnegative integer. */
+        NOT_COUNT,
+        /** The selected manifest is not a bounded distinct text list. */
+        NOT_MANIFEST
+    }
 
     /** Safe authoring error: it deliberately contains no selected input or connector metadata. */
     public static final class Invalid extends IllegalArgumentException {
+        /** Authored extraction pointer.
+     * @serial Authored bounded pointer, excluding the extracted value.
+     */
         private final String selector;
+        /** Closed extraction failure classification.
+     * @serial Closed extraction failure category.
+     */
         private final Reason reason;
         private Invalid(String selector, Reason reason) {
             super("correlation selector " + selector + ": " + reason.name().toLowerCase(java.util.Locale.ROOT));
             this.selector = selector;
             this.reason = reason;
         }
-        /** Configured selector; never the extracted value. */
+        /** Configured selector; never the extracted value.
+ * @return authored pointer whose extraction failed, without the selected value
+ */
         public String selector() { return selector; }
-        /** Fixed actionable error classifier. */
+        /** Fixed actionable error classifier.
+ * @return closed failure category suitable for a payload-safe response
+ */
         public Reason reason() { return reason; }
     }
 
@@ -33,7 +58,10 @@ public final class CorrelationSelector {
     private final List<String> segments;
     private final CorrelationLimits limits;
 
-    /** Compiles and bounds the pointer before any event is processed. */
+    /** Compiles and bounds the pointer before any event is processed.
+ * @param pointer strict RFC 6901 pointer over the actual exposed ingress payload
+ * @param limits operator-owned pointer, identifier and input bounds
+ */
     public CorrelationSelector(String pointer, CorrelationLimits limits) {
         this.limits = Objects.requireNonNull(limits, "limits");
         if (pointer == null) throw new Invalid("", Reason.INVALID_POINTER);
@@ -60,7 +88,10 @@ public final class CorrelationSelector {
         this.segments = List.copyOf(parts);
     }
 
-    /** Returns the exact selected structured value; no fallback or conversion is performed. */
+    /** Returns the exact selected structured value; no fallback or conversion is performed.
+ * @param input actual exposed ingress value selected under the configured input bounds
+ * @return selected JSON-compatible value; a failed selection is classified rather than coerced
+ */
     public PayloadValue select(PayloadValue input) {
         PayloadValue current = Objects.requireNonNull(input, "input");
         for (String segment : segments) {
@@ -75,21 +106,30 @@ public final class CorrelationSelector {
         return current;
     }
 
-    /** Selects an opaque string ID. Null, arrays, objects, booleans and numbers are never coerced. */
+    /** Selects an opaque string ID. Null, arrays, objects, booleans and numbers are never coerced.
+ * @param input actual exposed ingress value selected under the configured input bounds
+ * @return bounded nonblank text identity without control characters
+ */
     public String selectId(PayloadValue input) {
         if (!(select(input) instanceof PayloadValue.TextValue text)) throw invalid(Reason.NOT_SCALAR_TEXT);
         try { return limits.requireId(text.value(), "selected ID"); }
         catch (IllegalArgumentException invalid) { throw invalid(Reason.INVALID_ID); }
     }
 
-    /** Selects a bounded expected count, including an explicitly declared empty production. */
+    /** Selects a bounded expected count, including an explicitly declared empty production.
+ * @param input actual exposed ingress value selected under the configured input bounds
+ * @return bounded nonnegative integral expectation count
+ */
     public int selectCount(PayloadValue input) {
         if (!(select(input) instanceof PayloadValue.IntegerValue count)
                 || count.value() < 0 || count.value() > limits.maxManifestItems()) throw invalid(Reason.NOT_COUNT);
         return Math.toIntExact(count.value());
     }
 
-    /** Selects a distinct bounded expected manifest; duplicate identities are an error. */
+    /** Selects a distinct bounded expected manifest; duplicate identities are an error.
+ * @param input actual exposed ingress value selected under the configured input bounds
+ * @return bounded immutable list of distinct text contribution identities
+ */
     public List<String> selectManifest(PayloadValue input) {
         if (!(select(input) instanceof PayloadValue.ListValue values)
                 || values.values().size() > limits.maxManifestItems()) throw invalid(Reason.NOT_MANIFEST);

@@ -43,6 +43,8 @@
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
       url: /user-guide/embed-accessibility.html
+    - title: Business context from text email
+      url: /user-guide/email-business-context.html
 
 - title: Operator guide
   items:

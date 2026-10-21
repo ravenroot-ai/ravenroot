@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+<key id="kind" for="node" attr.name="kind" attr.type="string"/>
+<key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+<key id="profile" for="node" attr.name="profile" attr.type="string"/>
+<key id="previewChars" for="node" attr.name="previewChars" attr.type="string"/>
+<key id="contentMode" for="node" attr.name="contentMode" attr.type="string"/>
+<key id="expression" for="node" attr.name="expression" attr.type="string"/>
+<key id="source" for="node" attr.name="source" attr.type="string"/>
+<key id="correlation.mode" for="node" attr.name="correlation.mode" attr.type="string"/>
+<key id="correlation.selector" for="node" attr.name="correlation.selector" attr.type="string"/>
+<key id="correlation.contributionSelector" for="node" attr.name="correlation.contributionSelector" attr.type="string"/>
+<key id="correlation.kindSelector" for="node" attr.name="correlation.kindSelector" attr.type="string"/>
+<key id="correlation.roundSelector" for="node" attr.name="correlation.roundSelector" attr.type="string"/>
+<key id="correlation.referenceSelector" for="node" attr.name="correlation.referenceSelector" attr.type="string"/>
+<key id="auditReason" for="node" attr.name="auditReason" attr.type="string"/>
+<key id="message" for="node" attr.name="message" attr.type="string"/>
+<key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+<key id="join.semantics" for="graph" attr.name="join.semantics" attr.type="string"/>
+<key id="layoutX" for="node" attr.name="layoutX" attr.type="string"/>
+<key id="layoutY" for="node" attr.name="layoutY" attr.type="string"/>
+<graph id="bounded-email-context" edgedefault="directed"><data key="join.semantics">declared</data>
+<node id="start"><data key="kind">START</data><data key="layoutX">80</data><data key="layoutY">40</data></node>
+<node id="mail"><data key="kind">BEHAVIOR</data><data key="behavior">mail.imap.consume</data><data key="profile">replace-with-operator-profile</data><data key="previewChars">1024</data><data key="contentMode">preview</data><data key="correlation.mode">GENERATE_NEW</data><data key="layoutX">80</data><data key="layoutY">180</data></node>
+<node id="complete-text"><data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data><data key="expression">payload.kind == 'message' &amp;&amp; !payload.truncated</data><data key="layoutX">280</data><data key="layoutY">180</data></node>
+<node id="parse-text"><data key="kind">BEHAVIOR</data><data key="behavior">json-parse</data><data key="source">{{payload.content.textPreview}}</data><data key="layoutX">480</data><data key="layoutY">180</data></node>
+<node id="derive"><data key="kind">BEHAVIOR</data><data key="behavior">correlation-derive</data><data key="correlation.mode">ACCEPT_OR_CREATE</data><data key="correlation.selector">/ingestionId</data><data key="correlation.contributionSelector">/partition</data><data key="correlation.kindSelector">/stage</data><data key="correlation.roundSelector">/round</data><data key="correlation.referenceSelector">/filename</data><data key="auditReason">Map the declared complete bounded JSON text email format</data><data key="layoutX">680</data><data key="layoutY">180</data></node>
+<node id="store-result"><data key="kind">BEHAVIOR</data><data key="behavior">log</data><data key="message">Accepted explicit email operation {{payload.ingestionId}}</data><data key="layoutX">880</data><data key="layoutY">180</data></node>
+<node id="end"><data key="kind">END</data><data key="layoutX">1080</data><data key="layoutY">180</data></node>
+<node id="error"><data key="kind">ERROR</data><data key="layoutX">480</data><data key="layoutY">360</data></node>
+<edge id="route-0" source="start" target="end"><data key="outcome">continue</data></edge>
+<edge id="route-1" source="mail" target="complete-text"><data key="outcome">continue</data></edge>
+<edge id="route-2" source="complete-text" target="parse-text"><data key="outcome">true</data></edge>
+<edge id="route-3" source="complete-text" target="error"><data key="outcome">false</data></edge>
+<edge id="route-4" source="parse-text" target="derive"><data key="outcome">continue</data></edge>
+<edge id="route-5" source="derive" target="store-result"><data key="outcome">continue</data></edge>
+<edge id="route-6" source="store-result" target="end"><data key="outcome">continue</data></edge>
+</graph></graphml>

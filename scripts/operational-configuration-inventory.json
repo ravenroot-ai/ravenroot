@@ -150666,9 +150666,24 @@
       "status": "retained"
     },
     {
+      "id": "oc-c665aa7f089a957b34b5",
+      "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
+      "line": 30,
+      "symbol": "State",
+      "kind": "fixed-declaration",
+      "role": "LOGGER",
+      "expression": "\"ai.ravenroot.amqp.delivery.rejected\"",
+      "expressionDigest": "6ec437168ebd38ed17daf2d6924b6acef5bf3753db81a72058690b6d600c1c99",
+      "evidenceDigest": "2a42468d4a65686db995a5e9030ba79c505dc22770da4249c1e726e31894888f",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "The fixed logger identity separates safe AMQP delivery-rejection diagnostics from listener availability; it is an observability routing name, not an operator capacity, retry, credential or network setting."
+    },
+    {
       "id": "oc-d5fa090e625933ed2f49",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 154,
+      "line": 155,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "leaseKey",
@@ -150683,7 +150698,7 @@
     {
       "id": "oc-2f32127b8c25c93ad605",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 154,
+      "line": 155,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "leaseKey",
@@ -150698,7 +150713,7 @@
     {
       "id": "oc-a0d7b4dfc184799f421b",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 219,
+      "line": 220,
       "symbol": "while",
       "kind": "inline-operational-call",
       "role": "Duration.ofMillis",
@@ -150716,7 +150731,7 @@
     {
       "id": "oc-eaee0daaf5239a5456aa",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 242,
+      "line": 243,
       "symbol": "catch",
       "kind": "operational-declaration",
       "role": "attempt",
@@ -150734,7 +150749,7 @@
     {
       "id": "oc-8b533a0b19faba7bc91f",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 377,
+      "line": 389,
       "symbol": "jitteredReconnectBackoff",
       "kind": "operational-declaration",
       "role": "minimum",
@@ -150752,7 +150767,7 @@
     {
       "id": "oc-a82497420a3ab43bc426",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 377,
+      "line": 389,
       "symbol": "jitteredReconnectBackoff",
       "kind": "operational-declaration",
       "role": "minimum",
@@ -150770,7 +150785,7 @@
     {
       "id": "oc-899879a905c2f1a9a81b",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 445,
+      "line": 457,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "queue",
@@ -150785,7 +150800,7 @@
     {
       "id": "oc-c8583b8d9762bd11d099",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 446,
+      "line": 458,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "queue",
@@ -150800,7 +150815,7 @@
     {
       "id": "oc-39d6b64fb6e32f34acaf",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 446,
+      "line": 458,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "queue",
@@ -150815,7 +150830,7 @@
     {
       "id": "oc-6ecc9556677eaae6121a",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 470,
+      "line": 482,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "retry",
@@ -150830,7 +150845,7 @@
     {
       "id": "oc-37ad937ac53ca7e711dc",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 470,
+      "line": 482,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "retry",
@@ -150845,7 +150860,7 @@
     {
       "id": "oc-8e406fd11047b1f1f707",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 473,
+      "line": 485,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "maximum",
@@ -150860,7 +150875,7 @@
     {
       "id": "oc-fa30da52d3c0380dda1f",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 473,
+      "line": 485,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "maximum",
@@ -150875,7 +150890,7 @@
     {
       "id": "oc-f5db5eb32c4a79ea9667",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 479,
+      "line": 491,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "drain",
@@ -150890,7 +150905,7 @@
     {
       "id": "oc-94b23dbbe897cae32db0",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 479,
+      "line": 491,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "drain",
@@ -150905,7 +150920,7 @@
     {
       "id": "oc-9f82e4dea30603de2f11",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 479,
+      "line": 491,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "drain",
@@ -150920,7 +150935,7 @@
     {
       "id": "oc-44c54e87a415274c7392",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 514,
+      "line": 526,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "queue",
@@ -150942,7 +150957,7 @@
     {
       "id": "oc-64e92a1ed7d6ef7c89fc",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 514,
+      "line": 526,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "queue",
@@ -150964,7 +150979,7 @@
     {
       "id": "oc-6b5709e7bcc7df7ed540",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 536,
+      "line": 548,
       "symbol": "codePoints",
       "kind": "operational-declaration",
       "role": "retry",
@@ -150982,7 +150997,7 @@
     {
       "id": "oc-b8bc80e2089e308203cf",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 537,
+      "line": 549,
       "symbol": "codePoints",
       "kind": "operational-declaration",
       "role": "retry",
@@ -150997,7 +151012,7 @@
     {
       "id": "oc-1425763c9dbfdff421e9",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 539,
+      "line": 551,
       "symbol": "codePoints",
       "kind": "operational-declaration",
       "role": "maximum",
@@ -151015,7 +151030,7 @@
     {
       "id": "oc-ffd265b2b842e80bb55a",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 540,
+      "line": 552,
       "symbol": "codePoints",
       "kind": "operational-declaration",
       "role": "maximum",
@@ -151030,7 +151045,7 @@
     {
       "id": "oc-2e12653411780f6455ce",
       "path": "ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java",
-      "line": 583,
+      "line": 595,
       "symbol": "FailureStreak",
       "kind": "operational-declaration",
       "role": "attempts",
@@ -656396,6 +656411,7 @@
     "2a3ac3058a97a91752f666d3a003959a4b78f239de18c0cabd69f008d7d932ac": "\"x-ravenroot-environment\": \"RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD\",",
     "2a3fedd62c47f261870ca9d744b89542d1dda54daf64788b4fee14d9e2e04a82": "del without_authority[\"agentBudgetAuthorities\"]",
     "2a415bd5a223f9278c55a6dd3381d1eb90322a696b49ee562b6b9133a5a848dc": "} private static byte[] variant(Map<?,?> map,String prefix,boolean required,int max){ int count=0;",
+    "2a42468d4a65686db995a5e9030ba79c505dc22770da4249c1e726e31894888f": "final class AmqpConsumerSource implements InboundSource { enum State { STOPPED, STARTING, READY, BACKING_OFF, RECONNECTING, STOPPING, FAILED } private static final System.Logger LOGGER = System.getLogger(\"ai.ravenroot.amqp.delivery.rejected\");",
     "2a506811075703173bb4b53776eff1d7dd50e2e44546fed85f5f92696e4887f4": "\"statusCounts\": {\"retained\": 1}, \"rationale\": \"Earlier schema migration.\",",
     "2a5a35f1568d0a21c7ccd13a081b833abb3189e3d4d5d1f3f5b13b5f094bbab0": "\"RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE\",",
     "2a5b5bddbd9d92394a20e6c6c924229c2f803ec12a76de543fd01a21235f183f": "\"package dev.example;\",",
@@ -1171882,6 +1171898,27 @@
         }
       ],
       "semanticReviews": []
+    },
+    {
+      "id": "issue-591-amqp-delivery-health-diagnostics",
+      "issue": "#591",
+      "sourceRevision": "d473f7d687798479f758f1014f3be447de0d2986",
+      "targetRevision": "d473f7d687798479f758f1014f3be447de0d2986",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "35e454f0f6df2cb7445c8630542acce680bc064949582b899ed300cb1fd73f9f",
+      "targetCandidateDigest": "8dd1ec883158f188095992053dfd7a951cf51c435fea72a3e28430960e8fa257",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-c665aa7f089a957b34b5",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "The fixed logger identity separates safe AMQP delivery-rejection diagnostics from listener availability; it is an observability routing name, not an operator capacity, retry, credential or network setting."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [

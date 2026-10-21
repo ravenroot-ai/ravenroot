@@ -56,6 +56,8 @@
       url: /operator-guide/kubernetes-ui-only.html
     - title: Identity and browser boundary
       url: /operator-guide/identity-browser.html
+    - title: Correlation history upgrade and rollback
+      url: /operator-guide/correlation-migration.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
     - title: Graph source control and published deployments

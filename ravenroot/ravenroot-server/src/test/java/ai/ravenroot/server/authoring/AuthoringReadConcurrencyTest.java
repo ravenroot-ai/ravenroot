@@ -370,6 +370,15 @@ class AuthoringReadConcurrencyTest {
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             assertTrue(read.cancel(true));
             assertTrue(interrupted.await(5, TimeUnit.SECONDS));
+            // Interruption is observed before ReadObjects retires its failed single-flight
+            // entry in finally. A later retry starts after that cleanup has completed.
+            assertTimeoutPreemptively(
+                    java.time.Duration.ofSeconds(5),
+                    () -> {
+                        while (repository.readStatistics().get("inFlight") != 0L) {
+                            Thread.sleep(1);
+                        }
+                    });
             assertEquals(
                     10,
                     repository
